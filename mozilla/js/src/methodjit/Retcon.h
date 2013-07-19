@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -38,15 +37,15 @@ public:
     clearStackReferences(FreeOp *fop, JSScript *script);
 
     static void
-    expandInlineFrames(JSCompartment *compartment, StackFrame *fp, mjit::CallSite *inlined,
+    expandInlineFrames(JS::Zone *zone, StackFrame *fp, mjit::CallSite *inlined,
                        StackFrame *next, VMFrame *f);
 
-    static void patchFrame(JSCompartment *compartment, VMFrame *f, JSScript *script);
+    static void patchFrame(JSRuntime *rt, VMFrame *f, JSScript *script);
 
 private:
 
     static void patchCall(JITChunk *chunk, StackFrame *fp, void **location);
-    static void patchNative(JSCompartment *compartment, JITChunk *chunk, StackFrame *fp,
+    static void patchNative(JSRuntime *rt, JITChunk *chunk, StackFrame *fp,
                             jsbytecode *pc, RejoinState rejoin);
 
     static StackFrame *

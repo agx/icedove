@@ -52,10 +52,8 @@ function loadImapMessage()
 {
   let gMessageGenerator = new MessageGenerator();
 
-  let ioService = Cc["@mozilla.org/network/io-service;1"]
-                  .getService(Ci.nsIIOService);
   let file = do_get_file("../../../data/bodystructuretest1");
-  let msgURI = ioService.newFileURI(file).QueryInterface(Ci.nsIFileURL);
+  let msgURI = Services.io.newFileURI(file).QueryInterface(Ci.nsIFileURL);
 
   let imapInbox =  gIMAPDaemon.getMailbox("INBOX")
   let message = new imapMessage(msgURI.spec, imapInbox.uidnext++, []);
@@ -64,7 +62,7 @@ function loadImapMessage()
   // sure that streaming this message doesn't mark it read, even
   // though we will fallback to fetching the whole message.
   file = do_get_file("../../../data/bodystructuretest3");
-  msgURI = ioService.newFileURI(file).QueryInterface(Ci.nsIFileURL);
+  msgURI = Services.io.newFileURI(file).QueryInterface(Ci.nsIFileURL);
   message = new imapMessage(msgURI.spec, imapInbox.uidnext++, []);
   gIMAPMailbox.addMessage(message);
   gIMAPInbox.updateFolderWithListener(null, asyncUrlListener);
@@ -85,7 +83,7 @@ function startMime()
     let url = aMimeMessage.allUserAttachments[0].url;
     // A URL containing this string indicates that the attachment will be
     // downloaded on demand.
-    do_check_true(url.indexOf("/;section=") >= 0);
+    do_check_true(url.contains("/;section="));
     async_driver();
   }, true /* allowDownload */, { partsOnDemand: true });
   yield false;

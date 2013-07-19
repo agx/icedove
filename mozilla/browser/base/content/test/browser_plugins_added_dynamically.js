@@ -10,8 +10,12 @@ function test() {
   waitForExplicitFinish();
   registerCleanupFunction(function() {
     Services.prefs.clearUserPref("plugins.click_to_play");
+    getTestPlugin().enabledState = Ci.nsIPluginTag.STATE_ENABLED;
+    getTestPlugin("Second Test Plug-in").enabledState = Ci.nsIPluginTag.STATE_ENABLED;
   });
   Services.prefs.setBoolPref("plugins.click_to_play", true);
+  getTestPlugin().enabledState = Ci.nsIPluginTag.STATE_CLICKTOPLAY;
+  getTestPlugin("Second Test Plug-in").enabledState = Ci.nsIPluginTag.STATE_CLICKTOPLAY;
 
   let newTab = gBrowser.addTab();
   gBrowser.selectedTab = newTab;
@@ -103,9 +107,8 @@ function testActivateAddSameTypePart2() {
   ok(popupNotification, "testActivateAddSameTypePart2: should have a click-to-play notification");
 
   // we have to actually show the panel to get the bindings to instantiate
-  popupNotification.options.dismissed = false;
   popupNotification.options.eventCallback = testActivateAddSameTypePart3;
-  PopupNotifications._showPanel([popupNotification], popupNotification.anchorElement);
+  popupNotification.reshow();
 }
 
 function testActivateAddSameTypePart3() {
@@ -182,9 +185,8 @@ function testActivateAddDifferentTypePart2() {
   ok(popupNotification, "testActivateAddDifferentTypePart2: should have a click-to-play notification");
 
   // we have to actually show the panel to get the bindings to instantiate
-  popupNotification.options.dismissed = false;
   popupNotification.options.eventCallback = testActivateAddDifferentTypePart3;
-  PopupNotifications._showPanel([popupNotification], popupNotification.anchorElement);
+  popupNotification.reshow();
 }
 
 function testActivateAddDifferentTypePart3() {

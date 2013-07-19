@@ -10,16 +10,15 @@ const Cr = Components.results;
 const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/PluralForm.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
-Cu.import("resource:///modules/searchSpec.js");
 Cu.import("resource:///modules/iteratorUtils.jsm");
 Cu.import("resource:///modules/errUtils.js");
+Cu.import("resource:///modules/mailServices.js");
+Cu.import("resource:///modules/searchSpec.js");
 
 const Application = Cc["@mozilla.org/steel/application;1"]
                       .getService(Ci.steelIApplication);
-
-const FocusManager = Cc["@mozilla.org/focus-manager;1"]
-                       .getService(Ci.nsIFocusManager);
 
 const nsMsgSearchAttrib = Components.interfaces.nsMsgSearchAttrib;
 const nsMsgMessageFlags = Components.interfaces.nsMsgMessageFlags;
@@ -590,9 +589,7 @@ QuickFilterManager.defineFilter({
   domId: "qfb-inaddrbook",
   appendTerms: function(aTermCreator, aTerms, aFilterValue) {
     let term, value;
-    let enumerator = Components.classes["@mozilla.org/abmanager;1"]
-                               .getService(Components.interfaces.nsIAbManager)
-                               .directories;
+    let enumerator = MailServices.ab.directories;
     let firstBook = true;
     term = null;
     while (enumerator.hasMoreElements()) {
@@ -765,11 +762,9 @@ let TagFacetingFilter = {
 
     // only propagate things that are actually tags though!
     let outKeyMap = {};
-    let tagService = Cc["@mozilla.org/messenger/tagservice;1"]
-                       .getService(Ci.nsIMsgTagService);
-    let tags = tagService.getAllTags({});
+    let tags = MailServices.tags.getAllTags({});
     let tagCount = tags.length;
-    for (let iTag=0; iTag < tagCount; iTag++) {
+    for (let iTag = 0; iTag < tagCount; iTag++) {
       let tag = tags[iTag];
 
       if (tag.key in aKeywordMap)
@@ -856,11 +851,9 @@ let TagFacetingFilter = {
     let addCount = 0;
 
     // -- create an element for each tag
-    let tagService = Components.classes["@mozilla.org/messenger/tagservice;1"]
-                           .getService(Components.interfaces.nsIMsgTagService);
-    let tags = tagService.getAllTags({});
+    let tags = MailServices.tags.getAllTags({});
     let tagCount = tags.length;
-    for (let iTag=0; iTag < tagCount; iTag++) {
+    for (let iTag = 0; iTag < tagCount; iTag++) {
       let tag = tags[iTag];
 
       if (tag.key in keywordMap) {
@@ -956,7 +949,7 @@ let MessageTextFilter = {
     }
 
     while (aSearchString) {
-      if (aSearchString[0] == '"') {
+      if (aSearchString.startsWith('"')) {
         let endIndex = aSearchString.indexOf(aSearchString[0], 1);
         // treat a quote without a friend as making a phrase containing the
         // rest of the string...
@@ -1076,7 +1069,7 @@ let MessageTextFilter = {
     // -- Blurring kills upsell.
     aNode.addEventListener("blur", function(aEvent) {
       let panel = aDocument.getElementById("qfb-text-search-upsell");
-      if ((FocusManager.activeWindow != aDocument.defaultView ||
+      if ((Services.focus.activeWindow != aDocument.defaultView ||
            aDocument.commandDispatcher.focusedElement != aNode.inputField) &&
           panel.state == "open") {
         panel.hidePopup();

@@ -16,10 +16,10 @@
 namespace mozilla {
 namespace css {
 
-// check that we can fit all the CSS properties into a uint8_t
-// for the mOrder array - if not, might need to use uint16_t!
-MOZ_STATIC_ASSERT(eCSSProperty_COUNT_no_shorthands - 1 <= PR_UINT8_MAX,
-                  "CSS longhand property numbers no longer fit in a uint8_t");
+// check that we can fit all the CSS properties into a uint16_t
+// for the mOrder array
+MOZ_STATIC_ASSERT(eCSSProperty_COUNT_no_shorthands - 1 <= UINT16_MAX,
+                  "CSS longhand property numbers no longer fit in a uint16_t");
 
 Declaration::Declaration()
   : mImmutable(false)
@@ -432,12 +432,6 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue) const
         data->ValueFor(eCSSProperty_background_size)->
         GetPairListValue();
       for (;;) {
-        if (size->mXValue.GetUnit() != eCSSUnit_Auto ||
-            size->mYValue.GetUnit() != eCSSUnit_Auto) {
-          // Non-default background-size, so can't be serialized as shorthand.
-          aValue.Truncate();
-          return;
-        }
         image->mValue.AppendToString(eCSSProperty_background_image, aValue);
         aValue.Append(PRUnichar(' '));
         repeat->mXValue.AppendToString(eCSSProperty_background_repeat, aValue);
@@ -450,6 +444,16 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue) const
         aValue.Append(PRUnichar(' '));
         position->mValue.AppendToString(eCSSProperty_background_position,
                                         aValue);
+        
+        if (size->mXValue.GetUnit() != eCSSUnit_Auto ||
+            size->mYValue.GetUnit() != eCSSUnit_Auto) {
+          aValue.Append(PRUnichar(' '));
+          aValue.Append(PRUnichar('/'));
+          aValue.Append(PRUnichar(' '));
+          size->mXValue.AppendToString(eCSSProperty_background_size, aValue);
+          aValue.Append(PRUnichar(' '));
+          size->mYValue.AppendToString(eCSSProperty_background_size, aValue);
+        }
 
         NS_ABORT_IF_FALSE(clip->mValue.GetUnit() == eCSSUnit_Enumerated &&
                           origin->mValue.GetUnit() == eCSSUnit_Enumerated,
@@ -457,9 +461,12 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue) const
 
         if (clip->mValue.GetIntValue() != NS_STYLE_BG_CLIP_BORDER ||
             origin->mValue.GetIntValue() != NS_STYLE_BG_ORIGIN_PADDING) {
-          // The shorthand only has a single clip/origin value which sets
-          // both properties.  So if they're different (and non-default),
-          // we can't represent the state using the shorthand.
+          MOZ_ASSERT(nsCSSProps::kKeywordTableTable[
+                       eCSSProperty_background_origin] ==
+                     nsCSSProps::kBackgroundOriginKTable);
+          MOZ_ASSERT(nsCSSProps::kKeywordTableTable[
+                       eCSSProperty_background_clip] ==
+                     nsCSSProps::kBackgroundOriginKTable);
           MOZ_STATIC_ASSERT(NS_STYLE_BG_CLIP_BORDER ==
                             NS_STYLE_BG_ORIGIN_BORDER &&
                             NS_STYLE_BG_CLIP_PADDING ==
@@ -467,13 +474,13 @@ Declaration::GetValue(nsCSSProperty aProperty, nsAString& aValue) const
                             NS_STYLE_BG_CLIP_CONTENT ==
                             NS_STYLE_BG_ORIGIN_CONTENT,
                             "bg-clip and bg-origin style constants must agree");
-          if (clip->mValue != origin->mValue) {
-            aValue.Truncate();
-            return;
-          }
-
           aValue.Append(PRUnichar(' '));
-          clip->mValue.AppendToString(eCSSProperty_background_clip, aValue);
+          origin->mValue.AppendToString(eCSSProperty_background_origin, aValue);
+
+          if (clip->mValue != origin->mValue) {
+            aValue.Append(PRUnichar(' '));
+            clip->mValue.AppendToString(eCSSProperty_background_clip, aValue);
+          }
         }
 
         image = image->mNext;

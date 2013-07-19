@@ -10,7 +10,6 @@
 #include "TelephonyCommon.h"
 
 #include "nsIDOMTelephonyCall.h"
-#include "nsIRadioInterfaceLayer.h"
 
 class nsPIDOMWindow;
 
@@ -19,19 +18,6 @@ BEGIN_TELEPHONY_NAMESPACE
 class TelephonyCall : public nsDOMEventTargetHelper,
                       public nsIDOMTelephonyCall
 {
-  NS_DECL_EVENT_HANDLER(statechange)
-  NS_DECL_EVENT_HANDLER(dialing)
-  NS_DECL_EVENT_HANDLER(alerting)
-  NS_DECL_EVENT_HANDLER(busy)
-  NS_DECL_EVENT_HANDLER(connecting)
-  NS_DECL_EVENT_HANDLER(connected)
-  NS_DECL_EVENT_HANDLER(disconnecting)
-  NS_DECL_EVENT_HANDLER(disconnected)
-  NS_DECL_EVENT_HANDLER(holding)
-  NS_DECL_EVENT_HANDLER(held)
-  NS_DECL_EVENT_HANDLER(resuming)
-  NS_DECL_EVENT_HANDLER(error)
-
   nsRefPtr<Telephony> mTelephony;
 
   nsString mNumber;
@@ -46,7 +32,7 @@ class TelephonyCall : public nsDOMEventTargetHelper,
 public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIDOMTELEPHONYCALL
-  NS_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper::)
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TelephonyCall,
                                            nsDOMEventTargetHelper)
 
@@ -54,17 +40,10 @@ public:
   Create(Telephony* aTelephony, const nsAString& aNumber, uint16_t aCallState,
          uint32_t aCallIndex = kOutgoingPlaceholderCallIndex);
 
-  nsIDOMEventTarget*
-  ToIDOMEventTarget() const
-  {
-    return static_cast<nsDOMEventTargetHelper*>(
-             const_cast<TelephonyCall*>(this));
-  }
-
   nsISupports*
-  ToISupports() const
+  ToISupports()
   {
-    return ToIDOMEventTarget();
+    return static_cast<EventTarget*>(this);
   }
 
   void
@@ -103,16 +82,17 @@ public:
   NotifyError(const nsAString& aError);
 
 private:
-  TelephonyCall()
-  : mCallIndex(kOutgoingPlaceholderCallIndex),
-    mCallState(nsIRadioInterfaceLayer::CALL_STATE_UNKNOWN), mLive(false), mOutgoing(false)
-  { }
+  TelephonyCall();
 
   ~TelephonyCall()
   { }
 
   void
   ChangeStateInternal(uint16_t aCallState, bool aFireEvents);
+
+  nsresult
+  DispatchCallEvent(const nsAString& aType,
+                    nsIDOMTelephonyCall* aCall);
 };
 
 END_TELEPHONY_NAMESPACE

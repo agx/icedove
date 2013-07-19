@@ -6,6 +6,7 @@
 #ifndef NSSUBDOCUMENTFRAME_H_
 #define NSSUBDOCUMENTFRAME_H_
 
+#include "mozilla/Attributes.h"
 #include "nsLeafFrame.h"
 #include "nsIReflowCallback.h"
 #include "nsFrameLoader.h"
@@ -23,6 +24,7 @@ public:
   nsSubDocumentFrame(nsStyleContext* aContext);
 
 #ifdef DEBUG
+  void List(FILE* out, int32_t aIndent, uint32_t aFlags = 0) const;
   NS_IMETHOD GetFrameName(nsAString& aResult) const;
 #endif
 
@@ -37,9 +39,9 @@ public:
       ~(nsIFrame::eReplaced | nsIFrame::eReplacedContainsBlock));
   }
 
-  NS_IMETHOD Init(nsIContent*      aContent,
-                  nsIFrame*        aParent,
-                  nsIFrame*        aPrevInFlow);
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 
   virtual void DestroyFrom(nsIFrame* aDestructRoot);
 
@@ -62,11 +64,11 @@ public:
   NS_IMETHOD Reflow(nsPresContext*          aPresContext,
                     nsHTMLReflowMetrics&     aDesiredSize,
                     const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&          aStatus);
+                    nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   NS_IMETHOD AttributeChanged(int32_t aNameSpaceID,
                               nsIAtom* aAttribute,
@@ -79,18 +81,19 @@ public:
   virtual bool SupportsVisibilityHidden() { return false; }
 
 #ifdef ACCESSIBILITY
-  virtual already_AddRefed<Accessible> CreateAccessible();
+  virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
 #endif
 
   nsresult GetDocShell(nsIDocShell **aDocShell);
   nsresult BeginSwapDocShells(nsIFrame* aOther);
   void EndSwapDocShells(nsIFrame* aOther);
-  nsIView* EnsureInnerView();
+  nsView* EnsureInnerView();
   nsIFrame* GetSubdocumentRootFrame();
+  nsIntSize GetSubdocumentSize();
 
   // nsIReflowCallback
-  virtual bool ReflowFinished();
-  virtual void ReflowCallbackCanceled();
+  virtual bool ReflowFinished() MOZ_OVERRIDE;
+  virtual void ReflowCallbackCanceled() MOZ_OVERRIDE;
 
   bool ShouldClipSubdocument()
   {
@@ -114,10 +117,8 @@ protected:
 
   bool IsInline() { return mIsInline; }
 
-  virtual nscoord GetIntrinsicWidth();
-  virtual nscoord GetIntrinsicHeight();
-
-  virtual int GetSkipSides() const;
+  virtual nscoord GetIntrinsicWidth() MOZ_OVERRIDE;
+  virtual nscoord GetIntrinsicHeight() MOZ_OVERRIDE;
 
   // Show our document viewer. The document viewer is hidden via a script
   // runner, so that we can save and restore the presentation if we're
@@ -134,8 +135,14 @@ protected:
    */
   nsIFrame* ObtainIntrinsicSizeFrame();
 
+  /**
+   * Return true if pointer event hit-testing should be allowed to target
+   * content in the subdocument.
+   */
+  bool PassPointerEventsToChildren();
+
   nsRefPtr<nsFrameLoader> mFrameLoader;
-  nsIView* mInnerView;
+  nsView* mInnerView;
   bool mIsInline;
   bool mPostedReflowCallback;
   bool mDidCreateDoc;

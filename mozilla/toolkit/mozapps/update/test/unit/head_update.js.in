@@ -47,6 +47,12 @@ const IS_ANDROID = true;
 const IS_ANDROID = false;
 #endif
 
+#ifdef MOZ_WIDGET_GONK
+const IS_TOOLKIT_GONK = true;
+#else
+const IS_TOOLKIT_GONK = false;
+#endif
+
 const USE_EXECV = IS_UNIX && !IS_MACOSX;
 
 #ifdef MOZ_VERIFY_MAR_SIGNATURE
@@ -72,9 +78,6 @@ const MAR_WRONG_CHANNEL_FILE = "data/wrong_product_channel_mar.mar";
 const UPDATER_BIN_FILE = "updater" + BIN_SUFFIX;
 const MAINTENANCE_SERVICE_BIN_FILE = "maintenanceservice.exe";
 const MAINTENANCE_SERVICE_INSTALLER_BIN_FILE = "maintenanceservice_installer.exe";
-const UPDATE_SETTINGS_INI_FILE = "update-settings.ini";
-const UPDATE_SETTINGS_CONTENTS = "[Settings]\n" +
-                                 "ACCEPTED_MAR_CHANNEL_IDS=xpcshell-test\n"
 const UPDATES_DIR_SUFFIX = "_mar";
 
 const LOG_COMPLETE_SUCCESS = "data/complete_log_success";
@@ -113,6 +116,9 @@ var gTestserver;
 
 var gXHR;
 var gXHRCallback;
+
+var gUpdatePrompt;
+var gUpdatePromptCallback;
 
 var gCheckFunc;
 var gResponseBody;
@@ -289,7 +295,7 @@ var DEBUG_AUS_TEST = true;
 #include ../shared.js
 
 #ifdef MOZ_MAINTENANCE_SERVICE
-const STATE_APPLIED_PLATFORM = IS_WIN ? STATE_APPLIED_SVC : STATE_APPLIED;
+const STATE_APPLIED_PLATFORM = STATE_APPLIED_SVC;
 #else
 const STATE_APPLIED_PLATFORM = STATE_APPLIED;
 #endif
@@ -596,8 +602,14 @@ function runUpdate() {
   if (/ /.test(callbackAppPath))
     callbackAppPath = '"' + callbackAppPath + '"';
 
+  // Backup the updater-settings.ini file if it exists by moving it.
   let updateSettingsIni = getApplyDirFile(null, true);
-  updateSettingsIni.append(UPDATE_SETTINGS_INI_FILE);
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
+  if (updateSettingsIni.exists()) {
+    updateSettingsIni.moveTo(updateSettingsIni.parent, FILE_UPDATE_SETTINGS_INI_BAK);
+  }
+  updateSettingsIni = getApplyDirFile(null, true);
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
   writeFile(updateSettingsIni, UPDATE_SETTINGS_CONTENTS);
 
   let args = [updatesDirPath, applyToDirPath, 0];
@@ -625,6 +637,13 @@ function runUpdate() {
 
   if (gDisableReplaceFallback) {
     env.set("MOZ_NO_REPLACE_FALLBACK", "");
+  }
+
+  // Restore the backed up updater-settings.ini if it exists.
+  let updateSettingsIni = getApplyDirFile(null, true);
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI_BAK);
+  if (updateSettingsIni.exists()) {
+    updateSettingsIni.moveTo(updateSettingsIni.parent, FILE_UPDATE_SETTINGS_INI);
   }
 
   return process.exitValue;
@@ -937,8 +956,14 @@ function runUpdateUsingService(aInitialStatus, aExpectedStatus,
   copyBinToApplyToDir(MAINTENANCE_SERVICE_BIN_FILE);
   copyBinToApplyToDir(MAINTENANCE_SERVICE_INSTALLER_BIN_FILE);
 
+  // Backup the updater-settings.ini file if it exists by moving it.
   let updateSettingsIni = getApplyDirFile(null, true);
-  updateSettingsIni.append(UPDATE_SETTINGS_INI_FILE);
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
+  if (updateSettingsIni.exists()) {
+    updateSettingsIni.moveTo(updateSettingsIni.parent, FILE_UPDATE_SETTINGS_INI_BAK);
+  }
+  updateSettingsIni = getApplyDirFile(null, true);
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
   writeFile(updateSettingsIni, UPDATE_SETTINGS_CONTENTS);
 
   // Firefox does not wait for the service command to finish, but
@@ -969,6 +994,13 @@ function runUpdateUsingService(aInitialStatus, aExpectedStatus,
     
     // Make sure all of the logs are written out.
     waitForServiceStop(false);
+
+    // Restore the backed up updater-settings.ini if it exists.
+    let updateSettingsIni = getApplyDirFile(null, true);
+    updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI_BAK);
+    if (updateSettingsIni.exists()) {
+      updateSettingsIni.moveTo(updateSettingsIni.parent, FILE_UPDATE_SETTINGS_INI);
+    }
 
     do_check_eq(status, aExpectedStatus);
 
@@ -1644,6 +1676,7 @@ function overrideXHR(callback) {
                             gXHR.contractID, gXHR);
 }
 
+
 /**
  * Bare bones XMLHttpRequest implementation for testing onprogress, onerror,
  * and onload nsIDomEventListener handleEvent.
@@ -1708,6 +1741,63 @@ xhr.prototype = {
   get wrappedJSObject() { return this; }
 };
 
+function overrideUpdatePrompt(callback) {
+  var registrar = Components.manager.QueryInterface(AUS_Ci.nsIComponentRegistrar);
+  gUpdatePrompt = new UpdatePrompt();
+  gUpdatePromptCallback = callback;
+  registrar.registerFactory(gUpdatePrompt.classID, gUpdatePrompt.classDescription,
+                            gUpdatePrompt.contractID, gUpdatePrompt);
+}
+
+function UpdatePrompt() {
+  var fns = ["checkForUpdates", "showUpdateAvailable", "showUpdateDownloaded",
+             "showUpdateError", "showUpdateHistory", "showUpdateInstalled"];
+
+  fns.forEach(function(promptFn) {
+    UpdatePrompt.prototype[promptFn] = function() {
+      if (!gUpdatePromptCallback) {
+        return;
+      }
+
+      var callback = gUpdatePromptCallback[promptFn];
+      if (!callback) {
+        return;
+      }
+
+      callback.apply(gUpdatePromptCallback,
+                     Array.prototype.slice.call(arguments));
+    }
+  });
+}
+
+UpdatePrompt.prototype = {
+  flags: AUS_Ci.nsIClassInfo.SINGLETON,
+  implementationLanguage: AUS_Ci.nsIProgrammingLanguage.JAVASCRIPT,
+  getHelperForLanguage: function(language) null,
+  getInterfaces: function(count) {
+    var interfaces = [AUS_Ci.nsISupports, AUS_Ci.nsIUpdatePrompt];
+    count.value = interfaces.length;
+    return interfaces;
+  },
+  classDescription: "UpdatePrompt",
+  contractID: "@mozilla.org/updates/update-prompt;1",
+  classID: Components.ID("{8c350a15-9b90-4622-93a1-4d320308664b}"),
+  createInstance: function (outer, aIID) {
+    if (outer == null)
+      return gUpdatePrompt.QueryInterface(aIID);
+    throw AUS_Cr.NS_ERROR_NO_AGGREGATION;
+  },
+  QueryInterface: function(aIID) {
+    if (aIID.equals(AUS_Ci.nsIClassInfo) ||
+        aIID.equals(AUS_Ci.nsISupports) ||
+        aIID.equals(AUS_Ci.nsIUpdatePrompt))
+      return gUpdatePrompt;
+    throw AUS_Cr.NS_ERROR_NO_INTERFACE;
+  },
+};
+
+
+
 /* Update check listener */
 const updateCheckListener = {
   onProgress: function UCL_onProgress(request, position, totalSize) {
@@ -1728,12 +1818,13 @@ const updateCheckListener = {
   onError: function UCL_onError(request, update) {
     gRequestURL = request.channel.originalURI.spec;
     gStatusCode = request.status;
+
     gStatusText = update.statusText;
     logTestInfo("url = " + gRequestURL + ", " +
                 "request.status = " + gStatusCode + ", " +
                 "update.statusText = " + gStatusText);
     // Use a timeout to allow the XHR to complete
-    do_execute_soon(gCheckFunc);
+    do_execute_soon(gCheckFunc.bind(null, request, update));
   },
 
   QueryInterface: function(aIID) {

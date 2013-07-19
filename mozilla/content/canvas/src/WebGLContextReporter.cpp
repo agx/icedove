@@ -8,6 +8,7 @@
 
 using namespace mozilla;
 
+NS_IMPL_ISUPPORTS1(WebGLMemoryPressureObserver, nsIObserver)
 
 class WebGLMemoryMultiReporter MOZ_FINAL : public nsIMemoryMultiReporter 
 {
@@ -23,14 +24,6 @@ WebGLMemoryMultiReporter::GetName(nsACString &aName)
 {
   aName.AssignLiteral("webgl");
   return NS_OK;
-}
-
-NS_IMETHODIMP
-WebGLMemoryMultiReporter::GetExplicitNonHeap(int64_t *aAmount)
-{
-    // WebGLMemoryMultiReporterWrapper has no KIND_NONHEAP measurements.
-    *aAmount = 0;
-    return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -139,7 +132,7 @@ WebGLMemoryMultiReporterWrapper::~WebGLMemoryMultiReporterWrapper()
     NS_UnregisterMemoryMultiReporter(mReporter);
 }
 
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(WebGLBufferMallocSizeOfFun, "webgl-buffer")
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(WebGLBufferMallocSizeOf)
 
 int64_t 
 WebGLMemoryMultiReporterWrapper::GetBufferCacheMemoryUsed() {
@@ -151,13 +144,13 @@ WebGLMemoryMultiReporterWrapper::GetBufferCacheMemoryUsed() {
              buffer = buffer->getNext())
         {
             if (buffer->Target() == LOCAL_GL_ELEMENT_ARRAY_BUFFER)
-                result += buffer->SizeOfIncludingThis(WebGLBufferMallocSizeOfFun);
+                result += buffer->SizeOfIncludingThis(WebGLBufferMallocSizeOf);
         }
     }
     return result;
 }
 
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(WebGLShaderMallocSizeOfFun, "webgl-shader")
+NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(WebGLShaderMallocSizeOf)
 
 int64_t 
 WebGLMemoryMultiReporterWrapper::GetShaderSize() {
@@ -168,7 +161,7 @@ WebGLMemoryMultiReporterWrapper::GetShaderSize() {
              shader;
              shader = shader->getNext())
         {
-            result += shader->SizeOfIncludingThis(WebGLShaderMallocSizeOfFun);
+            result += shader->SizeOfIncludingThis(WebGLShaderMallocSizeOf);
         }
     }
     return result;

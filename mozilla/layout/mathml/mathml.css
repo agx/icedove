@@ -182,11 +182,14 @@ math[display="inline"] {
 ms {
   display: inline;
 }
-ms:before {
-  content: open-quote;
+ms:before, ms:after {
+  content: "\0022";
 }
-ms:after {
-  content: close-quote;
+ms[lquote]:before {
+  content: attr(lquote);
+}
+ms[rquote]:after {
+  content: attr(rquote);
 }
 
 merror {
@@ -405,23 +408,6 @@ mtd[_moz-math-columnline="dashed"] {
 ::-moz-math-anonymous {
 }
 */
-
-/**********************************************************************/
-/* Hide embedded semantic MathML content (as opposed to presentational
-   content, which we render). Ideally, here is the behavior that we want:
-
-   if there is an annotation-xml[encoding="MathML-Presentation"]
-     render that annotation, and ignore the first child of the
-     <semantics> element and all other annotations, 
-   else
-     render the first child of <semantics> and ignore all annotations
-
-   But this cannot be expressed with CSS. As a stop-gap, just render
-   the first child to cater for most of the common cases - bug 154931.
-*/
-semantics > :not(:first-child) {
-  display: none;
-}
 
 /**********************************************************************/
 /* This is used when wrapping non-MathML inline elements inside math. */

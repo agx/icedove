@@ -11,6 +11,8 @@
  *  then.
  */
 
+Components.utils.import("resource:///modules/mailServices.js");
+
 // Make sure we execute this file exactly once
 if (typeof gIMAPpump_js__ == "undefined") {
 var gIMAPpump_js__ = true;
@@ -38,9 +40,11 @@ var gIMAPServer;         // the imap fake server
 var gIMAPIncomingServer; // nsIMsgIncomingServer for the imap server
 var gIMAPInbox;          // nsIMsgFolder/nsIMsgImapMailFolder for imap inbox
 var gIMAPMailbox;        // imap fake server mailbox
+var gAppInfo;            // application info
 
 function setupIMAPPump(extensions)
 {
+  createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "5", "2.0");
 
   // These are copied from imap's head_server.js to here so we can run
   //   this from any directory.
@@ -84,27 +88,23 @@ function setupIMAPPump(extensions)
     loadLocalMailAccount();
 
   // We need an identity so that updateFolder doesn't fail
-  let acctMgr = Cc["@mozilla.org/messenger/account-manager;1"]
-                  .getService(Ci.nsIMsgAccountManager);
-  let localAccount = acctMgr.createAccount();
-  let identity = acctMgr.createIdentity();
+  let localAccount = MailServices.accounts.createAccount();
+  let identity = MailServices.accounts.createIdentity();
   localAccount.addIdentity(identity);
   localAccount.defaultIdentity = identity;
   localAccount.incomingServer = gLocalIncomingServer;
-  acctMgr.defaultAccount = localAccount;
+  MailServices.accounts.defaultAccount = localAccount;
 
   // Let's also have another account, using the same identity
-  let imapAccount = acctMgr.createAccount();
+  let imapAccount = MailServices.accounts.createAccount();
   imapAccount.addIdentity(identity);
   imapAccount.defaultIdentity = identity;
   imapAccount.incomingServer = gIMAPIncomingServer;
 
   // The server doesn't support more than one connection
-  Services.prefs.setIntPref("mail.server.default.max_cached_connections",
-                            1);
+  Services.prefs.setIntPref("mail.server.default.max_cached_connections", 1);
   // We aren't interested in downloading messages automatically
-  Services.prefs.setBoolPref("mail.server.default.download_on_biff",
-                             false);
+  Services.prefs.setBoolPref("mail.server.default.download_on_biff", false);
   Services.prefs.setBoolPref("mail.biff.play_sound", false);
   Services.prefs.setBoolPref("mail.biff.show_alert", false);
   Services.prefs.setBoolPref("mail.biff.show_tray_icon", false);
@@ -132,6 +132,38 @@ function teardownIMAPPump()
   let thread = gThreadManager.currentThread;
   while (thread.hasPendingEvents())
     thread.processNextEvent(true);
+}
+
+const XULAPPINFO_CONTRACTID = "@mozilla.org/xre/app-info;1";
+const XULAPPINFO_CID = Components.ID("{7e10a36e-1085-4302-9e3f-9571fc003ee0}");
+
+
+function createAppInfo(id, name, version, platformVersion) {
+  gAppInfo = {
+    // nsIXULAppInfo
+    vendor: "Mozilla",
+    name: name,
+    ID: id,
+    version: version,
+    appBuildID: "2007010101",
+    platformVersion: platformVersion,
+    platformBuildID: "2007010101",
+
+    QueryInterface: XPCOMUtils.generateQI([Components.interfaces.nsIXULAppInfo,
+                                           Components.interfaces.nsISupports])
+  };
+
+  var XULAppInfoFactory = {
+    createInstance: function (outer, iid) {
+      if (outer != null)
+        throw Components.results.NS_ERROR_NO_AGGREGATION;
+      return gAppInfo.QueryInterface(iid);
+    }
+  };
+  var registrar = Components.manager.QueryInterface(Components.interfaces.nsIComponentRegistrar);
+  registrar.registerFactory(XULAPPINFO_CID, "XULAppInfo",
+                            XULAPPINFO_CONTRACTID, XULAppInfoFactory);
+
 }
 
 } // end run only once

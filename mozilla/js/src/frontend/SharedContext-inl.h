@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,30 +14,37 @@ namespace js {
 namespace frontend {
 
 inline
-SharedContext::SharedContext(JSContext *cx, JSObject *scopeChain, JSFunction *fun,
-                             FunctionBox *funbox, StrictMode::StrictModeState sms)
+SharedContext::SharedContext(JSContext *cx, bool strict)
   : context(cx),
-    fun_(cx, fun),
-    funbox_(funbox),
-    scopeChain_(cx, scopeChain),
-    cxFlags(cx),
-    strictModeState(sms)
+    anyCxFlags(),
+    strict(strict)
 {
-    JS_ASSERT((fun && !scopeChain_) || (!fun && !funbox));
-}
-
-inline bool
-SharedContext::inStrictMode()
-{
-    JS_ASSERT(strictModeState != StrictMode::UNKNOWN);
-    JS_ASSERT_IF(inFunction() && funbox(), funbox()->strictModeState == strictModeState);
-    return strictModeState == StrictMode::STRICT;
 }
 
 inline bool
 SharedContext::needStrictChecks()
 {
-    return context->hasStrictOption() || strictModeState != StrictMode::NOTSTRICT;
+    return context->hasStrictOption() || strict;
+}
+
+inline GlobalSharedContext *
+SharedContext::asGlobalSharedContext()
+{
+    JS_ASSERT(isGlobalSharedContext());
+    return static_cast<GlobalSharedContext*>(this);
+}
+
+inline ModuleBox *
+SharedContext::asModuleBox()
+{
+    JS_ASSERT(isModuleBox());
+    return static_cast<ModuleBox*>(this);
+}
+
+GlobalSharedContext::GlobalSharedContext(JSContext *cx, JSObject *scopeChain, bool strict)
+  : SharedContext(cx, strict),
+    scopeChain_(cx, scopeChain)
+{
 }
 
 } /* namespace frontend */
@@ -99,6 +105,8 @@ template <class ContextT>
 typename ContextT::StmtInfo *
 frontend::LexicalLookup(ContextT *ct, HandleAtom atom, int *slotp, typename ContextT::StmtInfo *stmt)
 {
+    RootedId id(ct->sc->context, AtomToId(atom));
+
     if (!stmt)
         stmt = ct->topScopeStmt;
     for (; stmt; stmt = stmt->downScope) {
@@ -115,7 +123,7 @@ frontend::LexicalLookup(ContextT *ct, HandleAtom atom, int *slotp, typename Cont
             continue;
 
         StaticBlockObject &blockObj = *stmt->blockObj;
-        Shape *shape = blockObj.nativeLookup(ct->sc->context, AtomToId(atom));
+        Shape *shape = blockObj.nativeLookup(ct->sc->context, id);
         if (shape) {
             JS_ASSERT(shape->hasShortID());
 

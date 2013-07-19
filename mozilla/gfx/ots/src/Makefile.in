@@ -32,7 +32,6 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = ots
 LIBRARY_NAME   = mozots
 FORCE_STATIC_LIB = 1
 
@@ -76,11 +75,7 @@ CPPSRCS	= \
   gpos.cc \
   gsub.cc \
   graphite.cc \
-  $(NULL)
-
-EXPORTS = \
-  ../include/opentype-sanitiser.h \
-  ../include/ots-memory-stream.h  \
+  svg.cc \
   $(NULL)
 
 include $(topsrcdir)/config/rules.mk
@@ -93,9 +88,4 @@ DEFINES += -DMOZ_OTS_REPORT_ERRORS
 ifeq (WINNT,$(OS_TARGET))
 DEFINES += -DOTS_DLL -DOTS_DLL_EXPORTS
 endif
-
-# Suppress ANSI strict warnings
-# because Googlers don't care about comma-at-end-of-enumerator errors.
-CXXFLAGS := $(filter-out -pedantic,$(CXXFLAGS))
-CFLAGS := $(filter-out -pedantic,$(CFLAGS))
 

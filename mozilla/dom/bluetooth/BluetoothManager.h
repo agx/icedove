@@ -12,7 +12,6 @@
 #include "nsDOMEventTargetHelper.h"
 #include "nsIDOMBluetoothManager.h"
 #include "mozilla/Observer.h"
-#include "nsIEventTarget.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
 
@@ -27,13 +26,7 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIDOMBLUETOOTHMANAGER
 
-  NS_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper::)
-
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(BluetoothManager,
-                                           nsDOMEventTargetHelper)
-
-
-  inline void SetEnabledInternal(bool aEnabled) {mEnabled = aEnabled;}
+  NS_REALLY_FORWARD_NSIDOMEVENTTARGET(nsDOMEventTargetHelper)
 
   static already_AddRefed<BluetoothManager>
   Create(nsPIDOMWindow* aWindow);
@@ -42,9 +35,6 @@ public:
 private:
   BluetoothManager(nsPIDOMWindow* aWindow);
   ~BluetoothManager();
-  bool mEnabled;
-
-  NS_DECL_EVENT_HANDLER(enabled)
 };
 
 END_BLUETOOTH_NAMESPACE

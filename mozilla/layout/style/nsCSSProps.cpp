@@ -30,7 +30,7 @@ using namespace mozilla;
 extern const char* const kCSSRawProperties[];
 
 // define an array of all CSS properties
-const char* const kCSSRawProperties[] = {
+const char* const kCSSRawProperties[eCSSProperty_COUNT_with_aliases] = {
 #define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_, kwtable_, \
                  stylestruct_, stylestructoffset_, animtype_)                 \
   #name_,
@@ -39,6 +39,9 @@ const char* const kCSSRawProperties[] = {
 #define CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_) #name_,
 #include "nsCSSPropList.h"
 #undef CSS_PROP_SHORTHAND
+#define CSS_PROP_ALIAS(aliasname_, id_, method_, pref_) #aliasname_,
+#include "nsCSSPropAliasList.h"
+#undef CSS_PROP_ALIAS
 };
 
 using namespace mozilla;
@@ -77,43 +80,13 @@ SortPropertyAndCount(const void* s1, const void* s2, void *closure)
 // We need eCSSAliasCount so we can make gAliases nonzero size when there
 // are no aliases.
 enum {
-#define CSS_PROP_ALIAS(aliasname_, propid_, aliasmethod_, pref_)              \
-  eCSSAliasCountBefore_##aliasmethod_,
-#include "nsCSSPropAliasList.h"
-#undef CSS_PROP_ALIAS
-
-  eCSSAliasCount
+  eCSSAliasCount = eCSSProperty_COUNT_with_aliases - eCSSProperty_COUNT
 };
 
-enum {
-  // We want the largest sizeof(#aliasname_).  To find that, we use the
-  // auto-incrementing behavior of C++ enums (a value without an
-  // initializer is one larger than the previous value, or 0 at the
-  // start of the enum), and for each alias we define two values:
-  //   eMaxCSSAliasNameSizeBefore_##aliasmethod_ is the largest
-  //     sizeof(#aliasname_) before that alias.  The first one is
-  //     conveniently zero.
-  //   eMaxCSSAliasNameSizeWith_##aliasmethod_ is **one less than** the
-  //     largest sizeof(#aliasname_) before or including that alias.
-#define CSS_PROP_ALIAS(aliasname_, propid_, aliasmethod_, pref_)              \
-  eMaxCSSAliasNameSizeBefore_##aliasmethod_,                                  \
-  eMaxCSSAliasNameSizeWith_##aliasmethod_ =                                   \
-    PR_MAX(sizeof(#aliasname_), eMaxCSSAliasNameSizeBefore_##aliasmethod_) - 1,
-#include "nsCSSPropAliasList.h"
-#undef CSS_PROP_ALIAS
-
-  eMaxCSSAliasNameSize
-};
-
-struct CSSPropertyAlias {
-  const char name[PR_MAX(eMaxCSSAliasNameSize, 1)];
-  const nsCSSProperty id;
-  bool enabled;
-};
-
-static CSSPropertyAlias gAliases[PR_MAX(eCSSAliasCount, 1)] = {
+// The names are in kCSSRawProperties.
+static nsCSSProperty gAliases[eCSSAliasCount != 0 ? eCSSAliasCount : 1] = {
 #define CSS_PROP_ALIAS(aliasname_, propid_, aliasmethod_, pref_)  \
-  { #aliasname_, eCSSProperty_##propid_, true },
+  eCSSProperty_##propid_ ,
 #include "nsCSSPropAliasList.h"
 #undef CSS_PROP_ALIAS
 };
@@ -130,9 +103,9 @@ nsCSSProps::AddRefTable(void)
 #ifdef DEBUG
     {
       // let's verify the table...
-      for (int32_t index = 0; index < eCSSProperty_COUNT; ++index) {
-        nsCAutoString temp1(kCSSRawProperties[index]);
-        nsCAutoString temp2(kCSSRawProperties[index]);
+      for (int32_t index = 0; index < eCSSProperty_COUNT_with_aliases; ++index) {
+        nsAutoCString temp1(kCSSRawProperties[index]);
+        nsAutoCString temp2(kCSSRawProperties[index]);
         ToLowerCase(temp1);
         NS_ABORT_IF_FALSE(temp1.Equals(temp2), "upper case char in prop table");
         NS_ABORT_IF_FALSE(-1 == temp1.FindChar('_'),
@@ -140,7 +113,7 @@ nsCSSProps::AddRefTable(void)
       }
     }
 #endif
-      gPropertyTable->Init(kCSSRawProperties, eCSSProperty_COUNT);
+      gPropertyTable->Init(kCSSRawProperties, eCSSProperty_COUNT_with_aliases);
     }
 
     gFontDescTable = new nsStaticCaseInsensitiveNameTable();
@@ -149,8 +122,8 @@ nsCSSProps::AddRefTable(void)
     {
       // let's verify the table...
       for (int32_t index = 0; index < eCSSFontDesc_COUNT; ++index) {
-        nsCAutoString temp1(kCSSRawFontDescs[index]);
-        nsCAutoString temp2(kCSSRawFontDescs[index]);
+        nsAutoCString temp1(kCSSRawFontDescs[index]);
+        nsAutoCString temp2(kCSSRawFontDescs[index]);
         ToLowerCase(temp1);
         NS_ABORT_IF_FALSE(temp1.Equals(temp2), "upper case char in desc table");
         NS_ABORT_IF_FALSE(-1 == temp1.FindChar('_'),
@@ -169,32 +142,27 @@ nsCSSProps::AddRefTable(void)
       
       #define OBSERVE_PROP(pref_, id_)                                        \
         if (pref_[0]) {                                                       \
-          Preferences::AddBoolVarCache(&gPropertyEnabled[eCSSProperty_##id_], \
+          Preferences::AddBoolVarCache(&gPropertyEnabled[id_],                \
                                        pref_);                                \
         }
 
       #define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_,     \
                        kwtable_, stylestruct_, stylestructoffset_, animtype_) \
-        OBSERVE_PROP(pref_, id_)
+        OBSERVE_PROP(pref_, eCSSProperty_##id_)
       #include "nsCSSPropList.h"
       #undef CSS_PROP
 
       #define  CSS_PROP_SHORTHAND(name_, id_, method_, flags_, pref_) \
-        OBSERVE_PROP(pref_, id_)
+        OBSERVE_PROP(pref_, eCSSProperty_##id_)
       #include "nsCSSPropList.h"
       #undef CSS_PROP_SHORTHAND
 
-      #undef OBSERVE_PROP
-
-      size_t aliasIndex = 0;
       #define CSS_PROP_ALIAS(aliasname_, propid_, aliasmethod_, pref_)    \
-        if (pref_[0]) {                                                   \
-          Preferences::AddBoolVarCache(&gAliases[aliasIndex].enabled,     \
-                                       pref_);                            \
-        }                                                                 \
-        ++aliasIndex;
+        OBSERVE_PROP(pref_, eCSSPropertyAlias_##aliasmethod_)
       #include "nsCSSPropAliasList.h"
       #undef CSS_PROP_ALIAS
+
+      #undef OBSERVE_PROP
     }
   }
 }
@@ -387,15 +355,15 @@ nsCSSProps::LookupProperty(const nsACString& aProperty,
   nsCSSProperty res = nsCSSProperty(gPropertyTable->Lookup(aProperty));
   // Check eCSSAliasCount against 0 to make it easy for the
   // compiler to optimize away the 0-aliases case.
-  if (eCSSAliasCount != 0 && res == eCSSProperty_UNKNOWN) {
-    for (const CSSPropertyAlias *alias = gAliases,
-                            *alias_end = ArrayEnd(gAliases);
-         alias < alias_end; ++alias) {
-      if (aProperty.LowerCaseEqualsASCII(alias->name) &&
-          (alias->enabled || aEnabled == eAny)) {
-        res = alias->id;
-        break;
-      }
+  if (eCSSAliasCount != 0 && res >= eCSSProperty_COUNT) {
+    MOZ_STATIC_ASSERT(eCSSProperty_UNKNOWN < eCSSProperty_COUNT,
+                      "assuming eCSSProperty_UNKNOWN doesn't hit this code");
+    if (IsEnabled(res) || aEnabled == eAny) {
+      res = gAliases[res - eCSSProperty_COUNT];
+      NS_ABORT_IF_FALSE(0 <= res && res < eCSSProperty_COUNT,
+                        "aliases must not point to other aliases");
+    } else {
+      res = eCSSProperty_UNKNOWN;
     }
   }
   if (res != eCSSProperty_UNKNOWN && aEnabled == eEnabled && !IsEnabled(res)) {
@@ -414,15 +382,15 @@ nsCSSProps::LookupProperty(const nsAString& aProperty, EnabledState aEnabled)
   nsCSSProperty res = nsCSSProperty(gPropertyTable->Lookup(aProperty));
   // Check eCSSAliasCount against 0 to make it easy for the
   // compiler to optimize away the 0-aliases case.
-  if (eCSSAliasCount != 0 && res == eCSSProperty_UNKNOWN) {
-    for (const CSSPropertyAlias *alias = gAliases,
-                            *alias_end = ArrayEnd(gAliases);
-         alias < alias_end; ++alias) {
-      if (aProperty.LowerCaseEqualsASCII(alias->name) &&
-          (alias->enabled || aEnabled == eAny)) {
-        res = alias->id;
-        break;
-      }
+  if (eCSSAliasCount != 0 && res >= eCSSProperty_COUNT) {
+    MOZ_STATIC_ASSERT(eCSSProperty_UNKNOWN < eCSSProperty_COUNT,
+                      "assuming eCSSProperty_UNKNOWN doesn't hit this code");
+    if (IsEnabled(res) || aEnabled == eAny) {
+      res = gAliases[res - eCSSProperty_COUNT];
+      NS_ABORT_IF_FALSE(0 <= res && res < eCSSProperty_COUNT,
+                        "aliases must not point to other aliases");
+    } else {
+      res = eCSSProperty_UNKNOWN;
     }
   }
   if (res != eCSSProperty_UNKNOWN && aEnabled == eEnabled && !IsEnabled(res)) {
@@ -569,8 +537,8 @@ const int32_t nsCSSProps::kAppearanceKTable[] = {
   eCSSKeyword_tab,                    NS_THEME_TAB,
   eCSSKeyword_tabpanels,              NS_THEME_TAB_PANELS,
   eCSSKeyword_tabpanel,               NS_THEME_TAB_PANEL,
-  eCSSKeyword_tabscrollarrow_back,    NS_THEME_TAB_SCROLLARROW_BACK,
-  eCSSKeyword_tabscrollarrow_forward, NS_THEME_TAB_SCROLLARROW_FORWARD,
+  eCSSKeyword_tab_scroll_arrow_back,  NS_THEME_TAB_SCROLLARROW_BACK,
+  eCSSKeyword_tab_scroll_arrow_forward, NS_THEME_TAB_SCROLLARROW_FORWARD,
   eCSSKeyword_tooltip,                NS_THEME_TOOLTIP,
   eCSSKeyword_spinner,                NS_THEME_SPINNER,
   eCSSKeyword_spinner_upbutton,       NS_THEME_SPINNER_UP_BUTTON,
@@ -591,9 +559,11 @@ const int32_t nsCSSProps::kAppearanceKTable[] = {
   eCSSKeyword_caret,                  NS_THEME_TEXTFIELD_CARET,
   eCSSKeyword_searchfield,            NS_THEME_SEARCHFIELD,
   eCSSKeyword_menulist,               NS_THEME_DROPDOWN,
-  eCSSKeyword_menulistbutton,         NS_THEME_DROPDOWN_BUTTON,
-  eCSSKeyword_menulisttext,           NS_THEME_DROPDOWN_TEXT,
-  eCSSKeyword_menulisttextfield,      NS_THEME_DROPDOWN_TEXTFIELD,
+  eCSSKeyword_menulist_button,        NS_THEME_DROPDOWN_BUTTON,
+  eCSSKeyword_menulist_text,          NS_THEME_DROPDOWN_TEXT,
+  eCSSKeyword_menulist_textfield,     NS_THEME_DROPDOWN_TEXTFIELD,
+  eCSSKeyword_range,                  NS_THEME_RANGE,
+  eCSSKeyword_range_thumb,            NS_THEME_RANGE_THUMB,
   eCSSKeyword_scale_horizontal,       NS_THEME_SCALE_HORIZONTAL,
   eCSSKeyword_scale_vertical,         NS_THEME_SCALE_VERTICAL,
   eCSSKeyword_scalethumb_horizontal,  NS_THEME_SCALE_THUMB_HORIZONTAL,
@@ -602,11 +572,11 @@ const int32_t nsCSSProps::kAppearanceKTable[] = {
   eCSSKeyword_scalethumbend,          NS_THEME_SCALE_THUMB_END,
   eCSSKeyword_scalethumbtick,         NS_THEME_SCALE_TICK,
   eCSSKeyword_groupbox,               NS_THEME_GROUPBOX,
-  eCSSKeyword_checkboxcontainer,      NS_THEME_CHECKBOX_CONTAINER,
-  eCSSKeyword_radiocontainer,         NS_THEME_RADIO_CONTAINER,
-  eCSSKeyword_checkboxlabel,          NS_THEME_CHECKBOX_LABEL,
-  eCSSKeyword_radiolabel,             NS_THEME_RADIO_LABEL,
-  eCSSKeyword_buttonfocus,            NS_THEME_BUTTON_FOCUS,
+  eCSSKeyword_checkbox_container,     NS_THEME_CHECKBOX_CONTAINER,
+  eCSSKeyword_radio_container,        NS_THEME_RADIO_CONTAINER,
+  eCSSKeyword_checkbox_label,         NS_THEME_CHECKBOX_LABEL,
+  eCSSKeyword_radio_label,            NS_THEME_RADIO_LABEL,
+  eCSSKeyword_button_focus,           NS_THEME_BUTTON_FOCUS,
   eCSSKeyword_window,                 NS_THEME_WINDOW,
   eCSSKeyword_dialog,                 NS_THEME_DIALOG,
   eCSSKeyword_menubar,                NS_THEME_MENUBAR,
@@ -789,6 +759,7 @@ const int32_t nsCSSProps::kClearKTable[] = {
   eCSSKeyword_UNKNOWN,-1
 };
 
+// See also kObjectPatternKTable for SVG paint-specific values
 const int32_t nsCSSProps::kColorKTable[] = {
   eCSSKeyword_activeborder, LookAndFeel::eColorID_activeborder,
   eCSSKeyword_activecaption, LookAndFeel::eColorID_activecaption,
@@ -919,7 +890,7 @@ const int32_t nsCSSProps::kDirectionKTable[] = {
   eCSSKeyword_UNKNOWN,-1
 };
 
-const int32_t nsCSSProps::kDisplayKTable[] = {
+int32_t nsCSSProps::kDisplayKTable[] = {
   eCSSKeyword_none,               NS_STYLE_DISPLAY_NONE,
   eCSSKeyword_inline,             NS_STYLE_DISPLAY_INLINE,
   eCSSKeyword_block,              NS_STYLE_DISPLAY_BLOCK,
@@ -951,8 +922,11 @@ const int32_t nsCSSProps::kDisplayKTable[] = {
   eCSSKeyword__moz_groupbox,      NS_STYLE_DISPLAY_GROUPBOX,
 #endif
 #ifdef MOZ_FLEXBOX
-  eCSSKeyword__moz_flex,          NS_STYLE_DISPLAY_FLEX,
-  eCSSKeyword__moz_inline_flex,   NS_STYLE_DISPLAY_INLINE_FLEX,
+  // XXXdholbert NOTE: These currently need to be the last entries in the
+  // table, because the "is flexbox enabled" pref that disables these will
+  // disable all the entries after them, too.
+  eCSSKeyword_flex,               NS_STYLE_DISPLAY_FLEX,
+  eCSSKeyword_inline_flex,        NS_STYLE_DISPLAY_INLINE_FLEX,
 #endif // MOZ_FLEXBOX
   eCSSKeyword_UNKNOWN,-1
 };
@@ -1163,9 +1137,22 @@ const int32_t nsCSSProps::kListStyleKTable[] = {
   eCSSKeyword_UNKNOWN,-1
 };
 
+const int32_t nsCSSProps::kObjectOpacityKTable[] = {
+  eCSSKeyword__moz_objectfillopacity, NS_STYLE_OBJECT_FILL_OPACITY,
+  eCSSKeyword__moz_objectstrokeopacity, NS_STYLE_OBJECT_STROKE_OPACITY,
+  eCSSKeyword_UNKNOWN,-1
+};
+
+const int32_t nsCSSProps::kObjectPatternKTable[] = {
+  eCSSKeyword__moz_objectfill, NS_COLOR_OBJECTFILL,
+  eCSSKeyword__moz_objectstroke, NS_COLOR_OBJECTSTROKE,
+  eCSSKeyword_UNKNOWN,-1
+};
+
 const int32_t nsCSSProps::kOrientKTable[] = {
   eCSSKeyword_horizontal, NS_STYLE_ORIENT_HORIZONTAL,
   eCSSKeyword_vertical,   NS_STYLE_ORIENT_VERTICAL,
+  eCSSKeyword_auto,       NS_STYLE_ORIENT_AUTO,
   eCSSKeyword_UNKNOWN,    -1
 };
 
@@ -1367,6 +1354,7 @@ const int32_t nsCSSProps::kTextTransformKTable[] = {
   eCSSKeyword_capitalize, NS_STYLE_TEXT_TRANSFORM_CAPITALIZE,
   eCSSKeyword_lowercase, NS_STYLE_TEXT_TRANSFORM_LOWERCASE,
   eCSSKeyword_uppercase, NS_STYLE_TEXT_TRANSFORM_UPPERCASE,
+  eCSSKeyword_full_width, NS_STYLE_TEXT_TRANSFORM_FULLWIDTH,
   eCSSKeyword_UNKNOWN,-1
 };
 
@@ -1428,7 +1416,7 @@ const int32_t nsCSSProps::kUserSelectKTable[] = {
   eCSSKeyword_toggle,     NS_STYLE_USER_SELECT_TOGGLE,
   eCSSKeyword_tri_state,  NS_STYLE_USER_SELECT_TRI_STATE,
   eCSSKeyword__moz_all,   NS_STYLE_USER_SELECT_MOZ_ALL,
-  eCSSKeyword__moz_none,  NS_STYLE_USER_SELECT_MOZ_NONE,
+  eCSSKeyword__moz_none,  NS_STYLE_USER_SELECT_NONE,
   eCSSKeyword_UNKNOWN,-1
 };
 
@@ -1458,6 +1446,7 @@ const int32_t nsCSSProps::kWhitespaceKTable[] = {
   eCSSKeyword_nowrap, NS_STYLE_WHITESPACE_NOWRAP,
   eCSSKeyword_pre_wrap, NS_STYLE_WHITESPACE_PRE_WRAP,
   eCSSKeyword_pre_line, NS_STYLE_WHITESPACE_PRE_LINE,
+  eCSSKeyword__moz_pre_discard_newlines, NS_STYLE_WHITESPACE_PRE_DISCARD_NEWLINES,
   eCSSKeyword_UNKNOWN,-1
 };
 
@@ -1562,6 +1551,12 @@ const int32_t nsCSSProps::kImageRenderingKTable[] = {
   eCSSKeyword_UNKNOWN, -1
 };
 
+const int32_t nsCSSProps::kMaskTypeKTable[] = {
+  eCSSKeyword_luminance, NS_STYLE_MASK_TYPE_LUMINANCE,
+  eCSSKeyword_alpha, NS_STYLE_MASK_TYPE_ALPHA,
+  eCSSKeyword_UNKNOWN, -1
+};
+
 const int32_t nsCSSProps::kShapeRenderingKTable[] = {
   eCSSKeyword_auto, NS_STYLE_SHAPE_RENDERING_AUTO,
   eCSSKeyword_optimizespeed, NS_STYLE_SHAPE_RENDERING_OPTIMIZESPEED,
@@ -1581,6 +1576,13 @@ const int32_t nsCSSProps::kStrokeLinejoinKTable[] = {
   eCSSKeyword_miter, NS_STYLE_STROKE_LINEJOIN_MITER,
   eCSSKeyword_round, NS_STYLE_STROKE_LINEJOIN_ROUND,
   eCSSKeyword_bevel, NS_STYLE_STROKE_LINEJOIN_BEVEL,
+  eCSSKeyword_UNKNOWN, -1
+};
+
+// Lookup table to store the sole objectValue keyword to let SVG glyphs inherit
+// certain stroke-* properties from the outer text object
+const int32_t nsCSSProps::kStrokeObjectValueKTable[] = {
+  eCSSKeyword__moz_objectvalue, NS_STYLE_STROKE_PROP_OBJECTVALUE,
   eCSSKeyword_UNKNOWN, -1
 };
 
@@ -1612,16 +1614,33 @@ const int32_t nsCSSProps::kColorInterpolationKTable[] = {
   eCSSKeyword_UNKNOWN, -1
 };
 
-bool
-nsCSSProps::FindKeyword(nsCSSKeyword aKeyword, const int32_t aTable[], int32_t& aResult)
+const int32_t nsCSSProps::kColumnFillKTable[] = {
+  eCSSKeyword_auto, NS_STYLE_COLUMN_FILL_AUTO,
+  eCSSKeyword_balance, NS_STYLE_COLUMN_FILL_BALANCE,
+  eCSSKeyword_UNKNOWN, -1
+};
+
+int32_t
+nsCSSProps::FindIndexOfKeyword(nsCSSKeyword aKeyword, const int32_t aTable[])
 {
   int32_t index = 0;
   while (eCSSKeyword_UNKNOWN != nsCSSKeyword(aTable[index])) {
     if (aKeyword == nsCSSKeyword(aTable[index])) {
-      aResult = aTable[index+1];
-      return true;
+      return index;
     }
     index += 2;
+  }
+  return -1;
+}
+
+bool
+nsCSSProps::FindKeyword(nsCSSKeyword aKeyword, const int32_t aTable[],
+                        int32_t& aResult)
+{
+  int32_t index = FindIndexOfKeyword(aKeyword, aTable);
+  if (index >= 0) {
+    aResult = aTable[index + 1];
+    return true;
   }
   return false;
 }
@@ -2241,7 +2260,7 @@ static const nsCSSProperty gMozTransformSubpropTable[] = {
 
 const nsCSSProperty *const
 nsCSSProps::kSubpropertyTable[eCSSProperty_COUNT - eCSSProperty_COUNT_no_shorthands] = {
-#define CSS_PROP_DOMPROP_PREFIXED(prop_) prop_
+#define CSS_PROP_PUBLIC_OR_PRIVATE(publicname_, privatename_) privatename_
 // Need an extra level of macro nesting to force expansion of method_
 // params before they get pasted.
 #define NSCSSPROPS_INNER_MACRO(method_) g##method_##SubpropTable,
@@ -2250,7 +2269,7 @@ nsCSSProps::kSubpropertyTable[eCSSProperty_COUNT - eCSSProperty_COUNT_no_shortha
 #include "nsCSSPropList.h"
 #undef CSS_PROP_SHORTHAND
 #undef NSCSSPROPS_INNER_MACRO
-#undef CSS_PROP_DOMPROP_PREFIXED
+#undef CSS_PROP_PUBLIC_OR_PRIVATE
 };
 
 
@@ -2426,7 +2445,7 @@ enum ColumnCheckCounter {
 
 /* static */ const size_t
 nsCSSProps::gPropertyCountInStruct[nsStyleStructID_Length] = {
-  #define STYLE_STRUCT(name, checkdata_cb, ctor_args) \
+  #define STYLE_STRUCT(name, checkdata_cb) \
     ePropertyCount_for_##name,
   #include "nsStyleStructList.h"
   #undef STYLE_STRUCT
@@ -2448,7 +2467,7 @@ nsCSSProps::gPropertyIndexInStruct[eCSSProperty_COUNT_no_shorthands] = {
 };
 
 /* static */ bool
-nsCSSProps::gPropertyEnabled[eCSSProperty_COUNT] = {
+nsCSSProps::gPropertyEnabled[eCSSProperty_COUNT_with_aliases] = {
   #define CSS_PROP(name_, id_, method_, flags_, pref_, parsevariant_,     \
                    kwtable_, stylestruct_, stylestructoffset_, animtype_) \
     true,
@@ -2459,4 +2478,9 @@ nsCSSProps::gPropertyEnabled[eCSSProperty_COUNT] = {
     true,
   #include "nsCSSPropList.h"
   #undef CSS_PROP_SHORTHAND
+
+  #define CSS_PROP_ALIAS(aliasname_, propid_, aliasmethod_, pref_) \
+    true,
+  #include "nsCSSPropAliasList.h"
+  #undef CSS_PROP_ALIAS
 };

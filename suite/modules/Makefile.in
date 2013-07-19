@@ -9,16 +9,9 @@ srcdir    = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-ifdef ENABLE_TESTS
-DIRS += test
-endif
-
-EXTRA_PP_JS_MODULES = \
-  Sanitizer.jsm \
-  $(NULL)
-
 EXTRA_JS_MODULES = \
   DownloadTaskbarIntegration.jsm \
+  Sanitizer.jsm \
   $(NULL)
 
 ifeq ($(OS_ARCH),WINNT)

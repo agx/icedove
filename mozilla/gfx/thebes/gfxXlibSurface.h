@@ -11,7 +11,7 @@
 #include <X11/extensions/Xrender.h>
 #include <X11/Xlib.h>
 
-#if defined(MOZ_WIDGET_GTK2) && !defined(MOZ_PLATFORM_MAEMO)
+#if defined(GL_PROVIDER_GLX)
 #include "GLXLibrary.h"
 #endif
 
@@ -47,6 +47,7 @@ public:
 
     virtual already_AddRefed<gfxASurface>
     CreateSimilarSurface(gfxContentType aType, const gfxIntSize& aSize);
+    virtual void Finish() MOZ_OVERRIDE;
 
     virtual const gfxIntSize GetSize() const { return mSize; }
 
@@ -75,7 +76,7 @@ public:
     // server, not the main application.
     virtual gfxASurface::MemoryLocation GetMemoryLocation() const;
 
-#if defined(MOZ_WIDGET_GTK2) && !defined(MOZ_PLATFORM_MAEMO)
+#if defined(GL_PROVIDER_GLX)
     GLXPixmap GetGLXPixmap();
 #endif
 
@@ -102,7 +103,7 @@ protected:
 
     gfxIntSize mSize;
 
-#if defined(MOZ_WIDGET_GTK2) && !defined(MOZ_PLATFORM_MAEMO)
+#if defined(GL_PROVIDER_GLX)
     GLXPixmap mGLXPixmap;
 #endif
 };

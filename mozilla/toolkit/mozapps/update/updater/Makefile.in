@@ -22,8 +22,6 @@ CPPSRCS += \
   $(NULL)
 endif
 
-PROGRAM = updater$(BIN_SUFFIX)
-
 # Don't link the updater against libmozglue. See bug 687139
 MOZ_GLUE_LDFLAGS =
 MOZ_GLUE_PROGRAM_LDFLAGS =
@@ -75,7 +73,10 @@ endif
 ifeq (gonk,$(MOZ_WIDGET_TOOLKIT)) #{
 HAVE_PROGRESSUI = 1
 STL_FLAGS =
-CPPSRCS += progressui_gonk.cpp
+CPPSRCS += progressui_gonk.cpp automounter_gonk.cpp
+OS_LIBS += -lcutils -lsysutils
+# clear out all the --wrap flags and remove dependency on mozglue for Gonk
+WRAP_LDFLAGS :=
 endif #}
 
 ifndef HAVE_PROGRESSUI

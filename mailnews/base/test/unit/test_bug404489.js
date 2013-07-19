@@ -4,8 +4,7 @@
 
 // Tests that custom headers like "Sender" work (bug 404489)
 
-const copyService = Cc["@mozilla.org/messenger/messagecopyservice;1"]
-                      .getService(Ci.nsIMsgCopyService);
+Components.utils.import("resource:///modules/mailServices.js");
 
 const nsMsgSearchScope = Ci.nsMsgSearchScope;
 const nsMsgSearchAttrib = Ci.nsMsgSearchAttrib;
@@ -41,7 +40,7 @@ var Tests =
     op: Contains,
     count: 1},
   /* test header:
-  From: bugzilla-daemon@mozilla.org
+  From: bugzilla-daemon@mozilla.invalid
 
   Here we show that the "From" header does not fire tests for the
   "Sender" arbitrary headers, but does fire the standard test
@@ -73,8 +72,8 @@ function run_test()
   // Get a message into the local filestore. function continue_test() continues the testing after the copy.
   do_test_pending();
   var file = do_get_file(fileName);
-  copyService.CopyFileMessage(file, gLocalInboxFolder, null, false, 0,
-                              "", copyListener, null);
+  MailServices.copy.CopyFileMessage(file, gLocalInboxFolder, null, false, 0,
+                                    "", copyListener, null);
   return true;
 }
 

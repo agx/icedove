@@ -6,81 +6,120 @@ package org.mozilla.gecko;
 
 import android.content.Context;
 import android.content.res.Resources;
+import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.util.AttributeSet;
 import android.view.View;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.LinearLayout.LayoutParams;
 import android.widget.TextView;
 
-public class MenuItemDefault extends LinearLayout
+public class MenuItemDefault extends TextView
                              implements GeckoMenuItem.Layout {
-    private static final String LOGTAG = "GeckoMenuItemDefault";
+    private static final int[] STATE_MORE = new int[] { R.attr.state_more };
+    private static final int[] STATE_CHECKED = new int[] { android.R.attr.state_checkable, android.R.attr.state_checked };
+    private static final int[] STATE_UNCHECKED = new int[] { android.R.attr.state_checkable };
 
-    private ImageView mIcon;
-    private TextView mTitle;
-    private ImageView mCheck;
+    private Drawable mIcon;
+    private Drawable mState;
+    private static Rect sIconBounds;
+
+    private boolean mCheckable = false;
+    private boolean mChecked = false;
+    private boolean mHasSubMenu = false;
 
     public MenuItemDefault(Context context, AttributeSet attrs) {
         super(context, attrs);
 
         Resources res = context.getResources();
-        setLayoutParams(new LayoutParams((int) (res.getDimension(R.dimen.menu_item_row_width)),
-                                         (int) (res.getDimension(R.dimen.menu_item_row_height))));
-        setBackgroundResource(R.drawable.menu_item_bg);
+        int stateIconSize = res.getDimensionPixelSize(R.dimen.menu_item_state_icon);
+        Rect stateIconBounds = new Rect(0, 0, stateIconSize, stateIconSize);
 
-        inflate(context, R.layout.menu_item, this);
-        mIcon = (ImageView) findViewById(R.id.icon);
-        mTitle = (TextView) findViewById(R.id.title);
-        mCheck = (ImageView) findViewById(R.id.check);
+        mState = res.getDrawable(R.drawable.menu_item_state);
+        mState.setBounds(stateIconBounds);
+
+        if (sIconBounds == null) {
+            int iconSize = res.getDimensionPixelSize(R.dimen.menu_item_icon);
+            sIconBounds = new Rect(0, 0, iconSize, iconSize);
+        }
+
+        setCompoundDrawables(mIcon, null, mState, null);
     }
 
     @Override
-    public View getLayout() {
+    public int[] onCreateDrawableState(int extraSpace) {
+        final int[] drawableState = super.onCreateDrawableState(extraSpace + 2);
+
+        if (mHasSubMenu)
+            mergeDrawableStates(drawableState, STATE_MORE);
+        else if (mCheckable && mChecked)
+            mergeDrawableStates(drawableState, STATE_CHECKED);
+        else if (mCheckable && !mChecked)
+            mergeDrawableStates(drawableState, STATE_UNCHECKED);
+
+        return drawableState;
+    }
+
+    @Override
+    public View getView() {
         return this;
     }
 
     @Override
     public void setIcon(Drawable icon) {
-        if (icon != null) {
-            mIcon.setImageDrawable(icon);
-            mIcon.setVisibility(VISIBLE);
-        } else {
-            mIcon.setVisibility(GONE);
-        }
+        mIcon = icon;
+
+        if (mIcon != null)
+            mIcon.setBounds(sIconBounds);
+
+        setCompoundDrawables(mIcon, null, mState, null);
     }
 
     @Override
     public void setIcon(int icon) {
-        if (icon != 0) {
-            mIcon.setImageResource(icon);
-            mIcon.setVisibility(VISIBLE);
-        } else {
-            mIcon.setVisibility(GONE);
-        }
+        Drawable drawable = null;
+
+        if (icon != 0)
+            drawable = getContext().getResources().getDrawable(icon);
+         
+        setIcon(drawable);
     }
 
     @Override
     public void setTitle(CharSequence title) {
-        mTitle.setText(title);
+        setText(title);
     }
 
     @Override
     public void setEnabled(boolean enabled) {
         super.setEnabled(enabled);
-        mTitle.setEnabled(enabled);
-        mCheck.setEnabled(enabled);
-        mIcon.setColorFilter(enabled ? 0 : 0xFF999999);
+
+        if (mIcon != null)
+            mIcon.setAlpha(enabled ? 255 : 99);
+
+        if (mState != null)
+            mState.setAlpha(enabled ? 255 : 99);
     }
 
     @Override
     public void setCheckable(boolean checkable) {
-        mCheck.setVisibility(checkable ? VISIBLE : GONE);
+        if (mCheckable != checkable) {
+            mCheckable = checkable;
+            refreshDrawableState();
+        }
     }
 
     @Override
     public void setChecked(boolean checked) {
-        mCheck.setVisibility(checked ? VISIBLE : GONE);
+        if (mChecked != checked) {
+            mChecked = checked;
+            refreshDrawableState();
+        }
+    }
+
+    @Override
+    public void setSubMenuIndicator(boolean hasSubMenu) {
+        if (mHasSubMenu != hasSubMenu) {
+            mHasSubMenu = hasSubMenu;
+            refreshDrawableState();
+        }
     }
 }

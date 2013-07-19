@@ -4,11 +4,7 @@
  * go back online.
  */
 
-const copyService = Cc["@mozilla.org/messenger/messagecopyservice;1"]
-                      .getService(Ci.nsIMsgCopyService);
-
-const nsIIOService = Cc["@mozilla.org/network/io-service;1"]
-                     .getService(Ci.nsIIOService);
+Components.utils.import("resource:///modules/mailServices.js");
 
 load("../../../resources/logHelper.js");
 load("../../../resources/mailTestUtils.js");
@@ -41,7 +37,7 @@ var tests = [
   },
   function doOfflineOps() {
     gIMAPServer.stop();
-    nsIIOService.offline = true;
+    Services.io.offline = true;
 
     // Flag the two messages, and then copy them to different folders. Since
     // we're offline, these operations are synchronous.
@@ -55,20 +51,20 @@ var tests = [
     headers2.appendElement(msgHdr2, false);
     msgHdr1.folder.markMessagesFlagged(headers1, true);
     msgHdr2.folder.markMessagesFlagged(headers2, true);
-    copyService.CopyMessages(gIMAPInbox, headers1, gSecondFolder, true, null,
-                             null, true);
-    copyService.CopyMessages(gIMAPInbox, headers2, gThirdFolder, true, null,
-                             null, true);
+    MailServices.copy.CopyMessages(gIMAPInbox, headers1, gSecondFolder, true, null,
+                                   null, true);
+    MailServices.copy.CopyMessages(gIMAPInbox, headers2, gThirdFolder, true, null,
+                                   null, true);
     var file = do_get_file("../../../data/bugmail10");
-    copyService.CopyFileMessage(file, gIMAPInbox, null, false, 0,
-                                "", asyncCopyListener, null);
+    MailServices.copy.CopyFileMessage(file, gIMAPInbox, null, false, 0,
+                                      "", asyncCopyListener, null);
     yield false;
   },
   function goOnline() {
     gOfflineManager = Cc["@mozilla.org/messenger/offline-manager;1"]
                            .getService(Ci.nsIMsgOfflineManager);
     gIMAPDaemon.closing = false;
-    nsIIOService.offline = false;
+    Services.io.offline = false;
 
     gIMAPServer.start(IMAP_PORT);
     gOfflineManager.goOnline(false, true, null);
@@ -121,16 +117,16 @@ function setup() {
   gSynthMessage2 = messages[1];
 
   let msgURI =
-    nsIIOService.newURI("data:text/plain;base64," +
-                     btoa(messages[0].toMessageString()),
-                     null, null);
+    Services.io.newURI("data:text/plain;base64," +
+                       btoa(messages[0].toMessageString()),
+                       null, null);
   let imapInbox =  gIMAPDaemon.getMailbox("INBOX")
   let message = new imapMessage(msgURI.spec, imapInbox.uidnext++, ["\\Seen"]);
   imapInbox.addMessage(message);
   msgURI =
-    nsIIOService.newURI("data:text/plain;base64," +
-                     btoa(messages[1].toMessageString()),
-                     null, null);
+    Services.io.newURI("data:text/plain;base64," +
+                       btoa(messages[1].toMessageString()),
+                       null, null);
   message = new imapMessage(msgURI.spec, imapInbox.uidnext++, ["\\Seen"]);
   imapInbox.addMessage(message);
 

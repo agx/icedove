@@ -48,7 +48,7 @@ SVGAnimatedPathSegList::SetBaseValueString(const nsAString& aValue)
   // Only now may we modify mBaseVal!
 
   // We don't need to call DidChange* here - we're only called by
-  // nsSVGElement::ParseAttribute under nsGenericElement::SetAttr,
+  // nsSVGElement::ParseAttribute under Element::SetAttr,
   // which takes care of notifying.
 
   nsresult rv2 = mBaseVal.CopyFrom(newBaseValue);
@@ -150,7 +150,7 @@ SVGAnimatedPathSegList::ToSMILAttr(nsSVGElement *aElement)
 nsresult
 SVGAnimatedPathSegList::
   SMILAnimatedPathSegList::ValueFromString(const nsAString& aStr,
-                               const nsISMILAnimationElement* /*aSrcElement*/,
+                               const dom::SVGAnimationElement* /*aSrcElement*/,
                                nsSMILValue& aValue,
                                bool& aPreventCachingOfSandwich) const
 {

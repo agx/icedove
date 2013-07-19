@@ -21,6 +21,8 @@
 #include "nsWeakPtr.h"
 #include "TextInputHandler.h"
 #include "nsCocoaUtils.h"
+#include "gfxQuartzSurface.h"
+#include "GLContext.h"
 
 #include "nsString.h"
 #include "nsIDragService.h"
@@ -88,32 +90,9 @@ class TextureImage;
 }
 
 namespace layers {
-class LayerManagerOGL;
+class GLManager;
 }
 }
-
-#ifndef NP_NO_CARBON
-enum {
-  // Currently focused ChildView (while this TSM document is active).
-  // Transient (only set while TSMProcessRawKeyEvent() is processing a key
-  // event), and the ChildView will be retained and released around the call
-  // to TSMProcessRawKeyEvent() -- so it can be weak.
-  kFocusedChildViewTSMDocPropertyTag  = 'GKFV', // type ChildView* [WEAK]
-};
-
-// Undocumented HIToolbox function used by WebKit to allow Carbon-based IME
-// to work in a Cocoa-based browser (like Safari or Cocoa-widgets Firefox).
-// (Recent WebKit versions actually use a thin wrapper around this function
-// called WKSendKeyEventToTSM().)
-//
-// Calling TSMProcessRawKeyEvent() from ChildView's keyDown: and keyUp:
-// methods (when the ChildView is a plugin view) bypasses Cocoa's IME
-// infrastructure and (instead) causes Carbon TSM events to be sent on each
-// NSKeyDown event.  We install a Carbon event handler
-// (PluginKeyEventsHandler()) to catch these events and pass them to Gecko
-// (which in turn passes them to the plugin).
-extern "C" long TSMProcessRawKeyEvent(EventRef carbonEvent);
-#endif // NP_NO_CARBON
 
 @interface NSEvent (Undocumented)
 
@@ -121,6 +100,19 @@ extern "C" long TSMProcessRawKeyEvent(EventRef carbonEvent);
 // synthetic events) until the OS actually "sends" the event.  This method
 // has been present in the same form since at least OS X 10.2.8.
 - (EventRef)_eventRef;
+
+@end
+
+@interface NSView (Undocumented)
+
+// Returns an NSRect that is the bounding box for all an NSView's dirty
+// rectangles (ones that need to be redrawn).  The full list of dirty
+// rectangles can be obtained by calling -[NSView _dirtyRegion] and then
+// calling -[NSRegion getRects:count:] on what it returns.  Both these
+// methods have been present in the same form since at least OS X 10.5.
+// Unlike -[NSView getRectsBeingDrawn:count:], these methods can be called
+// outside a call to -[NSView drawRect:].
+- (NSRect)_dirtyRect;
 
 @end
 
@@ -206,6 +198,10 @@ typedef NSInteger NSEventGestureAxis;
 - (NSEventPhase)momentumPhase;
 @end
 
+@protocol EventRedirection
+  - (NSView*)targetView;
+@end
+
 @interface ChildView : NSView<
 #ifdef ACCESSIBILITY
                               mozAccessible,
@@ -277,10 +273,12 @@ typedef NSInteger NSEventGestureAxis;
   float mCumulativeRotation;
 
   BOOL mDidForceRefreshOpenGL;
+  BOOL mWaitingForPaint;
 
-  // Support for fluid swipe tracking.
 #ifdef __LP64__
-  BOOL *mSwipeAnimationCancelled;
+  // Support for fluid swipe tracking.
+  BOOL* mCancelSwipeAnimation;
+  PRUint32 mCurrentSwipeDir;
 #endif
 
   // Whether this uses off-main-thread compositing.
@@ -289,6 +287,8 @@ typedef NSInteger NSEventGestureAxis;
 
 // class initialization
 + (void)initialize;
+
++ (void)registerViewForDraggedTypes:(NSView*)aView;
 
 // these are sent to the first responder when the window key status changes
 - (void)viewsWindowDidBecomeKey;
@@ -301,7 +301,13 @@ typedef NSInteger NSEventGestureAxis;
 
 - (void)handleMouseMoved:(NSEvent*)aEvent;
 
+- (void)updateWindowDraggableStateOnMouseMove:(NSEvent*)theEvent;
+
+- (void)maybeDrawInTitlebar;
+
 - (void)drawRect:(NSRect)aRect inTitlebarContext:(CGContextRef)aContext;
+
+- (void)drawTitlebar:(NSRect)aRect inTitlebarContext:(CGContextRef)aContext;
 
 - (void)sendMouseEnterOrExitEvent:(NSEvent*)aEvent
                             enter:(BOOL)aEnter
@@ -318,6 +324,7 @@ typedef NSInteger NSEventGestureAxis;
 - (BOOL)isInFailingLeftClickThrough;
 
 - (void)setGLContext:(NSOpenGLContext *)aGLContext;
+- (void)preRender:(NSOpenGLContext *)aGLContext;
 
 // Simple gestures support
 //
@@ -332,13 +339,18 @@ typedef NSInteger NSEventGestureAxis;
 - (void)swipeWithEvent:(NSEvent *)anEvent;
 - (void)beginGestureWithEvent:(NSEvent *)anEvent;
 - (void)magnifyWithEvent:(NSEvent *)anEvent;
+- (void)smartMagnifyWithEvent:(NSEvent *)anEvent;
 - (void)rotateWithEvent:(NSEvent *)anEvent;
 - (void)endGestureWithEvent:(NSEvent *)anEvent;
+
+// Helper function for Lion smart magnify events
++ (BOOL)isLionSmartMagnifyEvent:(NSEvent*)anEvent;
 
 // Support for fluid swipe tracking.
 #ifdef __LP64__
 - (void)maybeTrackScrollEventAsSwipe:(NSEvent *)anEvent
-                      scrollOverflow:(double)overflow;
+                     scrollOverflowX:(double)overflowX
+                     scrollOverflowY:(double)overflowY;
 #endif
 
 - (void)setUsingOMTCompositor:(BOOL)aUseOMTC;
@@ -402,14 +414,31 @@ public:
 
   NS_IMETHOD              ConstrainPosition(bool aAllowSlop,
                                             int32_t *aX, int32_t *aY);
-  NS_IMETHOD              Move(int32_t aX, int32_t aY);
-  NS_IMETHOD              Resize(int32_t aWidth,int32_t aHeight, bool aRepaint);
-  NS_IMETHOD              Resize(int32_t aX, int32_t aY,int32_t aWidth,int32_t aHeight, bool aRepaint);
+  NS_IMETHOD              Move(double aX, double aY);
+  NS_IMETHOD              Resize(double aWidth, double aHeight, bool aRepaint);
+  NS_IMETHOD              Resize(double aX, double aY,
+                                 double aWidth, double aHeight, bool aRepaint);
 
   NS_IMETHOD              Enable(bool aState);
   virtual bool            IsEnabled() const;
   NS_IMETHOD              SetFocus(bool aRaise);
   NS_IMETHOD              GetBounds(nsIntRect &aRect);
+  NS_IMETHOD              GetClientBounds(nsIntRect &aRect);
+  NS_IMETHOD              GetScreenBounds(nsIntRect &aRect);
+
+  // Returns the "backing scale factor" of the view's window, which is the
+  // ratio of pixels in the window's backing store to Cocoa points. Prior to
+  // HiDPI support in OS X 10.7, this was always 1.0, but in HiDPI mode it
+  // will be 2.0 (and might potentially other values as screen resolutions
+  // evolve). This gives the relationship between what Gecko calls "device
+  // pixels" and the Cocoa "points" coordinate system.
+  CGFloat                 BackingScaleFactor();
+
+  // Call if the window's backing scale factor changes - i.e., it is moved
+  // between HiDPI and non-HiDPI screens
+  void                    BackingScaleFactorChanged();
+
+  virtual double          GetDefaultScaleInternal();
 
   NS_IMETHOD              Invalidate(const nsIntRect &aRect);
 
@@ -422,13 +451,13 @@ public:
                           { return aStatus == nsEventStatus_eConsumeNoDefault; }
   NS_IMETHOD              DispatchEvent(nsGUIEvent* event, nsEventStatus & aStatus);
 
-  virtual bool            GetShouldAccelerate();
-  virtual bool            UseOffMainThreadCompositing();
+  virtual bool            ComputeShouldAccelerate(bool aDefault);
+  virtual bool            ShouldUseOffMainThreadCompositing();
 
   NS_IMETHOD        SetCursor(nsCursor aCursor);
   NS_IMETHOD        SetCursor(imgIContainer* aCursor, uint32_t aHotspotX, uint32_t aHotspotY);
 
-  NS_IMETHOD        CaptureRollupEvents(nsIRollupListener * aListener, bool aDoCapture, bool aConsumeRollupEvent);
+  NS_IMETHOD        CaptureRollupEvents(nsIRollupListener * aListener, bool aDoCapture);
   NS_IMETHOD        SetTitle(const nsAString& title);
 
   NS_IMETHOD        GetAttention(int32_t aCycleCount);
@@ -438,16 +467,15 @@ public:
   NS_IMETHOD        ActivateNativeMenuItemAt(const nsAString& indexString);
   NS_IMETHOD        ForceUpdateNativeMenuAt(const nsAString& indexString);
 
-  NS_IMETHOD        ResetInputState();
+  NS_IMETHOD        NotifyIME(NotificationToIME aNotification) MOZ_OVERRIDE;
   NS_IMETHOD_(void) SetInputContext(const InputContext& aContext,
                                     const InputContextAction& aAction);
   NS_IMETHOD_(InputContext) GetInputContext();
-  NS_IMETHOD        CancelIMEComposition();
   NS_IMETHOD        GetToggledKeyState(uint32_t aKeyCode,
                                        bool* aLEDState);
-  NS_IMETHOD        OnIMEFocusChange(bool aFocus);
 
   // nsIPluginWidget
+  // outClipRect and outOrigin are in display pixels (not device pixels)
   NS_IMETHOD        GetPluginClipRect(nsIntRect& outClipRect, nsIntPoint& outOrigin, bool& outWidgetVisible);
   NS_IMETHOD        StartDrawPlugin();
   NS_IMETHOD        EndDrawPlugin();
@@ -479,15 +507,19 @@ public:
   
   virtual bool      DispatchWindowEvent(nsGUIEvent& event);
 
-  bool PaintWindow(nsIntRegion aRegion);
+  void WillPaintWindow();
+  bool PaintWindow(nsIntRegion aRegion, bool aIsAlternate);
 
 #ifdef ACCESSIBILITY
-  already_AddRefed<Accessible> GetDocumentAccessible();
+  already_AddRefed<mozilla::a11y::Accessible> GetDocumentAccessible();
 #endif
 
   virtual void CreateCompositor();
   virtual gfxASurface* GetThebesSurface();
-  virtual void DrawWindowOverlay(LayerManager* aManager, nsIntRect aRect);
+  virtual void PrepareWindowEffects() MOZ_OVERRIDE;
+  virtual void CleanupWindowEffects() MOZ_OVERRIDE;
+  virtual void PreRender(LayerManager* aManager) MOZ_OVERRIDE;
+  virtual void DrawWindowOverlay(LayerManager* aManager, nsIntRect aRect) MOZ_OVERRIDE;
 
   virtual void UpdateThemeGeometries(const nsTArray<ThemeGeometry>& aThemeGeometries);
 
@@ -507,16 +539,34 @@ public:
 
   bool IsPluginView() { return (mWindowType == eWindowType_plugin); }
 
-  void PaintQD();
-
   nsCocoaWindow*    GetXULWindowWidget();
 
   NS_IMETHOD        ReparentNativeWidget(nsIWidget* aNewParent);
+
+  CGContextRef      GetCGContextForTitlebarDrawing(NSSize aSize);
+
+  virtual void      WillPaint() MOZ_OVERRIDE;
 
   mozilla::widget::TextInputHandler* GetTextInputHandler()
   {
     return mTextInputHandler;
   }
+
+  // unit conversion convenience functions
+  nsIntPoint        CocoaPointsToDevPixels(const NSPoint& aPt) {
+    return nsCocoaUtils::CocoaPointsToDevPixels(aPt, BackingScaleFactor());
+  }
+  nsIntRect         CocoaPointsToDevPixels(const NSRect& aRect) {
+    return nsCocoaUtils::CocoaPointsToDevPixels(aRect, BackingScaleFactor());
+  }
+  CGFloat           DevPixelsToCocoaPoints(int32_t aPixels) {
+    return nsCocoaUtils::DevPixelsToCocoaPoints(aPixels, BackingScaleFactor());
+  }
+  NSRect            DevPixelsToCocoaPoints(const nsIntRect& aRect) {
+    return nsCocoaUtils::DevPixelsToCocoaPoints(aRect, BackingScaleFactor());
+  }
+
+  void CompositeTitlebar(const gfxSize& aSize, CGContextRef aContext);
 
 protected:
 
@@ -536,6 +586,11 @@ protected:
     return widget.forget();
   }
 
+  void MaybeDrawResizeIndicator(mozilla::layers::GLManager* aManager, nsIntRect aRect);
+  void MaybeDrawRoundedBottomCorners(mozilla::layers::GLManager* aManager, nsIntRect aRect);
+
+  nsIWidget* GetWidgetForListenerEvents();
+
 protected:
 
   NSView<mozView>*      mView;      // my parallel cocoa view (ChildView or NativeScrollbarView), [STRONG]
@@ -551,8 +606,32 @@ protected:
   nsWeakPtr             mAccessible;
 #endif
 
+
   nsRefPtr<gfxASurface> mTempThebesSurface;
+
+  mozilla::Mutex mEffectsLock;
+
+  // May be accessed from any thread, protected
+  // by mEffectsLock.
+  bool mShowsResizeIndicator;
+  nsIntRect mResizeIndicatorRect;
+  bool mHasRoundedBottomCorners;
+  int mDevPixelCornerRadius;
+
+  // Compositor thread only
+  bool                  mFailedResizerImage;
+  bool                  mFailedCornerMaskImage;
   nsRefPtr<mozilla::gl::TextureImage> mResizerImage;
+  nsRefPtr<mozilla::gl::TextureImage> mCornerMaskImage;
+
+  nsRefPtr<gfxQuartzSurface> mTitlebarSurf;
+  gfxSize mTitlebarSize;
+
+  // Cached value of [mView backingScaleFactor], to avoid sending two obj-c
+  // messages (respondsToSelector, backingScaleFactor) every time we need to
+  // use it.
+  // ** We'll need to reinitialize this if the backing resolution changes. **
+  CGFloat               mBackingScaleFactor;
 
   bool                  mVisible;
   bool                  mDrawing;
@@ -560,9 +639,6 @@ protected:
   bool                  mIsDispatchPaint; // Is a paint event being dispatched
 
   NP_CGContext          mPluginCGContext;
-#ifndef NP_NO_QUICKDRAW
-  NP_Port               mPluginQDPort;
-#endif
   nsIPluginInstanceOwner* mPluginInstanceOwner; // [WEAK]
 
   static uint32_t sLastInputEventCount;

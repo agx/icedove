@@ -9,31 +9,16 @@ VPATH            = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE           = dom
 LIBRARY_NAME     = dom_browserelement_s
-XPIDL_MODULE     = dom_browserelement
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
+FAIL_ON_WARNINGS := 1
 
 include $(topsrcdir)/dom/dom-config.mk
 
-TEST_DIRS += mochitest
-
-XPIDLSRCS = \
-  nsIOpenWindowEventDetail.idl \
-  $(NULL)
-
-EXPORTS = \
-  nsOpenWindowEventDetail.h \
-  $(NULL)
-
-EXPORTS_NAMESPACES = mozilla
-EXPORTS_mozilla = \
-  BrowserElementParent.h \
-  $(NULL)
-
 CPPSRCS = \
   nsOpenWindowEventDetail.cpp \
+  nsAsyncScrollEventDetail.cpp \
   BrowserElementParent.cpp \
   $(NULL)
 
@@ -44,6 +29,7 @@ EXTRA_COMPONENTS = \
 
 EXTRA_JS_MODULES = \
   BrowserElementPromptService.jsm \
+  BrowserElementParent.jsm \
   $(NULL)
 
 include $(topsrcdir)/config/config.mk

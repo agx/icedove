@@ -97,7 +97,7 @@ function create_incoming_server(aType, aPort, aUsername, aPassword) {
  * @return The newly-created nsISmtpServer.
  */
 function create_outgoing_server(aPort, aUsername, aPassword) {
-  let server = MailServices.smtp.createSmtpServer();
+  let server = MailServices.smtp.createServer();
   server.hostname = "localhost";
   server.port = aPort;
   server.authMethod = Ci.nsMsgAuthMethod.none;
@@ -611,8 +611,6 @@ function updateFolderAndNotify(aFolder, aCallback, aCallbackThis,
     aCallbackArgs, aSomeoneElseWillTriggerTheUpdate) {
   // register for the folder loaded notification ahead of time... even though
   //  we may not need it...
-  let mailSession = Cc["@mozilla.org/messenger/services/session;1"]
-                      .getService(Ci.nsIMsgMailSession);
   let atomService = Cc["@mozilla.org/atom-service;1"]
                       .getService(Ci.nsIAtomService);
   let kFolderLoadedAtom = atomService.getAtom("FolderLoaded");
@@ -620,13 +618,13 @@ function updateFolderAndNotify(aFolder, aCallback, aCallbackThis,
   let folderListener = {
     OnItemEvent: function (aEventFolder, aEvent) {
       if (aEvent == kFolderLoadedAtom && aFolder.URI == aEventFolder.URI) {
-        mailSession.RemoveFolderListener(this);
+        MailServices.mailSession.RemoveFolderListener(this);
         aCallback.apply(aCallbackThis, aCallbackArgs);
       }
     }
   };
 
-  mailSession.AddFolderListener(folderListener, Ci.nsIFolderListener.event);
+  MailServices.mailSession.AddFolderListener(folderListener, Ci.nsIFolderListener.event);
 
   if (!aSomeoneElseWillTriggerTheUpdate)
     aFolder.updateFolder(null);

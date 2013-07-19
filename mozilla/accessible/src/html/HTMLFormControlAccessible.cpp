@@ -7,7 +7,6 @@
 
 #include "Accessible-inl.h"
 #include "nsAccUtils.h"
-#include "nsARIAMap.h"
 #include "nsEventShell.h"
 #include "nsTextEquivUtils.h"
 #include "Relation.h"
@@ -15,26 +14,23 @@
 #include "States.h"
 
 #include "nsContentList.h"
+#include "mozilla/dom/HTMLInputElement.h"
 #include "nsIAccessibleRelation.h"
-#include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMNSEditableElement.h"
-#include "nsIDOMHTMLFormElement.h"
-#include "nsIDOMHTMLLegendElement.h"
 #include "nsIDOMHTMLTextAreaElement.h"
-#include "nsIDOMNodeList.h"
 #include "nsIEditor.h"
 #include "nsIFormControl.h"
 #include "nsIFrame.h"
 #include "nsINameSpaceManager.h"
 #include "nsISelectionController.h"
 #include "jsapi.h"
-#include "nsIJSContextStack.h"
 #include "nsIServiceManager.h"
 #include "nsITextControlFrame.h"
 
 #include "mozilla/Preferences.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 using namespace mozilla::a11y;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -94,23 +90,16 @@ HTMLCheckboxAccessible::NativeState()
   uint64_t state = LeafAccessible::NativeState();
 
   state |= states::CHECKABLE;
-  bool checkState = false;   // Radio buttons and check boxes can be checked or mixed
+  HTMLInputElement* input = HTMLInputElement::FromContent(mContent);
+  if (!input)
+    return state;
 
-  nsCOMPtr<nsIDOMHTMLInputElement> htmlCheckboxElement =
-    do_QueryInterface(mContent);
+  if (input->Indeterminate())
+    return state | states::MIXED;
+
+  if (input->Checked())
+    return state | states::CHECKED;
            
-  if (htmlCheckboxElement) {
-    htmlCheckboxElement->GetIndeterminate(&checkState);
-
-    if (checkState) {
-      state |= states::MIXED;
-    } else {   // indeterminate can't be checked at the same time.
-      htmlCheckboxElement->GetChecked(&checkState);
-    
-      if (checkState)
-        state |= states::CHECKED;
-    }
-  }
   return state;
 }
 
@@ -141,13 +130,8 @@ HTMLRadioButtonAccessible::NativeState()
 
   state |= states::CHECKABLE;
 
-  bool checked = false;   // Radio buttons and check boxes can be checked
-  nsCOMPtr<nsIDOMHTMLInputElement> htmlRadioElement =
-    do_QueryInterface(mContent);
-  if (htmlRadioElement)
-    htmlRadioElement->GetChecked(&checked);
-
-  if (checked)
+  HTMLInputElement* input = HTMLInputElement::FromContent(mContent);
+  if (input && input->Checked())
     state |= states::CHECKED;
 
   return state;
@@ -174,7 +158,7 @@ HTMLRadioButtonAccessible::GetPositionAndSizeInternal(int32_t* aPosInSet,
     inputElms = NS_GetContentList(formElm, namespaceId, tagName);
   else
     inputElms = NS_GetContentList(mContent->OwnerDoc(), namespaceId, tagName);
-  NS_ENSURE_TRUE(inputElms, );
+  NS_ENSURE_TRUE_VOID(inputElms);
 
   uint32_t inputCount = inputElms->Length(false);
 
@@ -187,8 +171,8 @@ HTMLRadioButtonAccessible::GetPositionAndSizeInternal(int32_t* aPosInSet,
     if (inputElm->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
                               type, eCaseMatters) &&
         inputElm->AttrValueIs(kNameSpaceID_None, nsGkAtoms::name,
-                              name, eCaseMatters)) {
-      count++;
+                              name, eCaseMatters) && mDoc->HasAccessible(inputElm)) {
+        count++;
       if (inputElm == mContent)
         indexOf = count;
     }
@@ -271,37 +255,29 @@ HTMLButtonAccessible::NativeRole()
   return roles::PUSHBUTTON;
 }
 
-nsresult
-HTMLButtonAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+HTMLButtonAccessible::NativeName(nsString& aName)
 {
-  Accessible::GetNameInternal(aName);
-  if (!aName.IsEmpty() || mContent->Tag() != nsGkAtoms::input)
-    return NS_OK;
+  // No need to check @value attribute for buttons since this attribute results
+  // in native anonymous text node and the name is calculated from subtree.
+  // The same magic works for @alt and @value attributes in case of type="image"
+  // element that has no valid @src (note if input@type="image" has an image
+  // then neither @alt nor @value attributes are used to generate a visual label
+  // and thus we need to obtain the accessible name directly from attribute
+  // value). Also the same algorithm works in case of default labels for
+  // type="submit"/"reset"/"image" elements.
 
-  // No name from HTML or ARIA
-  nsAutoString name;
-  if (!mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::value,
-                         name) &&
-      !mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::alt,
-                         name)) {
-    // Use the button's (default) label if nothing else works
-    nsIFrame* frame = GetFrame();
-    if (frame) {
-      nsIFormControlFrame* fcFrame = do_QueryFrame(frame);
-      if (fcFrame)
-        fcFrame->GetFormProperty(nsGkAtoms::defaultLabel, name);
-    }
-  }
+  ENameValueFlag nameFlag = Accessible::NativeName(aName);
+  if (!aName.IsEmpty() || mContent->Tag() != nsGkAtoms::input ||
+      !mContent->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                             nsGkAtoms::image, eCaseMatters))
+    return nameFlag;
 
-  if (name.IsEmpty() &&
-      !mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::src, name)) {
-    mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::data, name);
-  }
+  if (!mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::alt, aName))
+    mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::value, aName);
 
-  name.CompressWhitespace();
-  aName = name;
-
-  return NS_OK;
+  aName.CompressWhitespace();
+  return eNameOK;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -322,6 +298,7 @@ HTMLTextFieldAccessible::
   HTMLTextFieldAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   HyperTextAccessibleWrap(aContent, aDoc)
 {
+  mType = eHTMLTextFieldType;
 }
 
 NS_IMPL_ISUPPORTS_INHERITED2(HTMLTextFieldAccessible,
@@ -340,17 +317,14 @@ HTMLTextFieldAccessible::NativeRole()
   return roles::ENTRY;
 }
 
-nsresult
-HTMLTextFieldAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+HTMLTextFieldAccessible::NativeName(nsString& aName)
 {
-  nsresult rv = Accessible::GetNameInternal(aName);
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  ENameValueFlag nameFlag = Accessible::NativeName(aName);
   if (!aName.IsEmpty())
-    return NS_OK;
+    return nameFlag;
 
-  if (mContent->GetBindingParent())
-  {
+  if (mContent->GetBindingParent()) {
     // XXX: bug 459640
     // There's a binding parent.
     // This means we're part of another control, so use parent accessible for name.
@@ -362,12 +336,11 @@ HTMLTextFieldAccessible::GetNameInternal(nsAString& aName)
   }
 
   if (!aName.IsEmpty())
-    return NS_OK;
+    return eNameOK;
 
   // text inputs and textareas might have useful placeholder text
   mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::placeholder, aName);
-
-  return NS_OK;
+  return eNameOK;
 }
 
 void
@@ -382,11 +355,10 @@ HTMLTextFieldAccessible::Value(nsString& aValue)
     textArea->GetValue(aValue);
     return;
   }
-  
-  nsCOMPtr<nsIDOMHTMLInputElement> inputElement(do_QueryInterface(mContent));
-  if (inputElement) {
-    inputElement->GetValue(aValue);
-  }
+
+  HTMLInputElement* input = HTMLInputElement::FromContent(mContent);
+  if (input)
+    input->GetValue(aValue);
 }
 
 void
@@ -395,25 +367,6 @@ HTMLTextFieldAccessible::ApplyARIAState(uint64_t* aState) const
   HyperTextAccessibleWrap::ApplyARIAState(aState);
 
   aria::MapToState(aria::eARIAAutoComplete, mContent->AsElement(), aState);
-}
-
-uint64_t
-HTMLTextFieldAccessible::State()
-{
-  uint64_t state = HyperTextAccessibleWrap::State();
-  if (state & states::DEFUNCT)
-    return state;
-
-  // Inherit states from input@type="file" suitable for the button. Note,
-  // no special processing for unavailable state since inheritance is supplied
-  // by other code paths.
-  if (mParent && mParent->IsHTMLFileInput()) {
-    uint64_t parentState = mParent->State();
-    state |= parentState & (states::BUSY | states::REQUIRED |
-      states::HASPOPUP | states::INVALID);
-  }
-
-  return state;
 }
 
 uint64_t
@@ -432,8 +385,9 @@ HTMLTextFieldAccessible::NativeState()
   }
 
   // Is it an <input> or a <textarea> ?
-  nsCOMPtr<nsIDOMHTMLInputElement> htmlInput(do_QueryInterface(mContent));
-  state |= htmlInput ? states::SINGLE_LINE : states::MULTI_LINE;
+  HTMLInputElement* input = HTMLInputElement::FromContent(mContent);
+  state |= input && input->IsSingleLineTextControl() ?
+    states::SINGLE_LINE : states::MULTI_LINE;
 
   if (!(state & states::EDITABLE) ||
       (state & (states::PROTECTED | states::MULTI_LINE)))
@@ -463,9 +417,7 @@ HTMLTextFieldAccessible::NativeState()
                       autocomplete);
 
     if (!autocomplete.LowerCaseEqualsLiteral("off")) {
-      nsCOMPtr<nsIDOMHTMLFormElement> form;
-      htmlInput->GetForm(getter_AddRefs(form));
-      nsCOMPtr<nsIContent> formContent(do_QueryInterface(form));
+      nsIContent* formContent = input->GetFormElement();
       if (formContent) {
         formContent->GetAttr(kNameSpaceID_None,
                              nsGkAtoms::autocomplete, autocomplete);
@@ -499,7 +451,7 @@ NS_IMETHODIMP
 HTMLTextFieldAccessible::DoAction(uint8_t aIndex)
 {
   if (aIndex == 0) {
-    nsCOMPtr<nsIDOMHTMLElement> element(do_QueryInterface(mContent));
+    HTMLInputElement* element = HTMLInputElement::FromContent(mContent);
     if (element)
       return element->Focus();
 
@@ -518,18 +470,11 @@ HTMLTextFieldAccessible::GetEditor() const
   // nsGenericHTMLElement::GetEditor has a security check.
   // Make sure we're not restricted by the permissions of
   // whatever script is currently running.
-  nsCOMPtr<nsIJSContextStack> stack =
-    do_GetService("@mozilla.org/js/xpc/ContextStack;1");
-  bool pushed = stack && NS_SUCCEEDED(stack->Push(nullptr));
+  nsCxPusher pusher;
+  pusher.PushNull();
 
   nsCOMPtr<nsIEditor> editor;
   editableElt->GetEditor(getter_AddRefs(editor));
-
-  if (pushed) {
-    JSContext* cx;
-    stack->Pop(&cx);
-    NS_ASSERTION(!cx, "context should be null");
-  }
 
   return editor.forget();
 }
@@ -558,7 +503,7 @@ HTMLFileInputAccessible::
 HTMLFileInputAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   HyperTextAccessibleWrap(aContent, aDoc)
 {
-  mFlags |= eHTMLFileInputAccessible;
+  mType = eHTMLFileInputType;
 }
 
 role
@@ -584,26 +529,104 @@ HTMLFileInputAccessible::HandleAccEvent(AccEvent* aEvent)
        event->GetState() == states::REQUIRED ||
        event->GetState() == states::HASPOPUP ||
        event->GetState() == states::INVALID)) {
-    Accessible* input = GetChildAt(0);
-    if (input && input->Role() == roles::ENTRY) {
-      nsRefPtr<AccStateChangeEvent> childEvent =
-        new AccStateChangeEvent(input, event->GetState(),
-                                event->IsStateEnabled(),
-                                (event->IsFromUserInput() ? eFromUserInput : eNoUserInput));
-      nsEventShell::FireEvent(childEvent);
-    }
-
-    Accessible* button = GetChildAt(1);
+    Accessible* button = GetChildAt(0);
     if (button && button->Role() == roles::PUSHBUTTON) {
       nsRefPtr<AccStateChangeEvent> childEvent =
         new AccStateChangeEvent(button, event->GetState(),
                                 event->IsStateEnabled(),
-                                (event->IsFromUserInput() ? eFromUserInput : eNoUserInput));
+                                (event->IsFromUserInput() ? eFromUserInput
+                                                          : eNoUserInput));
       nsEventShell::FireEvent(childEvent);
     }
   }
+
   return NS_OK;
 }
+
+
+////////////////////////////////////////////////////////////////////////////////
+// HTMLRangeAccessible
+////////////////////////////////////////////////////////////////////////////////
+
+NS_IMPL_ISUPPORTS_INHERITED1(HTMLRangeAccessible, LeafAccessible,
+                             nsIAccessibleValue)
+
+role
+HTMLRangeAccessible::NativeRole()
+{
+  return roles::SLIDER;
+}
+
+bool
+HTMLRangeAccessible::IsWidget() const
+{
+  return true;
+}
+
+void
+HTMLRangeAccessible::Value(nsString& aValue)
+{
+  LeafAccessible::Value(aValue);
+  if (!aValue.IsEmpty())
+    return;
+
+  HTMLInputElement::FromContent(mContent)->GetValue(aValue);
+}
+
+NS_IMETHODIMP
+HTMLRangeAccessible::GetMaximumValue(double* aMaximumValue)
+{
+  nsresult rv = LeafAccessible::GetMaximumValue(aMaximumValue);
+  if (rv != NS_OK_NO_ARIA_VALUE)
+    return rv;
+
+  *aMaximumValue = HTMLInputElement::FromContent(mContent)->GetMaximum().toDouble();
+  return NS_OK;
+}
+
+
+NS_IMETHODIMP
+HTMLRangeAccessible::GetMinimumValue(double* aMinimumValue)
+{
+  nsresult rv = LeafAccessible::GetMinimumValue(aMinimumValue);
+  if (rv != NS_OK_NO_ARIA_VALUE)
+    return rv;
+
+  *aMinimumValue = HTMLInputElement::FromContent(mContent)->GetMinimum().toDouble();
+  return NS_OK;
+}
+
+
+NS_IMETHODIMP
+HTMLRangeAccessible::GetMinimumIncrement(double* aMinimumIncrement)
+{
+  nsresult rv = LeafAccessible::GetMinimumIncrement(aMinimumIncrement);
+  if (rv != NS_OK_NO_ARIA_VALUE)
+    return rv;
+
+  *aMinimumIncrement = HTMLInputElement::FromContent(mContent)->GetStep().toDouble();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HTMLRangeAccessible::GetCurrentValue(double* aCurrentValue)
+{
+  nsresult rv = LeafAccessible::GetCurrentValue(aCurrentValue);
+  if (rv != NS_OK_NO_ARIA_VALUE)
+    return rv;
+
+  *aCurrentValue = HTMLInputElement::FromContent(mContent)->GetValueAsDecimal().toDouble();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HTMLRangeAccessible::SetCurrentValue(double aValue)
+{
+  ErrorResult er;
+  HTMLInputElement::FromContent(mContent)->SetValueAsNumber(aValue, er);
+  return er.ErrorCode();
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // HTMLGroupboxAccessible
@@ -636,22 +659,18 @@ HTMLGroupboxAccessible::GetLegend()
   return nullptr;
 }
 
-nsresult
-HTMLGroupboxAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+HTMLGroupboxAccessible::NativeName(nsString& aName)
 {
-  nsresult rv = Accessible::GetNameInternal(aName);
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  ENameValueFlag nameFlag = Accessible::NativeName(aName);
   if (!aName.IsEmpty())
-    return NS_OK;
+    return nameFlag;
 
-  nsIContent *legendContent = GetLegend();
-  if (legendContent) {
-    return nsTextEquivUtils::
-      AppendTextEquivFromContent(this, legendContent, &aName);
-  }
+  nsIContent* legendContent = GetLegend();
+  if (legendContent)
+    nsTextEquivUtils::AppendTextEquivFromContent(this, legendContent, &aName);
 
-  return NS_OK;
+  return eNameOK;
 }
 
 Relation
@@ -705,16 +724,16 @@ HTMLFigureAccessible::
 {
 }
 
-nsresult
-HTMLFigureAccessible::GetAttributesInternal(nsIPersistentProperties* aAttributes)
+already_AddRefed<nsIPersistentProperties>
+HTMLFigureAccessible::NativeAttributes()
 {
-  nsresult rv = HyperTextAccessibleWrap::GetAttributesInternal(aAttributes);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIPersistentProperties> attributes =
+    HyperTextAccessibleWrap::NativeAttributes();
 
   // Expose figure xml-role.
-  nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::xmlroles,
+  nsAccUtils::SetAccAttr(attributes, nsGkAtoms::xmlroles,
                          NS_LITERAL_STRING("figure"));
-  return NS_OK;
+  return attributes.forget();
 }
 
 role
@@ -723,22 +742,18 @@ HTMLFigureAccessible::NativeRole()
   return roles::FIGURE;
 }
 
-nsresult
-HTMLFigureAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+HTMLFigureAccessible::NativeName(nsString& aName)
 {
-  nsresult rv = HyperTextAccessibleWrap::GetNameInternal(aName);
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  ENameValueFlag nameFlag = HyperTextAccessibleWrap::NativeName(aName);
   if (!aName.IsEmpty())
-    return NS_OK;
+    return nameFlag;
 
   nsIContent* captionContent = Caption();
-  if (captionContent) {
-    return nsTextEquivUtils::
-      AppendTextEquivFromContent(this, captionContent, &aName);
-  }
+  if (captionContent)
+    nsTextEquivUtils::AppendTextEquivFromContent(this, captionContent, &aName);
 
-  return NS_OK;
+  return eNameOK;
 }
 
 Relation

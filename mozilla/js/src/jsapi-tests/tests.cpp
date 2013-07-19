@@ -1,12 +1,11 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "tests.h"
-#include "gc/Root.h"
+#include "js/RootingAPI.h"
 #include "jsobj.h"
 #include <stdio.h>
 
@@ -20,15 +19,12 @@ bool JSAPITest::init()
     cx = createContext();
     if (!cx)
         return false;
-#ifdef JS_GC_ZEAL
-    JS_SetGCZeal(cx, 0, 0);
-#endif
     JS_BeginRequest(cx);
     JS::RootedObject global(cx, createGlobal());
     if (!global)
         return false;
-    call = JS_EnterCrossCompartmentCall(cx, global);
-    return call != NULL;
+    oldCompartment = JS_EnterCompartment(cx, global);
+    return oldCompartment != NULL;
 }
 
 bool JSAPITest::exec(const char *bytes, const char *filename, int lineno)
@@ -75,8 +71,6 @@ int main(int argc, char *argv[])
     int total = 0;
     int failures = 0;
     const char *filter = (argc == 2) ? argv[1] : NULL;
-
-    JS_SetCStringsAreUTF8();
 
     for (JSAPITest *test = JSAPITest::list; test; test = test->next) {
         const char *name = test->name();

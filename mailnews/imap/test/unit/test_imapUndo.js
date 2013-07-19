@@ -12,11 +12,12 @@ load("../../../resources/mailTestUtils.js");
 load("../../../resources/asyncTestUtils.js");
 load("../../../resources/IMAPpump.js");
 
+Components.utils.import("resource:///modules/mailServices.js");
+
 var gRootFolder;
 var gLastKey;
 var gMessages = Cc["@mozilla.org/array;1"].createInstance(Ci.nsIMutableArray);
-var gCopyService = Cc["@mozilla.org/messenger/messagecopyservice;1"]
-                .getService(Ci.nsIMsgCopyService);
+var gCopyService = MailServices.copy;
 var gMsgWindow;
 
 Components.utils.import("resource:///modules/iteratorUtils.jsm");
@@ -39,14 +40,11 @@ const gMsgId5 = "bugmail6.m47LtAEf007542@mrapp51.mozilla.org";
 // Adds some messages directly to a mailbox (eg new mail)
 function addMessagesToServer(messages, mailbox, localFolder)
 {
-  let ioService = Cc["@mozilla.org/network/io-service;1"]
-                    .getService(Ci.nsIIOService);
-
   // For every message we have, we need to convert it to a file:/// URI
   messages.forEach(function (message)
   {
-    message.spec = ioService.newFileURI(message.file)
-                     .QueryInterface(Ci.nsIFileURL).spec;
+    message.spec =
+      Services.io.newFileURI(message.file).QueryInterface(Ci.nsIFileURL).spec;
   });
 
   // Create the imapMessages and store them on the mailbox
@@ -112,12 +110,9 @@ var tests = [
 function setup() {
   setupIMAPPump();
 
-  var mailSession = Cc["@mozilla.org/messenger/services/session;1"]
-    .getService(Ci.nsIMsgMailSession);
-
   var listener1 = new alertListener();
 
-  mailSession.addUserFeedbackListener(listener1);
+  MailServices.mailSession.addUserFeedbackListener(listener1);
 
   Services.prefs.setBoolPref("mail.server.server1.autosync_offline_stores", false);
   Services.prefs.setBoolPref("mail.server.server1.offline_download", false);

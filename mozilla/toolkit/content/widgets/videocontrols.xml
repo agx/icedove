@@ -26,7 +26,6 @@
       </xbl:content>
       <implementation>
 
-      <field name="timeLabel">null</field>
       <constructor>
           <![CDATA[
           this.timeLabel = document.getAnonymousElementByAttribute(this, "class", "timeLabel");
@@ -99,18 +98,14 @@
         </getter>
       </property>
 
-      <!-- Public -->
-      <field name="scrubberNameFormat">"&scrubberScale.nameFormat;"</field>
-      <field name="durationValue">""</field>
-
-      <field name="thumb">null</field>
-      <field name="valueBar">null</field>
-      <field name="isDragging">false</field>
-      <field name="wasPausedBeforeDrag">true</field>
-      <field name="type">null</field>
-      <field name="Utils">null</field>
       <constructor>
           <![CDATA[
+          this.scrubberNameFormat = ]]>"&scrubberScale.nameFormat;"<![CDATA[;
+          this.durationValue = "";
+          this.valueBar = null;
+          this.isDragging = false;
+          this.wasPausedBeforeDrag = true;
+
           this.thumb = document.getAnonymousElementByAttribute(this, "class", "scale-thumb");
           this.type = this.getAttribute("class");
           this.Utils = document.getBindingParent(this.parentNode).Utils;
@@ -312,14 +307,10 @@
 
         <constructor>
             <![CDATA[
-            this.Utils.init(this);
-            ]]>
-        </constructor>
+            this.isTouchControl = false;
+            this.randomID = 0;
 
-        <field name="randomID">0</field>
-
-        <field name="Utils">
-            <![CDATA[ ({
+            this.Utils = {
                 debug : false,
                 video : null,
                 videocontrols : null,
@@ -345,7 +336,8 @@
                                "loadstart", "timeupdate", "progress",
                                "playing", "waiting", "canplay", "canplaythrough",
                                "seeking", "seeked", "emptied", "loadedmetadata",
-                               "error", "suspend", "stalled"],
+                               "error", "suspend", "stalled",
+                               "mozinterruptbegin", "mozinterruptend" ],
 
                 firstFrameShown : false,
                 timeUpdateCount : 0,
@@ -464,7 +456,7 @@
                     this.adjustControlSize();
 
                     // Preserve Statistics when toggling fullscreen mode due to bug 714071.
-                    if (this.video.mozMediaStatisticsShowing)
+                    if (XPCNativeWrapper.unwrap(this.video).mozMediaStatisticsShowing)
                         this.showStatistics(true);
 
                     this._handleCustomEventsBound = this.handleCustomEvents.bind(this);
@@ -640,6 +632,10 @@
                                     this.startFadeOut(this.controlBar);
                                 this.controlsSpacer.removeAttribute("hideCursor");
                             }
+                            break;
+                        case "mozinterruptbegin":
+                        case "mozinterruptend":
+                            // Nothing to do...
                             break;
                         default:
                             this.log("!!! event " + aEvent.type + " not handled!");
@@ -995,7 +991,7 @@
                          !this.isAudioOnly &&
                          !this.video.mozHasAudio;
                 },
-               
+
                 toggleMute : function () {
                     if (this.isVideoWithoutAudioTrack()) {
                         return;
@@ -1031,6 +1027,13 @@
                         this.fullscreenButton.setAttribute("fullscreened", "true");
                     else
                         this.fullscreenButton.removeAttribute("fullscreened");
+                },
+
+                onFullscreenChange: function () {
+                    if (this.isVideoInFullScreen()) {
+                        Utils._hideControlsTimeout = setTimeout(this._hideControlsFn, this.HIDE_CONTROLS_TIMEOUT_MS);
+                    }
+                    this.setFullscreenButtonState();
                 },
 
                 clickToPlayClickHandler : function(e) {
@@ -1098,14 +1101,15 @@
                         this.statsInterval = null;
                     }
 
+                    let unwrappedVideo = XPCNativeWrapper.unwrap(this.video);
                     if (shouldShow) {
-                        this.video.mozMediaStatisticsShowing = true;
+                        unwrappedVideo.mozMediaStatisticsShowing = true;
 
                         this.statsOverlay.hidden = false;
                         this.statsInterval = setInterval(this.updateStats.bind(this), this.STATS_INTERVAL_MS);
                         this.updateStats();
                     } else {
-                        delete this.video.mozMediaStatisticsShowing;
+                        delete unwrappedVideo.mozMediaStatisticsShowing;
                         this.statsOverlay.hidden = true;
                     }
                 },
@@ -1387,8 +1391,9 @@
                     //
                     // (Note: the |controls| attribute is already handled via layout/style/html.css)
                     var shouldShow = (!(this.video.autoplay && this.video.mozAutoplayEnabled) || !this.dynamicControls);
-                    // Hide the overlay if the video time is non-zero or if an error occurred to workaround bug 718107.
-                    this.startFade(this.clickToPlay, shouldShow && !this.isAudioOnly &&
+                    // Hide the overlay if the video time is non-zero or if the video is already playing
+                    // or if an error occurred to workaround bug 718107.
+                    this.startFade(this.clickToPlay, shouldShow && this.video.paused && !this.isAudioOnly &&
                                    this.video.currentTime == 0 && !this.hasError(), true);
                     this.startFade(this.controlBar, shouldShow, true);
 
@@ -1414,8 +1419,11 @@
                     addListener(this.fullscreenButton, "command", this.toggleFullscreen);
                     addListener(this.clickToPlay, "click", this.clickToPlayClickHandler);
                     addListener(this.controlsSpacer, "click", this.clickToPlayClickHandler);
+                    addListener(this.controlsSpacer, "dblclick", this.toggleFullscreen);
 
-                    if (!this.isAudioOnly) {
+                    if (this.isAudioOnly) {
+                      this.controlBar.classList.add("audio");
+                    } else {
                       addListener(this.muteButton, "mouseover", this.onVolumeMouseInOut);
                       addListener(this.muteButton, "mouseout", this.onVolumeMouseInOut);
                       addListener(this.volumeStack, "mouseover", this.onVolumeMouseInOut);
@@ -1423,19 +1431,24 @@
                     }
 
                     addListener(this.videocontrols, "transitionend", this.onTransitionEnd);
-                    addListener(this.video.ownerDocument, "mozfullscreenchange", this.setFullscreenButtonState);
-
-                    // Make the <video> element keyboard accessible.
-                    this.video.setAttribute("tabindex", 0);
-
+                    addListener(this.video.ownerDocument, "mozfullscreenchange", this.onFullscreenChange);
                     addListener(this.video, "keypress", this.keyHandler);
 
                     this.log("--- videocontrols initialized ---");
                 }
-            }) ]]>
-        </field>
-
-        <field readonly="true" name="isTouchControl">false</field>
+            };
+            this.Utils.init(this);
+            ]]>
+        </constructor>
+        <destructor>
+            <![CDATA[
+            // randomID used to be a <field>, which meant that the XBL machinery
+            // undefined the property when the element was unbound. The code in
+            // this file actually depends on this, so now that randomID is an
+            // expando, we need to make sure to explicitly delete it.
+            delete this.randomID;
+            ]]>
+        </destructor>
 
     </implementation>
 
@@ -1476,6 +1489,9 @@
                 </box>
                 <vbox class="controlBar" hidden="true">
                     <hbox class="buttonsBar">
+                        <button class="fullscreenButton"
+                            enterfullscreenlabel="&fullscreenButton.enterfullscreenlabel;"
+                            exitfullscreenlabel="&fullscreenButton.exitfullscreenlabel;"/>
                         <spacer flex="1"/>
                         <button class="playButton"
                                 playlabel="&playButton.playLabel;"
@@ -1499,9 +1515,6 @@
                         <label class="positionLabel" role="presentation"/>
                         <label class="durationLabel" role="presentation"/>
                     </vbox>
-                    <button class="fullscreenButton"
-                            enterfullscreenlabel="&fullscreenButton.enterfullscreenlabel;"
-                            exitfullscreenlabel="&fullscreenButton.exitfullscreenlabel;"/>
                 </vbox>
             </vbox>
         </stack>
@@ -1509,14 +1522,10 @@
 
     <implementation>
 
-        <field readonly="true" name="isTouchControl">true</field>
-
         <constructor>
-          this.TouchUtils.init(this);
-        </constructor>
-
-        <field name="TouchUtils">
-          <![CDATA[ ({
+          <![CDATA[
+          this.isTouchControl = true;
+          this.TouchUtils = {
             videocontrols: null,
             controlsTimer : null,
             controlsTimeout : 5000,
@@ -1611,11 +1620,35 @@
               }, false);
               this.Utils.muteButton.addEventListener("click", function() { self.delayHideControls(self.controlsTimeout); }, false);
 
-              if (!video.autoplay && this.Utils.dynamicControls)
+              // The first time the controls appear we want to just display
+              // a play button that does not fade away. The firstShow property
+              // makes that happen. But because of bug 718107 this init() method
+              // may be called again when we switch in or out of fullscreen
+              // mode. So we only set firstShow if we're not autoplaying and
+              // if we are at the beginning of the video
+              if (!video.autoplay && this.Utils.dynamicControls &&
+                  video.currentTime === 0)
                 this.firstShow = true;
+
+              // If the video is not at the start, then we probably just
+              // transitioned into or out of fullscreen mode, and we don't want
+              // the controls to remain visible. this.controlsTimeout is a full
+              // 5s, which feels too long after the transition.
+              if (video.currentTime !== 0) {
+                this.delayHideControls(this.Utils.HIDE_CONTROLS_TIMEOUT_MS);
+              }
             }
-          }) ]]>
-        </field>
+          };
+          this.TouchUtils.init(this);
+      ]]>
+      </constructor>
+      <destructor>
+          <![CDATA[
+          // XBL destructors don't appear to be inherited properly, so we need
+          // to do this here in addition to the videoControls destructor. :-(
+          delete this.randomID;
+          ]]>
+      </destructor>
 
     </implementation>
 

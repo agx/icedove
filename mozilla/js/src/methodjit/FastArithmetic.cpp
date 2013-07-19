@@ -1,12 +1,15 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "mozilla/MathAlgorithms.h"
+
 #include "jsbool.h"
 #include "jslibmath.h"
 #include "jsnum.h"
+
 #include "methodjit/MethodJIT.h"
 #include "methodjit/Compiler.h"
 #include "methodjit/StubCalls.h"
@@ -16,6 +19,8 @@ using namespace js;
 using namespace js::mjit;
 using namespace js::analyze;
 using namespace JSC;
+
+using mozilla::Abs;
 
 typedef JSC::MacroAssembler::FPRegisterID FPRegisterID;
 
@@ -150,7 +155,7 @@ mjit::Compiler::jsop_binary_slow(JSOp op, VoidStub stub, JSValueType type,
     JS_ASSERT_IF(isStringResult && type != JSVAL_TYPE_UNKNOWN, type == JSVAL_TYPE_STRING);
 
     prepareStubCall(Uses(2));
-    INLINE_STUBCALL(stub, REJOIN_BINARY);
+    INLINE_STUBCALL(stub, REJOIN_FALLTHROUGH);
     frame.popn(2);
     frame.pushSynced(isStringResult ? JSVAL_TYPE_STRING : type);
     return true;
@@ -170,6 +175,7 @@ mjit::Compiler::jsop_binary(JSOp op, VoidStub stub, JSValueType type, types::Typ
              * itself. Note that monitorOverflow will propagate the type as
              * necessary if a *INC operation overflowed.
              */
+            RootedScript script(cx, script_);
             types::TypeScript::MonitorOverflow(cx, script, PC);
             return false;
         }
@@ -197,7 +203,7 @@ mjit::Compiler::jsop_binary(JSOp op, VoidStub stub, JSValueType type, types::Typ
      * from ignored overflows are not live across points where the interpreter
      * can join into JIT code (loop heads and safe points).
      */
-    CrossSSAValue pushv(a->inlineIndex, SSAValue::PushedValue(PC - script->code, 0));
+    CrossSSAValue pushv(a->inlineIndex, SSAValue::PushedValue(PC - script_->code, 0));
     bool cannotOverflow = loop && loop->cannotIntegerOverflow(pushv);
     bool ignoreOverflow = loop && loop->ignoreIntegerOverflow(pushv);
 
@@ -326,7 +332,8 @@ mjit::Compiler::jsop_binary_double(FrameEntry *lhs, FrameEntry *rhs, JSOp op,
         (type == JSVAL_TYPE_INT32 ||
          (type == JSVAL_TYPE_UNKNOWN &&
           !(lhs->isConstant() && lhs->isType(JSVAL_TYPE_INT32) &&
-            abs(lhs->getValue().toInt32()) == 1)))) {
+            Abs(lhs->getValue().toInt32()) == 1))))
+    {
         RegisterID reg = frame.allocReg();
         FPRegisterID fpReg = frame.allocFPReg();
         JumpList isDouble;
@@ -352,7 +359,7 @@ mjit::Compiler::jsop_binary_double(FrameEntry *lhs, FrameEntry *rhs, JSOp op,
     types::TypeSet *resultTypes = pushedTypeSet(0);
     if (resultTypes && !resultTypes->hasType(types::Type::DoubleType())) {
         /*
-         * Call a stub and try harder to convert to int32, failing that trigger
+         * Call a stub and try harder to convert to int32_t, failing that trigger
          * recompilation of this script.
          */
         stubcc.linkExit(masm.jump(), Uses(2));
@@ -366,7 +373,7 @@ mjit::Compiler::jsop_binary_double(FrameEntry *lhs, FrameEntry *rhs, JSOp op,
         done.getJump().linkTo(masm.label(), &masm);
 
     stubcc.leave();
-    OOL_STUBCALL(stub, REJOIN_BINARY);
+    OOL_STUBCALL(stub, REJOIN_FALLTHROUGH);
 
     if (allocateRight)
         frame.freeReg(fpRight);
@@ -464,7 +471,7 @@ mjit::Compiler::jsop_binary_full_simple(FrameEntry *fe, JSOp op, VoidStub stub, 
     /* Slow call - use frame.sync to avoid erroneous jump repatching in stubcc. */
     frame.sync(stubcc.masm, Uses(2));
     stubcc.leave();
-    OOL_STUBCALL(stub, REJOIN_BINARY);
+    OOL_STUBCALL(stub, REJOIN_FALLTHROUGH);
 
     /* Finish up stack operations. */
     frame.popn(2);
@@ -731,7 +738,7 @@ mjit::Compiler::jsop_binary_full(FrameEntry *lhs, FrameEntry *rhs, JSOp op,
     /* Slow call - use frame.sync to avoid erroneous jump repatching in stubcc. */
     frame.sync(stubcc.masm, Uses(2));
     stubcc.leave();
-    OOL_STUBCALL(stub, REJOIN_BINARY);
+    OOL_STUBCALL(stub, REJOIN_FALLTHROUGH);
 
     /* Finish up stack operations. */
     frame.popn(2);
@@ -910,6 +917,7 @@ mjit::Compiler::jsop_mod()
     if (tryBinaryConstantFold(cx, frame, JSOP_MOD, lhs, rhs, &v)) {
         types::TypeSet *pushed = pushedTypeSet(0);
         if (!v.isInt32() && pushed && !pushed->hasType(types::Type::DoubleType())) {
+            RootedScript script(cx, script_);
             types::TypeScript::MonitorOverflow(cx, script, PC);
             return false;
         }

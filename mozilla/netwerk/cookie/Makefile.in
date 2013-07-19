@@ -12,21 +12,7 @@ relativesrcdir = @relativesrcdir@
 include $(DEPTH)/config/autoconf.mk
 
 # export required interfaces, even if --disable-cookies has been given
-MODULE       = necko
-XPIDL_MODULE = necko_cookie
-GRE_MODULE   = 1
-
-SDK_XPIDLSRCS = \
-  nsICookie.idl \
-  nsICookieManager.idl \
-  $(NULL)
-
-XPIDLSRCS = \
-  nsICookie2.idl \
-  nsICookieManager2.idl \
-  nsICookiePermission.idl \
-  nsICookieService.idl \
-  $(NULL)
+FAIL_ON_WARNINGS := 1
 
 ifdef NECKO_COOKIES
 LIBRARY_NAME     = neckocookie_s
@@ -37,23 +23,20 @@ CPPSRCS = \
   nsCookieService.cpp \
   $(NULL)
 
-XPCSHELL_TESTS += test/unit
-
-EXPORTS_NAMESPACES = mozilla/net
-
-EXPORTS_mozilla/net = \
-		CookieServiceParent.h \
-		CookieServiceChild.h  \
-		$(NULL)
+DISABLED_XPCSHELL_TESTS += test/unit
 
 CPPSRCS += \
 		CookieServiceParent.cpp \
 		CookieServiceChild.cpp \
 		$(NULL)
 
+LOCAL_INCLUDES	= \
+		-I$(topsrcdir)/intl/uconv/src \
+		$(NULL)
+
 # FIXME/bug 575918: out-of-process xpcshell is broken on OS X
 ifneq ($(OS_ARCH),Darwin)
-XPCSHELL_TESTS += test/unit_ipc
+DISABLED_XPCSHELL_TESTS += test/unit_ipc
 endif
 endif
 

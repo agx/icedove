@@ -10,17 +10,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= msgimap
 LIBRARY_NAME	= msgimap_s
 ifndef MOZ_INCOMPLETE_EXTERNAL_LINKAGE
 MOZILLA_INTERNAL_API = 1
 LIBXUL_LIBRARY = 1
 endif
 
-
-EXPORTS = \
-		nsImapCore.h \
-		$(NULL)
 
 CPPSRCS		= \
 		nsImapUtils.cpp \
@@ -45,6 +40,10 @@ CPPSRCS		= \
 		$(NULL)
 
 include $(topsrcdir)/config/config.mk
+
+ifeq ($(OS_ARCH),WINNT)
+OS_CXXFLAGS += -DNOMINMAX
+endif
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1

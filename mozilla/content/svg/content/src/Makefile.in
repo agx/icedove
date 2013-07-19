@@ -10,7 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= content
 LIBRARY_NAME	= gkcontentsvg_s
 LIBXUL_LIBRARY	= 1
 FAIL_ON_WARNINGS	= 1
@@ -18,10 +17,8 @@ FAIL_ON_WARNINGS	= 1
 CPPSRCS		= \
 		DOMSVGAnimatedLengthList.cpp \
 		DOMSVGAnimatedNumberList.cpp \
-		DOMSVGAnimatedTransformList.cpp \
 		DOMSVGLength.cpp \
 		DOMSVGLengthList.cpp \
-		DOMSVGMatrix.cpp \
 		DOMSVGNumber.cpp \
 		DOMSVGNumberList.cpp \
 		DOMSVGPathSeg.cpp \
@@ -29,118 +26,141 @@ CPPSRCS		= \
 		DOMSVGPoint.cpp \
 		DOMSVGPointList.cpp \
 		DOMSVGStringList.cpp \
-		DOMSVGTests.cpp \
-		DOMSVGTransform.cpp \
 		DOMSVGTransformList.cpp \
-		nsDOMSVGZoomEvent.cpp \
-		nsDOMSVGEvent.cpp \
-		nsSVGAElement.cpp \
-		nsSVGAltGlyphElement.cpp \
+		nsISVGPoint.cpp \
 		nsSVGAngle.cpp \
+		nsSVGAnimatedTransformList.cpp \
 		nsSVGBoolean.cpp \
-		nsSVGCircleElement.cpp \
 		nsSVGClass.cpp \
-		nsSVGClipPathElement.cpp \
 		nsSVGDataParser.cpp \
-		nsSVGDefsElement.cpp \
-		nsSVGDescElement.cpp \
 		nsSVGElement.cpp \
-		nsSVGElementFactory.cpp \
-		nsSVGEllipseElement.cpp \
 		nsSVGEnum.cpp \
 		nsSVGFeatures.cpp \
-		nsSVGFilterElement.cpp \
 		nsSVGFilters.cpp \
-		nsSVGForeignObjectElement.cpp \
-		nsSVGGElement.cpp \
-		nsSVGGradientElement.cpp \
-		nsSVGGraphicElement.cpp \
-		nsSVGImageElement.cpp \
 		nsSVGInteger.cpp \
 		nsSVGIntegerPair.cpp \
 		nsSVGLength2.cpp \
-		nsSVGLineElement.cpp \
-		nsSVGMarkerElement.cpp \
-		nsSVGMaskElement.cpp \
-		nsSVGMetadataElement.cpp \
 		nsSVGNumber2.cpp \
 		nsSVGNumberPair.cpp \
 		nsSVGPathDataParser.cpp \
-		nsSVGPathElement.cpp \
 		nsSVGPathGeometryElement.cpp \
-		nsSVGPatternElement.cpp \
 		nsSVGPolyElement.cpp \
-		nsSVGPolygonElement.cpp \
-		nsSVGPolylineElement.cpp \
-		nsSVGScriptElement.cpp \
 		nsSVGString.cpp \
-		nsSVGStylableElement.cpp \
-		nsSVGRect.cpp \
-		nsSVGRectElement.cpp \
-		nsSVGSVGElement.cpp \
-		nsSVGStopElement.cpp \
-		nsSVGStyleElement.cpp \
-		nsSVGSwitchElement.cpp \
-		nsSVGSymbolElement.cpp \
-		nsSVGTSpanElement.cpp \
-		nsSVGTextContentElement.cpp \
-		nsSVGTextElement.cpp \
-		nsSVGTextPathElement.cpp \
-		nsSVGTextPositioningElement.cpp \
-		nsSVGTitleElement.cpp \
-		nsSVGUnknownElement.cpp \
-		nsSVGUseElement.cpp \
+		nsSVGTransform.cpp \
 		nsSVGViewBox.cpp \
-		nsSVGViewElement.cpp \
+		SVGAElement.cpp \
+		SVGAltGlyphElement.cpp \
+		SVGAngle.cpp \
+		SVGAnimatedAngle.cpp \
+		SVGAnimatedBoolean.cpp \
+		SVGAnimatedLength.cpp \
 		SVGAnimatedLengthList.cpp \
 		SVGAnimatedNumberList.cpp \
 		SVGAnimatedPathSegList.cpp \
 		SVGAnimatedPointList.cpp \
 		SVGAnimatedPreserveAspectRatio.cpp \
+		SVGAnimatedRect.cpp \
 		SVGAnimatedTransformList.cpp \
+		SVGAnimateElement.cpp \
+		SVGAnimateTransformElement.cpp \
+		SVGAnimateMotionElement.cpp \
+		SVGAnimationElement.cpp \
+		SVGAttrValueWrapper.cpp \
+		SVGClipPathElement.cpp \
+		SVGCircleElement.cpp \
+		SVGContentUtils.cpp \
+		SVGDefsElement.cpp \
+		SVGDescElement.cpp \
+		SVGElementFactory.cpp \
+		SVGEllipseElement.cpp \
+		SVGFEBlendElement.cpp \
+		SVGFEColorMatrixElement.cpp \
+		SVGFEComponentTransferElement.cpp \
+		SVGFECompositeElement.cpp \
+		SVGFEConvolveMatrixElement.cpp \
+		SVGFEDiffuseLightingElement.cpp \
+		SVGFEDisplacementMapElement.cpp \
+		SVGFEDistantLightElement.cpp \
+		SVGFEFloodElement.cpp \
+		SVGFEGaussianBlurElement.cpp \
+		SVGFEImageElement.cpp \
+		SVGFEMergeElement.cpp \
+		SVGFEMergeNodeElement.cpp \
+		SVGFEMorphologyElement.cpp \
+		SVGFEOffsetElement.cpp \
+		SVGFEPointLightElement.cpp \
+		SVGFESpecularLightingElement.cpp \
+		SVGFESpotLightElement.cpp \
+		SVGFETileElement.cpp \
+		SVGFETurbulenceElement.cpp \
+		SVGFilterElement.cpp \
+		SVGForeignObjectElement.cpp \
 		SVGFragmentIdentifier.cpp \
+		SVGGElement.cpp \
+		SVGGradientElement.cpp \
+		SVGGraphicsElement.cpp \
+		SVGImageElement.cpp \
+		SVGIntegerPairSMILType.cpp \
 		SVGLength.cpp \
 		SVGLengthList.cpp \
-		SVGNumberList.cpp \
-		SVGPathData.cpp \
-		SVGPathSegUtils.cpp \
-		SVGPointList.cpp \
-		SVGStringList.cpp \
-		SVGTransform.cpp \
-		SVGTransformList.cpp \
-		SVGTransformListParser.cpp \
-		nsSVGAnimateElement.cpp \
-		nsSVGAnimateTransformElement.cpp \
-		nsSVGAnimateMotionElement.cpp \
-		nsSVGAnimationElement.cpp \
-		nsSVGMpathElement.cpp \
-		nsSVGSetElement.cpp \
-		SVGAttrValueWrapper.cpp \
-		SVGIntegerPairSMILType.cpp \
 		SVGLengthListSMILType.cpp \
+		SVGLineElement.cpp \
+		SVGMarkerElement.cpp \
+		SVGMaskElement.cpp \
+		SVGMatrix.cpp \
+		SVGMetadataElement.cpp \
 		SVGMotionSMILType.cpp \
 		SVGMotionSMILAttr.cpp \
 		SVGMotionSMILAnimationFunction.cpp \
 		SVGMotionSMILPathUtils.cpp \
+		SVGMPathElement.cpp \
+		SVGNumberList.cpp \
 		SVGNumberListSMILType.cpp \
 		SVGNumberPairSMILType.cpp \
 		SVGOrientSMILType.cpp \
+		SVGPathData.cpp \
+		SVGPathElement.cpp \
+		SVGPathSegUtils.cpp \
 		SVGPathSegListSMILType.cpp \
+		SVGPatternElement.cpp \
+		SVGPointList.cpp \
 		SVGPointListSMILType.cpp \
+		SVGPolygonElement.cpp \
+		SVGPolylineElement.cpp \
+		SVGPreserveAspectRatio.cpp \
+		SVGRect.cpp \
+		SVGRectElement.cpp \
+		SVGScriptElement.cpp \
+		SVGSetElement.cpp \
+		SVGStopElement.cpp \
+		SVGStringList.cpp \
+		SVGStyleElement.cpp \
+		SVGSymbolElement.cpp \
+		SVGSVGElement.cpp \
+		SVGSwitchElement.cpp \
+		SVGTests.cpp \
+		SVGTextContentElement.cpp \
+		SVGTextElement.cpp \
+		SVGTextPathElement.cpp \
+		SVGTextPositioningElement.cpp \
+		SVGTitleElement.cpp \
+		SVGTransform.cpp \
+		SVGTransformableElement.cpp \
+		SVGTransformList.cpp \
+		SVGTransformListParser.cpp \
 		SVGTransformListSMILType.cpp \
+		SVGTSpanElement.cpp \
+		SVGUseElement.cpp \
 		SVGViewBoxSMILType.cpp \
+		SVGViewElement.cpp \
+		SVGZoomEvent.cpp \
 		$(NULL)
 
 include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
-
-EXPORTS =  			\
-	nsSVGFeatures.h            \
-	nsSVGRect.h                \
-	SVGAttrValueWrapper.h      \
-	$(NULL)
 
 include $(topsrcdir)/config/rules.mk
 
@@ -150,7 +170,7 @@ INCLUDES += 	\
 		-I$(srcdir)/../../../base/src \
 		-I$(srcdir)/../../../../layout/generic \
 		-I$(srcdir)/../../../../layout/xul/base/src \
-		-I$(srcdir)/../../../../layout/svg/base/src \
+		-I$(srcdir)/../../../../layout/svg \
 		-I$(srcdir)/../../../../layout/style \
 		-I$(srcdir)/../../../events/src \
 		-I$(srcdir)/../../../html/content/src \

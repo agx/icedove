@@ -1,12 +1,13 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined jslogic_h_inl__ && defined JS_METHODJIT
 #define jslogic_h_inl__
+
+#include "methodjit/StubCalls.h"
 
 namespace js {
 namespace mjit {
@@ -29,23 +30,31 @@ ReportAtomNotDefined(JSContext *cx, JSAtom *atom)
         js_ReportIsNotDefined(cx, printable.ptr());
 }
 
-#define NATIVE_GET(cx,obj,pobj,shape,getHow,vp,onerr)                         \
-    JS_BEGIN_MACRO                                                            \
-        if (shape->isDataDescriptor() && shape->hasDefaultGetter()) {         \
-            /* Fast path for Object instance properties. */                   \
-            JS_ASSERT((shape)->slot() != SHAPE_INVALID_SLOT ||                \
-                      !shape->hasDefaultSetter());                            \
-            if (((shape)->slot() != SHAPE_INVALID_SLOT))                      \
-                *(vp) = (pobj)->nativeGetSlot((shape)->slot());               \
-            else                                                              \
-                (vp)->setUndefined();                                         \
-        } else {                                                              \
-            if (!js_NativeGet(cx, obj, pobj, shape, getHow, vp))              \
-                onerr;                                                        \
-        }                                                                     \
-    JS_END_MACRO
+inline bool
+stubs::UncachedCallResult::setFunction(JSContext *cx, CallArgs &args,
+                                       HandleScript callScript, jsbytecode *callPc)
+{
+    if (!IsFunctionObject(args.calleev(), fun.address()))
+        return true;
 
-}}
+    if (fun->isInterpretedLazy() && !fun->getOrCreateScript(cx))
+        return false;
+
+    if (cx->typeInferenceEnabled() && fun->isInterpreted() &&
+        fun->nonLazyScript()->shouldCloneAtCallsite)
+    {
+        original = fun;
+        fun = CloneFunctionAtCallsite(cx, original, callScript, callPc);
+        if (!fun)
+            return false;
+        args.setCallee(ObjectValue(*fun));
+    }
+
+    return true;
+}
+
+} /* namespace mjit */
+} /* namespace js */
 
 #endif /* jslogic_h__ */
 

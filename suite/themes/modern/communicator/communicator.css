@@ -129,3 +129,23 @@ toolbar[iconsize="small"] > #print-button[disabled="true"] {
 .messageImage[value="popup-blocked"] {
   list-style-image: url("chrome://navigator/skin/icons/popup-blocked.png");
 }
+
+.messageImage[value="blocked-badware-page"] {
+  list-style-image: url("chrome://global/skin/icons/blacklist_favicon.png");
+}
+
+.messageImage[value="EnterInsecureMessage"] {
+  list-style-image: url("chrome://communicator/skin/icons/lock-insecure-16.png");
+}
+
+.messageImage[value="EnterSecureMessage"],
+.messageImage[value="BlockedActiveContentMessage"],
+.messageImage[value="BlockedDisplayContentMessage"] {
+  list-style-image: url("chrome://communicator/skin/icons/lock-secure-16.png");
+}
+
+.messageImage[value="MixedContentMessage"],
+.messageImage[value="MixedActiveContentMessage"],
+.messageImage[value="MixedDisplayContentMessage"] {
+  list-style-image: url("chrome://communicator/skin/icons/lock-broken-16.png");
+}

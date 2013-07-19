@@ -10,13 +10,11 @@
 #include "nsISupportsUtils.h"           // for NS_ADDREF
 #include "nsITransaction.h"             // for nsITransaction
 #include "nsString.h"                   // for nsAutoString
-#include "prtypes.h"                    // for uint32_t
 
 EditAggregateTxn::EditAggregateTxn()
   : EditTxn()
 {
 }
-NS_IMPL_CYCLE_COLLECTION_CLASS(EditAggregateTxn)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(EditAggregateTxn, EditTxn)
   tmp->mChildren.Clear();

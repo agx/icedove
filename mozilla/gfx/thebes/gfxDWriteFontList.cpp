@@ -40,13 +40,6 @@ using namespace mozilla;
                                    gfxPlatform::GetLog(eGfxLog_cmapdata), \
                                    PR_LOG_DEBUG)
 
-// font info loader constants
-
-// avoid doing this during startup even on slow machines but try to start
-// it soon enough so that system fallback doesn't happen first
-static const uint32_t kDelayBeforeLoadingFonts = 120 * 1000; // 2 minutes after init
-static const uint32_t kIntervalBetweenLoadingFonts = 2000;   // every 2 seconds until complete
-
 static __inline void
 BuildKeyNameFromFontName(nsAString &aName)
 {
@@ -252,7 +245,7 @@ gfxDWriteFontEntry::IsSymbolFont()
 }
 
 static bool
-UsingArabicScriptSystemLocale()
+UsingArabicOrHebrewScriptSystemLocale()
 {
     LANGID langid = PRIMARYLANGID(::GetSystemDefaultLangID());
     switch (langid) {
@@ -263,6 +256,7 @@ UsingArabicScriptSystemLocale()
     case LANG_SINDHI:
     case LANG_UIGHUR:
     case LANG_URDU:
+    case LANG_HEBREW:
         return true;
     default:
         return false;
@@ -275,11 +269,12 @@ gfxDWriteFontEntry::GetFontTable(uint32_t aTableTag,
 {
     gfxDWriteFontList *pFontList = gfxDWriteFontList::PlatformFontList();
 
-    // don't use GDI table loading for symbol fonts or for
+    // Don't use GDI table loading for symbol fonts or for
     // italic fonts in Arabic-script system locales because of
-    // potential cmap discrepancies, see bug 629386
+    // potential cmap discrepancies, see bug 629386.
+    // Ditto for Hebrew, bug 837498.
     if (mFont && pFontList->UseGDIFontTableAccess() &&
-        !(mItalic && UsingArabicScriptSystemLocale()) &&
+        !(mItalic && UsingArabicOrHebrewScriptSystemLocale()) &&
         !mFont->IsSymbolFont())
     {
         LOGFONTW logfont = { 0 };
@@ -290,10 +285,13 @@ gfxDWriteFontEntry::GetFontTable(uint32_t aTableTag,
         AutoSelectFont font(dc.GetDC(), &logfont);
         if (font.IsValid()) {
             uint32_t tableSize =
-                ::GetFontData(dc.GetDC(), NS_SWAP32(aTableTag), 0, NULL, 0);
+                ::GetFontData(dc.GetDC(),
+                              NativeEndian::swapToBigEndian(aTableTag), 0,
+                              NULL, 0);
             if (tableSize != GDI_ERROR) {
                 if (aBuffer.SetLength(tableSize)) {
-                    ::GetFontData(dc.GetDC(), NS_SWAP32(aTableTag), 0,
+                    ::GetFontData(dc.GetDC(),
+                                  NativeEndian::swapToBigEndian(aTableTag), 0,
                                   aBuffer.Elements(), aBuffer.Length());
                     return NS_OK;
                 }
@@ -317,7 +315,7 @@ gfxDWriteFontEntry::GetFontTable(uint32_t aTableTag,
     uint32_t len;
     void *tableContext = NULL;
     BOOL exists;
-    hr = fontFace->TryGetFontTable(NS_SWAP32(aTableTag),
+    hr = fontFace->TryGetFontTable(NativeEndian::swapToBigEndian(aTableTag),
                                    (const void**)&tableData,
                                    &len,
                                    &tableContext,
@@ -554,15 +552,14 @@ gfxDWriteFontList::gfxDWriteFontList()
 //   I/O strain during cold startup due to dwrite caching bugs.  Default to
 //   Arial to avoid this.
 
-gfxFontEntry *
-gfxDWriteFontList::GetDefaultFont(const gfxFontStyle *aStyle,
-                                  bool &aNeedsBold)
+gfxFontFamily *
+gfxDWriteFontList::GetDefaultFont(const gfxFontStyle *aStyle)
 {
     nsAutoString resolvedName;
 
     // try Arial first
     if (ResolveFontName(NS_LITERAL_STRING("Arial"), resolvedName)) {
-        return FindFontForFamily(resolvedName, aStyle, aNeedsBold);
+        return FindFamily(resolvedName);
     }
 
     // otherwise, use local default
@@ -573,7 +570,7 @@ gfxDWriteFontList::GetDefaultFont(const gfxFontStyle *aStyle,
     if (status) {
         if (ResolveFontName(nsDependentString(ncm.lfMessageFont.lfFaceName),
                             resolvedName)) {
-            return FindFontForFamily(resolvedName, aStyle, aNeedsBold);
+            return FindFamily(resolvedName);
         }
     }
 
@@ -995,7 +992,7 @@ gfxDWriteFontList::DelayedInitFontList()
         Preferences::GetInt("gfx.font_rendering.cleartype_params.force_gdi_classic_max_size",
                             mForceGDIClassicMaxFontSize);
 
-    StartLoader(kDelayBeforeLoadingFonts, kIntervalBetweenLoadingFonts);
+    GetPrefsAndStartLoader();
 
     LOGREGISTRY(L"DelayedInitFontList end");
 
@@ -1214,7 +1211,7 @@ gfxDWriteFontList::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
     SizeOfExcludingThis(aMallocSizeOf, aSizes);
 }
 
-static nsresult GetFamilyName(IDWriteFont *aFont, nsString& aFamilyName)
+static HRESULT GetFamilyName(IDWriteFont *aFont, nsString& aFamilyName)
 {
     HRESULT hr;
     nsRefPtr<IDWriteFontFamily> family;
@@ -1256,7 +1253,7 @@ static nsresult GetFamilyName(IDWriteFont *aFont, nsString& aFamilyName)
     }
 
     if (!name.SetLength(length + 1)) {
-        return NS_ERROR_FAILURE;
+        return E_FAIL;
     }
     hr = familyNames->GetString(index, name.Elements(), length + 1);
     if (FAILED(hr)) {
@@ -1264,7 +1261,7 @@ static nsresult GetFamilyName(IDWriteFont *aFont, nsString& aFamilyName)
     }
 
     aFamilyName.Assign(name.Elements());
-    return NS_OK;
+    return S_OK;
 }
 
 // bug 705594 - the method below doesn't actually do any "drawing", it's only
@@ -1313,7 +1310,8 @@ gfxFontEntry*
 gfxDWriteFontList::GlobalFontFallback(const uint32_t aCh,
                                       int32_t aRunScript,
                                       const gfxFontStyle* aMatchStyle,
-                                      uint32_t& aCmapCount)
+                                      uint32_t& aCmapCount,
+                                      gfxFontFamily** aMatchedFamily)
 {
     bool useCmaps = gfxPlatform::GetPlatform()->UseCmapsDuringSystemFallback();
 
@@ -1321,7 +1319,8 @@ gfxDWriteFontList::GlobalFontFallback(const uint32_t aCh,
         return gfxPlatformFontList::GlobalFontFallback(aCh,
                                                        aRunScript,
                                                        aMatchStyle,
-                                                       aCmapCount);
+                                                       aCmapCount,
+                                                       aMatchedFamily);
     }
 
     HRESULT hr;
@@ -1382,13 +1381,17 @@ gfxDWriteFontList::GlobalFontFallback(const uint32_t aCh,
         return nullptr;
     }
 
-    gfxFontEntry *fontEntry = nullptr;
-    bool needsBold;  // ignored in the system fallback case
-    fontEntry = FindFontForFamily(mFallbackRenderer->FallbackFamilyName(),
-                                  aMatchStyle, needsBold);
-    if (fontEntry && !fontEntry->TestCharacterMap(aCh)) {
-        fontEntry = nullptr;
+    gfxFontFamily *family = FindFamily(mFallbackRenderer->FallbackFamilyName());
+    if (family) {
+        gfxFontEntry *fontEntry;
+        bool needsBold;  // ignored in the system fallback case
+        fontEntry = family->FindFontForStyle(*aMatchStyle, needsBold);
+        if (fontEntry && fontEntry->TestCharacterMap(aCh)) {
+            *aMatchedFamily = family;
+            return fontEntry;
+        }
         Telemetry::Accumulate(Telemetry::BAD_FALLBACK_FONT, true);
     }
-    return fontEntry;
+
+    return nullptr;
 }

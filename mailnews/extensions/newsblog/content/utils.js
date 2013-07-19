@@ -94,9 +94,9 @@ var FeedUtils = {
   getAllRssServerRootFolders: function() {
     let rssRootFolders = [];
     let allServers = MailServices.accounts.allServers;
-    for (let i = 0; i < allServers.Count(); i++)
+    for (let i = 0; i < allServers.length; i++)
     {
-      let server = allServers.QueryElementAt(i, Ci.nsIMsgIncomingServer);
+      let server = allServers.queryElementAt(i, Ci.nsIMsgIncomingServer);
       if (server && server.type == "rss")
         rssRootFolders.push(server.rootFolder);
     }
@@ -642,7 +642,7 @@ var FeedUtils = {
 
     // Leaf folder last.
     pathParts.push(aFolder.name);
-    return decodeURI(pathParts.join("/"));
+    return pathParts.join("/");
   },
 
   // Progress glue code.  Acts as a go between the RSS back end and the mail

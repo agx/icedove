@@ -1,5 +1,5 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,8 +14,6 @@
 #include "jsprvtd.h"
 #include "jspubtd.h"
 #include "jsutil.h"
-
-JS_BEGIN_EXTERN_C
 
 /*
  * JS operation bytecodes.
@@ -46,7 +44,7 @@ typedef enum JSOp {
 #define JOF_ATOM          2       /* unsigned 16-bit constant index */
 #define JOF_UINT16        3       /* unsigned 16-bit immediate operand */
 #define JOF_TABLESWITCH   4       /* table switch */
-#define JOF_LOOKUPSWITCH  5       /* lookup switch */
+/* 5 is unused */
 #define JOF_QARG          6       /* quickened get/set function argument ops */
 #define JOF_LOCAL         7       /* var or block-local variable */
 #define JOF_DOUBLE        8       /* uint32_t index for double value */
@@ -66,23 +64,21 @@ typedef enum JSOp {
 #define JOF_NAME          (1U<<5) /* name operation */
 #define JOF_PROP          (2U<<5) /* obj.prop operation */
 #define JOF_ELEM          (3U<<5) /* obj[index] operation */
-#define JOF_XMLNAME       (4U<<5) /* XML name: *, a::b, @a, @a::b, etc. */
 #define JOF_MODEMASK      (7U<<5) /* mask for above addressing modes */
 #define JOF_SET           (1U<<8) /* set (i.e., assignment) operation */
-#define JOF_DEL           (1U<<9) /* delete operation */
+/* (1U<<9) is unused*/
 #define JOF_DEC          (1U<<10) /* decrement (--, not ++) opcode */
 #define JOF_INC          (2U<<10) /* increment (++, not --) opcode */
 #define JOF_INCDEC       (3U<<10) /* increment or decrement opcode */
 #define JOF_POST         (1U<<12) /* postorder increment or decrement */
-#define JOF_ASSIGNING     JOF_SET /* hint for Class.resolve, used for ops
-                                     that do simplex assignment */
-#define JOF_DETECTING    (1U<<14) /* object detection for JSNewResolveOp */
-#define JOF_BACKPATCH    (1U<<15) /* backpatch placeholder during codegen */
+/* (1U<<13) is unused*/
+#define JOF_DETECTING    (1U<<14) /* object detection for warning-quelling */
+/* (1U<<15) is unused*/
 #define JOF_LEFTASSOC    (1U<<16) /* left-associative operator */
 /* (1U<<17) is unused */
 /* (1U<<18) is unused */
-#define JOF_PARENHEAD    (1U<<20) /* opcode consumes value of expression in
-                                     parenthesized statement head */
+/* (1U<<19) is unused*/
+/* (1U<<20) is unused*/
 #define JOF_INVOKE       (1U<<21) /* JSOP_CALL, JSOP_NEW, JSOP_EVAL */
 #define JOF_TMPSLOT      (1U<<22) /* interpreter uses extra temporary slot
                                      to root intermediate objects besides
@@ -108,9 +104,6 @@ typedef enum JSOp {
 /* Shorthands for mode from format and mode from opcode. */
 #define JOF_MODE(fmt)   ((fmt) & JOF_MODEMASK)
 #define JOF_OPMODE(op)  JOF_MODE(js_CodeSpec[op].format)
-
-#define JOF_TYPE_IS_EXTENDED_JUMP(t) \
-    ((unsigned)((t) - JOF_JUMP) <= (unsigned)(JOF_LOOKUPSWITCH - JOF_JUMP))
 
 /*
  * Immediate operand getters, setters, and bounds.
@@ -244,33 +237,6 @@ extern const char       js_EscapeMap[];
 extern JSString *
 js_QuoteString(JSContext *cx, JSString *str, jschar quote);
 
-/*
- * JSPrinter operations, for printf style message formatting.  The return
- * value from js_GetPrinterOutput() is the printer's cumulative output, in
- * a GC'ed string.
- *
- * strict is true if the context in which the output will appear has
- * already been marked as strict, thus indicating that nested
- * functions need not be re-marked with a strict directive.  It should
- * be false in the outermost printer.
- */
-
-extern JSPrinter *
-js_NewPrinter(JSContext *cx, const char *name, JSFunction *fun,
-              unsigned indent, JSBool pretty, JSBool grouped, JSBool strict);
-
-extern void
-js_DestroyPrinter(JSPrinter *jp);
-
-extern JSString *
-js_GetPrinterOutput(JSPrinter *jp);
-
-extern int
-js_printf(JSPrinter *jp, const char *format, ...);
-
-extern JSBool
-js_puts(JSPrinter *jp, const char *s);
-
 #define GET_ATOM_FROM_BYTECODE(script, pc, pcoff, atom)                       \
     JS_BEGIN_MACRO                                                            \
         JS_ASSERT(js_CodeSpec[*(pc)].format & JOF_ATOM);                      \
@@ -296,32 +262,6 @@ StackDefs(JSScript *script, jsbytecode *pc);
 }  /* namespace js */
 
 /*
- * Decompilers, for script, function, and expression pretty-printing.
- */
-extern JSBool
-js_DecompileScript(JSPrinter *jp, JSScript *script);
-
-extern JSBool
-js_DecompileFunctionBody(JSPrinter *jp);
-
-extern JSBool
-js_DecompileFunction(JSPrinter *jp);
-
-/*
- * Some C++ compilers treat the language linkage (extern "C" vs.
- * extern "C++") as part of function (and thus pointer-to-function)
- * types. The use of this typedef (defined in "C") ensures that
- * js_DecompileToString's definition (in "C++") gets matched up with
- * this declaration.
- */
-typedef JSBool (* JSDecompilerPtr)(JSPrinter *);
-
-extern JSString *
-js_DecompileToString(JSContext *cx, const char *name, JSFunction *fun,
-                     unsigned indent, JSBool pretty, JSBool grouped, JSBool strict,
-                     JSDecompilerPtr decompiler);
-
-/*
  * Given bytecode address pc in script's main program code, return the operand
  * stack depth just before (JSOp) *pc executes.
  */
@@ -331,8 +271,6 @@ js_ReconstructStackDepth(JSContext *cx, JSScript *script, jsbytecode *pc);
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif
-
-JS_END_EXTERN_C
 
 #define JSDVG_IGNORE_STACK      0
 #define JSDVG_SEARCH_STACK      1
@@ -360,11 +298,18 @@ namespace js {
  * errors containing decompiled values that are useful for the user, instead of
  * values used internally by the self-hosted code.
  *
- * The caller must call JS_free on the result after a succsesful call.
+ * The caller must call JS_free on the result after a successful call.
  */
 char *
 DecompileValueGenerator(JSContext *cx, int spindex, HandleValue v,
                         HandleString fallback, int skipStackHits = 0);
+
+/*
+ * Decompile the formal argument at formalIndex in the nearest non-builtin
+ * stack frame, falling back with converting v to source.
+ */
+char *
+DecompileArgument(JSContext *cx, int formalIndex, HandleValue v);
 
 /*
  * Sprintf, but with unlimited and automatically allocated buffering.
@@ -395,6 +340,7 @@ class Sprinter
     char                    *base;          /* malloc'd buffer address */
     size_t                  size;           /* size of buffer allocated at base */
     ptrdiff_t               offset;         /* offset of next free char in buffer */
+    bool                    reportedOOM;    /* this sprinter has reported OOM in string ops */
 
     bool realloc_(size_t newSize);
 
@@ -443,6 +389,16 @@ class Sprinter
     /* Get the offset */
     ptrdiff_t getOffset() const;
     ptrdiff_t getOffsetOf(const char *string) const;
+
+    /*
+     * Report that a string operation failed to get the memory it requested. The
+     * first call to this function calls JS_ReportOutOfMemory, and sets this
+     * Sprinter's outOfMemory flag; subsequent calls do nothing.
+     */
+    void reportOutOfMemory();
+
+    /* Return true if this Sprinter ran out of memory. */
+    bool hadOutOfMemory() const;
 };
 
 extern ptrdiff_t
@@ -502,6 +458,25 @@ IsGlobalOp(JSOp op)
     return js_CodeSpec[op].format & JOF_GNAME;
 }
 
+inline bool
+IsEqualityOp(JSOp op)
+{
+    return op == JSOP_EQ || op == JSOP_NE || op == JSOP_STRICTEQ || op == JSOP_STRICTNE;
+}
+
+inline bool
+IsGetterPC(jsbytecode *pc)
+{
+    JSOp op = JSOp(*pc);
+    return op == JSOP_LENGTH  || op == JSOP_GETPROP || op == JSOP_CALLPROP;
+}
+
+inline bool
+IsSetterPC(jsbytecode *pc)
+{
+    JSOp op = JSOp(*pc);
+    return op == JSOP_SETPROP || op == JSOP_SETNAME || op == JSOP_SETGNAME;
+}
 /*
  * Counts accumulated for a single opcode in a script. The counts tracked vary
  * between opcodes, and this structure ensures that counts are accessed in a
@@ -509,7 +484,7 @@ IsGlobalOp(JSOp op)
  */
 class PCCounts
 {
-    friend struct ::JSScript;
+    friend class ::JSScript;
     double *counts;
 #ifdef DEBUG
     size_t capacity;
@@ -636,6 +611,12 @@ class PCCounts
 /* Necessary for alignment with the script. */
 JS_STATIC_ASSERT(sizeof(PCCounts) % sizeof(Value) == 0);
 
+static inline jsbytecode *
+GetNextPc(jsbytecode *pc)
+{
+    return pc + js_CodeSpec[JSOp(*pc)].length;
+}
+
 } /* namespace js */
 
 #if defined(DEBUG)
@@ -651,6 +632,15 @@ js_Disassemble1(JSContext *cx, JS::Handle<JSScript*> script, jsbytecode *pc, uns
 
 void
 js_DumpPCCounts(JSContext *cx, JS::Handle<JSScript*> script, js::Sprinter *sp);
+
+#ifdef JS_ION
+namespace js {
+namespace ion { struct IonScriptCounts; }
+void
+DumpIonScriptCounts(js::Sprinter *sp, ion::IonScriptCounts *ionCounts);
+}
+#endif
+
 #endif
 
 #endif /* jsopcode_h___ */

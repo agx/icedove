@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,13 +13,19 @@ namespace js {
 namespace frontend {
 
 JSScript *
-CompileScript(JSContext *cx, HandleObject scopeChain, StackFrame *callerFrame,
+CompileScript(JSContext *cx, HandleObject scopeChain, HandleScript evalCaller,
               const CompileOptions &options, const jschar *chars, size_t length,
-              JSString *source_ = NULL, unsigned staticLevel = 0);
+              JSString *source_ = NULL, unsigned staticLevel = 0,
+              SourceCompressionToken *extraSct = NULL);
 
 bool
-CompileFunctionBody(JSContext *cx, HandleFunction fun, CompileOptions options,
-                    const AutoNameVector &formals, const jschar *chars, size_t length);
+ParseScript(JSContext *cx, HandleObject scopeChain,
+            const CompileOptions &options, StableCharPtr chars, size_t length);
+
+bool
+CompileFunctionBody(JSContext *cx, MutableHandleFunction fun, CompileOptions options,
+                    const AutoNameVector &formals, const jschar *chars, size_t length,
+                    bool isAsmJSRecompile = false);
 
 } /* namespace frontend */
 } /* namespace js */

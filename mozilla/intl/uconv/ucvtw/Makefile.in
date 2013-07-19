@@ -10,7 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= ucvtw
 LIBRARY_NAME	= ucvtw_s
 FORCE_STATIC_LIB=1
 LIBXUL_LIBRARY = 1
@@ -23,8 +22,6 @@ CPPSRCS		= \
 		nsUnicodeToBIG5HKSCS.cpp \
 		nsUnicodeToHKSCS.cpp \
 		$(NULL)
-
-EXPORTS		= nsUCvTWCID.h
 
 LOCAL_INCLUDES = -I$(srcdir)/../util
 

@@ -20,6 +20,7 @@
 #include "nsClassHashtable.h"
 #include "nsHashKeys.h"
 #include "nsInterfaceHashtable.h"
+#include "nsRefPtrHashtable.h"
 
 #include "mozilla/dom/indexedDB/IDBDatabase.h"
 #include "mozilla/dom/indexedDB/IDBWrapperCache.h"
@@ -101,6 +102,7 @@ public:
 
   void OnNewRequest();
   void OnRequestFinished();
+  void OnRequestDisconnected();
 
   void RemoveObjectStore(const nsAString& aName);
 
@@ -188,6 +190,12 @@ public:
     return mActorChild;
   }
 
+  IndexedDBTransactionParent*
+  GetActorParent() const
+  {
+    return mActorParent;
+  }
+
   nsresult
   ObjectStoreInternal(const nsAString& aName,
                       IDBObjectStore** _retval);
@@ -203,6 +211,14 @@ public:
   {
     return mAbortCode;
   }
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  uint64_t
+  GetSerialNumber() const
+  {
+    return mSerialNumber;
+  }
+#endif
 
 private:
   nsresult
@@ -229,11 +245,6 @@ private:
   Mode mMode;
   uint32_t mPendingRequests;
 
-  // Only touched on the main thread.
-  NS_DECL_EVENT_HANDLER(error)
-  NS_DECL_EVENT_HANDLER(complete)
-  NS_DECL_EVENT_HANDLER(abort)
-
   nsInterfaceHashtable<nsCStringHashKey, mozIStorageStatement>
     mCachedStatements;
 
@@ -255,6 +266,9 @@ private:
   IndexedDBTransactionParent* mActorParent;
 
   nsresult mAbortCode;
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  uint64_t mSerialNumber;
+#endif
   bool mCreating;
 
 #ifdef DEBUG

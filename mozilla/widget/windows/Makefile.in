@@ -10,7 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= widget
 LIBRARY_NAME	= widget_windows
 EXPORT_LIBRARY	= 1
 IS_COMPONENT	= 1
@@ -48,6 +47,7 @@ CPPSRCS = \
   nsWidgetFactory.cpp \
   WinUtils.cpp \
   WinMouseScrollHandler.cpp \
+  WinIMEHandler.cpp \
   $(NULL)
 
 ifdef MOZ_CRASHREPORTER
@@ -92,10 +92,6 @@ SHARED_LIBRARY_LIBS = \
   ../xpwidgets/$(LIB_PREFIX)xpwidgets_s.$(LIB_SUFFIX) \
   $(NULL)
 
-EXPORTS		= nsdefs.h WindowHook.h
-EXPORTS_NAMESPACES = mozilla/widget
-EXPORTS_mozilla/widget = AudioSession.h
-
 LOCAL_INCLUDES	= \
 		-I. \
 		-I$(srcdir)/../xpwidgets \
@@ -105,16 +101,13 @@ LOCAL_INCLUDES	= \
 		-I$(topsrcdir)/layout/xul/base/src \
 		-I$(topsrcdir)/toolkit/xre \
 		-I$(topsrcdir)/xpcom/base \
+		-I$(topsrcdir)/content/events/src \
 		$(NULL)
 
 FORCE_STATIC_LIB = 1
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
-
-ifdef ENABLE_TESTS
-TOOL_DIRS  += tests
-endif
 
 include $(topsrcdir)/config/rules.mk
 

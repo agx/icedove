@@ -6,15 +6,15 @@ DEPTH            = @DEPTH@
 topsrcdir        = @top_srcdir@
 srcdir           = @srcdir@
 VPATH            = @srcdir@
-FAIL_ON_WARNINGS := 1
 
-MODULE           = dom
 LIBRARY_NAME     = dombindings_s
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
 EXPORT_LIBRARY   = 1
+FAIL_ON_WARNINGS := 1
 
 include $(topsrcdir)/config/config.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
 # Need this to find all our DOM source files.
 include $(topsrcdir)/dom/dom-config.mk
@@ -38,6 +38,7 @@ globalgen_targets := \
   RegisterBindings.h \
   RegisterBindings.cpp \
   UnionTypes.h \
+  UnionTypes.cpp \
   UnionConversions.h \
   $(NULL)
 
@@ -45,36 +46,59 @@ CPPSRCS = \
   $(linked_binding_cpp_files) \
   $(filter %.cpp, $(globalgen_targets)) \
   BindingUtils.cpp \
+  CallbackInterface.cpp \
+  CallbackObject.cpp \
   DOMJSProxyHandler.cpp \
-  $(NULL)
-
-EXPORTS_NAMESPACES = $(binding_include_path) mozilla
-
-EXPORTS_mozilla = \
-  ErrorResult.h \
-  $(NULL)
-
-EXPORTS_$(binding_include_path) = \
-  BindingUtils.h \
-  DOMJSClass.h \
-  DOMJSProxyHandler.h \
-  Errors.msg \
-  Nullable.h \
-  PrimitiveConversions.h \
-  PrototypeList.h \
-  RegisterBindings.h \
-  TypedArray.h \
-  UnionConversions.h \
-  UnionTypes.h \
-  $(exported_binding_headers) \
   $(NULL)
 
 LOCAL_INCLUDES += -I$(topsrcdir)/js/xpconnect/src \
   -I$(topsrcdir)/js/xpconnect/wrappers \
   -I$(topsrcdir)/content/canvas/src \
-  -I$(topsrcdir)/content/html/content/src
+  -I$(topsrcdir)/content/html/content/src \
+  -I$(topsrcdir)/media/webrtc/signaling/src/peerconnection \
+  -I$(topsrcdir)/dom/base \
+  -I$(topsrcdir)/dom/battery \
+  -I$(topsrcdir)/dom/indexedDB \
+  -I$(topsrcdir)/content/xslt/src/base \
+  -I$(topsrcdir)/content/xslt/src/xpath \
+  -I$(topsrcdir)/content/xml/content/src \
+  -I$(topsrcdir)/content/xul/content/src \
+  -I$(topsrcdir)/content/xul/document/src \
+  -I$(topsrcdir)/content/media/webspeech/recognition \
+  $(NULL)
+
+ifdef MOZ_AUDIO_CHANNEL_MANAGER
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/dom/system/gonk \
+  $(NULL)
+endif
+
+ifdef MOZ_B2G_RIL
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/dom/icc/src \
+  $(NULL)
+endif
+
+EXTRA_MDDEPEND_FILES := $(addsuffix .pp,$(binding_cpp_files) $(binding_header_files))
+
+EXPORTS_GENERATED_FILES := $(exported_binding_headers)
+EXPORTS_GENERATED_DEST := $(DIST)/include/$(binding_include_path)
+EXPORTS_GENERATED_TARGET := webidl-export
+INSTALL_TARGETS += EXPORTS_GENERATED
+
+ifdef GNU_CC
+CXXFLAGS += -Wno-uninitialized
+endif
 
 include $(topsrcdir)/config/rules.mk
+
+# edmorley is sick of clobbering everytime someone adds an interface
+$(CPPOBJS): PrototypeList.h
+
+# We need to create a separate target so we can ensure that the pickle is
+# done before generating headers.
+export:: ParserResults.pkl
+	$(MAKE) webidl-export
 
 # If you change bindinggen_dependencies here, change it in
 # dom/bindings/test/Makefile.in too.
@@ -84,7 +108,6 @@ bindinggen_dependencies := \
   Configuration.py \
   Codegen.py \
   parser/WebIDL.py \
-  ParserResults.pkl \
   $(GLOBAL_DEPS) \
   $(NULL)
 
@@ -94,7 +117,7 @@ CSS2Properties.webidl: $(topsrcdir)/layout/style/nsCSSPropList.h \
                        $(webidl_base)/CSS2PropertiesProps.h \
                        $(srcdir)/GenerateCSS2PropertiesWebIDL.py \
                        $(GLOBAL_DEPS)
-	$(CPP) -I$(topsrcdir)/layout/style $(webidl_base)/CSS2PropertiesProps.h | \
+	$(CPP) $(DEFINES) $(ACDEFINES) -I$(topsrcdir)/layout/style $(webidl_base)/CSS2PropertiesProps.h | \
 	  PYTHONDONTWRITEBYTECODE=1 $(PYTHON) \
 	  $(srcdir)/GenerateCSS2PropertiesWebIDL.py $(webidl_base)/CSS2Properties.webidl.in > CSS2Properties.webidl
 
@@ -106,23 +129,37 @@ $(test_webidl_files): %: $(srcdir)/test/%
 
 $(binding_header_files): %Binding.h: $(bindinggen_dependencies) \
                                      %.webidl \
+                                     $(call mkdir_deps,$(MDDEPDIR)) \
                                      $(NULL)
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $(topsrcdir)/config/pythonpath.py \
 	  $(PLY_INCLUDE) -I$(srcdir)/parser \
 	  $(srcdir)/BindingGen.py header \
-	  $(srcdir)/Bindings.conf $*Binding \
+	  $(srcdir)/Bindings.conf \
+	  $*Binding \
+	  $(CURDIR)/ \
 	  $*.webidl
 
 $(binding_cpp_files): %Binding.cpp: $(bindinggen_dependencies) \
-                                    %.webidl \
+                                    $(CURDIR)/%.webidl \
+                                    $(call mkdir_deps,$(MDDEPDIR)) \
                                     $(NULL)
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $(topsrcdir)/config/pythonpath.py \
 	  $(PLY_INCLUDE) -I$(srcdir)/parser \
 	  $(srcdir)/BindingGen.py cpp \
-	  $(srcdir)/Bindings.conf $*Binding \
+	  $(srcdir)/Bindings.conf \
+	  $*Binding \
+	  $(CURDIR) \
 	  $*.webidl
 
 $(globalgen_targets): ParserResults.pkl
+
+%-example: $(bindinggen_dependencies) \
+           ParserResults.pkl \
+           $(NULL)
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $(topsrcdir)/config/pythonpath.py \
+	  $(PLY_INCLUDE) -I$(srcdir)/parser \
+	  $(srcdir)/ExampleGen.py \
+	  $(srcdir)/Bindings.conf $*
 
 CACHE_DIR = _cache
 
@@ -132,6 +169,8 @@ globalgen_dependencies := \
   Configuration.py \
   Codegen.py \
   parser/WebIDL.py \
+  ../webidl/WebIDL.mk \
+  $(all_webidl_files) \
   $(CACHE_DIR)/.done \
   $(GLOBAL_DEPS) \
   $(NULL)
@@ -140,8 +179,7 @@ $(CACHE_DIR)/.done:
 	$(MKDIR) -p $(CACHE_DIR)
 	@$(TOUCH) $@
 
-ParserResults.pkl: $(globalgen_dependencies) \
-                   $(all_webidl_files)
+ParserResults.pkl: $(globalgen_dependencies)
 	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) $(topsrcdir)/config/pythonpath.py \
     $(PLY_INCLUDE) -I$(srcdir)/parser \
     $(srcdir)/GlobalGen.py $(srcdir)/Bindings.conf . \
@@ -149,17 +187,24 @@ ParserResults.pkl: $(globalgen_dependencies) \
     $(all_webidl_files)
 
 GARBAGE += \
-  $(binding_header_files) \
-  $(binding_cpp_files) \
-  $(all_webidl_files) \
-  $(globalgen_targets) \
-  ParserResults.pkl \
   webidlyacc.py \
   parser.out \
+  $(wildcard *-example.h) \
+  $(wildcard *-example.cpp) \
   $(NULL)
 
 # Make sure all binding header files are created during the export stage, so we
 # don't have issues with .cpp files being compiled before we've generated the
 # headers they depend on.  This is really only needed for the test files, since
 # the non-test headers are all exported above anyway.
-export:: $(binding_header_files)
+webidl-export:: $(binding_header_files)
+
+distclean::
+	-$(RM) \
+        $(binding_header_files) \
+        $(binding_cpp_files) \
+        $(all_webidl_files) \
+        $(globalgen_targets) \
+        ParserResults.pkl
+
+.PHONY: webidl-export

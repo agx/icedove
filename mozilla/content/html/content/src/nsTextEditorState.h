@@ -33,7 +33,7 @@ class nsITextControlElement;
  * and also XUL controls such as <textbox> which use one of these elements behind
  * the scenes.
  *
- * This class is held as a member of nsHTMLInputElement and nsHTMLTextAreaElement.
+ * This class is held as a member of HTMLInputElement and nsHTMLTextAreaElement.
  * The public functions in this class include the public APIs which content/ uses.
  * Layout code uses the nsITextControlElement interface to invoke functions on this
  * class.
@@ -174,7 +174,10 @@ public:
   }
 
   // placeholder methods
-  void SetPlaceholderClass(bool aVisible, bool aNotify);
+  void UpdatePlaceholderVisibility(bool aNotify);
+  bool GetPlaceholderVisibility() {
+    return mPlaceholderVisibility;
+  }
   void UpdatePlaceholderText(bool aNotify); 
 
   /**
@@ -278,6 +281,7 @@ private:
   bool mSelectionCached; // Whether mSelectionProperties is valid
   mutable bool mSelectionRestoreEagerInit; // Whether we're eager initing because of selection restore
   SelectionProperties mSelectionProperties;
+  bool mPlaceholderVisibility;
 };
 
 #endif

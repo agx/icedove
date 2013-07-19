@@ -17,12 +17,11 @@ EXTRA_COMPONENTS = \
     Identity.manifest \
     $(NULL)
 
-EXTRA_JS_MODULES = \
+EXTRA_PP_JS_MODULES = \
     DOMIdentity.jsm \
     $(NULL)
 
-ifdef ENABLE_TESTS
-DIRS += tests
-endif
+EXTRA_JS_MODULES = \
+    $(NULL)
 
 include $(topsrcdir)/config/rules.mk

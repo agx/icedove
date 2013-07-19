@@ -1,6 +1,5 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=78:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -22,7 +21,7 @@ namespace js {
 
 /*
  * Announce to the debugger that the thread has entered a new JavaScript frame,
- * |fp|. Call whatever hooks have been registered to observe new frames, and
+ * |frame|. Call whatever hooks have been registered to observe new frames, and
  * return a JSTrapStatus code indication how execution should proceed:
  *
  * - JSTRAP_CONTINUE: Continue execution normally.
@@ -35,18 +34,18 @@ namespace js {
  *   exception.
  *
  * - JSTRAP_RETURN: Return from the new frame immediately. ScriptDebugPrologue
- *   has set |cx->fp()|'s return value appropriately.
+ *   has set |frame|'s return value appropriately.
  */
 extern JSTrapStatus
-ScriptDebugPrologue(JSContext *cx, StackFrame *fp);
+ScriptDebugPrologue(JSContext *cx, AbstractFramePtr frame);
 
 /*
- * Announce to the debugger that the thread has exited a JavaScript frame, |fp|.
+ * Announce to the debugger that the thread has exited a JavaScript frame, |frame|.
  * If |ok| is true, the frame is returning normally; if |ok| is false, the frame
  * is throwing an exception or terminating.
  *
  * Call whatever hooks have been registered to observe frame exits. Change cx's
- * current exception and |fp|'s return value to reflect the changes in behavior
+ * current exception and |frame|'s return value to reflect the changes in behavior
  * the hooks request, if any. Return the new error/success value.
  *
  * This function may be called twice for the same outgoing frame; only the
@@ -56,7 +55,26 @@ ScriptDebugPrologue(JSContext *cx, StackFrame *fp);
  * alternative path, containing its own call to ScriptDebugEpilogue.)
  */
 extern bool
-ScriptDebugEpilogue(JSContext *cx, StackFrame *fp, bool ok);
+ScriptDebugEpilogue(JSContext *cx, AbstractFramePtr frame, bool ok);
+
+/*
+ * Announce to the debugger that an exception has been thrown and propagated
+ * to |frame|. Call whatever hooks have been registered to observe this and
+ * return a JSTrapStatus code indication how execution should proceed:
+ *
+ * - JSTRAP_CONTINUE: Continue throwing the current exception.
+ *
+ * - JSTRAP_THROW: Throw another value. DebugExceptionUnwind has set |cx|'s
+ *   pending exception to the new value.
+ *
+ * - JSTRAP_ERROR: Terminate execution. DebugExceptionUnwind has cleared |cx|'s
+ *   pending exception.
+ *
+ * - JSTRAP_RETURN: Return from |frame|. DebugExceptionUnwind has cleared
+ *   |cx|'s pending exception and set |frame|'s return value.
+ */
+extern JSTrapStatus
+DebugExceptionUnwind(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc);
 
 /*
  * For a given |call|, convert null/undefined |this| into the global object for
@@ -67,6 +85,9 @@ ScriptDebugEpilogue(JSContext *cx, StackFrame *fp, bool ok);
 extern bool
 BoxNonStrictThis(JSContext *cx, const CallReceiver &call);
 
+extern bool
+BoxNonStrictThis(JSContext *cx, MutableHandleValue thisv, bool *modified);
+
 /*
  * Ensure that fp->thisValue() is the correct value of |this| for the scripted
  * call represented by |fp|. ComputeThis is necessary because fp->thisValue()
@@ -74,52 +95,32 @@ BoxNonStrictThis(JSContext *cx, const CallReceiver &call);
  * an optimization to avoid global-this computation).
  */
 inline bool
-ComputeThis(JSContext *cx, StackFrame *fp);
+ComputeThis(JSContext *cx, AbstractFramePtr frame);
 
 enum MaybeConstruct {
     NO_CONSTRUCT = INITIAL_NONE,
     CONSTRUCT = INITIAL_CONSTRUCT
 };
 
+/*
+ * numToSkip is the number of stack values the expression decompiler should skip
+ * before it reaches |v|. If it's -1, the decompiler will search the stack.
+ */
 extern bool
-ReportIsNotFunction(JSContext *cx, const Value &v, MaybeConstruct construct = NO_CONSTRUCT);
+ReportIsNotFunction(JSContext *cx, const Value &v, int numToSkip = -1,
+                    MaybeConstruct construct = NO_CONSTRUCT);
 
-extern bool
-ReportIsNotFunction(JSContext *cx, const Value *vp, MaybeConstruct construct = NO_CONSTRUCT);
-
+/* See ReportIsNotFunction comment for the meaning of numToSkip. */
 extern JSObject *
-ValueToCallable(JSContext *cx, const Value *vp, MaybeConstruct construct = NO_CONSTRUCT);
-
-inline JSFunction *
-ReportIfNotFunction(JSContext *cx, const Value &v, MaybeConstruct construct = NO_CONSTRUCT)
-{
-    if (v.isObject() && v.toObject().isFunction())
-        return v.toObject().toFunction();
-
-    ReportIsNotFunction(cx, v, construct);
-    return NULL;
-}
+ValueToCallable(JSContext *cx, const Value &vp, int numToSkip = -1,
+                MaybeConstruct construct = NO_CONSTRUCT);
 
 /*
- * InvokeKernel assumes that the given args have been pushed on the top of the
- * VM stack. Additionally, if 'args' is contained in a CallArgsList, that they
- * have already been marked 'active'.
+ * Invoke assumes that the given args have been pushed on the top of the
+ * VM stack.
  */
 extern bool
-InvokeKernel(JSContext *cx, CallArgs args, MaybeConstruct construct = NO_CONSTRUCT);
-
-/*
- * Invoke assumes that 'args' has been pushed (via ContextStack::pushInvokeArgs)
- * and is currently at the top of the VM stack.
- */
-inline bool
-Invoke(JSContext *cx, InvokeArgsGuard &args, MaybeConstruct construct = NO_CONSTRUCT)
-{
-    args.setActive();
-    bool ok = InvokeKernel(cx, args, construct);
-    args.setInactive();
-    return ok;
-}
+Invoke(JSContext *cx, CallArgs args, MaybeConstruct construct = NO_CONSTRUCT);
 
 /*
  * This Invoke overload places the least requirements on the caller: it may be
@@ -139,21 +140,11 @@ InvokeGetterOrSetter(JSContext *cx, JSObject *obj, const Value &fval, unsigned a
                      Value *rval);
 
 /*
- * InvokeConstructor* implement a function call from a constructor context
+ * InvokeConstructor implement a function call from a constructor context
  * (e.g. 'new') handling the the creation of the new 'this' object.
  */
 extern bool
-InvokeConstructorKernel(JSContext *cx, CallArgs args);
-
-/* See the InvokeArgsGuard overload of Invoke. */
-inline bool
-InvokeConstructor(JSContext *cx, InvokeArgsGuard &args)
-{
-    args.setActive();
-    bool ok = InvokeConstructorKernel(cx, ImplicitCast<CallArgs>(args));
-    args.setInactive();
-    return ok;
-}
+InvokeConstructor(JSContext *cx, CallArgs args);
 
 /* See the fval overload of Invoke. */
 extern bool
@@ -167,7 +158,7 @@ InvokeConstructor(JSContext *cx, const Value &fval, unsigned argc, Value *argv, 
  */
 extern bool
 ExecuteKernel(JSContext *cx, HandleScript script, JSObject &scopeChain, const Value &thisv,
-              ExecuteType type, StackFrame *evalInFrame, Value *result);
+              ExecuteType type, AbstractFramePtr evalInFrame, Value *result);
 
 /* Execute a script with the given scopeChain as global code. */
 extern bool
@@ -178,18 +169,28 @@ enum InterpMode
 {
     JSINTERP_NORMAL    = 0, /* interpreter is running normally */
     JSINTERP_REJOIN    = 1, /* as normal, but the frame has already started */
-    JSINTERP_SKIP_TRAP = 2  /* as REJOIN, but skip trap at first opcode */
+    JSINTERP_SKIP_TRAP = 2, /* as REJOIN, but skip trap at first opcode */
+    JSINTERP_BAILOUT   = 3, /* interpreter is running from an Ion bailout */
+    JSINTERP_RETHROW   = 4  /* as BAILOUT, but unwind all frames */
+};
+
+enum InterpretStatus
+{
+    Interpret_Error    = 0, /* interpreter had an error */
+    Interpret_Ok       = 1, /* interpreter executed successfully */
+    Interpret_OSR      = 2  /* when mode=BAILOUT and we should OSR into Ion */
 };
 
 /*
  * Execute the caller-initialized frame for a user-defined script or function
  * pointed to by cx->fp until completion or error.
  */
-extern JS_NEVER_INLINE bool
-Interpret(JSContext *cx, StackFrame *stopFp, InterpMode mode = JSINTERP_NORMAL);
+extern JS_NEVER_INLINE InterpretStatus
+Interpret(JSContext *cx, StackFrame *stopFp, InterpMode mode = JSINTERP_NORMAL,
+          bool useNewType = false);
 
 extern bool
-RunScript(JSContext *cx, JSScript *script, StackFrame *fp);
+RunScript(JSContext *cx, StackFrame *fp);
 
 extern bool
 StrictlyEqual(JSContext *cx, const Value &lval, const Value &rval, bool *equal);
@@ -204,8 +205,8 @@ SameValue(JSContext *cx, const Value &v1, const Value &v2, bool *same);
 extern JSType
 TypeOfValue(JSContext *cx, const Value &v);
 
-extern JSBool
-HasInstance(JSContext *cx, HandleObject obj, const js::Value *v, JSBool *bp);
+extern bool
+HasInstance(JSContext *cx, HandleObject obj, HandleValue v, JSBool *bp);
 
 /*
  * A linked list of the |FrameRegs regs;| variables belonging to all
@@ -252,12 +253,9 @@ class InterpreterFrames {
     const InterruptEnablerBase &enabler;
 };
 
-/*
- * Unwind block and scope chains to match the given depth. The function sets
- * fp->sp on return to stackDepth.
- */
+/* Unwind block and scope chains to match the given depth. */
 extern void
-UnwindScope(JSContext *cx, uint32_t stackDepth);
+UnwindScope(JSContext *cx, AbstractFramePtr frame, uint32_t stackDepth);
 
 /*
  * Unwind for an uncatchable exception. This means not running finalizers, etc;
@@ -272,12 +270,14 @@ OnUnknownMethod(JSContext *cx, HandleObject obj, Value idval, MutableHandleValue
 class TryNoteIter
 {
     const FrameRegs &regs;
-    JSScript *script;
+    RootedScript script; /* TryNotIter is always stack allocated. */
     uint32_t pcOffset;
     JSTryNote *tn, *tnEnd;
+
     void settle();
+
   public:
-    TryNoteIter(const FrameRegs &regs);
+    explicit TryNoteIter(JSContext *cx, const FrameRegs &regs);
     bool done() const;
     void operator++();
     JSTryNote *operator*() const { return tn; }
@@ -315,6 +315,104 @@ Debug_SetValueRangeToCrashOnTouch(HeapValue *vec, size_t len)
     Debug_SetValueRangeToCrashOnTouch((Value *) vec, len);
 #endif
 }
+
+bool
+Throw(JSContext *cx, HandleValue v);
+
+bool
+GetProperty(JSContext *cx, HandleValue value, HandlePropertyName name, MutableHandleValue vp);
+
+bool
+GetScopeName(JSContext *cx, HandleObject obj, HandlePropertyName name, MutableHandleValue vp);
+
+bool
+GetScopeNameForTypeOf(JSContext *cx, HandleObject obj, HandlePropertyName name,
+                      MutableHandleValue vp);
+
+JSObject *
+Lambda(JSContext *cx, HandleFunction fun, HandleObject parent);
+
+bool
+GetElement(JSContext *cx, MutableHandleValue lref, HandleValue rref, MutableHandleValue res);
+
+bool
+GetElementMonitored(JSContext *cx, MutableHandleValue lref, HandleValue rref, MutableHandleValue res);
+
+bool
+CallElement(JSContext *cx, MutableHandleValue lref, HandleValue rref, MutableHandleValue res);
+
+bool
+SetObjectElement(JSContext *cx, HandleObject obj, HandleValue index, HandleValue value,
+                 JSBool strict);
+bool
+SetObjectElement(JSContext *cx, HandleObject obj, HandleValue index, HandleValue value,
+                 JSBool strict, HandleScript script, jsbytecode *pc);
+
+bool
+InitElementArray(JSContext *cx, jsbytecode *pc,
+                 HandleObject obj, uint32_t index, HandleValue value);
+
+bool
+AddValues(JSContext *cx, HandleScript script, jsbytecode *pc,
+          MutableHandleValue lhs, MutableHandleValue rhs,
+          Value *res);
+
+bool
+SubValues(JSContext *cx, HandleScript script, jsbytecode *pc,
+          MutableHandleValue lhs, MutableHandleValue rhs,
+          Value *res);
+
+bool
+MulValues(JSContext *cx, HandleScript script, jsbytecode *pc,
+          MutableHandleValue lhs, MutableHandleValue rhs,
+          Value *res);
+
+bool
+DivValues(JSContext *cx, HandleScript script, jsbytecode *pc,
+          MutableHandleValue lhs, MutableHandleValue rhs,
+          Value *res);
+
+bool
+ModValues(JSContext *cx, HandleScript script, jsbytecode *pc,
+          MutableHandleValue lhs, MutableHandleValue rhs,
+          Value *res);
+
+bool
+UrshValues(JSContext *cx, HandleScript script, jsbytecode *pc,
+           MutableHandleValue lhs, MutableHandleValue rhs,
+           Value *res);
+
+template <bool strict>
+bool
+SetProperty(JSContext *cx, HandleObject obj, HandleId id, const Value &value);
+
+template <bool strict>
+bool
+DeleteProperty(JSContext *ctx, HandleValue val, HandlePropertyName name, JSBool *bv);
+
+template <bool strict>
+bool
+DeleteElement(JSContext *cx, HandleValue val, HandleValue index, JSBool *bv);
+
+bool
+DefFunOperation(JSContext *cx, HandleScript script, HandleObject scopeChain, HandleFunction funArg);
+
+bool
+GetAndClearException(JSContext *cx, MutableHandleValue res);
+
+bool
+DeleteNameOperation(JSContext *cx, HandlePropertyName name, HandleObject scopeObj,
+                    MutableHandleValue res);
+
+bool
+ImplicitThisOperation(JSContext *cx, HandleObject scopeObj, HandlePropertyName name,
+                      MutableHandleValue res);
+
+bool
+IteratorMore(JSContext *cx, JSObject *iterobj, bool *cond, MutableHandleValue rval);
+
+bool
+IteratorNext(JSContext *cx, HandleObject iterobj, MutableHandleValue rval);
 
 }  /* namespace js */
 

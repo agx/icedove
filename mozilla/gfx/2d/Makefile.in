@@ -6,44 +6,39 @@
 DEPTH		= @DEPTH@
 topsrcdir	= @top_srcdir@
 srcdir		= @srcdir@
-VPATH		= @srcdir@
+VPATH		=  $(srcdir) $(srcdir)/unittest
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= gfx2d
 LIBRARY_NAME	= gfx2d
 LIBXUL_LIBRARY	= 1
 EXPORT_LIBRARY	= 1
 
-EXPORTS_NAMESPACES = mozilla/gfx
-EXPORTS_mozilla/gfx	= \
-        2D.h \
-        BasePoint.h \
-        BasePoint3D.h \
-        BasePoint4D.h \
-        BaseMargin.h \
-        BaseRect.h \
-        BaseSize.h \
-        Blur.h \
-        PathHelpers.h \
-        Point.h \
-        Matrix.h \
-        Rect.h \
-        Types.h \
-        UserData.h \
-	$(NULL)
-
 CPPSRCS	= \
-	Factory.cpp \
+        Factory.cpp \
+        Rect.cpp \
         Matrix.cpp \
         DrawTargetCairo.cpp \
         SourceSurfaceCairo.cpp \
         PathCairo.cpp \
+        DrawTargetRecording.cpp \
+        PathRecording.cpp \
+        RecordedEvent.cpp \
+        DrawEventRecorder.cpp \
         Blur.cpp \
+        Scale.cpp \
         ScaledFontBase.cpp \
         DrawTargetDual.cpp \
         ImageScaling.cpp \
         SourceSurfaceRawData.cpp \
+        $(NULL)
+
+GTEST_CPPSRCS = \
+        GTestMain.cpp \
+        TestBase.cpp \
+        TestPoint.cpp \
+        TestScaling.cpp \
+        TestCairo.cpp \
         $(NULL)
 
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
@@ -56,11 +51,6 @@ CPPSRCS	+= \
 CMMSRCS = \
 	   QuartzSupport.mm \
 	   $(NULL)
-
-EXPORTS_mozilla/gfx	+= \
-	   QuartzSupport.h \
-	   MacIOSurface.h \
-	   $(NULL)
 endif
 
 DEFINES += -DMOZ_GFX -DUSE_CAIRO -DGFX2D_INTERNAL
@@ -70,19 +60,16 @@ CPPSRCS	+= \
         SourceSurfaceSkia.cpp \
         DrawTargetSkia.cpp \
         PathSkia.cpp \
+        convolver.cpp \
+        image_operations.cpp \
         $(NULL)
-
-DEFINES += -DUSE_SKIA
-
 endif
 
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
-ifdef MOZ_ENABLE_SKIA
 CPPSRCS += \
         ScaledFontMac.cpp \
         $(NULL)
 
-endif
 endif
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),$(findstring $(MOZ_WIDGET_TOOLKIT),android gtk2 gonk qt))
@@ -90,10 +77,6 @@ CPPSRCS	+= \
         ScaledFontFreetype.cpp \
         $(NULL)
 DEFINES += -DMOZ_ENABLE_FREETYPE
-endif
-
-ifeq (android,$(MOZ_WIDGET_TOOLKIT))
-DEFINES += -DSK_BUILD_FOR_ANDROID_NDK
 endif
 
 DEFINES += -DSK_A32_SHIFT=24 -DSK_R32_SHIFT=16 -DSK_G32_SHIFT=8 -DSK_B32_SHIFT=0
@@ -106,7 +89,10 @@ endif
 ifneq (,$(INTEL_ARCHITECTURE))
 # VC2005 doesn't support _mm_castsi128_ps, so SSE2 is turned off
 ifneq (1400,$(_MSC_VER))
-CPPSRCS += ImageScalingSSE2.cpp
+CPPSRCS += \
+        ImageScalingSSE2.cpp \
+        BlurSSE2.cpp \
+        $(NULL)
 DEFINES += -DUSE_SSE2
 endif
 endif
@@ -125,10 +111,17 @@ ifdef MOZ_ENABLE_SKIA
 CPPSRCS += \
         ScaledFontWin.cpp \
         $(NULL)
+DEFINES += -DSKIA_IMPLEMENTATION=1 -DGR_IMPLEMENTATION=1
 endif
 endif
 
 include $(topsrcdir)/config/rules.mk
+include $(topsrcdir)/ipc/chromium/chromium-config.mk
+
+# Due to bug 796023, we can't have -DUNICODE and -D_UNICODE; defining those
+# macros changes the type of LOGFONT to LOGFONTW instead of LOGFONTA. This
+# changes the symbol names of exported C++ functions that use LOGFONT.
+DEFINES := $(filter-out -DUNICODE -D_UNICODE,$(DEFINES))
 
 #ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
 #CPPSRCS	+= \
@@ -145,10 +138,12 @@ include $(topsrcdir)/config/rules.mk
 ifneq (,$(INTEL_ARCHITECTURE))
 ifdef GNU_CC
 ImageScalingSSE2.$(OBJ_SUFFIX): CXXFLAGS+=-msse2
+BlurSSE2.$(OBJ_SUFFIX): CXXFLAGS+=-msse2
 endif
 
 ifdef SOLARIS_SUNPRO_CXX
 ImageScalingSSE2.$(OBJ_SUFFIX): OS_CXXFLAGS += -xarch=sse2 -xO4
+BlurSSE2.$(OBJ_SUFFIX): OS_CXXFLAGS += -xarch=sse2 -xO4
 endif
 endif
 

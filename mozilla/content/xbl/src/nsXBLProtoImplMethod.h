@@ -9,10 +9,11 @@
 #include "nsIAtom.h"
 #include "nsString.h"
 #include "jsapi.h"
-#include "nsIContent.h"
 #include "nsString.h"
 #include "nsXBLProtoImplMember.h"
 #include "nsXBLSerialize.h"
+
+class nsIContent;
 
 struct nsXBLParameter {
   nsXBLParameter* mNext;
@@ -87,14 +88,11 @@ public:
 
   void SetLineNumber(uint32_t aLineNumber);
   
-  virtual nsresult InstallMember(nsIScriptContext* aContext,
-                                 nsIContent* aBoundElement, 
-                                 JSObject* aScriptObject,
-                                 JSObject* aTargetClassObject,
-                                 const nsCString& aClassStr);
+  virtual nsresult InstallMember(JSContext* aCx,
+                                 JS::Handle<JSObject*> aTargetClassObject);
   virtual nsresult CompileMember(nsIScriptContext* aContext,
                                  const nsCString& aClassStr,
-                                 JSObject* aClassObject);
+                                 JS::Handle<JSObject*> aClassObject);
 
   virtual void Trace(TraceCallback aCallback, void *aClosure) const;
 
@@ -107,11 +105,11 @@ public:
   }
   void SetUncompiledMethod(nsXBLUncompiledMethod* aUncompiledMethod)
   {
-    mUncompiledMethod = PRUptrdiff(aUncompiledMethod) | BIT_UNCOMPILED;
+    mUncompiledMethod = uintptr_t(aUncompiledMethod) | BIT_UNCOMPILED;
   }
   nsXBLUncompiledMethod* GetUncompiledMethod() const
   {
-    PRUptrdiff unmasked = mUncompiledMethod & ~BIT_UNCOMPILED;
+    uintptr_t unmasked = mUncompiledMethod & ~BIT_UNCOMPILED;
     return reinterpret_cast<nsXBLUncompiledMethod*>(unmasked);
   }
 
@@ -119,7 +117,7 @@ protected:
   enum { BIT_UNCOMPILED = 1 << 0 };
 
   union {
-    PRUptrdiff mUncompiledMethod; // An object that represents the method before being compiled.
+    uintptr_t mUncompiledMethod; // An object that represents the method before being compiled.
     JSObject* mJSMethodObject;    // The JS object for the method (after compilation)
   };
 
@@ -139,11 +137,8 @@ public:
   // Override InstallMember; these methods never get installed as members on
   // binding instantiations (though they may hang out in mMembers on the
   // prototype implementation).
-  virtual nsresult InstallMember(nsIScriptContext* aContext,
-                                 nsIContent* aBoundElement, 
-                                 JSObject* aScriptObject,
-                                 JSObject* aTargetClassObject,
-                                 const nsCString& aClassStr) {
+  virtual nsresult InstallMember(JSContext* aCx,
+                                 JS::Handle<JSObject*> aTargetClassObject) {
     return NS_OK;
   }
 

@@ -18,9 +18,10 @@ struct Margin :
   typedef BaseMargin<Float, Margin> Super;
 
   // Constructors
+  Margin() : Super(0, 0, 0, 0) {}
   Margin(const Margin& aMargin) : Super(aMargin) {}
-  Margin(Float aLeft,  Float aTop, Float aRight, Float aBottom)
-    : Super(aLeft, aTop, aRight, aBottom) {}
+  Margin(Float aTop, Float aRight, Float aBottom, Float aLeft)
+    : Super(aTop, aRight, aBottom, aLeft) {}
 };
 
 struct IntRect :
@@ -52,7 +53,9 @@ struct Rect :
         Super(float(rect.x), float(rect.y),
               float(rect.width), float(rect.height)) {}
 
-    bool ToIntRect(IntRect *aOut)
+    GFX2D_API void NudgeToIntegers();
+
+    bool ToIntRect(IntRect *aOut) const
     {
       *aOut = IntRect(int32_t(X()), int32_t(Y()),
                     int32_t(Width()), int32_t(Height()));

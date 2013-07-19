@@ -1,6 +1,8 @@
 "use strict";
 
 SimpleTest.waitForExplicitFinish();
+browserElementTestHelpers.setEnabledPref(true);
+browserElementTestHelpers.addPermission();
 
 var iframeScript = function() {
 
@@ -20,7 +22,7 @@ var iframeScript = function() {
 
   content.fireContextMenu(content.document.body);
   content.fireContextMenu(content.document.getElementById('menu1-trigger'));
-  content.fireContextMenu(content.document.getElementById('inner-link'));
+  content.fireContextMenu(content.document.getElementById('inner-link').childNodes[0]);
   content.fireContextMenu(content.document.getElementById('menu2-trigger'));
 }
 
@@ -29,12 +31,8 @@ var trigger1 = function() {
 };
 
 function runTest() {
-
-  browserElementTestHelpers.setEnabledPref(true);
-  browserElementTestHelpers.addPermission();
-
   var iframe1 = document.createElement('iframe');
-  iframe1.mozbrowser = true;
+  SpecialPowers.wrap(iframe1).mozbrowser = true;
   document.body.appendChild(iframe1);
   iframe1.src = 'data:text/html,<html>' +
     '<body>' +
@@ -141,4 +139,4 @@ function runTest() {
   iframe1.addEventListener('mozbrowserloadend', iframeLoadedHandler);
 }
 
-addEventListener('load', function() { SimpleTest.executeSoon(runTest); });
+addEventListener('testready', runTest);

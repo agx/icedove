@@ -10,19 +10,25 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= imglib2
 LIBRARY_NAME	= imglib2_s
 FORCE_STATIC_LIB = 1
 MODULE_NAME	= nsImageLib2Module
-GRE_MODULE	= 1
 LIBXUL_LIBRARY  = 1
+FAIL_ON_WARNINGS = 1
 
 
 CPPSRCS		= \
 			Image.cpp \
+			ImageFactory.cpp \
+                        ImageMetadata.cpp \
+			ImageOps.cpp \
+			ImageWrapper.cpp \
+			ClippedImage.cpp \
 			Decoder.cpp \
 			DiscardTracker.cpp \
+			FrozenImage.cpp \
 			RasterImage.cpp \
+			ScriptedNotificationObserver.cpp \
 			SVGDocumentWrapper.cpp \
 			VectorImage.cpp \
 			imgFrame.cpp \
@@ -36,14 +42,17 @@ CPPSRCS		= \
 # We need to instantiate the decoders
 LOCAL_INCLUDES += -I$(topsrcdir)/image/decoders
 
-# Because SVGDocumentWrapper.cpp includes "nsSVGSVGElement.h"
+# For URI-related functionality
+LOCAL_INCLUDES += -I$(topsrcdir)/netwerk/base/src
+
+# Because SVGDocumentWrapper.cpp includes "mozilla/dom/SVGSVGElement.h"
 LOCAL_INCLUDES += \
 			-I$(topsrcdir)/content/svg/content/src \
 			-I$(topsrcdir)/content/base/src \
 			$(NULL)
 
 # Because VectorImage.cpp includes nsSVGUtils.h and nsSVGEffects.h
-LOCAL_INCLUDES += -I$(topsrcdir)/layout/svg/base/src
+LOCAL_INCLUDES += -I$(topsrcdir)/layout/svg
 
 include $(topsrcdir)/config/rules.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk

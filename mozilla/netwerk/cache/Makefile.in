@@ -10,27 +10,11 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = nkcache
 LIBRARY_NAME   = nkcache_s
 LIBXUL_LIBRARY = 1
-XPIDL_MODULE   = necko_cache
-GRE_MODULE     = 1
+FAIL_ON_WARNINGS := 1
 
 FORCE_STATIC_LIB = 1
-
-XPIDLSRCS = \
-  nsICache.idl \
-  nsICacheEntryDescriptor.idl \
-  nsICacheListener.idl \
-  nsICacheService.idl \
-  nsICacheSession.idl \
-  nsICacheVisitor.idl \
-  nsIDiskCacheStreamInternal.idl \
-  $(NULL)
-
-EXPORTS = \
-  nsCacheService.h \
-  $(NULL)
 
 CPPSRCS = \
   nsCache.cpp \
@@ -39,6 +23,7 @@ CPPSRCS = \
   nsCacheMetaData.cpp \
   nsCacheService.cpp \
   nsCacheSession.cpp \
+  nsCacheUtils.cpp \
   nsMemoryCacheDevice.cpp \
   nsDiskCacheBinding.cpp \
   nsDiskCacheBlockFile.cpp \

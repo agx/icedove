@@ -6,7 +6,7 @@ const PREF_NEWTAB_ENABLED = "browser.newtabpage.enabled";
 Services.prefs.setBoolPref(PREF_NEWTAB_ENABLED, true);
 
 let tmp = {};
-Cu.import("resource:///modules/NewTabUtils.jsm", tmp);
+Cu.import("resource://gre/modules/NewTabUtils.jsm", tmp);
 Cc["@mozilla.org/moz/jssubscript-loader;1"]
   .getService(Ci.mozIJSSubScriptLoader)
   .loadSubScript("chrome://browser/content/sanitize.js", tmp);
@@ -16,12 +16,11 @@ let {NewTabUtils, Sanitizer} = tmp;
 let uri = Services.io.newURI("about:newtab", null, null);
 let principal = Services.scriptSecurityManager.getNoAppCodebasePrincipal(uri);
 
-let sm = Services.domStorageManager;
-let storage = sm.getLocalStorageForPrincipal(principal, "");
+let gWindow = window;
 
 registerCleanupFunction(function () {
-  while (gBrowser.tabs.length > 1)
-    gBrowser.removeTab(gBrowser.tabs[1]);
+  while (gWindow.gBrowser.tabs.length > 1)
+    gWindow.gBrowser.removeTab(gWindow.gBrowser.tabs[1]);
 
   Services.prefs.clearUserPref(PREF_NEWTAB_ENABLED);
 });
@@ -83,7 +82,7 @@ let TestRunner = {
  * @return The content window.
  */
 function getContentWindow() {
-  return gBrowser.selectedBrowser.contentWindow;
+  return gWindow.gBrowser.selectedBrowser.contentWindow;
 }
 
 /**
@@ -91,7 +90,7 @@ function getContentWindow() {
  * @return The content document.
  */
 function getContentDocument() {
-  return gBrowser.selectedBrowser.contentDocument;
+  return gWindow.gBrowser.selectedBrowser.contentDocument;
 }
 
 /**
@@ -183,7 +182,12 @@ function setPinnedLinks(aLinks) {
     });
   }
 
-  storage.setItem("pinnedLinks", JSON.stringify(links));
+  let string = Cc["@mozilla.org/supports-string;1"]
+                 .createInstance(Ci.nsISupportsString);
+  string.data = JSON.stringify(links);
+  Services.prefs.setComplexValue("browser.newtabpage.pinned",
+                                 Ci.nsISupportsString, string);
+
   NewTabUtils.pinnedLinks.resetCache();
   NewTabUtils.allPages.update();
 }
@@ -200,7 +204,7 @@ function restore() {
  * Creates a new tab containing 'about:newtab'.
  */
 function addNewTabPageTab() {
-  let tab = gBrowser.selectedTab = gBrowser.addTab("about:newtab");
+  let tab = gWindow.gBrowser.selectedTab = gWindow.gBrowser.addTab("about:newtab");
   let browser = tab.linkedBrowser;
 
   function whenNewTabLoaded() {

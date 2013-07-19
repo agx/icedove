@@ -100,6 +100,8 @@ XPCOMUtils.defineLazyServiceGetter(this, "CrashReporter",
 
 XPCOMUtils.defineLazyServiceGetter(this, "SecMan",
   "@mozilla.org/scriptsecuritymanager;1", "nsIScriptSecurityManager");
+XPCOMUtils.defineLazyServiceGetter(this, "gScreenManager",
+  "@mozilla.org/gfx/screenmanager;1", "nsIScreenManager");
 
 function debug(aMsg) {
   Services.console.logStringMessage("SessionStore: " + aMsg);
@@ -3057,9 +3059,11 @@ SessionStoreService.prototype = {
 
     var _this = this;
     aWindow.setTimeout(function() {
-      _this.restoreDimensions.apply(_this, [aWindow, aWinData.width || 0,
-        aWinData.height || 0, "screenX" in aWinData ? aWinData.screenX : NaN,
-        "screenY" in aWinData ? aWinData.screenY : NaN,
+      _this.restoreDimensions.apply(_this, [aWindow,
+        +aWinData.width || 0,
+        +aWinData.height || 0,
+        "screenX" in aWinData ? +aWinData.screenX : NaN,
+        "screenY" in aWinData ? +aWinData.screenY : NaN,
         aWinData.sizemode || "", aWinData.sidebar || ""]);
     }, 0);
   },
@@ -3084,6 +3088,31 @@ SessionStoreService.prototype = {
     var _this = this;
     function win_(aName) { return _this._getWindowDimension(win, aName); }
 
+    // find available space on the screen where this window is being placed
+    let screen = gScreenManager.screenForRect(aLeft, aTop, aWidth, aHeight);
+    if (screen) {
+      let screenLeft = {}, screenTop = {}, screenWidth = {}, screenHeight = {};
+      screen.GetAvailRectDisplayPix(screenLeft, screenTop, screenWidth, screenHeight);
+      // constrain the dimensions to the actual space available
+      if (aWidth > screenWidth.value) {
+        aWidth = screenWidth.value;
+      }
+      if (aHeight > screenHeight.value) {
+        aHeight = screenHeight.value;
+      }
+      // and then pull the window within the screen's bounds
+      if (aLeft < screenLeft.value) {
+        aLeft = screenLeft.value;
+      } else if (aLeft + aWidth > screenLeft.value + screenWidth.value) {
+        aLeft = screenLeft.value + screenWidth.value - aWidth;
+      }
+      if (aTop < screenTop.value) {
+        aTop = screenTop.value;
+      } else if (aTop + aHeight > screenTop.value + screenHeight.value) {
+        aTop = screenTop.value + screenHeight.value - aHeight;
+      }
+    }
+ 
     // only modify those aspects which aren't correct yet
     if (aWidth && aHeight && (aWidth != win_("width") || aHeight != win_("height"))) {
       aWindow.resizeTo(aWidth, aHeight);

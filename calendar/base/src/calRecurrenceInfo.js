@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://calendar/modules/calUtils.jsm");
+Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 function getRidKey(dt) {
     if (!dt) {
@@ -22,6 +23,8 @@ function calRecurrenceInfo() {
     this.wrappedJSObject = this;
 }
 
+const calRecurrenceInfoClassID = Components.ID("{04027036-5884-4a30-b4af-f2cad79f6edf}");
+const calRecurrenceInfoInterfaces = [Components.interfaces.calIRecurrenceInfo];
 calRecurrenceInfo.prototype = {
     mImmutable: false,
     mBaseItem: null,
@@ -30,29 +33,14 @@ calRecurrenceInfo.prototype = {
     mNegativeRules: null,
     mExceptionMap: null,
 
-    QueryInterface: function cRI_QueryInterface(aIID) {
-        return doQueryInterface(this, calRecurrenceInfo.__proto__, aIID, null, this);
-    },
-
-    /**
-     * nsIClassInfo
-     */
-    getInterfaces: function cRI_getInterfaces(aCount) {
-        const interfaces = [Components.interfaces.nsISupports,
-                            Components.interfaces.calIRecurrenceInfo,
-                            Components.interfaces.nsIClassInfo];
-
-        aCount.value = interfaces.length;
-        return interfaces;
-    },
-    getHelperForLanguage: function cRI_getHelperForLanguage(aLang) {
-        return null;
-    },
-    contractID: "@mozilla.org/calendar/recurrence-info;1",
-    classDescription: "Calendar Recurrence Info",
-    classID: Components.ID("{04027036-5884-4a30-b4af-f2cad79f6edf}"),
-    implementationLanguage: Components.interfaces.nsIProgrammingLanguage.JAVASCRIPT,
-    flags: 0,
+    classID: calRecurrenceInfoClassID,
+    QueryInterface: XPCOMUtils.generateQI(calRecurrenceInfoInterfaces),
+    classInfo: XPCOMUtils.generateCI({
+        classID: calRecurrenceInfoClassID,
+        contractID: "@mozilla.org/calendar/recurrence-info;1",
+        classDescription: "Calendar Recurrence Info",
+        interfaces: calRecurrenceInfoInterfaces,
+    }),
 
     /**
      * Helpers
@@ -328,8 +316,6 @@ calRecurrenceInfo.prototype = {
                         nextOccurrences[i] = null;
                         invalidOccurrences++;
                     }
-                    // TODO What about calIRecurrenceDateSet? Multi-value date
-                    // sets are parsed into multiple calIRecurrenceDates, iirc.
                 } else if (calInstanceOf(this.mPositiveRules[i], Components.interfaces.calIRecurrenceRule)) {
                     // RRULEs must not start searching before |startDate|, since
                     // the pattern is only valid afterwards. If an occurrence
@@ -350,7 +336,13 @@ calRecurrenceInfo.prototype = {
                                              .getNextOccurrence(searchStart, searchDate);
                 }
 
-                if (negMap[getRidKey(nextOccurrences[i])] || this.mExceptionMap[getRidKey(nextOccurrences[i])]) {
+                // As decided in bug 734245, an EXDATE of type DATE shall also match a DTSTART of type DATE-TIME
+                let nextKey = getRidKey(nextOccurrences[i]);
+                let isInExceptionMap = nextKey && (this.mExceptionMap[nextKey.substring(0,8)] ||
+                                                   this.mExceptionMap[nextKey]);
+                let isInNegMap = nextKey && (negMap[nextKey.substring(0,8)] ||
+                                             negMap[nextKey]);
+                if (nextKey && (isInNegMap || isInExceptionMap)) {
                     // If the found recurrence id points to either an exception
                     // (will handle later) or an EXDATE, then nextOccurrences[i]
                     // is invalid and we might need to try again next round.
@@ -548,9 +540,21 @@ calRecurrenceInfo.prototype = {
             // (like, you can't make a date "real" by defining an RECURRENCE-ID which
             // is an EXDATE, and then giving it a real DTSTART) -- so we don't
             // check exceptions here
-            for each (var dateToRemove in cur_dates) {
-                var dateToRemoveKey = getRidKey(dateToRemove);
-                if (occurrenceMap[dateToRemoveKey]) {
+            for each (let dateToRemove in cur_dates) {
+                let dateToRemoveKey = getRidKey(dateToRemove);
+                if (dateToRemove.isDate) {
+                    // As decided in bug 734245, an EXDATE of type DATE shall also match a DTSTART of type DATE-TIME
+                    let toRemove = [];
+                    for (let occurenceKey in occurrenceMap) {
+                        if (occurrenceMap[occurenceKey] && occurenceKey.substring(0,8) == dateToRemoveKey) {
+                            dates = dates.filter(function (d) { return d.id.compare(dateToRemove) != 0; });
+                            toRemove.push(occurenceKey)
+                        }
+                    }
+                    for (let i=0; i < toRemove.length; i++) {
+                        delete occurrenceMap[toRemove[i]];
+                    }
+                } else if (occurrenceMap[dateToRemoveKey]) {
                     // TODO PERF Theoretically we could use occurrence map
                     // to construct the array of occurrences. Right now I'm
                     // just using the occurrence map to skip the filter
@@ -564,7 +568,7 @@ calRecurrenceInfo.prototype = {
         // The list was already sorted above, chop anything over aMaxCount, if
         // specified.
         if (aMaxCount && dates.length > aMaxCount) {
-            dates = dates.splice(aMaxCount, dates.length - aMaxCount);
+            dates = dates.slice(0, aMaxCount);
         }
 
         return dates;
@@ -584,14 +588,17 @@ calRecurrenceInfo.prototype = {
                                                 aRangeEnd,
                                                 aMaxCount,
                                                 aCount) {
-        var results = [];
-        var dates = this.calculateDates(aRangeStart, aRangeEnd, aMaxCount);
+        let results = [];
+        let dates = this.calculateDates(aRangeStart, aRangeEnd, aMaxCount);
         if (dates.length) {
-            var count = aMaxCount;
-            if (!count)
+            let count;
+            if (aMaxCount) {
+                count = Math.min(aMaxCount, dates.length);
+            } else {
                 count = dates.length;
+            }
 
-            for (var i = 0; i < count; i++) {
+            for (let i = 0; i < count; i++) {
                 results.push(this.getOccurrenceFor(dates[i].id));
             }
         }
@@ -749,7 +756,6 @@ calRecurrenceInfo.prototype = {
 
         // take RDATE's and EXDATE's into account.
         const kCalIRecurrenceDate = Components.interfaces.calIRecurrenceDate;
-        const kCalIRecurrenceDateSet = Components.interfaces.calIRecurrenceDateSet;
         let ritems = this.getRecurrenceItems({});
         for each (let ritem in ritems) {
             if (cal.calInstanceOf(ritem, kCalIRecurrenceDate)) {
@@ -760,15 +766,6 @@ calRecurrenceInfo.prototype = {
                     rdates[getRidKey(date)] = date;
                 }
                 ritem.date = date;
-            } else if (cal.calInstanceOf(ritem, kCalIRecurrenceDateSet)) {
-                ritem = ritem.QueryInterface(kCalIRecurrenceDateSet);
-                for each (let date in ritem.getDates({})) {
-                    date.addDuration(timeDiff);
-                    if (!ritem.isNegative) {
-                        rdates[getRidKey(date)] = date;
-                    }
-                }
-                ritem.setDates(rdates.length,rdates);
             } else if (cal.calInstanceOf(ritem, Components.interfaces.calIRecurrenceRule)) {
                 ritem = ritem.QueryInterface(Components.interfaces.calIRecurrenceRule);
                 if (!ritem.isByCount) {

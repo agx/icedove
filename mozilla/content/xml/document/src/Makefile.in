@@ -10,7 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= content
 LIBRARY_NAME	= gkconxmldoc_s
 LIBXUL_LIBRARY	= 1
 FAIL_ON_WARNINGS = 1
@@ -18,7 +17,7 @@ FAIL_ON_WARNINGS = 1
 CPPSRCS		= \
 		nsXMLContentSink.cpp \
 		nsXMLFragmentContentSink.cpp \
-		nsXMLDocument.cpp \
+		XMLDocument.cpp \
 		nsXMLPrettyPrinter.cpp \
 		$(NULL)
 

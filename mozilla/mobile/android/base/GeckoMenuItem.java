@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.graphics.drawable.Drawable;
 import android.view.ActionProvider;
 import android.view.ContextMenu;
+import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.SubMenu;
 import android.view.View;
@@ -25,8 +26,9 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
         public void setCheckable(boolean checkable);
         public void setChecked(boolean checked);
         public void setOnClickListener(View.OnClickListener listener);
+        public void setSubMenuIndicator(boolean hasSubMenu);
         public void setVisibility(int visible);
-        public View getLayout();
+        public View getView();
     }
 
     public static interface OnShowAsActionChangedListener {
@@ -34,10 +36,14 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
         public void onShowAsActionChanged(GeckoMenuItem item, boolean isActionItem);
     }
 
+    public static interface OnVisibilityChangedListener {
+        public void onVisibilityChanged(GeckoMenuItem item, boolean isVisible);
+    }
+
     private Context mContext;
     private int mId;
     private int mOrder;
-    private GeckoMenuItem.Layout mLayout;
+    private Layout mLayout;
     private boolean mActionItem;
     private CharSequence mTitle;
     private CharSequence mTitleCondensed;
@@ -47,12 +53,15 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
     private boolean mEnabled;
     private Drawable mIcon;
     private int mIconRes;
+    private GeckoMenu mMenu;
+    private GeckoSubMenu mSubMenu;
     private MenuItem.OnMenuItemClickListener mMenuItemClickListener;
+    private OnVisibilityChangedListener mVisibilityChangedListener;
     private OnShowAsActionChangedListener mShowAsActionChangedListener;
 
     public GeckoMenuItem(Context context, int id) {
         mContext = context;
-        mLayout = new MenuItemDefault(context, null);
+        mLayout = (MenuItemDefault) LayoutInflater.from(mContext).inflate(R.layout.menu_item, null);
         mLayout.setId(id);
 
         mId = id;
@@ -63,8 +72,6 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
         mCheckable = true;
         mChecked = false;
         mMenuItemClickListener = null;
-
-        mLayout.setOnClickListener(this);
     }
 
     public GeckoMenuItem(Context context, int id, int order) {
@@ -104,7 +111,14 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
 
     @Override
     public Drawable getIcon() {
-        return null;
+        if (mIcon == null) {
+            if (mIconRes != 0)
+                return mContext.getResources().getDrawable(mIconRes);
+            else
+                return null;
+        } else {
+            return mIcon;
+        }
     }
 
     @Override
@@ -118,7 +132,11 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
     }
 
     public View getLayout() {
-        return mLayout.getLayout();
+        return mLayout.getView();
+    }
+
+    public void setMenu(GeckoMenu menu) {
+        mMenu = menu;
     }
 
     @Override
@@ -138,7 +156,7 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
 
     @Override
     public SubMenu getSubMenu() {
-        return null;
+        return mSubMenu;
     }
 
     @Override
@@ -153,7 +171,7 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
 
     @Override
     public boolean hasSubMenu() {
-        return false;
+        return (mSubMenu != null);
     }
 
     @Override
@@ -267,10 +285,10 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
         if (mShowAsActionChangedListener == null)
             return;
 
-        if (mActionItem == (actionEnum == 1))
+        if (mActionItem == (actionEnum > 0))
             return;
 
-        if (actionEnum == 1) {
+        if (actionEnum > 0) {
             if (!mShowAsActionChangedListener.hasActionItemBar())
                 return;
 
@@ -278,10 +296,10 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
             mLayout = new MenuItemActionBar(mContext, null);
         } else {
             // Change the type to default
-            mLayout = new MenuItemDefault(mContext, null);
+            mLayout = (MenuItemDefault) LayoutInflater.from(mContext).inflate(R.layout.menu_item, null);
         }
 
-        mActionItem = (actionEnum == 1);         
+        mActionItem = (actionEnum > 0);         
 
         mLayout.setId(mId);
         mLayout.setOnClickListener(this);
@@ -302,6 +320,12 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
 
     @Override
     public MenuItem setShowAsActionFlags(int actionEnum) {
+        return this;
+    }
+
+    public MenuItem setSubMenu(GeckoSubMenu subMenu) {
+        mSubMenu = subMenu;
+        mLayout.setSubMenuIndicator(subMenu != null);
         return this;
     }
 
@@ -329,16 +353,29 @@ public class GeckoMenuItem implements MenuItem, View.OnClickListener {
     public MenuItem setVisible(boolean visible) {
         mVisible = visible;
         mLayout.setVisibility(visible ? View.VISIBLE : View.GONE);
+
+        if (mVisibilityChangedListener != null)
+            mVisibilityChangedListener.onVisibilityChanged(this, visible);
+
         return this;
     }
 
     @Override
     public void onClick(View view) {
-        if (mMenuItemClickListener != null)
-            mMenuItemClickListener.onMenuItemClick(this);
+        // If there is a custom listener, pass it to parent menu, so that it can do default cleanups.
+        if (mMenuItemClickListener != null) {
+            if (mMenuItemClickListener instanceof GeckoMenu)
+                mMenuItemClickListener.onMenuItemClick(this);
+            else
+                mMenu.onCustomMenuItemClick(this, mMenuItemClickListener);
+        }
     }
 
     public void setOnShowAsActionChangedListener(OnShowAsActionChangedListener listener) {
         mShowAsActionChangedListener = listener;
-    } 
+    }
+
+    public void setOnVisibilityChangedListener(OnVisibilityChangedListener listener) {
+        mVisibilityChangedListener = listener;
+    }
 }

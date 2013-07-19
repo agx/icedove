@@ -10,12 +10,10 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= pref
 LIBRARY_NAME	= pref
 EXPORT_LIBRARY = 1
 IS_COMPONENT	= 1
 MODULE_NAME	= nsPrefModule
-GRE_MODULE	= 1
 LIBXUL_LIBRARY = 1
 
 CPPSRCS		= \
@@ -40,7 +38,20 @@ GARBAGE		+= $(addprefix $(DIST)/bin/defaults/pref/, \
 
 GARBAGE		+= greprefs.js
 
-GREPREF_FILES = $(topsrcdir)/netwerk/base/public/security-prefs.js $(srcdir)/init/all.js
+# TODO bug 813259 external files should be defined near their location in the source tree.
+grepref_files = $(topsrcdir)/netwerk/base/public/security-prefs.js $(srcdir)/init/all.js
+
+ifdef MOZ_DATA_REPORTING
+grepref_files += $(topsrcdir)/services/datareporting/datareporting-prefs.js
+endif
+
+ifdef MOZ_SERVICES_HEALTHREPORT
+ifneq (android,$(MOZ_WIDGET_TOOLKIT))
+grepref_files += $(topsrcdir)/services/healthreport/healthreport-prefs.js
+else
+grepref_files += $(topsrcdir)/mobile/android/chrome/content/healthreport-prefs.js
+endif
+endif
 
 # Optimizer bug with GCC 3.2.2 on OS/2
 ifeq ($(OS_ARCH), OS2)
@@ -51,7 +62,7 @@ nsPrefService.$(OBJ_SUFFIX): nsPrefService.cpp
 endif
 
 
-greprefs.js: $(GREPREF_FILES)
+greprefs.js: $(grepref_files)
 	$(PYTHON) $(topsrcdir)/config/Preprocessor.py $(PREF_PPFLAGS) $(DEFINES) $(ACDEFINES) $(XULPPFLAGS) $^ > $@
 
 libs:: greprefs.js

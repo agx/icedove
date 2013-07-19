@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -64,6 +63,9 @@ struct BaseIC : public MacroAssemblerTypedefs {
     // Whether a type barrier is in place for the result of the op.
     bool forcedTypeBarrier : 1;
 
+    // Whether this IC has been disabled.
+    bool disabled : 1;
+
     // Number of stubs generated.
     uint32_t stubsGenerated : 5;
 
@@ -77,6 +79,7 @@ struct BaseIC : public MacroAssemblerTypedefs {
         hit = false;
         slowCallPatched = false;
         forcedTypeBarrier = false;
+        disabled = false;
         stubsGenerated = 0;
         secondShapeGuard = 0;
     }
@@ -129,11 +132,11 @@ class BasePolyIC : public BaseIC {
         if (isOnePool()) {
             JSC::ExecutablePool *oldPool = u.execPool;
             JS_ASSERT(!isTagged(oldPool));
-            ExecPoolVector *execPools = OffTheBooks::new_<ExecPoolVector>(SystemAllocPolicy());
+            ExecPoolVector *execPools = js_new<ExecPoolVector>(SystemAllocPolicy());
             if (!execPools)
                 return false;
             if (!execPools->append(oldPool) || !execPools->append(pool)) {
-                Foreground::delete_(execPools);
+                js_delete(execPools);
                 return false;
             }
             u.taggedExecPools = tag(execPools);
@@ -154,7 +157,7 @@ class BasePolyIC : public BaseIC {
             ExecPoolVector *execPools = multiplePools();
             for (size_t i = 0; i < execPools->length(); i++)
                 (*execPools)[i]->release();
-            Foreground::delete_(execPools);
+            js_delete(execPools);
             u.execPool = NULL;
         }
         JS_ASSERT(areZeroPools());
@@ -305,7 +308,6 @@ struct SetElementIC : public BaseIC {
 
     void purge(Repatcher &repatcher);
     LookupStatus attachTypedArray(VMFrame &f, JSObject *obj, int32_t key);
-    LookupStatus attachHoleStub(VMFrame &f, JSObject *obj, int32_t key);
     LookupStatus update(VMFrame &f, const Value &objval, const Value &idval);
     LookupStatus disable(VMFrame &f, const char *reason);
     LookupStatus error(JSContext *cx);
@@ -391,8 +393,8 @@ struct PICInfo : public BasePolyIC {
     // last stub.
     bool shapeRegHasBaseShape : 1;
 
-    // True if can use the property cache.
-    bool usePropCache : 1;
+    // If set, at least one lookup was uncacheable (no stub was generated).
+    bool hadUncacheable : 1;
 
     // State flags.
     bool inlinePathPatched : 1;     // inline path has been patched
@@ -479,8 +481,22 @@ struct PICInfo : public BasePolyIC {
     // Index into the script's atom table.
     PropertyName *name;
 
+  private:
+    Shape *inlinePathShape_;
+
   public:
     void purge(Repatcher &repatcher);
+
+    void setInlinePathShape(Shape *shape) {
+        JS_ASSERT(!inlinePathShape_);
+        inlinePathShape_ = shape;
+    }
+
+    Shape *getSingleShape() {
+        if (disabled || hadUncacheable || stubsGenerated > 0)
+            return NULL;
+        return inlinePathShape_;
+    }
 
   protected:
     // Reset the data members to the state of a fresh PIC before any patching
@@ -489,6 +505,8 @@ struct PICInfo : public BasePolyIC {
         BasePolyIC::reset();
         inlinePathPatched = false;
         shapeRegHasBaseShape = true;
+        hadUncacheable = false;
+        inlinePathShape_ = NULL;
     }
 };
 

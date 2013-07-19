@@ -10,14 +10,11 @@ VPATH      = @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 EXTRA_JS_MODULES = \
-  LocaleRepository.jsm \
-  linuxTypes.jsm \
-  video.jsm \
+  LightweightThemeConsumer.jsm \
   JNI.jsm \
-  $(NULL)
-
-EXTRA_PP_JS_MODULES = \
-  contacts.jsm \
+  OrderedBroadcast.jsm \
+  Sanitizer.jsm \
+  SharedPreferences.jsm \
   $(NULL)
 
 include $(topsrcdir)/config/rules.mk

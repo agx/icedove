@@ -5,16 +5,12 @@
 
 /* the features that media queries can test */
 
-#include "mozilla/Util.h"
-
 #include "nsMediaFeatures.h"
 #include "nsGkAtoms.h"
 #include "nsCSSKeywords.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsCSSValue.h"
-#include "nsIDocShell.h"
-#include "nsLayoutUtils.h"
 #include "mozilla/LookAndFeel.h"
 #include "nsCSSRuleProcessor.h"
 
@@ -330,6 +326,14 @@ GetWindowsTheme(nsPresContext* aPresContext, const nsMediaFeature* aFeature,
     return NS_OK;
 }
 
+static nsresult
+GetIsGlyph(nsPresContext* aPresContext, const nsMediaFeature* aFeature,
+          nsCSSValue& aResult)
+{
+    aResult.SetIntValue(aPresContext->IsGlyph() ? 1 : 0, eCSSUnit_Integer);
+    return NS_OK;
+}
+
 /*
  * Adding new media features requires (1) adding the new feature to this
  * array, with appropriate entries (and potentially any new code needed
@@ -505,6 +509,13 @@ nsMediaFeatures::features[] = {
         GetSystemMetric
     },
     {
+        &nsGkAtoms::_moz_overlay_scrollbars,
+        nsMediaFeature::eMinMaxNotAllowed,
+        nsMediaFeature::eBoolInteger,
+        { &nsGkAtoms::overlay_scrollbars },
+        GetSystemMetric
+    },
+    {
         &nsGkAtoms::_moz_windows_default_theme,
         nsMediaFeature::eMinMaxNotAllowed,
         nsMediaFeature::eBoolInteger,
@@ -540,6 +551,13 @@ nsMediaFeatures::features[] = {
         GetSystemMetric
     },
     {
+        &nsGkAtoms::_moz_windows_glass,
+        nsMediaFeature::eMinMaxNotAllowed,
+        nsMediaFeature::eBoolInteger,
+        { &nsGkAtoms::windows_glass },
+        GetSystemMetric
+    },
+    {
         &nsGkAtoms::_moz_touch_enabled,
         nsMediaFeature::eMinMaxNotAllowed,
         nsMediaFeature::eBoolInteger,
@@ -566,6 +584,25 @@ nsMediaFeatures::features[] = {
         nsMediaFeature::eIdent,
         { nullptr },
         GetWindowsTheme
+    },
+
+    {
+        &nsGkAtoms::_moz_swipe_animation_enabled,
+        nsMediaFeature::eMinMaxNotAllowed,
+        nsMediaFeature::eBoolInteger,
+        { &nsGkAtoms::swipe_animation_enabled },
+        GetSystemMetric
+    },
+
+    // Internal -moz-is-glyph media feature: applies only inside SVG glyphs.
+    // Internal because it is really only useful in the user agent anyway
+    //  and therefore not worth standardizing.
+    {
+        &nsGkAtoms::_moz_is_glyph,
+        nsMediaFeature::eMinMaxNotAllowed,
+        nsMediaFeature::eBoolInteger,
+        { nullptr },
+        GetIsGlyph
     },
     // Null-mName terminator:
     {

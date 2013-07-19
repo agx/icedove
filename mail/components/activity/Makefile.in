@@ -9,19 +9,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE    = activity
-
 EXTRA_COMPONENTS = \
   nsActivity.js \
   nsActivityManager.js \
   nsActivityManagerUI.js \
   activityComponents.manifest \
   $(NULL)
-
-XPIDLSRCS = nsIActivity.idl \
-            nsIActivityManager.idl \
-            nsIActivityManagerUI.idl \
-            $(NULL)
 
 libs:: $(wildcard $(srcdir)/modules/*.js)
 	$(INSTALL) $(IFLAGS1) $^ $(FINAL_TARGET)/modules/activity

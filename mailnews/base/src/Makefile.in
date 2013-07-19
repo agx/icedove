@@ -10,7 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= msgbase
 LIBRARY_NAME	= msgbase_s
 ifndef MOZ_INCOMPLETE_EXTERNAL_LINKAGE
 MOZILLA_INTERNAL_API = 1
@@ -84,12 +83,6 @@ endif
 ifdef MOZ_LDAP_XPCOM
 DEFINES         += -DMOZ_LDAP_XPCOM
 endif
-
-EXPORTS = \
-		nsMsgRDFDataSource.h \
-		nsMsgRDFUtils.h \
-		nsMailDirServiceDefs.h \
-		$(NULL)
 
 EXTRA_COMPONENTS = \
 		nsMailNewsCommandLineHandler.js \

@@ -9,7 +9,6 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = libupdatecommon
 LIBRARY_NAME = updatecommon
 FORCE_STATIC_LIB =1
 LIBXUL_LIBRARY = 1
@@ -22,21 +21,10 @@ CPPSRCS = \
   readstrings.cpp \
   $(NULL)
 
-EXPORTS = updatelogging.h \
-  updatedefines.h \
-  readstrings.h \
-  $(NULL)
-
 ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
 CPPSRCS += updatehelper.cpp \
   uachelper.cpp \
   pathhash.cpp \
-  $(NULL)
-
-EXPORTS = updatehelper.h \
-  updatehelper.cpp \
-  uachelper.h \
-  pathhash.h \
   $(NULL)
 endif
 

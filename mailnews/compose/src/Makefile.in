@@ -10,7 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= msgcompose
 LIBRARY_NAME	= msgcompose_s
 ifndef MOZ_INCOMPLETE_EXTERNAL_LINKAGE
 MOZILLA_INTERNAL_API = 1
@@ -32,7 +31,6 @@ CPPSRCS		= \
 		nsSmtpService.cpp \
 		nsMsgCopy.cpp \
 		nsMsgSendLater.cpp \
-		nsMsgEncoders.cpp \
 		nsMsgCompUtils.cpp \
 		nsMsgAttachment.cpp \
 		nsMsgAttachmentHandler.cpp \
@@ -45,10 +43,6 @@ CPPSRCS		= \
 		nsMsgQuote.cpp \
 		nsURLFetcher.cpp \
 		nsSmtpServer.cpp \
-		$(NULL)
-
-EXPORTS		= \
-		nsComposeStrings.h \
 		$(NULL)
 
 ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))

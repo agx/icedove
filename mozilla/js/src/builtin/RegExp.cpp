@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99 ft=cpp:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -17,6 +16,8 @@
 using namespace js;
 using namespace js::types;
 
+using mozilla::ArrayLength;
+
 class RegExpMatchBuilder
 {
     JSContext   * const cx;
@@ -28,7 +29,7 @@ class RegExpMatchBuilder
     }
 
   public:
-    RegExpMatchBuilder(JSContext *cx, JSObject *array) : cx(cx), array(cx, array) {}
+    RegExpMatchBuilder(JSContext *cx, HandleObject array) : cx(cx), array(cx, array) {}
 
     bool append(uint32_t index, HandleValue v) {
         JS_ASSERT(!array->getOps()->getElement);
@@ -37,22 +38,20 @@ class RegExpMatchBuilder
     }
 
     bool setIndex(int index) {
-        Rooted<PropertyName*> name(cx, cx->runtime->atomState.indexAtom);
         RootedValue value(cx, Int32Value(index));
-        return setProperty(name, value);
+        return setProperty(cx->names().index, value);
     }
 
-    bool setInput(JSString *str) {
+    bool setInput(HandleString str) {
         JS_ASSERT(str);
-        Rooted<PropertyName*> name(cx, cx->runtime->atomState.inputAtom);
         RootedValue value(cx, StringValue(str));
-        return setProperty(name, value);
+        return setProperty(cx->names().input, value);
     }
 };
 
-static bool
-CreateRegExpMatchResult(JSContext *cx, JSString *input_, const jschar *chars, size_t length,
-                        MatchPairs *matchPairs, Value *rval)
+bool
+js::CreateRegExpMatchResult(JSContext *cx, HandleString input_, const jschar *chars, size_t length,
+                            MatchPairs &matches, MutableHandleValue rval)
 {
     RootedString input(cx, input_);
 
@@ -65,12 +64,12 @@ CreateRegExpMatchResult(JSContext *cx, JSString *input_, const jschar *chars, si
      *  input:          input string
      *  index:          start index for the match
      */
-    RootedObject array(cx, NewSlowEmptyArray(cx));
+    RootedObject array(cx, NewDenseEmptyArray(cx));
     if (!array)
         return false;
 
     if (!input) {
-        input = js_NewStringCopyN(cx, chars, length);
+        input = js_NewStringCopyN<CanGC>(cx, chars, length);
         if (!input)
             return false;
     }
@@ -78,10 +77,13 @@ CreateRegExpMatchResult(JSContext *cx, JSString *input_, const jschar *chars, si
     RegExpMatchBuilder builder(cx, array);
     RootedValue undefinedValue(cx, UndefinedValue());
 
-    for (size_t i = 0; i < matchPairs->pairCount(); ++i) {
-        MatchPair pair = matchPairs->pair(i);
+    size_t numPairs = matches.length();
+    JS_ASSERT(numPairs > 0);
 
-        JSString *captured;
+    for (size_t i = 0; i < numPairs; ++i) {
+        const MatchPair &pair = matches[i];
+
+        RootedString captured(cx);
         if (pair.isUndefined()) {
             JS_ASSERT(i != 0); /* Since we had a match, first pair must be present. */
             if (!builder.append(i, undefinedValue))
@@ -94,66 +96,84 @@ CreateRegExpMatchResult(JSContext *cx, JSString *input_, const jschar *chars, si
         }
     }
 
-    if (!builder.setIndex(matchPairs->pair(0).start) || !builder.setInput(input))
+    if (!builder.setIndex(matches[0].start) || !builder.setInput(input))
         return false;
 
-    *rval = ObjectValue(*array);
+    rval.setObject(*array);
     return true;
 }
 
-template <class T>
 bool
-ExecuteRegExpImpl(JSContext *cx, RegExpStatics *res, T &re, JSLinearString *input,
-                  const jschar *chars, size_t length,
-                  size_t *lastIndex, RegExpExecType type, Value *rval)
+js::CreateRegExpMatchResult(JSContext *cx, HandleString string, MatchPairs &matches,
+                            MutableHandleValue rval)
 {
-    LifoAllocScope allocScope(&cx->tempLifoAlloc());
-    MatchPairs *matchPairs = NULL;
-    RegExpRunStatus status = re.execute(cx, chars, length, lastIndex, &matchPairs);
-
-    switch (status) {
-      case RegExpRunStatus_Error:
+    Rooted<JSLinearString*> input(cx, string->ensureLinear(cx));
+    if (!input)
         return false;
-      case RegExpRunStatus_Success_NotFound:
-        *rval = NullValue();
-        return true;
-      default:
-        JS_ASSERT(status == RegExpRunStatus_Success);
-        JS_ASSERT(matchPairs);
-    }
-
-    if (res)
-        res->updateFromMatchPairs(cx, input, matchPairs);
-
-    *lastIndex = matchPairs->pair(0).limit;
-
-    if (type == RegExpTest) {
-        *rval = BooleanValue(true);
-        return true;
-    }
-
-    return CreateRegExpMatchResult(cx, input, chars, length, matchPairs, rval);
+    return CreateRegExpMatchResult(cx, input, input->chars(), input->length(), matches, rval);
 }
 
-bool
-js::ExecuteRegExp(JSContext *cx, RegExpStatics *res, RegExpShared &shared, JSLinearString *input,
-                  const jschar *chars, size_t length,
-                  size_t *lastIndex, RegExpExecType type, Value *rval)
+static RegExpRunStatus
+ExecuteRegExpImpl(JSContext *cx, RegExpStatics *res, RegExpShared &re,
+                  Handle<JSLinearString*> input, const jschar *chars, size_t length,
+                  size_t *lastIndex, MatchConduit &matches)
 {
-    return ExecuteRegExpImpl(cx, res, shared, input, chars, length, lastIndex, type, rval);
+    RegExpRunStatus status;
+
+    /* Switch between MatchOnly and IncludeSubpatterns modes. */
+    if (matches.isPair) {
+        size_t lastIndex_orig = *lastIndex;
+        /* Only one MatchPair slot provided: execute short-circuiting regexp. */
+        status = re.executeMatchOnly(cx, chars, length, lastIndex, *matches.u.pair);
+        if (status == RegExpRunStatus_Success && res)
+            res->updateLazily(cx, input, &re, lastIndex_orig);
+    } else {
+        /* Vector of MatchPairs provided: execute full regexp. */
+        status = re.execute(cx, chars, length, lastIndex, *matches.u.pairs);
+        if (status == RegExpRunStatus_Success && res)
+            res->updateFromMatchPairs(cx, input, *matches.u.pairs);
+    }
+
+    return status;
 }
 
+/* Legacy ExecuteRegExp behavior is baked into the JSAPI. */
 bool
-js::ExecuteRegExp(JSContext *cx, RegExpStatics *res, RegExpObject &reobj, JSLinearString *input,
-                  const jschar *chars, size_t length,
-                  size_t *lastIndex, RegExpExecType type, Value *rval)
+js::ExecuteRegExpLegacy(JSContext *cx, RegExpStatics *res, RegExpObject &reobj,
+                        Handle<JSLinearString*> input, const jschar *chars, size_t length,
+                        size_t *lastIndex, bool test, MutableHandleValue rval)
 {
-    return ExecuteRegExpImpl(cx, res, reobj, input, chars, length, lastIndex, type, rval);
+    RegExpGuard shared(cx);
+    if (!reobj.getShared(cx, &shared))
+        return false;
+
+    ScopedMatchPairs matches(&cx->tempLifoAlloc());
+    MatchConduit conduit(&matches);
+
+    RegExpRunStatus status =
+        ExecuteRegExpImpl(cx, res, *shared, input, chars, length, lastIndex, conduit);
+
+    if (status == RegExpRunStatus_Error)
+        return false;
+
+    if (status == RegExpRunStatus_Success_NotFound) {
+        /* ExecuteRegExp() previously returned an array or null. */
+        rval.setNull();
+        return true;
+    }
+
+    if (test) {
+        /* Forbid an array, as an optimization. */
+        rval.setBoolean(true);
+        return true;
+    }
+
+    return CreateRegExpMatchResult(cx, input, chars, length, matches, rval);
 }
 
 /* Note: returns the original if no escaping need be performed. */
 static JSAtom *
-EscapeNakedForwardSlashes(JSContext *cx, JSAtom *unescaped)
+EscapeNakedForwardSlashes(JSContext *cx, HandleAtom unescaped)
 {
     size_t oldLen = unescaped->length();
     const jschar *oldChars = unescaped->chars();
@@ -180,7 +200,7 @@ EscapeNakedForwardSlashes(JSContext *cx, JSAtom *unescaped)
             return NULL;
     }
 
-    return sb.empty() ? unescaped : sb.finishAtom();
+    return sb.empty() ? (JSAtom *)unescaped : sb.finishAtom();
 }
 
 /*
@@ -207,7 +227,7 @@ CompileRegExpObject(JSContext *cx, RegExpObjectBuilder &builder, CallArgs args)
         return true;
     }
 
-    Value sourceValue = args[0];
+    RootedValue sourceValue(cx, args[0]);
 
     /*
      * If we get passed in an object whose internal [[Class]] property is
@@ -232,8 +252,8 @@ CompileRegExpObject(JSContext *cx, RegExpObjectBuilder &builder, CallArgs args)
          */
         RegExpFlag flags;
         {
-            RegExpGuard g;
-            if (!RegExpToShared(cx, *sourceObj, &g))
+            RegExpGuard g(cx);
+            if (!RegExpToShared(cx, sourceObj, &g))
                 return false;
 
             flags = g->getFlags();
@@ -244,7 +264,7 @@ CompileRegExpObject(JSContext *cx, RegExpObjectBuilder &builder, CallArgs args)
          * to executing RegExpObject::getSource on the unwrapped object.
          */
         RootedValue v(cx);
-        if (!JSObject::getProperty(cx, sourceObj, sourceObj, cx->runtime->atomState.sourceAtom, &v))
+        if (!JSObject::getProperty(cx, sourceObj, sourceObj, cx->names().source, &v))
             return false;
 
         Rooted<JSAtom*> sourceAtom(cx, &v.toString()->asAtom());
@@ -261,18 +281,18 @@ CompileRegExpObject(JSContext *cx, RegExpObjectBuilder &builder, CallArgs args)
         source = cx->runtime->emptyString;
     } else {
         /* Coerce to string and compile. */
-        JSString *str = ToString(cx, sourceValue);
+        JSString *str = ToString<CanGC>(cx, sourceValue);
         if (!str)
             return false;
 
-        source = AtomizeString(cx, str);
+        source = AtomizeString<CanGC>(cx, str);
         if (!source)
             return false;
     }
 
     RegExpFlag flags = RegExpFlag(0);
     if (args.hasDefined(1)) {
-        JSString *flagStr = ToString(cx, args[1]);
+        RootedString flagStr(cx, ToString<CanGC>(cx, args[1]));
         if (!flagStr)
             return false;
         args[1].setString(flagStr);
@@ -284,7 +304,7 @@ CompileRegExpObject(JSContext *cx, RegExpObjectBuilder &builder, CallArgs args)
     if (!escapedSourceStr)
         return false;
 
-    if (!js::detail::RegExpCode::checkSyntax(cx, NULL, escapedSourceStr))
+    if (!js::RegExpShared::checkSyntax(cx, NULL, escapedSourceStr))
         return false;
 
     RegExpStatics *res = cx->regExpStatics();
@@ -361,7 +381,7 @@ regexp_toString(JSContext *cx, unsigned argc, Value *vp)
     return CallNonGenericMethod<IsRegExp, regexp_toString_impl>(cx, args);
 }
 
-static JSFunctionSpec regexp_methods[] = {
+static const JSFunctionSpec regexp_methods[] = {
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str,  regexp_toString,    0,0),
 #endif
@@ -393,23 +413,23 @@ static JSFunctionSpec regexp_methods[] = {
         code;                                                                   \
     }
 
-DEFINE_STATIC_GETTER(static_input_getter,        return res->createPendingInput(cx, vp.address()))
-DEFINE_STATIC_GETTER(static_multiline_getter,    vp.set(BOOLEAN_TO_JSVAL(res->multiline()));
+DEFINE_STATIC_GETTER(static_input_getter,        return res->createPendingInput(cx, vp))
+DEFINE_STATIC_GETTER(static_multiline_getter,    vp.setBoolean(res->multiline());
                                                  return true)
-DEFINE_STATIC_GETTER(static_lastMatch_getter,    return res->createLastMatch(cx, vp.address()))
-DEFINE_STATIC_GETTER(static_lastParen_getter,    return res->createLastParen(cx, vp.address()))
-DEFINE_STATIC_GETTER(static_leftContext_getter,  return res->createLeftContext(cx, vp.address()))
-DEFINE_STATIC_GETTER(static_rightContext_getter, return res->createRightContext(cx, vp.address()))
+DEFINE_STATIC_GETTER(static_lastMatch_getter,    return res->createLastMatch(cx, vp))
+DEFINE_STATIC_GETTER(static_lastParen_getter,    return res->createLastParen(cx, vp))
+DEFINE_STATIC_GETTER(static_leftContext_getter,  return res->createLeftContext(cx, vp))
+DEFINE_STATIC_GETTER(static_rightContext_getter, return res->createRightContext(cx, vp))
 
-DEFINE_STATIC_GETTER(static_paren1_getter,       return res->createParen(cx, 1, vp.address()))
-DEFINE_STATIC_GETTER(static_paren2_getter,       return res->createParen(cx, 2, vp.address()))
-DEFINE_STATIC_GETTER(static_paren3_getter,       return res->createParen(cx, 3, vp.address()))
-DEFINE_STATIC_GETTER(static_paren4_getter,       return res->createParen(cx, 4, vp.address()))
-DEFINE_STATIC_GETTER(static_paren5_getter,       return res->createParen(cx, 5, vp.address()))
-DEFINE_STATIC_GETTER(static_paren6_getter,       return res->createParen(cx, 6, vp.address()))
-DEFINE_STATIC_GETTER(static_paren7_getter,       return res->createParen(cx, 7, vp.address()))
-DEFINE_STATIC_GETTER(static_paren8_getter,       return res->createParen(cx, 8, vp.address()))
-DEFINE_STATIC_GETTER(static_paren9_getter,       return res->createParen(cx, 9, vp.address()))
+DEFINE_STATIC_GETTER(static_paren1_getter,       return res->createParen(cx, 1, vp))
+DEFINE_STATIC_GETTER(static_paren2_getter,       return res->createParen(cx, 2, vp))
+DEFINE_STATIC_GETTER(static_paren3_getter,       return res->createParen(cx, 3, vp))
+DEFINE_STATIC_GETTER(static_paren4_getter,       return res->createParen(cx, 4, vp))
+DEFINE_STATIC_GETTER(static_paren5_getter,       return res->createParen(cx, 5, vp))
+DEFINE_STATIC_GETTER(static_paren6_getter,       return res->createParen(cx, 6, vp))
+DEFINE_STATIC_GETTER(static_paren7_getter,       return res->createParen(cx, 7, vp))
+DEFINE_STATIC_GETTER(static_paren8_getter,       return res->createParen(cx, 8, vp))
+DEFINE_STATIC_GETTER(static_paren9_getter,       return res->createParen(cx, 9, vp))
 
 #define DEFINE_STATIC_SETTER(name, code)                                        \
     static JSBool                                                               \
@@ -435,7 +455,7 @@ const uint8_t RO_REGEXP_STATIC_PROP_ATTRS = REGEXP_STATIC_PROP_ATTRS | JSPROP_RE
 const uint8_t HIDDEN_PROP_ATTRS = JSPROP_PERMANENT | JSPROP_SHARED;
 const uint8_t RO_HIDDEN_PROP_ATTRS = HIDDEN_PROP_ATTRS | JSPROP_READONLY;
 
-static JSPropertySpec regexp_static_props[] = {
+static const JSPropertySpec regexp_static_props[] = {
     {"input",        0, REGEXP_STATIC_PROP_ATTRS,    JSOP_WRAPPER(static_input_getter),
                                                      JSOP_WRAPPER(static_input_setter)},
     {"multiline",    0, REGEXP_STATIC_PROP_ATTRS,    JSOP_WRAPPER(static_multiline_getter),
@@ -482,7 +502,7 @@ static JSPropertySpec regexp_static_props[] = {
 };
 
 JSObject *
-js_InitRegExpClass(JSContext *cx, JSObject *obj)
+js_InitRegExpClass(JSContext *cx, HandleObject obj)
 {
     JS_ASSERT(obj->isNative());
 
@@ -493,8 +513,8 @@ js_InitRegExpClass(JSContext *cx, JSObject *obj)
         return NULL;
     proto->setPrivate(NULL);
 
+    HandlePropertyName empty = cx->names().empty;
     RegExpObjectBuilder builder(cx, &proto->asRegExp());
-    Rooted<JSAtom*> empty(cx, cx->runtime->emptyString);
     if (!builder.build(empty, RegExpFlag(0)))
         return NULL;
 
@@ -502,7 +522,7 @@ js_InitRegExpClass(JSContext *cx, JSObject *obj)
         return NULL;
 
     RootedFunction ctor(cx);
-    ctor = global->createConstructor(cx, regexp_construct, CLASS_NAME(cx, RegExp), 2);
+    ctor = global->createConstructor(cx, regexp_construct, cx->names().RegExp, 2);
     if (!ctor)
         return NULL;
 
@@ -519,117 +539,119 @@ js_InitRegExpClass(JSContext *cx, JSObject *obj)
     return proto;
 }
 
-
-static const jschar GreedyStarChars[] = {'.', '*'};
-
-static inline bool
-StartsWithGreedyStar(JSAtom *source)
+RegExpRunStatus
+js::ExecuteRegExp(JSContext *cx, HandleObject regexp, HandleString string, MatchConduit &matches)
 {
-    return false;
+    /* Step 1 (b) was performed by CallNonGenericMethod. */
+    Rooted<RegExpObject*> reobj(cx, &regexp->asRegExp());
 
-#if 0
-    if (source->length() < 3)
-        return false;
-
-    const jschar *chars = source->chars();
-    return chars[0] == GreedyStarChars[0] &&
-           chars[1] == GreedyStarChars[1] &&
-           chars[2] != '?';
-#endif
-}
-
-static inline bool
-GetSharedForGreedyStar(JSContext *cx, JSAtom *source, RegExpFlag flags, RegExpGuard *g)
-{
-    if (cx->compartment->regExps.lookupHack(source, flags, cx, g))
-        return true;
-
-    JSAtom *hackedSource = AtomizeChars(cx, source->chars() + ArrayLength(GreedyStarChars),
-                                        source->length() - ArrayLength(GreedyStarChars));
-    if (!hackedSource)
-        return false;
-
-    return cx->compartment->regExps.getHack(cx, source, hackedSource, flags, g);
-}
-
-/*
- * ES5 15.10.6.2 (and 15.10.6.3, which calls 15.10.6.2).
- *
- * RegExp.prototype.test doesn't need to create a results array, and we use
- * |execType| to perform this optimization.
- */
-static bool
-ExecuteRegExp(JSContext *cx, RegExpExecType execType, CallArgs args)
-{
-    /* Step 1 was performed by CallNonGenericMethod. */
-    Rooted<RegExpObject*> reobj(cx, &args.thisv().toObject().asRegExp());
-
-    RegExpGuard re;
-    if (StartsWithGreedyStar(reobj->getSource())) {
-        if (!GetSharedForGreedyStar(cx, reobj->getSource(), reobj->getFlags(), &re))
-            return false;
-    } else {
-        if (!reobj->getShared(cx, &re))
-            return false;
-    }
+    RegExpGuard re(cx);
+    if (!reobj->getShared(cx, &re))
+        return RegExpRunStatus_Error;
 
     RegExpStatics *res = cx->regExpStatics();
 
-    /* Step 2. */
-    JSString *input = ToString(cx, (args.length() > 0) ? args[0] : UndefinedValue());
-    if (!input)
-        return false;
-
     /* Step 3. */
-    Rooted<JSLinearString*> linearInput(cx, input->ensureLinear(cx));
-    if (!linearInput)
-        return false;
+    Rooted<JSLinearString*> input(cx, string->ensureLinear(cx));
+    if (!input)
+        return RegExpRunStatus_Error;
 
     /* Step 4. */
     Value lastIndex = reobj->getLastIndex();
+    size_t length = input->length();
 
     /* Step 5. */
-    double i;
-    if (!ToInteger(cx, lastIndex, &i))
-        return false;
+    int i;
+    if (lastIndex.isInt32()) {
+        /* Aggressively avoid doubles. */
+        i = lastIndex.toInt32();
+    } else {
+        double d;
+        if (!ToInteger(cx, lastIndex, &d))
+            return RegExpRunStatus_Error;
+
+        /* Inlined steps 6, 7, 9a with doubles to detect failure case. */
+        if ((re->global() || re->sticky()) && (d < 0 || d > length)) {
+            reobj->zeroLastIndex();
+            return RegExpRunStatus_Success_NotFound;
+        }
+
+        i = int(d);
+    }
 
     /* Steps 6-7 (with sticky extension). */
     if (!re->global() && !re->sticky())
         i = 0;
 
-    const jschar *chars = linearInput->chars();
-    size_t length = linearInput->length();
-
     /* Step 9a. */
-    if (i < 0 || i > length) {
+    if (i < 0 || size_t(i) > length) {
         reobj->zeroLastIndex();
-        args.rval().setNull();
-        return true;
+        return RegExpRunStatus_Success_NotFound;
     }
 
     /* Steps 8-21. */
+    const jschar *chars = input->chars();
     size_t lastIndexInt(i);
-    if (!ExecuteRegExp(cx, res, *re, linearInput, chars, length, &lastIndexInt, execType,
-                       args.rval().address())) {
-        return false;
-    }
+    RegExpRunStatus status =
+        ExecuteRegExpImpl(cx, res, *re, input, chars, length, &lastIndexInt, matches);
+
+    if (status == RegExpRunStatus_Error)
+        return RegExpRunStatus_Error;
 
     /* Step 11 (with sticky extension). */
-    if (re->global() || (!args.rval().isNull() && re->sticky())) {
-        if (args.rval().isNull())
+    if (re->global() || (status == RegExpRunStatus_Success && re->sticky())) {
+        if (status == RegExpRunStatus_Success_NotFound)
             reobj->zeroLastIndex();
         else
             reobj->setLastIndex(lastIndexInt);
     }
 
-    return true;
+    return status;
+}
+
+/* ES5 15.10.6.2 (and 15.10.6.3, which calls 15.10.6.2). */
+static RegExpRunStatus
+ExecuteRegExp(JSContext *cx, CallArgs args, MatchConduit &matches)
+{
+    /* Step 1 (a) was performed by CallNonGenericMethod. */
+    RootedObject regexp(cx, &args.thisv().toObject());
+
+    /* Step 2. */
+    RootedString string(cx, ToString<CanGC>(cx, args.get(0)));
+    if (!string)
+        return RegExpRunStatus_Error;
+
+    return ExecuteRegExp(cx, regexp, string, matches);
 }
 
 /* ES5 15.10.6.2. */
 static bool
 regexp_exec_impl(JSContext *cx, CallArgs args)
 {
-    return ExecuteRegExp(cx, RegExpExec, args);
+    /* Execute regular expression and gather matches. */
+    ScopedMatchPairs matches(&cx->tempLifoAlloc());
+    MatchConduit conduit(&matches);
+
+    /*
+     * Extract arguments to share between ExecuteRegExp()
+     * and CreateRegExpMatchResult().
+     */
+    RootedObject regexp(cx, &args.thisv().toObject());
+    RootedString string(cx, ToString<CanGC>(cx, args.get(0)));
+    if (!string)
+        return false;
+
+    RegExpRunStatus status = ExecuteRegExp(cx, regexp, string, conduit);
+
+    if (status == RegExpRunStatus_Error)
+        return false;
+
+    if (status == RegExpRunStatus_Success_NotFound) {
+        args.rval().setNull();
+        return true;
+    }
+
+    return CreateRegExpMatchResult(cx, string, matches, args.rval());
 }
 
 JSBool
@@ -643,11 +665,22 @@ js::regexp_exec(JSContext *cx, unsigned argc, Value *vp)
 static bool
 regexp_test_impl(JSContext *cx, CallArgs args)
 {
-    if (!ExecuteRegExp(cx, RegExpTest, args))
-        return false;
-    if (!args.rval().isTrue())
-        args.rval().setBoolean(false);
-    return true;
+    MatchPair match;
+    MatchConduit conduit(&match);
+    RegExpRunStatus status = ExecuteRegExp(cx, args, conduit);
+    args.rval().setBoolean(status == RegExpRunStatus_Success);
+    return (status != RegExpRunStatus_Error);
+}
+
+/* Separate interface for use by IonMonkey. */
+bool
+js::regexp_test_raw(JSContext *cx, HandleObject regexp, HandleString input, JSBool *result)
+{
+    MatchPair match;
+    MatchConduit conduit(&match);
+    RegExpRunStatus status = ExecuteRegExp(cx, regexp, input, conduit);
+    *result = (status == RegExpRunStatus_Success);
+    return (status != RegExpRunStatus_Error);
 }
 
 JSBool

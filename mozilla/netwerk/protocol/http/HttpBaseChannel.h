@@ -17,6 +17,7 @@
 #include "nsHttpConnectionInfo.h"
 #include "nsIEncodedChannel.h"
 #include "nsIHttpChannel.h"
+#include "nsHttpHandler.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsIUploadChannel.h"
 #include "nsIUploadChannel2.h"
@@ -30,6 +31,8 @@
 #include "nsILoadContext.h"
 #include "mozilla/net/NeckoCommon.h"
 #include "nsThreadUtils.h"
+#include "PrivateBrowsingChannel.h"
+#include "mozilla/net/DNS.h"
 
 namespace mozilla {
 namespace net {
@@ -50,6 +53,7 @@ class HttpBaseChannel : public nsHashPropertyBag
                       , public nsISupportsPriority
                       , public nsIResumableChannel
                       , public nsITraceableChannel
+                      , public PrivateBrowsingChannel<HttpBaseChannel>
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
@@ -60,7 +64,9 @@ public:
   HttpBaseChannel();
   virtual ~HttpBaseChannel();
 
-  virtual nsresult Init(nsIURI *aURI, uint8_t aCaps, nsProxyInfo *aProxyInfo);
+  virtual nsresult Init(nsIURI *aURI, uint32_t aCaps, nsProxyInfo *aProxyInfo,
+                        uint32_t aProxyResolveFlags,
+                        nsIURI *aProxyURI);
 
   // nsIRequest
   NS_IMETHOD GetName(nsACString& aName);
@@ -84,10 +90,12 @@ public:
   NS_IMETHOD GetContentCharset(nsACString& aContentCharset);
   NS_IMETHOD SetContentCharset(const nsACString& aContentCharset);
   NS_IMETHOD GetContentDisposition(uint32_t *aContentDisposition);
+  NS_IMETHOD SetContentDisposition(uint32_t aContentDisposition);
   NS_IMETHOD GetContentDispositionFilename(nsAString& aContentDispositionFilename);
+  NS_IMETHOD SetContentDispositionFilename(const nsAString& aContentDispositionFilename);
   NS_IMETHOD GetContentDispositionHeader(nsACString& aContentDispositionHeader);
-  NS_IMETHOD GetContentLength(int32_t *aContentLength);
-  NS_IMETHOD SetContentLength(int32_t aContentLength);
+  NS_IMETHOD GetContentLength(int64_t *aContentLength);
+  NS_IMETHOD SetContentLength(int64_t aContentLength);
   NS_IMETHOD Open(nsIInputStream **aResult);
 
   // nsIEncodedChannel
@@ -117,6 +125,7 @@ public:
   NS_IMETHOD GetResponseStatus(uint32_t *aValue);
   NS_IMETHOD GetResponseStatusText(nsACString& aValue);
   NS_IMETHOD GetRequestSucceeded(bool *aValue);
+  NS_IMETHOD RedirectTo(nsIURI *newURI);
 
   // nsIHttpChannelInternal
   NS_IMETHOD GetDocumentURI(nsIURI **aDocumentURI);
@@ -136,6 +145,10 @@ public:
   NS_IMETHOD GetRemotePort(int32_t* port);
   NS_IMETHOD GetAllowSpdy(bool *aAllowSpdy);
   NS_IMETHOD SetAllowSpdy(bool aAllowSpdy);
+  NS_IMETHOD GetLoadAsBlocking(bool *aLoadAsBlocking);
+  NS_IMETHOD SetLoadAsBlocking(bool aLoadAsBlocking);
+  NS_IMETHOD GetLoadUnblocked(bool *aLoadUnblocked);
+  NS_IMETHOD SetLoadUnblocked(bool aLoadUnblocked);
   
   inline void CleanRedirectCacheChainIfNecessary()
   {
@@ -178,13 +191,10 @@ public:
     nsHttpResponseHead * GetResponseHead() const { return mResponseHead; }
     nsHttpRequestHead * GetRequestHead() { return &mRequestHead; }
 
-    const PRNetAddr& GetSelfAddr() { return mSelfAddr; }
-    const PRNetAddr& GetPeerAddr() { return mPeerAddr; }
+    const NetAddr& GetSelfAddr() { return mSelfAddr; }
+    const NetAddr& GetPeerAddr() { return mPeerAddr; }
 
 public: /* Necko internal use only... */
-
-  bool ShouldRewriteRedirectToGET(uint32_t httpStatus, nsHttpAtom method);
-  bool IsSafeMethod(nsHttpAtom method);
 
 protected:
 
@@ -192,12 +202,21 @@ protected:
   void     DoNotifyListener();
   virtual void DoNotifyListenerCleanup() = 0;
 
+  // drop reference to listener, its callbacks, and the progress sink
+  void ReleaseListeners();
+
   nsresult ApplyContentConversions();
 
   void AddCookiesToRequest();
   virtual nsresult SetupReplacementChannel(nsIURI *,
                                            nsIChannel *,
                                            bool preserveMethod);
+
+  // bundle calling OMR observers and marking flag into one function
+  inline void CallOnModifyRequestObservers() {
+    gHttpHandler->OnModifyRequest(this);
+    mRequestObserversCalled = true;
+  }
 
   // Helper function to simplify getting notification callbacks.
   template <class T>
@@ -207,6 +226,8 @@ protected:
                                   NS_GET_TEMPLATE_IID(T),
                                   getter_AddRefs(aResult));
   }
+
+  friend class PrivateBrowsingChannel<HttpBaseChannel>;
 
   nsCOMPtr<nsIURI>                  mURI;
   nsCOMPtr<nsIURI>                  mOriginalURI;
@@ -224,14 +245,15 @@ protected:
   nsCOMPtr<nsIInputStream>          mUploadStream;
   nsAutoPtr<nsHttpResponseHead>     mResponseHead;
   nsRefPtr<nsHttpConnectionInfo>    mConnectionInfo;
+  nsCOMPtr<nsIProxyInfo>            mProxyInfo;
 
   nsCString                         mSpec; // ASCII encoded URL spec
   nsCString                         mContentTypeHint;
   nsCString                         mContentCharsetHint;
   nsCString                         mUserSetCookieHeader;
 
-  PRNetAddr                         mSelfAddr;
-  PRNetAddr                         mPeerAddr;
+  NetAddr                           mSelfAddr;
+  NetAddr                           mPeerAddr;
 
   // HTTP Upgrade Data
   nsCString                        mUpgradeProtocol;
@@ -243,14 +265,16 @@ protected:
 
   nsresult                          mStatus;
   uint32_t                          mLoadFlags;
+  uint32_t                          mCaps;
   int16_t                           mPriority;
-  uint8_t                           mCaps;
   uint8_t                           mRedirectionLimit;
 
   uint32_t                          mApplyConversion            : 1;
   uint32_t                          mCanceled                   : 1;
   uint32_t                          mIsPending                  : 1;
   uint32_t                          mWasOpened                  : 1;
+  // if 1 all "http-on-{opening|modify|etc}-request" observers have been called
+  uint32_t                          mRequestObserversCalled     : 1;
   uint32_t                          mResponseHeadersModified    : 1;
   uint32_t                          mAllowPipelining            : 1;
   uint32_t                          mForceAllowThirdPartyCookie : 1;
@@ -263,12 +287,20 @@ protected:
   // True if timing collection is enabled
   uint32_t                          mTimingEnabled              : 1;
   uint32_t                          mAllowSpdy                  : 1;
-  uint32_t                          mPrivateBrowsing            : 1;
+  uint32_t                          mLoadAsBlocking             : 1;
+  uint32_t                          mLoadUnblocked              : 1;
 
   // Current suspension depth for this channel object
   uint32_t                          mSuspendCount;
 
+  nsCOMPtr<nsIURI>                  mAPIRedirectToURI;
   nsAutoPtr<nsTArray<nsCString> >   mRedirectedCachekeys;
+
+  uint32_t                          mProxyResolveFlags;
+  nsCOMPtr<nsIURI>                  mProxyURI;
+
+  uint32_t                          mContentDispositionHint;
+  nsAutoPtr<nsString>               mContentDispositionFilename;
 };
 
 // Share some code while working around C++'s absurd inability to handle casting

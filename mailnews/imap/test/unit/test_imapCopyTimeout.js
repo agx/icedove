@@ -18,6 +18,7 @@ load("../../../resources/messageGenerator.js");
 load("../../../resources/IMAPpump.js");
 
 // Globals
+Components.utils.import("resource:///modules/mailServices.js");
 
 setupIMAPPump();
 
@@ -25,7 +26,7 @@ var gGotAlert = false;
 var gGotMsgAdded = false;
 
 function alert(aDialogTitle, aText) {
-  do_check_eq(aText.indexOf("Connection to server Mail for  timed out."), 0);
+  do_check_true(aText.startsWith("Connection to server Mail for  timed out."));
   gGotAlert = true;
   async_driver();
 }
@@ -69,12 +70,10 @@ function loadImapMessage()
   let gMessageGenerator = new MessageGenerator();
   messages = messages.concat(gMessageGenerator.makeMessage());
 
-  let ioService = Cc["@mozilla.org/network/io-service;1"]
-                  .getService(Ci.nsIIOService);
   let msgURI =
-    ioService.newURI("data:text/plain;base64," +
-                     btoa(messages[0].toMessageString()),
-                     null, null);
+    Services.io.newURI("data:text/plain;base64," +
+                       btoa(messages[0].toMessageString()),
+                       null, null);
   let imapInbox =  gIMAPDaemon.getMailbox("INBOX")
   gMessage = new imapMessage(msgURI.spec, imapInbox.uidnext++, []);
   gIMAPMailbox.addMessage(gMessage);
@@ -96,12 +95,10 @@ function moveMessageToTargetFolder()
   var messages = Cc["@mozilla.org/array;1"]
                    .createInstance(Ci.nsIMutableArray);
   messages.appendElement(msgHdr, false);
-  let copyService = Cc["@mozilla.org/messenger/messagecopyservice;1"]
-                      .getService(Ci.nsIMsgCopyService);
   // This should cause the move to be done as an offline imap operation
   // that's played back immediately.
-  copyService.CopyMessages(gIMAPInbox, messages, gTargetFolder, true,
-                           CopyListener, gDummyMsgWindow, true);
+  MailServices.copy.CopyMessages(gIMAPInbox, messages, gTargetFolder, true,
+                                 CopyListener, gDummyMsgWindow, true);
   yield false;
 }
 
@@ -160,11 +157,9 @@ function run_test()
   Services.prefs.setBoolPref("mail.server.default.autosync_offline_stores", false);
   // Add folder listeners that will capture async events
   const nsIMFNService = Ci.nsIMsgFolderNotificationService;
-  let MFNService = Cc["@mozilla.org/messenger/msgnotificationservice;1"]
-                      .getService(nsIMFNService);
   let flags =
         nsIMFNService.folderAdded |
         nsIMFNService.msgAdded;
-  MFNService.addListener(mfnListener, flags);
+  MailServices.mfn.addListener(mfnListener, flags);
   async_run_tests(tests);
 }

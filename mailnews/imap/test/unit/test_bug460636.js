@@ -28,9 +28,8 @@ function setup() {
    * Ok, prelude done. Read the original message from disk
    * (through a file URI), and add it to the Inbox.
    */
-  var msgfileuri = Cc["@mozilla.org/network/io-service;1"]
-                     .getService(Ci.nsIIOService)
-                     .newFileURI(gMsgFile).QueryInterface(Ci.nsIFileURL);
+  var msgfileuri =
+    Services.io.newFileURI(gMsgFile).QueryInterface(Ci.nsIFileURL);
 
   gIMAPMailbox.addMessage(new imapMessage(msgfileuri.spec, gIMAPMailbox.uidnext++, []));
   gIMAPInbox.updateFolderWithListener(null, asyncUrlListener);
@@ -42,9 +41,7 @@ function setup() {
    * files). If we pass the test, we'll remove the file afterwards
    * (cf. UrlListener), otherwise it's kept in IMapMD.
    */
-  gSavedMsgFile = Cc["@mozilla.org/file/directory_service;1"]
-                  .getService(Ci.nsIProperties)
-                  .get("IMapMD", Ci.nsILocalFile);
+  gSavedMsgFile = Services.dirsvc.get("IMapMD", Ci.nsIFile);
   gSavedMsgFile.append(gFileName + ".eml");
 
   /*

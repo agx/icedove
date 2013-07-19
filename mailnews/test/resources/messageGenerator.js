@@ -426,7 +426,7 @@ SyntheticMessage.prototype = {
    */
   _formatMailFromNameAndAddress: function(aNameAndAddress) {
     // if the name is encoded, do not put it in quotes!
-    return (aNameAndAddress[0][0] == "=" ?
+    return (aNameAndAddress[0].startsWith("=") ?
               (aNameAndAddress[0] + " ") :
               ('"' + aNameAndAddress[0] + '" ')) +
            '<' + aNameAndAddress[1] + '>';
@@ -715,7 +715,7 @@ MessageGenerator.prototype = {
                 LAST_NAMES.length;
 
     return FIRST_NAMES[iFirst].toLowerCase() + "@" +
-           LAST_NAMES[iLast].toLowerCase() + ".nul";
+           LAST_NAMES[iLast].toLowerCase() + ".invalid";
   },
 
   /**
@@ -789,7 +789,7 @@ MessageGenerator.prototype = {
    * @returns a Message-id suitable for the given message.
    */
   makeMessageId: function(aSynthMessage) {
-    let msgId = this._nextMessageIdNum + "@made.up";
+    let msgId = this._nextMessageIdNum + "@made.up.invalid";
     this._nextMessageIdNum++;
     return msgId;
   },
@@ -876,7 +876,7 @@ MessageGenerator.prototype = {
       msg.parent = srcMsg;
       msg.parent.children.push(msg);
 
-      msg.subject = (srcMsg.subject.substring(0, 4) == "Re: ") ? srcMsg.subject
+      msg.subject = (srcMsg.subject.startsWith("Re: ")) ? srcMsg.subject
                     : ("Re: " + srcMsg.subject);
       if (aArgs.replyAll)
         msg.to = [srcMsg.from].concat(srcMsg.to.slice(1));

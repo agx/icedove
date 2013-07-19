@@ -1,5 +1,6 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -14,9 +15,7 @@
 #include "jstypes.h"
 #include "jsutil.h"
 
-JS_BEGIN_EXTERN_C
-
-#if defined(__GNUC__) && defined(__i386__) && (__GNUC__ >= 3) && !defined(XP_OS2)
+#if defined(__GNUC__) && defined(__i386__) && !defined(XP_OS2)
 #define JS_DHASH_FASTCALL __attribute__ ((regparm (3),stdcall))
 #elif defined(XP_WIN)
 #define JS_DHASH_FASTCALL __fastcall
@@ -86,9 +85,21 @@ struct JSDHashEntryHdr {
     JSDHashNumber       keyHash;        /* every entry must begin like this */
 };
 
-#define JS_DHASH_ENTRY_IS_FREE(entry)   ((entry)->keyHash == 0)
-#define JS_DHASH_ENTRY_IS_BUSY(entry)   (!JS_DHASH_ENTRY_IS_FREE(entry))
-#define JS_DHASH_ENTRY_IS_LIVE(entry)   ((entry)->keyHash >= 2)
+MOZ_ALWAYS_INLINE bool
+JS_DHASH_ENTRY_IS_FREE(JSDHashEntryHdr* entry)
+{
+    return entry->keyHash == 0;
+}
+MOZ_ALWAYS_INLINE bool
+JS_DHASH_ENTRY_IS_BUSY(JSDHashEntryHdr* entry)
+{
+    return !JS_DHASH_ENTRY_IS_FREE(entry);
+}
+MOZ_ALWAYS_INLINE bool
+JS_DHASH_ENTRY_IS_LIVE(JSDHashEntryHdr* entry)
+{
+    return entry->keyHash >= 2;
+}
 
 /*
  * A JSDHashTable is currently 8 words (without the JS_DHASHMETER overhead)
@@ -597,7 +608,5 @@ JS_DHashMarkTableImmutable(JSDHashTable *table);
 extern JS_PUBLIC_API(void)
 JS_DHashTableDumpMeter(JSDHashTable *table, JSDHashEnumerator dump, FILE *fp);
 #endif
-
-JS_END_EXTERN_C
 
 #endif /* jsdhash_h___ */

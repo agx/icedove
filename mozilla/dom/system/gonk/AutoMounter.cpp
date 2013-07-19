@@ -22,6 +22,7 @@
 #include "base/message_loop.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/Hal.h"
+#include "mozilla/StaticPtr.h"
 #include "nsAutoPtr.h"
 #include "nsMemory.h"
 #include "nsString.h"
@@ -88,51 +89,9 @@ class AutoMounter;
 // try to automount. Any other volumes will be ignored.
 static const nsDependentCString sAutoVolumeName[] = { NS_LITERAL_CSTRING("sdcard") };
 
-/**************************************************************************
-*
-*   Some helper functions for reading/writing files in /sys
-*
-**************************************************************************/
-
-static bool
-ReadSysFile(const char *aFilename, char *aBuf, size_t aBufSize)
-{
-  int fd = open(aFilename, O_RDONLY);
-  if (fd < 0) {
-    ERR("Unable to open file '%s' for reading", aFilename);
-    return false;
-  }
-  ScopedClose autoClose(fd);
-  ssize_t bytesRead = read(fd, aBuf, aBufSize - 1);
-  if (bytesRead < 0) {
-    ERR("Unable to read from file '%s'", aFilename);
-    return false;
-  }
-  if (aBuf[bytesRead - 1] == '\n') {
-    bytesRead--;
-  }
-  aBuf[bytesRead] = '\0';
-  return true;
-}
-
-static bool
-ReadSysFile(const char *aFilename, bool *aVal)
-{
-  char valBuf[20];
-  if (!ReadSysFile(aFilename, valBuf, sizeof(valBuf))) {
-    return false;
-  }
-  int intVal;
-  if (sscanf(valBuf, "%d", &intVal) != 1) {
-    return false;
-  }
-  *aVal = (intVal != 0);
-  return true;
-}
-
 /***************************************************************************/
 
-inline const char *SwitchStateStr(const SwitchEvent &aEvent)
+inline const char* SwitchStateStr(const SwitchEvent& aEvent)
 {
   return aEvent.status() == SWITCH_STATE_ON ? "plugged" : "unplugged";
 }
@@ -150,13 +109,18 @@ IsUsbCablePluggedIn()
   // Until then, just go read the file directly
   if (access(ICS_SYS_USB_STATE, F_OK) == 0) {
     char usbState[20];
-    return ReadSysFile(ICS_SYS_USB_STATE,
-                       usbState, sizeof(usbState)) &&
-           (strcmp(usbState, "CONFIGURED") == 0);
+    if (ReadSysFile(ICS_SYS_USB_STATE, usbState, sizeof(usbState))) {
+      return strcmp(usbState, "CONFIGURED") == 0;
+    }
+    ERR("Error reading file '%s': %s", ICS_SYS_USB_STATE, strerror(errno));
+    return false;
   }
   bool configured;
-  return ReadSysFile(GB_SYS_USB_CONFIGURED, &configured) &&
-         configured;
+  if (ReadSysFile(GB_SYS_USB_CONFIGURED, &configured)) {
+    return configured;
+  }
+  ERR("Error reading file '%s': %s", GB_SYS_USB_CONFIGURED, strerror(errno));
+  return false;
 #endif
 }
 
@@ -167,7 +131,7 @@ IsUsbCablePluggedIn()
 class AutoVolumeManagerStateObserver : public VolumeManager::StateObserver
 {
 public:
-  virtual void Notify(const VolumeManager::StateChangedEvent &aEvent);
+  virtual void Notify(const VolumeManager::StateChangedEvent& aEvent);
 };
 
 // The AutoVolumeEventObserver allows the AutoMounter to know about card
@@ -175,7 +139,7 @@ public:
 class AutoVolumeEventObserver : public Volume::EventObserver
 {
 public:
-  virtual void Notify(Volume * const &aEvent);
+  virtual void Notify(Volume * const & aEvent);
 };
 
 class AutoMounterResponseCallback : public VolumeResponseCallback
@@ -187,7 +151,7 @@ public:
   }
 
 protected:
-  virtual void ResponseReceived(const VolumeCommand *aCommand);
+  virtual void ResponseReceived(const VolumeCommand* aCommand);
 
 private:
     const static int kMaxErrorCount = 3; // Max number of errors before we give up
@@ -235,7 +199,7 @@ public:
 
   void UpdateState();
 
-  const char *ModeStr(int32_t aMode)
+  const char* ModeStr(int32_t aMode)
   {
     switch (aMode) {
       case AUTOMOUNTER_DISABLE:                 return "Disable";
@@ -253,6 +217,21 @@ public:
       // AUTOMOUNTER_DISABLE_WHEN_UNPLUGGED implies "enabled until unplugged"
       aMode = AUTOMOUNTER_DISABLE;
     }
+
+    if ((aMode == AUTOMOUNTER_DISABLE) &&
+        (mMode == AUTOMOUNTER_ENABLE) && IsUsbCablePluggedIn()) {
+      // On many devices (esp non-Samsung), we can't force the disable, so we
+      // need to defer until the USB cable is actually unplugged.
+      // See bug 777043.
+      //
+      // Otherwise our attempt to disable it will fail, and we'll wind up in a bad
+      // state where the AutoMounter thinks that Sharing has been turned off, but
+      // the files are actually still being Shared because the attempt to unshare
+      // failed.
+      LOG("Attempting to disable UMS. Deferring until USB cable is unplugged.");
+      aMode = AUTOMOUNTER_DISABLE_WHEN_UNPLUGGED;
+    }
+
     if (aMode != mMode) {
       LOG("Changing mode from '%s' to '%s'", ModeStr(mMode), ModeStr(aMode));
       mMode = aMode;
@@ -270,7 +249,7 @@ private:
   VolumeArray                     mAutoVolume;
 };
 
-static RefPtr<AutoMounter> sAutoMounter;
+static StaticRefPtr<AutoMounter> sAutoMounter;
 
 /***************************************************************************/
 
@@ -297,7 +276,7 @@ AutoVolumeEventObserver::Notify(Volume * const &)
 }
 
 void
-AutoMounterResponseCallback::ResponseReceived(const VolumeCommand *aCommand)
+AutoMounterResponseCallback::ResponseReceived(const VolumeCommand* aCommand)
 {
 
   if (WasSuccessful()) {
@@ -354,10 +333,17 @@ AutoMounter::UpdateState()
 
   if (access(ICS_SYS_USB_FUNCTIONS, F_OK) == 0) {
     umsAvail = (access(ICS_SYS_UMS_DIRECTORY, F_OK) == 0);
-    char functionsStr[60];
-    umsEnabled = umsAvail &&
-                 ReadSysFile(ICS_SYS_USB_FUNCTIONS, functionsStr, sizeof(functionsStr)) &&
-                 !!strstr(functionsStr, "mass_storage");
+    if (umsAvail) {
+      char functionsStr[60];
+      if (ReadSysFile(ICS_SYS_USB_FUNCTIONS, functionsStr, sizeof(functionsStr))) {
+        umsEnabled = strstr(functionsStr, "mass_storage") != NULL;
+      } else {
+        ERR("Error reading file '%s': %s", ICS_SYS_USB_FUNCTIONS, strerror(errno));
+        umsEnabled = false;
+      }
+    } else {
+      umsEnabled = false;
+    }
   } else {
     umsAvail = ReadSysFile(GB_SYS_UMS_ENABLE, &umsEnabled);
   }
@@ -382,8 +368,16 @@ AutoMounter::UpdateState()
     RefPtr<Volume>  vol = mAutoVolume[volIndex];
     Volume::STATE   volState = vol->State();
 
-    LOG("UpdateState: Volume %s is %s and %s", vol->NameStr(), vol->StateStr(),
-        vol->MediaPresent() ? "inserted" : "missing");
+    if (vol->State() == nsIVolume::STATE_MOUNTED) {
+      LOG("UpdateState: Volume %s is %s and %s @ %s gen %d locked %d",
+          vol->NameStr(), vol->StateStr(),
+          vol->MediaPresent() ? "inserted" : "missing",
+          vol->MountPoint().get(), vol->MountGeneration(),
+          (int)vol->IsMountLocked());
+    } else {
+      LOG("UpdateState: Volume %s is %s and %s", vol->NameStr(), vol->StateStr(),
+          vol->MediaPresent() ? "inserted" : "missing");
+    }
     if (!vol->MediaPresent()) {
       // No media - nothing we can do
       continue;
@@ -393,17 +387,24 @@ AutoMounter::UpdateState()
       // We're going to try to unmount and share the volumes
       switch (volState) {
         case nsIVolume::STATE_MOUNTED: {
+          if (vol->IsMountLocked()) {
+            // The volume is currently locked, so leave it in the mounted
+            // state.
+            DBG("UpdateState: Mounted volume %s is locked, leaving",
+                vol->NameStr());
+            break;
+          }
           // Volume is mounted, we need to unmount before
           // we can share.
           DBG("UpdateState: Unmounting %s", vol->NameStr());
           vol->StartUnmount(mResponseCallback);
-          return;
+          return; // UpdateState will be called again when the Unmount command completes
         }
         case nsIVolume::STATE_IDLE: {
           // Volume is unmounted. We can go ahead and share.
           DBG("UpdateState: Sharing %s", vol->NameStr());
           vol->StartShare(mResponseCallback);
-          return;
+          return; // UpdateState will be called again when the Share command completes
         }
         default: {
           // Not in a state that we can do anything about.
@@ -417,14 +418,14 @@ AutoMounter::UpdateState()
           // Volume is shared. We can go ahead and unshare.
           DBG("UpdateState: Unsharing %s", vol->NameStr());
           vol->StartUnshare(mResponseCallback);
-          return;
+          return; // UpdateState will be called again when the Unshare command completes
         }
         case nsIVolume::STATE_IDLE: {
           // Volume is unmounted, try to mount.
 
           DBG("UpdateState: Mounting %s", vol->NameStr());
           vol->StartMount(mResponseCallback);
-          return;
+          return; // UpdateState will be called again when Mount command completes
         }
         default: {
           // Not in a state that we can do anything about.
@@ -456,7 +457,7 @@ ShutdownAutoMounterIOThread()
 }
 
 static void
-SetAutoMounterModeIOThread(const int32_t &aMode)
+SetAutoMounterModeIOThread(const int32_t& aMode)
 {
   MOZ_ASSERT(MessageLoop::current() == XRE_GetIOMessageLoop());
   MOZ_ASSERT(sAutoMounter);
@@ -499,7 +500,7 @@ public:
     UnregisterSwitchObserver(SWITCH_USB, this);
   }
 
-  virtual void Notify(const SwitchEvent &aEvent)
+  virtual void Notify(const SwitchEvent& aEvent)
   {
     DBG("UsbCable switch device: %d state: %s\n",
         aEvent.device(), SwitchStateStr(aEvent));
@@ -509,8 +510,8 @@ public:
   }
 };
 
-static RefPtr<UsbCableObserver> sUsbCableObserver;
-static RefPtr<AutoMounterSetting> sAutoMounterSetting;
+static StaticRefPtr<UsbCableObserver> sUsbCableObserver;
+static StaticRefPtr<AutoMounterSetting> sAutoMounterSetting;
 
 void
 InitAutoMounter()

@@ -92,7 +92,7 @@ nsThreadManager::Init()
 void
 nsThreadManager::Shutdown()
 {
-  NS_ASSERTION(NS_IsMainThread(), "shutdown not called from main thread");
+  MOZ_ASSERT(NS_IsMainThread(), "shutdown not called from main thread");
 
   // Prevent further access to the thread manager (no more new threads!)
   //
@@ -156,9 +156,14 @@ nsThreadManager::Shutdown()
 void
 nsThreadManager::RegisterCurrentThread(nsThread *thread)
 {
-  NS_ASSERTION(thread->GetPRThread() == PR_GetCurrentThread(), "bad thread");
+  MOZ_ASSERT(thread->GetPRThread() == PR_GetCurrentThread(), "bad thread");
 
   MutexAutoLock lock(*mLock);
+
+  ++mCurrentNumberOfThreads;
+  if (mCurrentNumberOfThreads > mHighestNumberOfThreads) {
+    mHighestNumberOfThreads = mCurrentNumberOfThreads;
+  }
 
   mThreadsByPRThread.Put(thread->GetPRThread(), thread);  // XXX check OOM?
 
@@ -169,10 +174,11 @@ nsThreadManager::RegisterCurrentThread(nsThread *thread)
 void
 nsThreadManager::UnregisterCurrentThread(nsThread *thread)
 {
-  NS_ASSERTION(thread->GetPRThread() == PR_GetCurrentThread(), "bad thread");
+  MOZ_ASSERT(thread->GetPRThread() == PR_GetCurrentThread(), "bad thread");
 
   MutexAutoLock lock(*mLock);
 
+  --mCurrentNumberOfThreads;
   mThreadsByPRThread.Remove(thread->GetPRThread());
 
   PR_SetThreadPrivate(mCurThreadIndex, nullptr);
@@ -278,4 +284,11 @@ nsThreadManager::GetIsCycleCollectorThread(bool *result)
 {
   *result = bool(NS_IsCycleCollectorThread());
   return NS_OK;
+}
+
+uint32_t
+nsThreadManager::GetHighestNumberOfThreads()
+{
+  MutexAutoLock lock(*mLock);
+  return mHighestNumberOfThreads;
 }

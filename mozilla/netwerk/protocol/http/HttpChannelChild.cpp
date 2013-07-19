@@ -18,6 +18,7 @@
 #include "base/compiler_specific.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/net/DNS.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
@@ -173,8 +174,8 @@ class StartRequestEvent : public ChannelEvent
                     const uint32_t& cacheExpirationTime,
                     const nsCString& cachedCharset,
                     const nsCString& securityInfoSerialization,
-                    const PRNetAddr& selfAddr,
-                    const PRNetAddr& peerAddr)
+                    const NetAddr& selfAddr,
+                    const NetAddr& peerAddr)
   : mChild(child)
   , mResponseHead(responseHead)
   , mRequestHeaders(requestHeaders)
@@ -205,8 +206,8 @@ class StartRequestEvent : public ChannelEvent
   uint32_t mCacheExpirationTime;
   nsCString mCachedCharset;
   nsCString mSecurityInfoSerialization;
-  PRNetAddr mSelfAddr;
-  PRNetAddr mPeerAddr;
+  NetAddr mSelfAddr;
+  NetAddr mPeerAddr;
 };
 
 bool 
@@ -218,8 +219,8 @@ HttpChannelChild::RecvOnStartRequest(const nsHttpResponseHead& responseHead,
                                      const uint32_t& cacheExpirationTime,
                                      const nsCString& cachedCharset,
                                      const nsCString& securityInfoSerialization,
-                                     const PRNetAddr& selfAddr,
-                                     const PRNetAddr& peerAddr)
+                                     const NetAddr& selfAddr,
+                                     const NetAddr& peerAddr)
 {
   if (mEventQ.ShouldEnqueue()) {
     mEventQ.Enqueue(new StartRequestEvent(this, responseHead, useResponseHead,
@@ -245,8 +246,8 @@ HttpChannelChild::OnStartRequest(const nsHttpResponseHead& responseHead,
                                  const uint32_t& cacheExpirationTime,
                                  const nsCString& cachedCharset,
                                  const nsCString& securityInfoSerialization,
-                                 const PRNetAddr& selfAddr,
-                                 const PRNetAddr& peerAddr)
+                                 const NetAddr& selfAddr,
+                                 const NetAddr& peerAddr)
 {
   LOG(("HttpChannelChild::RecvOnStartRequest [this=%x]\n", this));
 
@@ -268,8 +269,11 @@ HttpChannelChild::OnStartRequest(const nsHttpResponseHead& responseHead,
   // replace our request headers with what actually got sent in the parent
   mRequestHead.Headers() = requestHeaders;
 
-  // notify "http-on-examine-response" observers
-  gHttpHandler->OnExamineResponse(this);
+  // Note: this is where we would notify "http-on-examine-response" observers.
+  // We have deliberately disabled this for child processes (see bug 806753)
+  //
+  // gHttpHandler->OnExamineResponse(this);
+
   mTracingEnabled = false;
 
   nsresult rv = mListener->OnStartRequest(this, mListenerContext);
@@ -297,7 +301,7 @@ class TransportAndDataEvent : public ChannelEvent
                         const uint64_t& progress,
                         const uint64_t& progressMax,
                         const nsCString& data,
-                        const uint32_t& offset,
+                        const uint64_t& offset,
                         const uint32_t& count)
   : mChild(child)
   , mStatus(status)
@@ -315,7 +319,7 @@ class TransportAndDataEvent : public ChannelEvent
   uint64_t mProgress;
   uint64_t mProgressMax;
   nsCString mData;
-  uint32_t mOffset;
+  uint64_t mOffset;
   uint32_t mCount;
 };
 
@@ -324,7 +328,7 @@ HttpChannelChild::RecvOnTransportAndData(const nsresult& status,
                                          const uint64_t& progress,
                                          const uint64_t& progressMax,
                                          const nsCString& data,
-                                         const uint32_t& offset,
+                                         const uint64_t& offset,
                                          const uint32_t& count)
 {
   if (mEventQ.ShouldEnqueue()) {
@@ -342,7 +346,7 @@ HttpChannelChild::OnTransportAndData(const nsresult& status,
                                      const uint64_t progress,
                                      const uint64_t& progressMax,
                                      const nsCString& data,
-                                     const uint32_t& offset,
+                                     const uint64_t& offset,
                                      const uint32_t& count)
 {
   LOG(("HttpChannelChild::OnTransportAndData [this=%x]\n", this));
@@ -372,7 +376,7 @@ HttpChannelChild::OnTransportAndData(const nsresult& status,
                  status == NS_NET_STATUS_READING,
                  "unexpected status code");
 
-    nsCAutoString host;
+    nsAutoCString host;
     mURI->GetHost(host);
     mProgressSink->OnStatus(this, nullptr, status,
                             NS_ConvertUTF8toUTF16(host).get());
@@ -568,7 +572,7 @@ HttpChannelChild::OnStatus(const nsresult& status)
   if (mProgressSink && NS_SUCCEEDED(mStatus) && mIsPending && 
       !(mLoadFlags & LOAD_BACKGROUND)) 
   {
-    nsCAutoString host;
+    nsAutoCString host;
     mURI->GetHost(host);
     mProgressSink->OnStatus(this, nullptr, status,
                             NS_ConvertUTF8toUTF16(host).get());
@@ -724,8 +728,8 @@ HttpChannelChild::Redirect1Begin(const uint32_t& newChannelId,
   mResponseHead = new nsHttpResponseHead(responseHead);
   SetCookie(mResponseHead->PeekHeader(nsHttp::Set_Cookie));
 
-  bool rewriteToGET = ShouldRewriteRedirectToGET(mResponseHead->Status(), 
-                                                 mRequestHead.Method());
+  bool rewriteToGET = nsHttp::ShouldRewriteRedirectToGET(
+                               mResponseHead->Status(), mRequestHead.Method());
   
   rv = SetupReplacementChannel(uri, newChannel, !rewriteToGET);
   if (NS_FAILED(rv)) {
@@ -802,13 +806,18 @@ HttpChannelChild::ConnectParent(uint32_t id)
   if (iTabChild) {
     tabChild = static_cast<mozilla::dom::TabChild*>(iTabChild.get());
   }
+  if (MissingRequiredTabChild(tabChild, "http")) {
+    return NS_ERROR_ILLEGAL_VALUE;
+  }
 
   // The socket transport in the chrome process now holds a logical ref to us
   // until OnStopRequest, or we do a redirect, or we hit an IPDL error.
   AddIPDLReference();
 
-  if (!gNeckoChild->SendPHttpChannelConstructor(this, tabChild))
+  if (!gNeckoChild->SendPHttpChannelConstructor(
+                      this, tabChild, IPC::SerializedLoadContext(this))) {
     return NS_ERROR_FAILURE;
+  }
 
   if (!SendConnectChannel(id))
     return NS_ERROR_FAILURE;
@@ -854,6 +863,7 @@ HttpChannelChild::CompleteRedirectSetup(nsIStreamListener *listener,
 NS_IMETHODIMP
 HttpChannelChild::OnRedirectVerifyCallback(nsresult result)
 {
+  OptionalURIParams redirectURI;
   nsCOMPtr<nsIHttpChannel> newHttpChannel =
       do_QueryInterface(mRedirectChannelChild);
 
@@ -872,13 +882,28 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult result)
     newHttpChannelChild->GetClientSetRequestHeaders(&headerTuples);
   }
 
-  // After we verify redirect, nsHttpChannel may hit the network: must give
-  // "http-on-modify-request" observers the chance to cancel before that.
-  if (NS_SUCCEEDED(result))
-    gHttpHandler->OnModifyRequest(newHttpChannel);
+  if (NS_SUCCEEDED(result)) {
+    // we know this is an HttpChannelChild
+    HttpChannelChild* base =
+      static_cast<HttpChannelChild*>(mRedirectChannelChild.get());
+    // Note: this is where we would notify "http-on-modify-response" observers.
+    // We have deliberately disabled this for child processes (see bug 806753)
+    //
+    // After we verify redirect, nsHttpChannel may hit the network: must give
+    // "http-on-modify-request" observers the chance to cancel before that.
+    //base->CallOnModifyRequestObservers();
+
+    /* If there was an API redirect of this redirect, we need to send it
+     * down here, since it can't get sent via SendAsyncOpen. */
+    SerializeURI(base->mAPIRedirectToURI, redirectURI);
+  } else {
+    /* If the redirect was canceled, bypass OMR and send an empty API
+     * redirect URI */
+    SerializeURI(nullptr, redirectURI);
+  }
 
   if (mIPCOpen)
-    SendRedirect2Verify(result, *headerTuples);
+    SendRedirect2Verify(result, *headerTuples, redirectURI);
 
   return NS_OK;
 }
@@ -984,8 +1009,11 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
   // OnStart/OnStopRequest
   //
 
+  // Note: this is where we would notify "http-on-modify-request" observers.
+  // We have deliberately disabled this for child processes (see bug 806753)
+  //
   // notify "http-on-modify-request" observers
-  gHttpHandler->OnModifyRequest(this);
+  //CallOnModifyRequestObservers();
 
   mIsPending = true;
   mWasOpened = true;
@@ -1032,30 +1060,35 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
   if (iTabChild) {
     tabChild = static_cast<mozilla::dom::TabChild*>(iTabChild.get());
   }
+  if (MissingRequiredTabChild(tabChild, "http")) {
+    return NS_ERROR_ILLEGAL_VALUE;
+  }
 
   // The socket transport in the chrome process now holds a logical ref to us
   // until OnStopRequest, or we do a redirect, or we hit an IPDL error.
   AddIPDLReference();
 
-  gNeckoChild->SendPHttpChannelConstructor(this, tabChild);
+  gNeckoChild->SendPHttpChannelConstructor(this, tabChild,
+                                           IPC::SerializedLoadContext(this));
 
   URIParams uri;
   SerializeURI(mURI, uri);
 
-  OptionalURIParams originalURI, documentURI, referrer;
+  OptionalURIParams originalURI, documentURI, referrer, redirectURI;
   SerializeURI(mOriginalURI, originalURI);
   SerializeURI(mDocumentURI, documentURI);
   SerializeURI(mReferrer, referrer);
+  SerializeURI(mAPIRedirectToURI, redirectURI);
 
   OptionalInputStreamParams uploadStream;
   SerializeInputStream(mUploadStream, uploadStream);
 
-  SendAsyncOpen(uri, originalURI, documentURI, referrer, mLoadFlags,
+  SendAsyncOpen(uri, originalURI, documentURI, referrer, redirectURI, mLoadFlags,
                 mClientSetRequestHeaders, mRequestHead.Method(), uploadStream,
                 mUploadStreamHasHeaders, mPriority, mRedirectionLimit,
                 mAllowPipelining, mForceAllowThirdPartyCookie, mSendResumeAt,
                 mStartPos, mEntityID, mChooseApplicationCache,
-                appCacheClientId, mAllowSpdy, IPC::SerializedLoadContext(this));
+                appCacheClientId, mAllowSpdy);
 
   return NS_OK;
 }
@@ -1081,6 +1114,13 @@ HttpChannelChild::SetRequestHeader(const nsACString& aHeader,
   tuple->mValue = aValue;
   tuple->mMerge = aMerge;
   return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpChannelChild::RedirectTo(nsIURI *newURI)
+{
+  // disabled until/unless addons run in child or something else needs this
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 //-----------------------------------------------------------------------------
@@ -1177,7 +1217,7 @@ HttpChannelChild::IsFromCache(bool *value)
 NS_IMETHODIMP
 HttpChannelChild::ResumeAt(uint64_t startPos, const nsACString& entityID)
 {
-  ENSURE_CALLED_BEFORE_ASYNC_OPEN();
+  ENSURE_CALLED_BEFORE_CONNECT();
   mStartPos = startPos;
   mEntityID = entityID;
   mSendResumeAt = true;
@@ -1193,7 +1233,7 @@ HttpChannelChild::ResumeAt(uint64_t startPos, const nsACString& entityID)
 NS_IMETHODIMP
 HttpChannelChild::SetPriority(int32_t aPriority)
 {
-  int16_t newValue = clamped(aPriority, PR_INT16_MIN, PR_INT16_MAX);
+  int16_t newValue = clamped<int32_t>(aPriority, INT16_MIN, INT16_MAX);
   if (mPriority == newValue)
     return NS_OK;
   mPriority = newValue;
@@ -1312,50 +1352,6 @@ HttpChannelChild::GetAssociatedContentSecurity(
   return true;
 }
 
-/* attribute unsigned long countSubRequestsHighSecurity; */
-NS_IMETHODIMP
-HttpChannelChild::GetCountSubRequestsHighSecurity(
-                    int32_t *aSubRequestsHighSecurity)
-{
-  nsCOMPtr<nsIAssociatedContentSecurity> assoc;
-  if (!GetAssociatedContentSecurity(getter_AddRefs(assoc)))
-    return NS_OK;
-
-  return assoc->GetCountSubRequestsHighSecurity(aSubRequestsHighSecurity);
-}
-NS_IMETHODIMP
-HttpChannelChild::SetCountSubRequestsHighSecurity(
-                    int32_t aSubRequestsHighSecurity)
-{
-  nsCOMPtr<nsIAssociatedContentSecurity> assoc;
-  if (!GetAssociatedContentSecurity(getter_AddRefs(assoc)))
-    return NS_OK;
-
-  return assoc->SetCountSubRequestsHighSecurity(aSubRequestsHighSecurity);
-}
-
-/* attribute unsigned long countSubRequestsLowSecurity; */
-NS_IMETHODIMP
-HttpChannelChild::GetCountSubRequestsLowSecurity(
-                    int32_t *aSubRequestsLowSecurity)
-{
-  nsCOMPtr<nsIAssociatedContentSecurity> assoc;
-  if (!GetAssociatedContentSecurity(getter_AddRefs(assoc)))
-    return NS_OK;
-
-  return assoc->GetCountSubRequestsLowSecurity(aSubRequestsLowSecurity);
-}
-NS_IMETHODIMP
-HttpChannelChild::SetCountSubRequestsLowSecurity(
-                    int32_t aSubRequestsLowSecurity)
-{
-  nsCOMPtr<nsIAssociatedContentSecurity> assoc;
-  if (!GetAssociatedContentSecurity(getter_AddRefs(assoc)))
-    return NS_OK;
-
-  return assoc->SetCountSubRequestsLowSecurity(aSubRequestsLowSecurity);
-}
-
 /* attribute unsigned long countSubRequestsBrokenSecurity; */
 NS_IMETHODIMP 
 HttpChannelChild::GetCountSubRequestsBrokenSecurity(
@@ -1406,19 +1402,15 @@ HttpChannelChild::Flush()
     return NS_OK;
 
   nsresult rv;
-  int32_t hi, low, broken, no;
+  int32_t broken, no;
 
-  rv = assoc->GetCountSubRequestsHighSecurity(&hi);
-  NS_ENSURE_SUCCESS(rv, rv);
-  rv = assoc->GetCountSubRequestsLowSecurity(&low);
-  NS_ENSURE_SUCCESS(rv, rv);
   rv = assoc->GetCountSubRequestsBrokenSecurity(&broken);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = assoc->GetCountSubRequestsNoSecurity(&no);
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (mIPCOpen)
-    SendUpdateAssociatedContentSecurity(hi, low, broken, no);
+    SendUpdateAssociatedContentSecurity(broken, no);
 
   return NS_OK;
 }

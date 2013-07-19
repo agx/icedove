@@ -19,7 +19,6 @@
 
 #include "nsCOMPtr.h"
 #include "nsCRT.h"
-#include "nsFixedSizeAllocator.h"
 #include "nsIContent.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMNode.h"
@@ -42,7 +41,6 @@
 #include "nsIScriptGlobalObject.h"
 #include "nsIServiceManager.h"
 #include "nsISimpleEnumerator.h"
-#include "nsISupportsArray.h"
 #include "nsIMutableArray.h"
 #include "nsIURL.h"
 #include "nsIXPConnect.h"
@@ -71,6 +69,7 @@
 #include "nsContentUtils.h"
 
 using namespace mozilla::dom;
+using namespace mozilla;
 
 //----------------------------------------------------------------------
 
@@ -111,12 +110,10 @@ nsXULTemplateBuilder::nsXULTemplateBuilder(void)
 static PLDHashOperator
 DestroyMatchList(nsISupports* aKey, nsTemplateMatch*& aMatch, void* aContext)
 {
-    nsFixedSizeAllocator* pool = static_cast<nsFixedSizeAllocator *>(aContext);
-
     // delete all the matches in the list
     while (aMatch) {
         nsTemplateMatch* next = aMatch->mNext;
-        nsTemplateMatch::Destroy(*pool, aMatch, true);
+        nsTemplateMatch::Destroy(aMatch, true);
         aMatch = next;
     }
 
@@ -175,8 +172,7 @@ nsXULTemplateBuilder::InitGlobals()
     if (!mMatchMap.IsInitialized())
         mMatchMap.Init();
 
-    const size_t bucketsizes[] = { sizeof(nsTemplateMatch) };
-    return mPool.Init("nsXULTemplateBuilder", bucketsizes, 1, 256);
+    return NS_OK;
 }
 
 void
@@ -189,7 +185,7 @@ nsXULTemplateBuilder::CleanUp(bool aIsFinal)
 
     mQuerySets.Clear();
 
-    mMatchMap.Enumerate(DestroyMatchList, &mPool);
+    mMatchMap.Enumerate(DestroyMatchList, nullptr);
 
     // Setting mQueryProcessor to null will close connections. This would be
     // handled by the cycle collector, but we want to close them earlier.
@@ -236,17 +232,16 @@ TraverseMatchList(nsISupports* aKey, nsTemplateMatch* aMatch, void* aContext)
     return PL_DHASH_NEXT;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULTemplateBuilder)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULTemplateBuilder)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mDataSource)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mDB)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mCompDB)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mRoot)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mRootResult)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMARRAY(mListeners)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mQueryProcessor)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mDataSource)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mDB)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mCompDB)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mRoot)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mRootResult)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mListeners)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mQueryProcessor)
     if (tmp->mMatchMap.IsInitialized()) {
-      tmp->mMatchMap.Enumerate(DestroyMatchList, &(tmp->mPool));
+      tmp->mMatchMap.Enumerate(DestroyMatchList, nullptr);
     }
     for (uint32_t i = 0; i < tmp->mQuerySets.Length(); ++i) {
         nsTemplateQuerySet* qs = tmp->mQuerySets[i];
@@ -260,13 +255,13 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXULTemplateBuilder)
         return NS_SUCCESS_INTERRUPTED_TRAVERSE;
     }
 
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mDataSource)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mDB)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mCompDB)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mRoot)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mRootResult)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMARRAY(mListeners)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mQueryProcessor)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDataSource)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDB)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCompDB)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRootResult)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mListeners)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mQueryProcessor)
     if (tmp->mMatchMap.IsInitialized())
         tmp->mMatchMap.EnumerateRead(TraverseMatchList, &cb);
     {
@@ -778,7 +773,7 @@ nsXULTemplateBuilder::UpdateResultInContainer(nsIXULTemplateResult* aOldResult,
 
         int32_t findpriority = aQuerySet->Priority();
 
-        newmatch = nsTemplateMatch::Create(mPool, findpriority,
+        newmatch = nsTemplateMatch::Create(findpriority,
                                            aNewResult, aInsertionPoint);
         if (!newmatch)
             return NS_ERROR_OUT_OF_MEMORY;
@@ -850,7 +845,7 @@ nsXULTemplateBuilder::UpdateResultInContainer(nsIXULTemplateResult* aOldResult,
                 rv = DetermineMatchedRule(aInsertionPoint, newmatch->mResult,
                                           aQuerySet, &matchedrule, &ruleindex);
                 if (NS_FAILED(rv)) {
-                    nsTemplateMatch::Destroy(mPool, newmatch, false);
+                    nsTemplateMatch::Destroy(newmatch, false);
                     return rv;
                 }
 
@@ -859,7 +854,7 @@ nsXULTemplateBuilder::UpdateResultInContainer(nsIXULTemplateResult* aOldResult,
                                                matchedrule, ruleindex,
                                                newmatch->mResult);
                     if (NS_FAILED(rv)) {
-                        nsTemplateMatch::Destroy(mPool, newmatch, false);
+                        nsTemplateMatch::Destroy(newmatch, false);
                         return rv;
                     }
 
@@ -899,8 +894,7 @@ nsXULTemplateBuilder::UpdateResultInContainer(nsIXULTemplateResult* aOldResult,
                             rv = DetermineMatchedRule(aInsertionPoint, newmatch->mResult,
                                                       aQuerySet, &matchedrule, &ruleindex);
                             if (NS_FAILED(rv)) {
-                                nsTemplateMatch::Destroy(mPool, newmatch,
-                                                         false);
+                                nsTemplateMatch::Destroy(newmatch, false);
                                 return rv;
                             }
 
@@ -909,8 +903,7 @@ nsXULTemplateBuilder::UpdateResultInContainer(nsIXULTemplateResult* aOldResult,
                                                            matchedrule, ruleindex,
                                                            newmatch->mResult);
                                 if (NS_FAILED(rv)) {
-                                    nsTemplateMatch::Destroy(mPool, newmatch,
-                                                             false);
+                                    nsTemplateMatch::Destroy(newmatch, false);
                                     return rv;
                                 }
 
@@ -939,7 +932,7 @@ nsXULTemplateBuilder::UpdateResultInContainer(nsIXULTemplateResult* aOldResult,
             rv = DetermineMatchedRule(aInsertionPoint, aNewResult,
                                       aQuerySet, &matchedrule, &ruleindex);
             if (NS_FAILED(rv)) {
-                nsTemplateMatch::Destroy(mPool, newmatch, false);
+                nsTemplateMatch::Destroy(newmatch, false);
                 return rv;
             }
 
@@ -947,7 +940,7 @@ nsXULTemplateBuilder::UpdateResultInContainer(nsIXULTemplateResult* aOldResult,
                 rv = newmatch->RuleMatched(aQuerySet, matchedrule,
                                            ruleindex, aNewResult);
                 if (NS_FAILED(rv)) {
-                    nsTemplateMatch::Destroy(mPool, newmatch, false);
+                    nsTemplateMatch::Destroy(newmatch, false);
                     return rv;
                 }
 
@@ -969,10 +962,10 @@ nsXULTemplateBuilder::UpdateResultInContainer(nsIXULTemplateResult* aOldResult,
         if (mFlags & eLoggingEnabled)
             OutputMatchToLog(aNewId, replacedmatch, false);
     }
- 
+
     // remove a match that needs to be deleted.
     if (replacedmatchtodelete)
-        nsTemplateMatch::Destroy(mPool, replacedmatchtodelete, true);
+        nsTemplateMatch::Destroy(replacedmatchtodelete, true);
 
     // If the old match was active, the content for it needs to be removed.
     // If the old match was not active, it shouldn't have had any content,
@@ -984,7 +977,7 @@ nsXULTemplateBuilder::UpdateResultInContainer(nsIXULTemplateResult* aOldResult,
 
     // delete the old match that was replaced
     if (removedmatch)
-        nsTemplateMatch::Destroy(mPool, removedmatch, true);
+        nsTemplateMatch::Destroy(removedmatch, true);
 
     if (mFlags & eLoggingEnabled && newmatch)
         OutputMatchToLog(aNewId, newmatch, true);
@@ -1081,8 +1074,7 @@ nsXULTemplateBuilder::Observe(nsISupports* aSubject,
     if (!strcmp(aTopic, DOM_WINDOW_DESTROYED_TOPIC)) {
         nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aSubject);
         if (window) {
-            nsCOMPtr<nsIDocument> doc =
-                do_QueryInterface(window->GetExtantDocument());
+            nsCOMPtr<nsIDocument> doc = window->GetExtantDoc();
             if (doc && doc == mObservedDocument)
                 NodeWillBeDestroyed(doc);
         }
@@ -1227,7 +1219,7 @@ nsXULTemplateBuilder::LoadDataSources(nsIDocument* aDocument,
         NS_ENSURE_TRUE(mQueryProcessor, NS_ERROR_OUT_OF_MEMORY);
     }
     else {
-        nsCAutoString cid(NS_QUERY_PROCESSOR_CONTRACTID_PREFIX);
+        nsAutoCString cid(NS_QUERY_PROCESSOR_CONTRACTID_PREFIX);
         AppendUTF16toUTF8(querytype, cid);
         mQueryProcessor = do_CreateInstance(cid.get(), &rv);
 
@@ -1382,30 +1374,30 @@ nsXULTemplateBuilder::InitHTMLTemplateRoot()
     if (! global)
         return NS_ERROR_UNEXPECTED;
 
-    JSObject *scope = global->GetGlobalJSObject();
-
     nsIScriptContext *context = global->GetContext();
     if (! context)
         return NS_ERROR_UNEXPECTED;
 
-    JSContext* jscontext = context->GetNativeContext();
+    AutoPushJSContext jscontext(context->GetNativeContext());
     NS_ASSERTION(context != nullptr, "no jscontext");
     if (! jscontext)
         return NS_ERROR_UNEXPECTED;
 
+    JS::Rooted<JSObject*> scope(jscontext, global->GetGlobalJSObject());
+
     JSAutoRequest ar(jscontext);
 
-    jsval v;
+    JS::Rooted<JS::Value> v(jscontext);
     nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
-    rv = nsContentUtils::WrapNative(jscontext, scope, mRoot, mRoot, &v,
+    rv = nsContentUtils::WrapNative(jscontext, scope, mRoot, mRoot, v.address(),
                                     getter_AddRefs(wrapper));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    JSObject* jselement = JSVAL_TO_OBJECT(v);
+    JS::Rooted<JSObject*> jselement(jscontext, JSVAL_TO_OBJECT(v));
 
     if (mDB) {
         // database
-        jsval jsdatabase;
+        JS::Value jsdatabase;
         rv = nsContentUtils::WrapNative(jscontext, scope, mDB,
                                         &NS_GET_IID(nsIRDFCompositeDataSource),
                                         &jsdatabase, getter_AddRefs(wrapper));
@@ -1420,7 +1412,7 @@ nsXULTemplateBuilder::InitHTMLTemplateRoot()
 
     {
         // builder
-        jsval jsbuilder;
+        JS::Value jsbuilder;
         nsCOMPtr<nsIXPConnectJSObjectHolder> wrapper;
         rv = nsContentUtils::WrapNative(jscontext, jselement,
                                         static_cast<nsIXULTemplateBuilder*>(this),
@@ -1551,7 +1543,7 @@ nsXULTemplateBuilder::ParseAttribute(const nsAString& aAttributeValue,
 }
 
 
-struct NS_STACK_CLASS SubstituteTextClosure {
+struct MOZ_STACK_CLASS SubstituteTextClosure {
     SubstituteTextClosure(nsIXULTemplateResult* aResult, nsAString& aString)
         : result(aResult), str(aString) {}
 
@@ -1830,7 +1822,7 @@ nsXULTemplateBuilder::CompileTemplate(nsIContent* aTemplate,
         nsINodeInfo *ni = rulenode->NodeInfo();
 
         // don't allow more queries than can be supported
-        if (*aPriority == PR_INT16_MAX)
+        if (*aPriority == INT16_MAX)
             return NS_ERROR_FAILURE;
 
         // XXXndeakin queryset isn't a good name for this tag since it only
@@ -2146,7 +2138,7 @@ nsXULTemplateBuilder::DetermineRDFQueryRef(nsIContent* aQueryElement, nsIAtom** 
         content->GetAttr(kNameSpaceID_None, nsGkAtoms::tag, tag);
 
         if (!tag.IsEmpty())
-            *aTag = NS_NewAtom(tag);
+            *aTag = NS_NewAtom(tag).get();
     }
 }
 

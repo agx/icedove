@@ -2,7 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-// This test is intended as a simple demonstration of the imap pump test method
+/**
+ * Simple demonstration of the imap pump test method.
+ */
 
 // async support 
 load("../../../resources/logHelper.js");
@@ -61,9 +63,6 @@ function run_test()
 function specForFileName(aFileName)
 {
   let file = do_get_file("../../../data/" + aFileName);
-  let msgfileuri = Cc["@mozilla.org/network/io-service;1"]
-                     .getService(Ci.nsIIOService)
-                     .newFileURI(file)
-                     .QueryInterface(Ci.nsIFileURL);
+  let msgfileuri = Services.io.newFileURI(file).QueryInterface(Ci.nsIFileURL);
   return msgfileuri.spec;
 }

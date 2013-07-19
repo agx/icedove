@@ -13,7 +13,6 @@
 #include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
 #include "nsJSUtils.h"
-#include "nsIJSContextStack.h"
 #include "nsGUIEvent.h"
 #include "nsEventDispatcher.h"
 #include "nsIJSEventListener.h"
@@ -21,6 +20,9 @@
 #include "jsdIDebuggerService.h"
 #endif
 #include "nsDOMClassInfoID.h"
+
+using namespace mozilla::dom;
+using mozilla::AutoSafeJSContext;
 
 NS_IMPL_CYCLE_COLLECTION_1(nsEventListenerInfo, mListener)
 
@@ -63,17 +65,27 @@ nsEventListenerInfo::GetInSystemEventGroup(bool* aInSystemEventGroup)
   return NS_OK;
 }
 
+NS_IMETHODIMP
+nsEventListenerInfo::GetListenerObject(JSContext* aCx, JS::Value* aObject)
+{
+  mozilla::Maybe<JSAutoCompartment> ac;
+  GetJSVal(aCx, ac, aObject);
+  return NS_OK;
+}
+
 NS_IMPL_ISUPPORTS1(nsEventListenerService, nsIEventListenerService)
 
 // Caller must root *aJSVal!
 bool
-nsEventListenerInfo::GetJSVal(JSContext* aCx, mozilla::Maybe<JSAutoCompartment>& aAc, jsval* aJSVal)
+nsEventListenerInfo::GetJSVal(JSContext* aCx,
+                              mozilla::Maybe<JSAutoCompartment>& aAc,
+                              JS::Value* aJSVal)
 {
   *aJSVal = JSVAL_NULL;
   nsCOMPtr<nsIXPConnectWrappedJS> wrappedJS = do_QueryInterface(mListener);
   if (wrappedJS) {
-    JSObject* object = nullptr;
-    if (NS_FAILED(wrappedJS->GetJSObject(&object))) {
+    JS::Rooted<JSObject*> object(aCx, nullptr);
+    if (NS_FAILED(wrappedJS->GetJSObject(object.address()))) {
       return false;
     }
     aAc.construct(aCx, object);
@@ -83,7 +95,7 @@ nsEventListenerInfo::GetJSVal(JSContext* aCx, mozilla::Maybe<JSAutoCompartment>&
 
   nsCOMPtr<nsIJSEventListener> jsl = do_QueryInterface(mListener);
   if (jsl) {
-    JSObject *handler = jsl->GetHandler();
+    JSObject *handler = jsl->GetHandler().Ptr()->Callable();
     if (handler) {
       aAc.construct(aCx, handler);
       *aJSVal = OBJECT_TO_JSVAL(handler);
@@ -98,30 +110,22 @@ nsEventListenerInfo::ToSource(nsAString& aResult)
 {
   aResult.SetIsVoid(true);
 
-  nsCOMPtr<nsIThreadJSContextStack> stack =
-    nsContentUtils::ThreadJSContextStack();
-  if (stack) {
-    JSContext* cx = stack->GetSafeJSContext();
-    if (cx && NS_SUCCEEDED(stack->Push(cx))) {
-      {
-        // Extra block to finish the auto request before calling pop
-        JSAutoRequest ar(cx);
-        mozilla::Maybe<JSAutoCompartment> ac;
-        jsval v = JSVAL_NULL;
-        if (GetJSVal(cx, ac, &v)) {
-          JSString* str = JS_ValueToSource(cx, v);
-          if (str) {
-            nsDependentJSString depStr;
-            if (depStr.init(cx, str)) {
-              aResult.Assign(depStr);
-            }
-          }
+  AutoSafeJSContext cx;
+  {
+    // Extra block to finish the auto request before calling pop
+    JSAutoRequest ar(cx);
+    mozilla::Maybe<JSAutoCompartment> ac;
+    JS::Rooted<JS::Value> v(cx, JSVAL_NULL);
+    if (GetJSVal(cx, ac, v.address())) {
+      JSString* str = JS_ValueToSource(cx, v);
+      if (str) {
+        nsDependentJSString depStr;
+        if (depStr.init(cx, str)) {
+          aResult.Assign(depStr);
         }
       }
-      stack->Pop(&cx);
     }
   }
-  
   return NS_OK;
 }
 
@@ -135,29 +139,22 @@ nsEventListenerInfo::GetDebugObject(nsISupports** aRetVal)
   nsCOMPtr<jsdIDebuggerService> jsd =
     do_GetService("@mozilla.org/js/jsd/debugger-service;1", &rv);
   NS_ENSURE_SUCCESS(rv, NS_OK);
-  
+
   bool isOn = false;
   jsd->GetIsOn(&isOn);
   NS_ENSURE_TRUE(isOn, NS_OK);
 
-  nsCOMPtr<nsIThreadJSContextStack> stack =
-    nsContentUtils::ThreadJSContextStack();
-  if (stack) {
-    JSContext* cx = stack->GetSafeJSContext();
-    if (cx && NS_SUCCEEDED(stack->Push(cx))) {
-      {
-        // Extra block to finish the auto request before calling pop
-        JSAutoRequest ar(cx);
-        mozilla::Maybe<JSAutoCompartment> ac;
-        jsval v = JSVAL_NULL;
-        if (GetJSVal(cx, ac, &v)) {
-          nsCOMPtr<jsdIValue> jsdValue;
-          rv = jsd->WrapValue(v, getter_AddRefs(jsdValue));
-          NS_ENSURE_SUCCESS(rv, rv);
-          jsdValue.forget(aRetVal);
-        }
-      }
-      stack->Pop(&cx);
+  AutoSafeJSContext cx;
+  {
+    // Extra block to finish the auto request before calling pop
+    JSAutoRequest ar(cx);
+    mozilla::Maybe<JSAutoCompartment> ac;
+    JS::Rooted<JS::Value> v(cx, JSVAL_NULL);
+    if (GetJSVal(cx, ac, v.address())) {
+      nsCOMPtr<jsdIValue> jsdValue;
+      rv = jsd->WrapValue(v, getter_AddRefs(jsdValue));
+      NS_ENSURE_SUCCESS(rv, rv);
+      jsdValue.forget(aRetVal);
     }
   }
 #endif
@@ -206,7 +203,7 @@ nsEventListenerService::GetEventTargetChainFor(nsIDOMEventTarget* aEventTarget,
   *aOutArray = nullptr;
   NS_ENSURE_ARG(aEventTarget);
   nsEvent event(true, NS_EVENT_TYPE_NULL);
-  nsCOMArray<nsIDOMEventTarget> targets;
+  nsCOMArray<EventTarget> targets;
   nsresult rv = nsEventDispatcher::Dispatch(aEventTarget, nullptr, &event,
                                             nullptr, nullptr, nullptr, &targets);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -250,10 +247,9 @@ nsEventListenerService::AddSystemEventListener(nsIDOMEventTarget *aTarget,
   nsEventListenerManager* manager = aTarget->GetListenerManager(true);
   NS_ENSURE_STATE(manager);
 
-  int32_t flags = aUseCapture ? NS_EVENT_FLAG_CAPTURE |
-                                NS_EVENT_FLAG_SYSTEM_EVENT :
-                                NS_EVENT_FLAG_BUBBLE |
-                                NS_EVENT_FLAG_SYSTEM_EVENT;
+  EventListenerFlags flags =
+    aUseCapture ? TrustedEventsAtSystemGroupCapture() :
+                  TrustedEventsAtSystemGroupBubble();
   manager->AddEventListenerByType(aListener, aType, flags);
   return NS_OK;
 }
@@ -269,13 +265,41 @@ nsEventListenerService::RemoveSystemEventListener(nsIDOMEventTarget *aTarget,
 
   nsEventListenerManager* manager = aTarget->GetListenerManager(false);
   if (manager) {
-    int32_t flags = aUseCapture ? NS_EVENT_FLAG_CAPTURE |
-                                  NS_EVENT_FLAG_SYSTEM_EVENT :
-                                  NS_EVENT_FLAG_BUBBLE |
-                                  NS_EVENT_FLAG_SYSTEM_EVENT;
+    EventListenerFlags flags =
+      aUseCapture ? TrustedEventsAtSystemGroupCapture() :
+                    TrustedEventsAtSystemGroupBubble();
     manager->RemoveEventListenerByType(aListener, aType, flags);
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsEventListenerService::AddListenerForAllEvents(nsIDOMEventTarget* aTarget,
+                                                nsIDOMEventListener* aListener,
+                                                bool aUseCapture,
+                                                bool aWantsUntrusted,
+                                                bool aSystemEventGroup)
+{
+  NS_ENSURE_STATE(aTarget && aListener);
+  nsEventListenerManager* manager = aTarget->GetListenerManager(true);
+  NS_ENSURE_STATE(manager);
+  manager->AddListenerForAllEvents(aListener, aUseCapture, aWantsUntrusted,
+                               aSystemEventGroup);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsEventListenerService::RemoveListenerForAllEvents(nsIDOMEventTarget* aTarget,
+                                                   nsIDOMEventListener* aListener,
+                                                   bool aUseCapture,
+                                                   bool aSystemEventGroup)
+{
+  NS_ENSURE_STATE(aTarget && aListener);
+  nsEventListenerManager* manager = aTarget->GetListenerManager(false);
+  if (manager) {
+    manager->RemoveListenerForAllEvents(aListener, aUseCapture, aSystemEventGroup);
+  }
   return NS_OK;
 }
 

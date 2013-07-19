@@ -10,21 +10,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= content
 LIBRARY_NAME	= gkconevents_s
 LIBXUL_LIBRARY  = 1
 FAIL_ON_WARNINGS = 1
 
-EXPORTS		= \
-		nsEventStateManager.h \
-		nsEventListenerManager.h \
-		nsDOMEventTargetHelper.h \
-		nsDOMEvent.h \
-		nsDOMTouchEvent.h \
-		nsDOMUIEvent.h \
-		$(NULL)
-
 CPPSRCS		= \
+		EventTarget.cpp \
 		nsEventListenerManager.cpp \
 		nsEventStateManager.cpp \
 		nsDOMEvent.cpp \
@@ -43,32 +34,31 @@ CPPSRCS		= \
 		nsDOMMessageEvent.cpp \
 		nsPaintRequest.cpp \
 		nsPrivateTextRange.cpp \
-		nsXMLEventsManager.cpp \
-		nsXMLEventsElement.cpp \
 		nsAsyncDOMEvent.cpp \
 		nsEventDispatcher.cpp \
 		nsIMEStateManager.cpp \
 		nsContentEventHandler.cpp \
 		nsEventListenerService.cpp \
-		nsDOMProgressEvent.cpp \
 		nsDOMDataTransfer.cpp \
 		nsDOMNotifyPaintEvent.cpp \
 		nsDOMNotifyAudioAvailableEvent.cpp \
 		nsDOMSimpleGestureEvent.cpp \
-		nsDOMMozTouchEvent.cpp \
 		nsDOMEventTargetHelper.cpp \
 		nsDOMScrollAreaEvent.cpp \
 		nsDOMTransitionEvent.cpp \
 		nsDOMAnimationEvent.cpp \
 		nsDOMTouchEvent.cpp \
 		nsDOMCompositionEvent.cpp \
+		nsDOMClipboardEvent.cpp \
 		DOMWheelEvent.cpp \
+		TextComposition.cpp \
+		Touch.cpp \
 		$(NULL)
 
-ifdef MOZ_B2G_RIL
+ifdef MOZ_GAMEPAD
 CPPSRCS += \
-    nsDOMWifiEvent.cpp \
-    $(NULL)
+  nsDOMGamepad.cpp \
+  $(NULL)
 endif
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
@@ -88,7 +78,7 @@ LOCAL_INCLUDES	+= \
              -I$(srcdir)/../../../dom/src/storage \
              -I$(srcdir)/../../../layout/generic \
              -I$(srcdir)/../../../layout/xul/base/src \
-             -I$(srcdir)/../../../layout/xul/base/src/tree/src \
+             -I$(srcdir)/../../../layout/xul/tree/ \
              $(NULL)
 
 ifdef MOZ_B2G_RIL

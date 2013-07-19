@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -165,6 +164,9 @@ struct CallICInfo {
 
     FrameSize frameSize;
 
+    /* Label to the function object identity guard. */
+    JSC::CodeLocationLabel funGuardLabel;
+
     /* Function object identity guard. */
     JSC::CodeLocationDataLabelPtr funGuard;
 
@@ -173,6 +175,20 @@ struct CallICInfo {
 
     /* Inline to OOL jump, redirected by stubs. */
     JSC::CodeLocationJump funJump;
+
+    /*
+     * Target of the above jump, remembered so that if we need to generate a
+     * callsite clone stub we can redirect to the original funJump target.
+     */
+    JSC::CodeLocationLabel funJumpTarget;
+
+    /*
+     * If an Ion stub has been generated, its guard may be linked to another
+     * stub. The guard location is stored in this label.
+     */
+    bool hasIonStub_;
+    JSC::JITCode lastOolCode_;
+    JSC::CodeLocationJump lastOolJump_;
 
     /* Offset to inline scripted call, from funGuard. */
     uint32_t hotJumpOffset   : 16;
@@ -192,6 +208,9 @@ struct CallICInfo {
 
     /* Join point for all slow call paths. */
     uint32_t slowJoinOffset  : 16;
+
+    /* Join point for Ion calls. */
+    uint32_t ionJoinOffset : 16;
 
     RegisterID funObjReg : 5;
     bool hit : 1;
@@ -213,6 +232,41 @@ struct CallICInfo {
         JS_REMOVE_LINK(&links);
     }
 
+    bool hasJMStub() const {
+        return !!pools[Pool_ScriptStub];
+    }
+    bool hasIonStub() const {
+        return hasIonStub_;
+    }
+    bool hasStubOolJump() const {
+        return hasIonStub();
+    }
+    JSC::CodeLocationLabel icCall() {
+        return slowPathStart.labelAtOffset(icCallOffset);
+    }
+    JSC::CodeLocationJump oolJump() {
+        return slowPathStart.jumpAtOffset(oolJumpOffset);
+    }
+    JSC::CodeLocationJump lastOolJump() {
+        if (hasStubOolJump())
+            return lastOolJump_;
+        return oolJump();
+    }
+    JSC::JITCode lastOolCode() {
+        JS_ASSERT(hasStubOolJump());
+        return lastOolCode_;
+    }
+    void updateLastOolJump(JSC::CodeLocationJump jump, JSC::JITCode code) {
+        lastOolJump_ = jump;
+        lastOolCode_ = code;
+    }
+    JSC::CodeLocationLabel nativeRejoin() {
+        return slowPathStart.labelAtOffset(slowJoinOffset);
+    }
+    JSC::CodeLocationLabel ionJoinPoint() {
+        return funGuard.labelAtOffset(ionJoinOffset);
+    }
+
     inline void reset(Repatcher &repatcher) {
         if (fastGuardedObject) {
             repatcher.repatch(funGuard, NULL);
@@ -223,13 +277,12 @@ struct CallICInfo {
             repatcher.relink(funJump, slowPathStart);
             fastGuardedNative = NULL;
         }
-        if (pools[Pool_ScriptStub]) {
-            JSC::CodeLocationJump oolJump = slowPathStart.jumpAtOffset(oolJumpOffset);
-            JSC::CodeLocationLabel icCall = slowPathStart.labelAtOffset(icCallOffset);
-            repatcher.relink(oolJump, icCall);
+        if (pools[Pool_ScriptStub] || hasIonStub()) {
+            repatcher.relink(oolJump(), icCall());
             releasePool(Pool_ScriptStub);
         }
         hit = false;
+        hasIonStub_ = false;
     }
 };
 

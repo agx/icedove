@@ -12,17 +12,22 @@
 #include "FileCommon.h"
 #include "zipstruct.h"
 
+#include "DictionaryHelpers.h"
+
 BEGIN_FILE_NAMESPACE
 
+/**
+ * ArchiveZipItem - ArchiveItem for ArchiveReaderZipEvent
+ */
 class ArchiveZipItem : public ArchiveItem
 {
 public:
   ArchiveZipItem(const char* aFilename,
-                 ZipCentral& aCentralStruct);
+                 const ZipCentral& aCentralStruct,
+                 const nsAString& aEncoding);
   virtual ~ArchiveZipItem();
 
-  void SetFilename(const nsCString& aFilename);
-  nsCString GetFilename();
+  nsresult GetFilename(nsString& aFilename);
 
   // From zipItem to DOMFile:
   virtual nsIDOMFile* File(ArchiveReader* aArchiveReader);
@@ -31,17 +36,31 @@ public: // for the event
   static uint32_t StrToInt32(const uint8_t* aStr);
   static uint16_t StrToInt16(const uint8_t* aStr);
 
+private:
+  nsresult ConvertFilename();
+
 private: // data
   nsCString mFilename;
+
+  nsString mFilenameU;
   ZipCentral mCentralStruct;
+
+  nsString mEncoding;
 };
 
+/**
+ * ArchiveReaderEvent implements the ArchiveReaderEvent for the ZIP format
+ */
 class ArchiveReaderZipEvent : public ArchiveReaderEvent
 {
 public:
-  ArchiveReaderZipEvent(ArchiveReader* aArchiveReader);
+  ArchiveReaderZipEvent(ArchiveReader* aArchiveReader,
+                        const nsAString& aEncoding);
 
   nsresult Exec();
+
+private:
+  nsString mEncoding;
 };
 
 END_FILE_NAMESPACE

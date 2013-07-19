@@ -16,7 +16,9 @@
 #include "mozilla/dom/BindingUtils.h"
 
 using namespace mozilla;
-using mozilla::dom::DestroyProtoOrIfaceCache;
+using namespace JS;
+using namespace xpc;
+using mozilla::dom::DestroyProtoAndIfaceCache;
 
 /***************************************************************************/
 
@@ -44,33 +46,13 @@ XPCJSContextStack::Pop()
     --idx; // Advance to new top of the stack
 
     XPCJSContextInfo &e = mStack[idx];
-    NS_ASSERTION(!e.suspendDepth || e.cx, "Shouldn't have suspendDepth without a cx!");
-    if (e.cx) {
-        if (e.suspendDepth) {
-            JS_ResumeRequest(e.cx, e.suspendDepth);
-            e.suspendDepth = 0;
-        }
-
-        if (e.savedFrameChain) {
-            // Pop() can be called outside any request for e.cx.
-            JSAutoRequest ar(e.cx);
-            JS_RestoreFrameChain(e.cx);
-            e.savedFrameChain = false;
-        }
+    if (e.cx && e.savedFrameChain) {
+        // Pop() can be called outside any request for e.cx.
+        JSAutoRequest ar(e.cx);
+        JS_RestoreFrameChain(e.cx);
+        e.savedFrameChain = false;
     }
     return cx;
-}
-
-static nsIPrincipal*
-GetPrincipalFromCx(JSContext *cx)
-{
-    nsIScriptContextPrincipal* scp = GetScriptContextPrincipalFromJSContext(cx);
-    if (scp) {
-        nsIScriptObjectPrincipal* globalData = scp->GetObjectPrincipal();
-        if (globalData)
-            return globalData->GetPrincipal();
-    }
-    return nullptr;
 }
 
 bool
@@ -83,18 +65,20 @@ XPCJSContextStack::Push(JSContext *cx)
 
     XPCJSContextInfo &e = mStack[mStack.Length() - 1];
     if (e.cx) {
-        if (e.cx == cx) {
-            nsIScriptSecurityManager* ssm = XPCWrapper::GetSecurityManager();
-            if (ssm) {
-                if (nsIPrincipal* globalObjectPrincipal = GetPrincipalFromCx(cx)) {
-                    nsIPrincipal* subjectPrincipal = ssm->GetCxSubjectPrincipal(cx);
-                    bool equals = false;
-                    globalObjectPrincipal->Equals(subjectPrincipal, &equals);
-                    if (equals) {
-                        mStack.AppendElement(cx);
-                        return true;
-                    }
-                }
+        // The cx we're pushing is also stack-top. In general we still need to
+        // call JS_SaveFrameChain here. But if that would put us in a
+        // compartment that's same-origin with the current one, we can skip it.
+        nsIScriptSecurityManager* ssm = XPCWrapper::GetSecurityManager();
+        if ((e.cx == cx) && ssm) {
+            RootedObject defaultGlobal(cx, JS_GetGlobalObject(cx));
+            nsIPrincipal *currentPrincipal =
+              GetCompartmentPrincipal(js::GetContextCompartment(cx));
+            nsIPrincipal *defaultPrincipal = GetObjectPrincipal(defaultGlobal);
+            bool equal = false;
+            currentPrincipal->Equals(defaultPrincipal, &equal);
+            if (equal) {
+                mStack.AppendElement(cx);
+                return true;
             }
         }
 
@@ -105,25 +89,20 @@ XPCJSContextStack::Push(JSContext *cx)
                 return false;
             e.savedFrameChain = true;
         }
-
-        if (!cx)
-            e.suspendDepth = JS_SuspendRequest(e.cx);
     }
 
     mStack.AppendElement(cx);
     return true;
 }
 
-#ifdef DEBUG
 bool
-XPCJSContextStack::DEBUG_StackHasJSContext(JSContext *cx)
+XPCJSContextStack::HasJSContext(JSContext *cx)
 {
     for (uint32_t i = 0; i < mStack.Length(); i++)
         if (cx == mStack[i].cx)
             return true;
     return false;
 }
-#endif
 
 static JSBool
 SafeGlobalResolve(JSContext *cx, JSHandleObject obj, JSHandleId id)
@@ -135,16 +114,17 @@ SafeGlobalResolve(JSContext *cx, JSHandleObject obj, JSHandleId id)
 static void
 SafeFinalize(JSFreeOp *fop, JSObject* obj)
 {
-    nsIScriptObjectPrincipal* sop =
-        static_cast<nsIScriptObjectPrincipal*>(xpc_GetJSPrivate(obj));
+    SandboxPrivate* sop =
+        static_cast<SandboxPrivate*>(xpc_GetJSPrivate(obj));
+    sop->ForgetGlobalObject();
     NS_IF_RELEASE(sop);
-    DestroyProtoOrIfaceCache(obj);
+    DestroyProtoAndIfaceCache(obj);
 }
 
 static JSClass global_class = {
     "global_for_XPCJSContextStack_SafeJSContext",
     XPCONNECT_GLOBAL_FLAGS,
-    JS_PropertyStub, JS_PropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
+    JS_PropertyStub, JS_DeletePropertyStub, JS_PropertyStub, JS_StrictPropertyStub,
     JS_EnumerateStub, SafeGlobalResolve, JS_ConvertStub, SafeFinalize,
     NULL, NULL, NULL, NULL, TraceXPCGlobal
 };
@@ -167,8 +147,6 @@ XPCJSContextStack::GetSafeJSContext()
     if (NS_FAILED(rv))
         return NULL;
 
-    nsCOMPtr<nsIScriptObjectPrincipal> sop = new PrincipalHolder(principal);
-
     nsRefPtr<nsXPConnect> xpc = nsXPConnect::GetXPConnect();
     if (!xpc)
         return NULL;
@@ -185,19 +163,14 @@ XPCJSContextStack::GetSafeJSContext()
     if (!mSafeJSContext)
         return NULL;
 
-    JSObject *glob;
+    JS::RootedObject glob(mSafeJSContext);
     {
         // scoped JS Request
         JSAutoRequest req(mSafeJSContext);
 
         JS_SetErrorReporter(mSafeJSContext, mozJSLoaderErrorReporter);
 
-        JSCompartment *compartment;
-        nsresult rv = xpc_CreateGlobalObject(mSafeJSContext, &global_class,
-                                             principal, principal, false,
-                                             &glob, &compartment);
-        if (NS_FAILED(rv))
-            glob = nullptr;
+        glob = xpc::CreateGlobalObject(mSafeJSContext, &global_class, principal, JS::SystemZone);
 
         if (glob) {
             // Make sure the context is associated with a proper compartment
@@ -206,9 +179,8 @@ XPCJSContextStack::GetSafeJSContext()
 
             // Note: make sure to set the private before calling
             // InitClasses
-            nsIScriptObjectPrincipal* priv = nullptr;
-            sop.swap(priv);
-            JS_SetPrivate(glob, priv);
+            nsCOMPtr<nsIScriptObjectPrincipal> sop = new SandboxPrivate(principal, glob);
+            JS_SetPrivate(glob, sop.forget().get());
         }
 
         // After this point either glob is null and the
@@ -231,45 +203,3 @@ XPCJSContextStack::GetSafeJSContext()
 
     return mSafeJSContext;
 }
-
-/***************************************************************************/
-
-NS_IMPL_ISUPPORTS1(nsXPCJSContextStackIterator, nsIJSContextStackIterator)
-
-NS_IMETHODIMP
-nsXPCJSContextStackIterator::Reset(nsIJSContextStack *aStack)
-{
-    NS_ASSERTION(aStack == nsXPConnect::GetXPConnect(),
-                 "aStack must be implemented by XPConnect singleton");
-    mStack = XPCJSRuntime::Get()->GetJSContextStack()->GetStack();
-    if (mStack->IsEmpty())
-        mStack = nullptr;
-    else
-        mPosition = mStack->Length() - 1;
-
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXPCJSContextStackIterator::Done(bool *aDone)
-{
-    *aDone = !mStack;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXPCJSContextStackIterator::Prev(JSContext **aContext)
-{
-    if (!mStack)
-        return NS_ERROR_NOT_INITIALIZED;
-
-    *aContext = mStack->ElementAt(mPosition).cx;
-
-    if (mPosition == 0)
-        mStack = nullptr;
-    else
-        --mPosition;
-
-    return NS_OK;
-}
-

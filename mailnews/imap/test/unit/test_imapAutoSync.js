@@ -27,6 +27,7 @@ load("../../../resources/alertTestUtils.js");
 load("../../../resources/messageGenerator.js");
 
 // Globals
+Components.utils.import("resource:///modules/mailServices.js");
 
 setupIMAPPump();
 
@@ -108,10 +109,8 @@ function test_moveMessageToTargetFolder()
   let messages = Cc["@mozilla.org/array;1"]
                    .createInstance(Ci.nsIMutableArray);
   messages.appendElement(msgHdr, false);
-  let copyService = Cc["@mozilla.org/messenger/messagecopyservice;1"]
-                      .getService(Ci.nsIMsgCopyService);
-  copyService.CopyMessages(gIMAPInbox, messages, gTargetFolder, true,
-                           CopyListener, null, false);
+  MailServices.copy.CopyMessages(gIMAPInbox, messages, gTargetFolder, true,
+                                 CopyListener, null, false);
   yield false;
 }
 
@@ -147,13 +146,11 @@ function run_test()
 {
   // Add folder listeners that will capture async events
   const nsIMFNService = Ci.nsIMsgFolderNotificationService;
-  let MFNService = Cc["@mozilla.org/messenger/msgnotificationservice;1"]
-                      .getService(nsIMFNService);
   let flags =
         nsIMFNService.folderAdded |
         nsIMFNService.msgsMoveCopyCompleted |
         nsIMFNService.msgAdded;
-  MFNService.addListener(mfnListener, flags);
+  MailServices.mfn.addListener(mfnListener, flags);
   addMessageToFolder(gIMAPInbox);
 
   async_run_tests(tests);
@@ -287,12 +284,10 @@ function addMessageToFolder(folder)
   let gMessageGenerator = new MessageGenerator();
   messages = messages.concat(gMessageGenerator.makeMessage());
 
-  let ioService = Cc["@mozilla.org/network/io-service;1"]
-                  .getService(Ci.nsIIOService);
   let msgURI =
-    ioService.newURI("data:text/plain;base64," +
-                     btoa(messages[0].toMessageString()),
-                     null, null);
+    Services.io.newURI("data:text/plain;base64," +
+                       btoa(messages[0].toMessageString()),
+                       null, null);
   let imapMailbox =  gIMAPDaemon.getMailbox(folder.name);
   // We add messages with \Seen flag set so that we won't accidentally
   // trigger the code that updates imap folders that have unread messages moved

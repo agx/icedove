@@ -79,7 +79,7 @@ FeedParser.prototype =
     // Get the first channel (assuming there is only one per RSS File).
     let parsedItems = new Array();
 
-    let channel = aDOM.getElementsByTagName("channel")[0];
+    let channel = aDOM.querySelector("channel");
     if (!channel)
       return aFeed.onParseError(aFeed);
 
@@ -101,6 +101,7 @@ FeedParser.prototype =
     // XXX use getElementsByTagNameNS for now; childrenByTagNameNS would be
     // better, but RSS .90 is still with us.
     let itemNodes = aDOM.getElementsByTagNameNS(nsURI, "item");
+    itemNodes = itemNodes ? itemNodes : [];
     FeedUtils.log.debug("FeedParser.parseAsRSS2: items to parse - " +
                         itemNodes.length);
 
@@ -309,7 +310,7 @@ FeedParser.prototype =
     let parsedItems = new Array();
 
     // Get the first channel (assuming there is only one per Atom File).
-    let channel = aDOM.getElementsByTagName("feed")[0];
+    let channel = aDOM.querySelector("feed");
     if (!channel)
     {
       aFeed.onParseError(aFeed);
@@ -329,6 +330,7 @@ FeedParser.prototype =
 
     aFeed.invalidateItems();
     let items = this.childrenByTagNameNS(channel, FeedUtils.ATOM_03_NS, "entry");
+    items = items ? items : [];
     FeedUtils.log.debug("FeedParser.parseAsAtom: items to parse - " +
                         items.length);
 
@@ -451,6 +453,7 @@ FeedParser.prototype =
 
     aFeed.invalidateItems();
     let items = this.childrenByTagNameNS(channel, FeedUtils.ATOM_IETF_NS, "entry");
+    items = items ? items : [];
     FeedUtils.log.debug("FeedParser.parseAsAtomIETF: items to parse - " +
                         items.length);
 

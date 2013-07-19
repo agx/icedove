@@ -5,7 +5,63 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 "use strict";
-Cu.import("resource://gre/modules/NetUtil.jsm");
+Components.utils.import("resource://gre/modules/NetUtil.jsm");
+
+/* Turn the error e into a string, without fail. */
+function safeErrorString(aError) {
+  try {
+    var s = aError.toString();
+    if (typeof s === "string")
+      return s;
+  } catch (ee) { }
+
+  return "<failed trying to find error description>";
+}
+
+/**
+ * Given a handler function that may throw, return an infallible handler
+ * function that calls the fallible handler, and logs any exceptions it
+ * throws.
+ *
+ * @param aHandler function
+ *      A handler function, which may throw.
+ * @param aName string
+ *      A name for aHandler, for use in error messages. If omitted, we use
+ *      aHandler.name.
+ *
+ * (SpiderMonkey does generate good names for anonymous functions, but we
+ * don't have a way to get at them from JavaScript at the moment.)
+ */
+function makeInfallible(aHandler, aName) {
+  if (!aName)
+    aName = aHandler.name;
+
+  return function (/* arguments */) {
+    try {
+      return aHandler.apply(this, arguments);
+    } catch (ex) {
+      let msg = "Handler function ";
+      if (aName) {
+        msg += aName + " ";
+      }
+      msg += "threw an exception: " + safeErrorString(ex);
+      if (ex.stack) {
+        msg += "\nCall stack:\n" + ex.stack;
+      }
+
+      dump(msg + "\n");
+
+      if (Cu.reportError) {
+        /*
+         * Note that the xpcshell test harness registers an observer for
+         * console messages, so when we're running tests, this will cause
+         * the test to quit.
+         */
+        Cu.reportError(msg);
+      }
+    }
+  }
+}
 
 /**
  * An adapter that handles data transfers between the debugger client and
@@ -14,7 +70,7 @@ Cu.import("resource://gre/modules/NetUtil.jsm");
  *
  * @param aInput nsIInputStream
  *        The input stream.
- * @param aOutput nsIOutputStream
+ * @param aOutput nsIAsyncOutputStream
  *        The output stream.
  *
  * Given a DebuggerTransport instance dt:
@@ -39,7 +95,7 @@ Cu.import("resource://gre/modules/NetUtil.jsm");
  * ([length]:[packet]). The contents of the JSON packet are specified in
  * the Remote Debugging Protocol specification.
  */
-function DebuggerTransport(aInput, aOutput)
+this.DebuggerTransport = function DebuggerTransport(aInput, aOutput)
 {
   this._input = aInput;
   this._output = aOutput;
@@ -90,11 +146,12 @@ DebuggerTransport.prototype = {
     }
   },
 
-  onOutputStreamReady: function DT_onOutputStreamReady(aStream) {
+  onOutputStreamReady:
+  makeInfallible(function DT_onOutputStreamReady(aStream) {
     let written = aStream.write(this._outgoing, this._outgoing.length);
     this._outgoing = this._outgoing.slice(written);
     this._flushOutgoing();
-  },
+  }, "DebuggerTransport.prototype.onOutputStreamReady"),
 
   /**
    * Initialize the input stream for reading. Once this method has been
@@ -109,25 +166,23 @@ DebuggerTransport.prototype = {
   },
 
   // nsIStreamListener
-  onStartRequest: function DT_onStartRequest(aRequest, aContext) {},
+  onStartRequest:
+  makeInfallible(function DT_onStartRequest(aRequest, aContext) {},
+                 "DebuggerTransport.prototype.onStartRequest"),
 
-  onStopRequest: function DT_onStopRequest(aRequest, aContext, aStatus) {
+  onStopRequest:
+  makeInfallible(function DT_onStopRequest(aRequest, aContext, aStatus) {
     this.close();
     this.hooks.onClosed(aStatus);
-  },
+  }, "DebuggerTransport.prototype.onStopRequest"),
 
-  onDataAvailable: function DT_onDataAvailable(aRequest, aContext,
-                                                aStream, aOffset, aCount) {
-    try {
-      this._incoming += NetUtil.readInputStreamToString(aStream,
-                                                        aStream.available());
-      while (this._processIncoming()) {};
-    } catch(e) {
-      dumpn("Unexpected error reading from debugging connection: " + e + " - " + e.stack);
-      this.close();
-      return;
-    }
-  },
+  onDataAvailable:
+  makeInfallible(function DT_onDataAvailable(aRequest, aContext,
+                                             aStream, aOffset, aCount) {
+    this._incoming += NetUtil.readInputStreamToString(aStream,
+                                                      aStream.available());
+    while (this._processIncoming()) {};
+  }, "DebuggerTransport.prototype.onDataAvailable"),
 
   /**
    * Process incoming packets. Returns true if a packet has been received, either
@@ -158,22 +213,107 @@ DebuggerTransport.prototype = {
       packet = this._converter.ConvertToUnicode(packet);
       var parsed = JSON.parse(packet);
     } catch(e) {
-      dumpn("Error parsing incoming packet: " + packet + " (" + e + " - " + e.stack + ")");
+      let msg = "Error parsing incoming packet: " + packet + " (" + e + " - " + e.stack + ")";
+      if (Cu.reportError) {
+        Cu.reportError(msg);
+      }
+      dump(msg + "\n");
       return true;
     }
 
-    try {
-      dumpn("Got: " + packet);
-      let thr = Cc["@mozilla.org/thread-manager;1"].getService().currentThread;
-      let self = this;
-      thr.dispatch({run: function() {
-        self.hooks.onPacket(parsed);
-      }}, 0);
-    } catch(e) {
-      dumpn("Error handling incoming packet: " + e + " - " + e.stack);
-      dumpn("Packet was: " + packet);
-    }
+    dumpn("Got: " + packet);
+    let self = this;
+    Services.tm.currentThread.dispatch(makeInfallible(function() {
+      self.hooks.onPacket(parsed);
+    }, "DebuggerTransport instance's this.hooks.onPacket"), 0);
 
     return true;
   }
 }
+
+
+/**
+ * An adapter that handles data transfers between the debugger client and
+ * server when they both run in the same process. It presents the same API as
+ * DebuggerTransport, but instead of transmitting serialized messages across a
+ * connection it merely calls the packet dispatcher of the other side.
+ *
+ * @param aOther LocalDebuggerTransport
+ *        The other endpoint for this debugger connection.
+ *
+ * @see DebuggerTransport
+ */
+this.LocalDebuggerTransport = function LocalDebuggerTransport(aOther)
+{
+  this.other = aOther;
+  this.hooks = null;
+
+  /*
+   * A packet number, shared between this and this.other. This isn't used
+   * by the protocol at all, but it makes the packet traces a lot easier to
+   * follow.
+   */
+  this._serial = this.other ? this.other._serial : { count: 0 };
+}
+
+LocalDebuggerTransport.prototype = {
+  /**
+   * Transmit a message by directly calling the onPacket handler of the other
+   * endpoint.
+   */
+  send: function LDT_send(aPacket) {
+    let serial = this._serial.count++;
+    if (wantLogging) {
+      if (aPacket.to) {
+        dumpn("Packet " + serial + " sent to " + uneval(aPacket.to));
+      } else if (aPacket.from) {
+        dumpn("Packet " + serial + " sent from " + uneval(aPacket.from));
+      }
+    }
+    this._deepFreeze(aPacket);
+    let other = this.other;
+    Services.tm.currentThread.dispatch(makeInfallible(function() {
+      // Avoid the cost of JSON.stringify() when logging is disabled.
+      if (wantLogging) {
+        dumpn("Received packet " + serial + ": " + JSON.stringify(aPacket, null, 2));
+      }
+      other.hooks.onPacket(aPacket);
+    }, "LocalDebuggerTransport instance's this.other.hooks.onPacket"), 0);
+  },
+
+  /**
+   * Close the transport.
+   */
+  close: function LDT_close() {
+    if (this.other) {
+      // Remove the reference to the other endpoint before calling close(), to
+      // avoid infinite recursion.
+      let other = this.other;
+      delete this.other;
+      other.close();
+    }
+    this.hooks.onClosed();
+  },
+
+  /**
+   * An empty method for emulating the DebuggerTransport API.
+   */
+  ready: function LDT_ready() {},
+
+  /**
+   * Helper function that makes an object fully immutable.
+   */
+  _deepFreeze: function LDT_deepFreeze(aObject) {
+    Object.freeze(aObject);
+    for (let prop in aObject) {
+      // Freeze the properties that are objects, not on the prototype, and not
+      // already frozen. Note that this might leave an unfrozen reference
+      // somewhere in the object if there is an already frozen object containing
+      // an unfrozen object.
+      if (aObject.hasOwnProperty(prop) && typeof aObject === "object" &&
+          !Object.isFrozen(aObject)) {
+        this._deepFreeze(o[prop]);
+      }
+    }
+  }
+};

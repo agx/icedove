@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -27,14 +26,12 @@ ScopeObject::enclosingScope() const
     return getReservedSlot(SCOPE_CHAIN_SLOT).toObject();
 }
 
-inline bool
-ScopeObject::setEnclosingScope(JSContext *cx, HandleObject obj)
+inline void
+ScopeObject::setEnclosingScope(HandleObject obj)
 {
-    RootedObject self(cx, this);
-    if (!obj->setDelegate(cx))
-        return false;
-    self->setFixedSlot(SCOPE_CHAIN_SLOT, ObjectValue(*obj));
-    return true;
+    JS_ASSERT_IF(obj->isCall() || obj->isDeclEnv() || obj->isBlock(),
+                 obj->isDelegate());
+    setFixedSlot(SCOPE_CHAIN_SLOT, ObjectValue(*obj));
 }
 
 inline const Value &
@@ -85,6 +82,12 @@ CallObject::setAliasedVar(AliasedFormalIter fi, const Value &v)
     setSlot(fi.scopeSlot(), v);
 }
 
+/*static*/ inline size_t
+CallObject::offsetOfCallee()
+{
+    return getFixedSlotOffset(CALLEE_SLOT);
+}
+
 inline uint32_t
 NestedScopeObject::stackDepth() const
 {
@@ -125,14 +128,12 @@ BlockObject::localIndexToSlot(const Bindings &bindings, unsigned i)
 inline const Value &
 BlockObject::slotValue(unsigned i)
 {
-    JS_ASSERT(i < slotCount());
     return getSlotRef(RESERVED_SLOTS + i);
 }
 
 inline void
 BlockObject::setSlotValue(unsigned i, const Value &v)
 {
-    JS_ASSERT(i < slotCount());
     setSlot(RESERVED_SLOTS + i, v);
 }
 

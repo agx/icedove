@@ -37,6 +37,7 @@ public:
 
     cairo_pattern_t *CairoPattern();
     void AddColorStop(gfxFloat offset, const gfxRGBA& c);
+    void SetColorStops(mozilla::RefPtr<mozilla::gfx::GradientStops> aStops);
 
     void SetMatrix(const gfxMatrix& matrix);
     gfxMatrix GetMatrix() const;
@@ -103,6 +104,17 @@ public:
 protected:
     cairo_pattern_t *mPattern;
 
+    /**
+     * aPatternTransform is the cairo pattern transform --- from user space at
+     * the time the pattern was set, to pattern space.
+     * aCurrentTransform is the DrawTarget's CTM --- from user space to device
+     * space.
+     * aOriginalTransform, if non-null, is the DrawTarget's TM when
+     * aPatternTransform was set --- user space to device space. If null, then
+     * the DrawTarget's CTM is the same as the TM when aPatternTransfrom was set.
+     * This function sets aPatternTransform to the Azure pattern transform ---
+     * from pattern space to current DrawTarget user space.
+     */
     void AdjustTransformForPattern(mozilla::gfx::Matrix &aPatternTransform,
                                    const mozilla::gfx::Matrix &aCurrentTransform,
                                    const mozilla::gfx::Matrix *aOriginalTransform);

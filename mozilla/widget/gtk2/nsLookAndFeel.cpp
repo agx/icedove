@@ -540,6 +540,9 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
         aResult = 0;
         res = NS_ERROR_NOT_IMPLEMENTED;
         break;
+    case eIntID_AlertNotificationOrigin:
+        aResult = NS_ALERT_TOP;
+        break;
     case eIntID_IMERawInputUnderlineStyle:
     case eIntID_IMEConvertedTextUnderlineStyle:
         aResult = NS_STYLE_TEXT_DECORATION_STYLE_SOLID;
@@ -562,6 +565,9 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
         break;
     case eIntID_ScrollbarButtonAutoRepeatBehavior:
         aResult = 1;
+        break;
+    case eIntID_SwipeAnimationEnabled:
+        aResult = 0;
         break;
     default:
         aResult = 0;
@@ -721,7 +727,8 @@ GetSystemFontInfo(LookAndFeel::FontID /*unused */,
 
 bool
 nsLookAndFeel::GetFontImpl(FontID aID, nsString& aFontName,
-                           gfxFontStyle& aFontStyle)
+                           gfxFontStyle& aFontStyle,
+                           float aDevPixPerCSSPixel)
 {
   nsString *cachedFontName = NULL;
   gfxFontStyle *cachedFontStyle = NULL;

@@ -11,16 +11,13 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= necko
 LIBRARY_NAME	= neckobase_s
 LIBXUL_LIBRARY  = 1
-
-EXPORTS = \
-		nsMIMEInputStream.h \
-		nsURLHelper.h \
-		$(NULL)
+FAIL_ON_WARNINGS := 1
 
 CPPSRCS		= \
++		ArrayBufferInputStream.cpp \
+		BackgroundFileSaver.cpp \
 		nsTransportUtils.cpp \
 		nsAsyncStreamCopier.cpp \
 		nsAsyncRedirectVerifyHelper.cpp \
@@ -38,6 +35,7 @@ CPPSRCS		= \
 		nsStreamTransportService.cpp \
 		nsIOService.cpp \
 		nsLoadGroup.cpp \
+		nsMediaFragmentURIParser.cpp \
 		nsMIMEInputStream.cpp \
 		nsProtocolProxyService.cpp \
 		nsProxyInfo.cpp \
@@ -50,6 +48,7 @@ CPPSRCS		= \
 		nsSocketTransport2.cpp \
 		nsSocketTransportService2.cpp \
 		nsServerSocket.cpp \
+		nsUDPServerSocket.cpp \
 		nsStreamListenerTee.cpp \
 		nsStreamLoader.cpp \
 		nsSyncStreamListener.cpp \
@@ -65,7 +64,13 @@ CPPSRCS		= \
 		RedirectChannelRegistrar.cpp \
 		nsPreloadedStream.cpp \
 		nsStreamListenerWrapper.cpp \
+		ProxyAutoConfig.cpp \
+		Dashboard.cpp \
+		NetworkActivityMonitor.cpp \
+		EventTokenBucket.cpp \
 		$(NULL)
+
+LOCAL_INCLUDES	+= -I$(topsrcdir)/dom/base
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
 	CPPSRCS += nsURLHelperOS2.cpp
@@ -95,11 +100,6 @@ ifdef MOZ_ENABLE_QTNETWORK
 	OS_INCLUDES += $(MOZ_QT_CFLAGS)
 endif
 endif
-
-EXTRA_COMPONENTS = \
-		$(srcdir)/nsProxyAutoConfig.js \
-		$(srcdir)/nsProxyAutoConfig.manifest \
-		$(NULL)
 
 EXTRA_JS_MODULES = \
 		NetUtil.jsm \

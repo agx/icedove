@@ -9,7 +9,6 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import android.content.Context;
 import android.text.SpannableString;
 import android.text.method.LinkMovementMethod;
 import android.text.style.ForegroundColorSpan;
@@ -40,6 +39,9 @@ public class DoorHanger extends LinearLayout implements Button.OnClickListener {
     // Optional checkbox added underneath message text
     private CheckBox mCheckBox;
 
+    // Divider between doorhangers.
+    private View mDivider;
+
     private int mPersistence = 0;
     private boolean mPersistWhileVisible = false;
     private long mTimeout = 0;
@@ -61,10 +63,17 @@ public class DoorHanger extends LinearLayout implements Button.OnClickListener {
         return mValue;
     }
 
+    public void showDivider() {
+        mDivider.setVisibility(View.VISIBLE);
+    }
+
+    public void hideDivider() {
+        mDivider.setVisibility(View.GONE);
+    }
+
     // Postpone stuff that needs to be done on the main thread
     void init(String message, JSONArray buttons, JSONObject options) {
         setOrientation(VERTICAL);
-        setBackgroundResource(R.drawable.doorhanger_shadow_bg);
 
         LayoutInflater.from(mActivity).inflate(R.layout.doorhanger, this);
         setVisibility(View.GONE);
@@ -73,6 +82,8 @@ public class DoorHanger extends LinearLayout implements Button.OnClickListener {
         mTextView.setText(message);
 
         mChoicesLayout = (LinearLayout) findViewById(R.id.doorhanger_choices);
+
+        mDivider = findViewById(R.id.divider_doorhanger);
 
         // Set the doorhanger text and buttons
         for (int i = 0; i < buttons.length(); i++) {
@@ -86,6 +97,12 @@ public class DoorHanger extends LinearLayout implements Button.OnClickListener {
             }
          }
 
+        // Enable the button layout if we have buttons.
+        if (buttons.length() > 0) {
+            findViewById(R.id.divider_choices).setVisibility(View.VISIBLE);
+            mChoicesLayout.setVisibility(View.VISIBLE);
+        }
+
         setOptions(options);
     }
 
@@ -95,13 +112,22 @@ public class DoorHanger extends LinearLayout implements Button.OnClickListener {
                                              LayoutParams.FILL_PARENT,
                                              1.0f);
 
-        Button mButton = new Button(mActivity);
-        mButton.setText(aText);
-        mButton.setTag(Integer.toString(aCallback));
-        mButton.setOnClickListener(this);
-        mChoicesLayout.addView(mButton, mLayoutParams);
+        Button button = (Button) LayoutInflater.from(mActivity).inflate(R.layout.doorhanger_button, null);
+        button.setText(aText);
+        button.setTag(Integer.toString(aCallback));
+        button.setOnClickListener(this);
+
+        if (mChoicesLayout.getChildCount() > 0) {
+            Divider divider = new Divider(mActivity, null);
+            divider.setOrientation(Divider.Orientation.VERTICAL);
+            divider.setBackgroundColor(0xFFD1D5DA);
+            mChoicesLayout.addView(divider);
+        }
+
+        mChoicesLayout.addView(button, mLayoutParams);
     }
 
+    @Override
     public void onClick(View v) {
         JSONObject response = new JSONObject();
         try {
@@ -145,7 +171,7 @@ public class DoorHanger extends LinearLayout implements Button.OnClickListener {
             URLSpan linkSpan = new URLSpan(linkUrl) {
                 @Override
                 public void onClick(View view) {
-                    mActivity.loadUrlInTab(this.getURL());
+                    Tabs.getInstance().loadUrlInTab(this.getURL());
                 }
             };
 

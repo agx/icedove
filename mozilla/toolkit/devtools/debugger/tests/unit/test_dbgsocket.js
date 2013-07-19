@@ -1,14 +1,15 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-Cu.import("resource:///modules/devtools/dbg-server.jsm");
-Cu.import("resource:///modules/devtools/dbg-client.jsm");
+Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
+Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
+
+let port = 2929;
 
 function run_test()
 {
-  // Allow incoming connections.
-  DebuggerServer.init(function () { return true; });
-  DebuggerServer.addActors("resource://test/testactors.js");
+  do_print("Starting test at " + new Date().toTimeString());
+  initTestDebuggerServer();
 
   add_test(test_socket_conn);
   add_test(test_socket_shutdown);
@@ -27,10 +28,17 @@ function really_long() {
 
 function test_socket_conn()
 {
-  DebuggerServer.openListener(2929);
+  do_check_eq(DebuggerServer._socketConnections, 0);
+  try_open_listener();
+  do_print("Debugger server port is " + port);
+  do_check_eq(DebuggerServer._socketConnections, 1);
+  // Make sure opening the listener twice does nothing.
+  do_check_true(DebuggerServer.openListener(port));
+  do_check_eq(DebuggerServer._socketConnections, 1);
 
+  do_print("Starting long and unicode tests at " + new Date().toTimeString());
   let unicodeString = "(╯°□°）╯︵ ┻━┻";
-  let transport = debuggerSocketConnect("127.0.0.1", 2929);
+  let transport = debuggerSocketConnect("127.0.0.1", port);
   transport.hooks = {
     onPacket: function(aPacket) {
       this.onPacket = function(aPacket) {
@@ -54,9 +62,15 @@ function test_socket_conn()
 
 function test_socket_shutdown()
 {
-  DebuggerServer.closeListener();
+  do_check_eq(DebuggerServer._socketConnections, 1);
+  do_check_true(DebuggerServer.closeListener());
+  do_check_eq(DebuggerServer._socketConnections, 0);
+  // Make sure closing the listener twice does nothing.
+  do_check_false(DebuggerServer.closeListener());
+  do_check_eq(DebuggerServer._socketConnections, 0);
 
-  let transport = debuggerSocketConnect("127.0.0.1", 2929);
+  do_print("Connecting to a server socket at " + new Date().toTimeString());
+  let transport = debuggerSocketConnect("127.0.0.1", port);
   transport.hooks = {
     onPacket: function(aPacket) {
       // Shouldn't reach this, should never connect.
@@ -64,11 +78,13 @@ function test_socket_shutdown()
     },
 
     onClosed: function(aStatus) {
+      do_print("test_socket_shutdown onClosed called at " + new Date().toTimeString());
       do_check_eq(aStatus, Cr.NS_ERROR_CONNECTION_REFUSED);
       run_next_test();
     }
   };
 
+  do_print("Initializing input stream at " + new Date().toTimeString());
   transport.ready();
 }
 
@@ -86,4 +102,15 @@ function test_pipe_conn()
   };
 
   transport.ready();
+}
+
+function try_open_listener()
+{
+  try {
+    do_check_true(DebuggerServer.openListener(port));
+  } catch (e) {
+    // In case the port is unavailable, pick a random one between 2000 and 65000.
+    port = Math.floor(Math.random() * (65000 - 2000 + 1)) + 2000;
+    try_open_listener();
+  }
 }

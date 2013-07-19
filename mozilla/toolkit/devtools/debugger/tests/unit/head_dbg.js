@@ -15,8 +15,8 @@ Services.prefs.setBoolPref("devtools.debugger.log", true);
 // Enable remote debugging for the relevant tests.
 Services.prefs.setBoolPref("devtools.debugger.remote-enabled", true);
 
-Cu.import("resource:///modules/devtools/dbg-server.jsm");
-Cu.import("resource:///modules/devtools/dbg-client.jsm");
+Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
+Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
 
 // Convert an nsIScriptError 'aFlags' value into an appropriate string.
 function scriptErrorFlagsToKind(aFlags) {
@@ -58,6 +58,10 @@ let listener = {
       }
     }
 
+    // Make sure we exit all nested event loops so that the test can finish.
+    while (DebuggerServer.xpcInspector.eventLoopNestLevel > 0) {
+      DebuggerServer.xpcInspector.exitNestedEventLoop();
+    }
     do_throw("head_dbg.js got console message: " + string + "\n");
   }
 };
@@ -93,30 +97,50 @@ function addTestGlobal(aName)
   return global;
 }
 
-function getTestGlobalContext(aClient, aName, aCallback) {
-  aClient.request({ "to": "root", "type": "listContexts" }, function(aResponse) {
-    for each (let context in aResponse.contexts) {
-      if (context.global == aName) {
-        aCallback(context);
-        return false;
+// List the DebuggerClient |aClient|'s tabs, look for one whose title is
+// |aTitle|, and apply |aCallback| to the packet's entry for that tab.
+function getTestTab(aClient, aTitle, aCallback) {
+  aClient.listTabs(function (aResponse) {
+    for (let tab of aResponse.tabs) {
+      if (tab.title === aTitle) {
+        aCallback(tab);
+        return;
       }
     }
     aCallback(null);
   });
 }
 
-function attachTestGlobalClient(aClient, aName, aCallback) {
-  getTestGlobalContext(aClient, aName, function(aContext) {
-    aClient.attachThread(aContext.actor, aCallback);
+// Attach to |aClient|'s tab whose title is |aTitle|; pass |aCallback| the
+// response packet and a TabClient instance referring to that tab.
+function attachTestTab(aClient, aTitle, aCallback) {
+  getTestTab(aClient, aTitle, function (aTab) {
+    aClient.attachTab(aTab.actor, aCallback);
   });
 }
 
-function attachTestGlobalClientAndResume(aClient, aName, aCallback) {
-  attachTestGlobalClient(aClient, aName, function(aResponse, aThreadClient) {
-    aThreadClient.resume(function(aResponse) {
-      aCallback(aResponse, aThreadClient);
+// Attach to |aClient|'s tab whose title is |aTitle|, and then attach to
+// that tab's thread. Pass |aCallback| the thread attach response packet, a
+// TabClient referring to the tab, and a ThreadClient referring to the
+// thread.
+function attachTestThread(aClient, aTitle, aCallback) {
+  attachTestTab(aClient, aTitle, function (aResponse, aTabClient) {
+    aClient.attachThread(aResponse.threadActor, function (aResponse, aThreadClient) {
+      aCallback(aResponse, aTabClient, aThreadClient);
+    }, { useSourceMaps: true });
+  });
+}
+
+// Attach to |aClient|'s tab whose title is |aTitle|, attach to the tab's
+// thread, and then resume it. Pass |aCallback| the thread's response to
+// the 'resume' packet, a TabClient for the tab, and a ThreadClient for the
+// thread.
+function attachTestTabAndResume(aClient, aTitle, aCallback) {
+  attachTestThread(aClient, aTitle, function(aResponse, aTabClient, aThreadClient) {
+    aThreadClient.resume(function (aResponse) {
+      aCallback(aResponse, aTabClient, aThreadClient);
     });
-  })
+  });
 }
 
 /**
@@ -129,11 +153,26 @@ function initTestDebuggerServer()
   DebuggerServer.init(function () { return true; });
 }
 
+function initSourcesBackwardsCompatDebuggerServer()
+{
+  DebuggerServer.addActors("chrome://global/content/devtools/dbg-browser-actors.js");
+  DebuggerServer.addActors("resource://test/testcompatactors.js");
+  DebuggerServer.init(function () { return true; });
+}
+
 function finishClient(aClient)
 {
   aClient.close(function() {
     do_test_finished();
   });
+}
+
+/**
+ * Takes a relative file path and returns the absolute file url for it.
+ */
+function getFileUrl(aName) {
+  let file = do_get_file(aName);
+  return Services.io.newFileURI(file).spec;
 }
 
 /**
@@ -150,4 +189,21 @@ function getFilePath(aName)
     filePrePath += "/";
   }
   return path.slice(filePrePath.length);
+}
+
+Cu.import("resource://gre/modules/NetUtil.jsm");
+
+/**
+ * Returns the full text contents of the given file.
+ */
+function readFile(aFileName) {
+  let f = do_get_file(aFileName);
+  let s = Cc["@mozilla.org/network/file-input-stream;1"]
+    .createInstance(Ci.nsIFileInputStream);
+  s.init(f, -1, -1, false);
+  try {
+    return NetUtil.readInputStreamToString(s, s.available());
+  } finally {
+    s.close();
+  }
 }

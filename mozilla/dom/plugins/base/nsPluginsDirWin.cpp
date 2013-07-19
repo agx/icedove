@@ -11,7 +11,8 @@
   by Alex Musil
  */
 
-#include "mozilla/Util.h"
+#include "mozilla/DebugOnly.h"
+#include "mozilla/Util.h" // ArrayLength
 
 #include "nsPluginsDir.h"
 #include "prlink.h"
@@ -188,7 +189,7 @@ static bool CanLoadPlugin(const PRUnichar* aBinaryPath)
 // The file name must be in the form "np*.dll"
 bool nsPluginsDir::IsPluginFile(nsIFile* file)
 {
-  nsCAutoString path;
+  nsAutoCString path;
   if (NS_FAILED(file->GetNativePath(path)))
     return false;
 
@@ -205,8 +206,8 @@ bool nsPluginsDir::IsPluginFile(nsIFile* file)
   if (extension)
     ++extension;
 
-  uint32_t fullLength = PL_strlen(filename);
-  uint32_t extLength = PL_strlen(extension);
+  uint32_t fullLength = strlen(filename);
+  uint32_t extLength = extension ? strlen(extension) : 0;
   if (fullLength >= 7 && extLength == 3) {
     if (!PL_strncasecmp(filename, "np", 2) && !PL_strncasecmp(extension, "dll", 3)) {
       // don't load OJI-based Java plugins
@@ -280,7 +281,7 @@ nsresult nsPluginFile::LoadPlugin(PRLibrary **outLibrary)
   }
 
   if (restoreOrigDir) {
-    BOOL bCheck = SetCurrentDirectoryW(aOrigDir);
+    DebugOnly<BOOL> bCheck = SetCurrentDirectoryW(aOrigDir);
     NS_ASSERTION(bCheck, "Error in Loading plugin");
   }
 
@@ -321,7 +322,7 @@ nsresult nsPluginFile::GetPluginInfo(nsPluginInfo& info, PRLibrary **outLibrary)
   if (!verbuf)
     return NS_ERROR_OUT_OF_MEMORY;
 
-  if (::GetFileVersionInfoW(lpFilepath, NULL, versionsize, verbuf))
+  if (::GetFileVersionInfoW(lpFilepath, 0, versionsize, verbuf))
   {
     // TODO: get appropriately-localized info from plugin file
     UINT lang = 1033; // language = English

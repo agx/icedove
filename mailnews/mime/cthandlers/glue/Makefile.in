@@ -10,7 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= mime
 LIBRARY_NAME	= mimecthglue_s
 EXPORT_LIBRARY = 1
 ifndef MOZ_INCOMPLETE_EXTERNAL_LINKAGE
@@ -24,9 +23,6 @@ CPPSRCS		= \
 		nsMimeContentTypeHandler.cpp \
 		$(NULL)
 
-EXPORTS     = nsMimeContentTypeHandler.h
-
-# glue lib should be static
 FORCE_STATIC_LIB = 1
 
 include $(topsrcdir)/config/rules.mk

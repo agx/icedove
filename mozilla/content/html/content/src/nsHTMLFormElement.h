@@ -14,15 +14,15 @@
 #include "nsIDOMHTMLFormElement.h"
 #include "nsIWebProgressListener.h"
 #include "nsIRadioGroupContainer.h"
-#include "nsIURI.h"
 #include "nsIWeakReferenceUtils.h"
-#include "nsPIDOMWindow.h"
 #include "nsThreadUtils.h"
 #include "nsInterfaceHashtable.h"
 #include "nsDataHashtable.h"
+#include "nsAsyncDOMEvent.h"
 
 class nsFormControlList;
 class nsIMutableArray;
+class nsIURI;
 
 class nsHTMLFormElement : public nsGenericHTMLElement,
                           public nsIDOMHTMLFormElement,
@@ -40,13 +40,13 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE(nsGenericHTMLElement::)
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
 
   // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT(nsGenericHTMLElement::)
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
 
   // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT(nsGenericHTMLElement::)
+  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLFormElement
   NS_DECL_NSIDOMHTMLFORMELEMENT
@@ -57,7 +57,6 @@ public:
   // nsIForm
   NS_IMETHOD_(nsIFormControl*) GetElementAt(int32_t aIndex) const;
   NS_IMETHOD_(uint32_t) GetElementCount() const;
-  NS_IMETHOD_(already_AddRefed<nsISupports>) ResolveName(const nsAString& aName);
   NS_IMETHOD_(int32_t) IndexOfControl(nsIFormControl* aControl);
   NS_IMETHOD_(nsIFormControl*) GetDefaultSubmitElement() const;
 
@@ -240,7 +239,34 @@ public:
    */
   bool HasEverTriedInvalidSubmit() const { return mEverTriedInvalidSubmit; }
 
+  /**
+   * Implements form[name]. Returns form controls in this form with the correct
+   * value of the name attribute.
+   */
+  already_AddRefed<nsISupports>
+  FindNamedItem(const nsAString& aName, nsWrapperCache** aCache);
+
 protected:
+  void PostPasswordEvent();
+  void EventHandled() { mFormPasswordEvent = nullptr; }
+
+  class FormPasswordEvent : public nsAsyncDOMEvent
+  {
+  public:
+    FormPasswordEvent(nsHTMLFormElement* aEventNode,
+                      const nsAString& aEventType)
+      : nsAsyncDOMEvent(aEventNode, aEventType, true, true)
+    {}
+
+    NS_IMETHOD Run()
+    {
+      static_cast<nsHTMLFormElement*>(mEventNode.get())->EventHandled();
+      return nsAsyncDOMEvent::Run();
+    }
+  };
+
+  nsRefPtr<FormPasswordEvent> mFormPasswordEvent;
+
   class RemoveElementRunnable;
   friend class RemoveElementRunnable;
 
@@ -305,7 +331,8 @@ protected:
                                  bool aEarlyNotify);
 
   /**
-   * Just like ResolveName(), but takes an arg for whether to flush
+   * Find form controls in this form with the correct value in the name
+   * attribute.
    */
   already_AddRefed<nsISupports> DoResolveName(const nsAString& aName, bool aFlushContent);
 

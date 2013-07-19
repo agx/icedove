@@ -13,10 +13,14 @@
 #include "nsIDOMLocation.h"
 #include "nsIDOMXULCommandDispatcher.h"
 #include "nsIDOMElement.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMDocument.h"
 #include "nsCOMPtr.h"
+#include "nsAutoPtr.h"
+#include "nsTArray.h"
 #include "nsIURI.h"
+#include "mozilla/dom/EventTarget.h"
+
+#include "js/RootingAPI.h"
 
 #define DOM_WINDOW_DESTROYED_TOPIC "dom-window-destroyed"
 #define DOM_WINDOW_FROZEN_TOPIC "dom-window-frozen"
@@ -24,6 +28,7 @@
 
 class nsIIdleObserver;
 class nsIPrincipal;
+class nsPerformance;
 
 // Popup control state enum. The values in this enum must go from most
 // permissive to least permissive so that it's safe to push state in
@@ -42,14 +47,19 @@ class nsIContent;
 class nsIDocument;
 class nsIScriptTimeoutHandler;
 struct nsTimeout;
-template <class> class nsScriptObjectHolder;
 class nsXBLPrototypeHandler;
 class nsIArray;
 class nsPIWindowRoot;
 
+namespace mozilla {
+namespace dom {
+class AudioContext;
+}
+}
+
 #define NS_PIDOMWINDOW_IID \
-{ 0x0c5763c6, 0x5e87, 0x4f6f, \
-  { 0xa2, 0xef, 0xcf, 0x4d, 0xeb, 0xd1, 0xbc, 0xc3 } }
+{ 0x81fe131f, 0x57c9, 0x4992, \
+  { 0xa7, 0xad, 0x82, 0x67, 0x3f, 0xc4, 0xe2, 0x53 } }
 
 class nsPIDOMWindow : public nsIDOMWindowInternal
 {
@@ -94,14 +104,14 @@ public:
     return mIsBackground;
   }
 
-  nsIDOMEventTarget* GetChromeEventHandler() const
+  mozilla::dom::EventTarget* GetChromeEventHandler() const
   {
     return mChromeEventHandler;
   }
 
-  virtual void SetChromeEventHandler(nsIDOMEventTarget* aChromeEventHandler) = 0;
+  virtual void SetChromeEventHandler(mozilla::dom::EventTarget* aChromeEventHandler) = 0;
 
-  nsIDOMEventTarget* GetParentTarget()
+  mozilla::dom::EventTarget* GetParentTarget()
   {
     if (!mParentTarget) {
       UpdateParentTarget();
@@ -162,15 +172,12 @@ public:
   virtual void MaybeUpdateTouchState() {}
   virtual void UpdateTouchState() {}
 
-  // GetExtantDocument provides a backdoor to the DOM GetDocument accessor
-  nsIDOMDocument* GetExtantDocument() const
-  {
-    return mDocument;
-  }
   nsIDocument* GetExtantDoc() const
   {
     return mDoc;
   }
+  nsIURI* GetDocumentURI() const;
+  nsIURI* GetDocBaseURI() const;
 
   nsIDocument* GetDoc()
   {
@@ -291,7 +298,7 @@ public:
 
   // Returns an object containing the window's state.  This also suspends
   // all running timeouts in the window.
-  virtual nsresult SaveWindowState(nsISupports **aState) = 0;
+  virtual already_AddRefed<nsISupports> SaveWindowState() = 0;
 
   // Restore the window state from aState.
   virtual nsresult RestoreWindowState(nsISupports *aState) = 0;
@@ -482,7 +489,7 @@ public:
 
   virtual JSObject* GetCachedXBLPrototypeHandler(nsXBLPrototypeHandler* aKey) = 0;
   virtual void CacheXBLPrototypeHandler(nsXBLPrototypeHandler* aKey,
-                                        nsScriptObjectHolder<JSObject>& aHandler) = 0;
+                                        JS::Handle<JSObject*> aHandler) = 0;
 
   /*
    * Get and set the currently focused element within the document. If
@@ -571,6 +578,28 @@ public:
    */
   virtual void DisableDeviceSensor(uint32_t aType) = 0;
 
+  virtual void EnableTimeChangeNotifications() = 0;
+  virtual void DisableTimeChangeNotifications() = 0;
+
+#ifdef MOZ_B2G
+  /**
+   * Tell the window that it should start to listen to the network event of the
+   * given aType.
+   */
+  virtual void EnableNetworkEvent(uint32_t aType) = 0;
+
+  /**
+   * Tell the window that it should stop to listen to the network event of the
+   * given aType.
+   */
+  virtual void DisableNetworkEvent(uint32_t aType) = 0;
+#endif // MOZ_B2G
+
+  /**
+   * Tell this window that there is an observer for gamepad input
+   */
+  virtual void SetHasGamepadEventListener(bool aHasGamepad = true) = 0;
+
   /**
    * Set a arguments for this window. This will be set on the window
    * right away (if there's an existing document) and it will also be
@@ -611,6 +640,11 @@ public:
   OpenNoNavigate(const nsAString& aUrl, const nsAString& aName,
                  const nsAString& aOptions, nsIDOMWindow **_retval) = 0;
 
+  void AddAudioContext(mozilla::dom::AudioContext* aAudioContext);
+
+  // WebIDL-ish APIs
+  nsPerformance* GetPerformance();
+
 protected:
   // The nsPIDOMWindow constructor. The aOuterWindow argument should
   // be null if and only if the created window itself is an outer
@@ -620,7 +654,7 @@ protected:
 
   ~nsPIDOMWindow();
 
-  void SetChromeEventHandlerInternal(nsIDOMEventTarget* aChromeEventHandler) {
+  void SetChromeEventHandlerInternal(mozilla::dom::EventTarget* aChromeEventHandler) {
     mChromeEventHandler = aChromeEventHandler;
     // mParentTarget will be set when the next event is dispatched.
     mParentTarget = nullptr;
@@ -628,18 +662,26 @@ protected:
 
   virtual void UpdateParentTarget() = 0;
 
+  // Helper for creating performance objects.
+  void CreatePerformanceObjectIfNeeded();
+
   // These two variables are special in that they're set to the same
   // value on both the outer window and the current inner window. Make
   // sure you keep them in sync!
-  nsCOMPtr<nsIDOMEventTarget> mChromeEventHandler; // strong
-  nsCOMPtr<nsIDOMDocument> mDocument; // strong
-  nsCOMPtr<nsIDocument> mDoc; // strong, for fast access
+  nsCOMPtr<mozilla::dom::EventTarget> mChromeEventHandler; // strong
+  nsCOMPtr<nsIDocument> mDoc; // strong
+  // Cache the URI when mDoc is cleared.
+  nsCOMPtr<nsIURI> mDocumentURI; // strong
+  nsCOMPtr<nsIURI> mDocBaseURI; // strong
 
-  nsCOMPtr<nsIDOMEventTarget> mParentTarget; // strong
+  nsCOMPtr<mozilla::dom::EventTarget> mParentTarget; // strong
 
   // These members are only used on outer windows.
   nsCOMPtr<nsIDOMElement> mFrameElement;
   nsIDocShell           *mDocShell;  // Weak Reference
+
+  // mPerformance is only used on inner windows.
+  nsRefPtr<nsPerformance>       mPerformance;
 
   uint32_t               mModalStateDepth;
 
@@ -675,6 +717,9 @@ protected:
   // the element within the document that is currently focused when this
   // window is active
   nsCOMPtr<nsIContent> mFocusedNode;
+
+  // The AudioContexts created for the current document, if any.
+  nsTArray<nsRefPtr<mozilla::dom::AudioContext> > mAudioContexts;
 
   // A unique (as long as our 64-bit counter doesn't roll over) id for
   // this window.

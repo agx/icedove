@@ -9,13 +9,10 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = htmlparser
 LIBRARY_NAME   = htmlpars
 EXPORT_LIBRARY = 1
 IS_COMPONENT   = 1
 MODULE_NAME	   = nsParserModule
-SHORT_LIBNAME  = gkparser
-GRE_MODULE	= 1
 LIBXUL_LIBRARY = 1
 
 
@@ -44,5 +41,3 @@ CPPSRCS = \
 		$(NULL)
 
 include $(topsrcdir)/config/rules.mk
-
-LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/io

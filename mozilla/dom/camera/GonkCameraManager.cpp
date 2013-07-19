@@ -14,94 +14,102 @@
  * limitations under the License.
  */
 
+#include <camera/Camera.h>
+
 #include "jsapi.h"
-#include "libcameraservice/CameraHardwareInterface.h"
 #include "GonkCameraControl.h"
 #include "DOMCameraManager.h"
-
-#define DOM_CAMERA_LOG_LEVEL  3
 #include "CameraCommon.h"
 
 // From nsDOMCameraManager, but gonk-specific!
+nsresult
+nsDOMCameraManager::GetNumberOfCameras(int32_t& aDeviceCount)
+{
+  aDeviceCount = android::Camera::getNumberOfCameras();
+  return NS_OK;
+}
+
+nsresult
+nsDOMCameraManager::GetCameraName(uint32_t aDeviceNum, nsCString& aDeviceName)
+{
+  int32_t count = android::Camera::getNumberOfCameras();
+  DOM_CAMERA_LOGI("getListOfCameras : getNumberOfCameras() returned %d\n", count);
+  if (aDeviceNum > count) {
+    DOM_CAMERA_LOGE("GetCameraName : invalid device number");
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  android::CameraInfo info;
+  int rv = android::Camera::getCameraInfo(aDeviceNum, &info);
+  if (rv != 0) {
+    DOM_CAMERA_LOGE("GetCameraName : get_camera_info(%d) failed: %d\n", aDeviceNum, rv);
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  switch (info.facing) {
+    case CAMERA_FACING_BACK:
+      aDeviceName.Assign("back");
+      break;
+
+    case CAMERA_FACING_FRONT:
+      aDeviceName.Assign("front");
+      break;
+
+    default:
+      aDeviceName.Assign("extra-camera-");
+      aDeviceName.AppendInt(aDeviceNum);
+      break;
+  }
+  return NS_OK;
+}
 
 /* [implicit_jscontext] jsval getListOfCameras (); */
 NS_IMETHODIMP
 nsDOMCameraManager::GetListOfCameras(JSContext* cx, JS::Value* _retval)
 {
   JSObject* a = JS_NewArrayObject(cx, 0, nullptr);
-  camera_module_t* module;
   uint32_t index = 0;
-  uint32_t count;
+  int32_t count;
 
   if (!a) {
     DOM_CAMERA_LOGE("getListOfCameras : Could not create array object");
     return NS_ERROR_OUT_OF_MEMORY;
   }
-  if (hw_get_module(CAMERA_HARDWARE_MODULE_ID, (const hw_module_t**)&module) < 0) {
-    DOM_CAMERA_LOGE("getListOfCameras : Could not load camera HAL module");
+  count = android::Camera::getNumberOfCameras();
+  if (count <= 0) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  count = module->get_number_of_cameras();
-  DOM_CAMERA_LOGI("getListOfCameras : get_number_of_cameras() returned %d\n", count);
+  DOM_CAMERA_LOGI("getListOfCameras : getNumberOfCameras() returned %d\n", count);
   while (count--) {
-    struct camera_info info;
-    int rv = module->get_camera_info(count, &info);
-    if (rv != 0) {
-      DOM_CAMERA_LOGE("getListOfCameras : get_camera_info(%d) failed: %d\n", count, rv);
+    nsCString cameraName;
+    nsresult result = GetCameraName(count, cameraName);
+    if (result != NS_OK) {
       continue;
     }
 
-    JSString* v;
-    jsval jv;
-
-    switch (info.facing) {
-      case CAMERA_FACING_BACK:
-        v = JS_NewStringCopyZ(cx, "back");
-        index = 0;
-        break;
-
-      case CAMERA_FACING_FRONT:
-        v = JS_NewStringCopyZ(cx, "front");
-        index = 1;
-        break;
-
-      default:
-        // TODO: handle extra cameras in getCamera().
-        {
-          static uint32_t extraIndex = 2;
-          nsCString s;
-          s.AppendPrintf("extra-camera-%d", count);
-          v = JS_NewStringCopyZ(cx, s.get());
-          index = extraIndex++;
-        }
-        break;
+    JSString* v = JS_NewStringCopyZ(cx, cameraName.get());
+    JS::Value jv;
+    if (!cameraName.Compare("back")) {
+      index = 0;
+    } else if (!cameraName.Compare("front")) {
+      index = 1;
+    } else {
+      static uint32_t extraIndex = 2;
+      index = extraIndex++;
     }
+
     if (!v) {
       DOM_CAMERA_LOGE("getListOfCameras : out of memory populating camera list");
-      delete a;
       return NS_ERROR_NOT_AVAILABLE;
     }
     jv = STRING_TO_JSVAL(v);
     if (!JS_SetElement(cx, a, index, &jv)) {
       DOM_CAMERA_LOGE("getListOfCameras : failed building list of cameras");
-      delete a;
       return NS_ERROR_NOT_AVAILABLE;
     }
   }
 
   *_retval = OBJECT_TO_JSVAL(a);
   return NS_OK;
-}
-
-using namespace mozilla;
-
-NS_IMETHODIMP
-GetCameraTask::Run()
-{
-  nsCOMPtr<nsICameraControl> cameraControl = new nsGonkCameraControl(mCameraId, mCameraThread);
-
-  DOM_CAMERA_LOGI("%s:%d\n", __func__, __LINE__);
-
-  return NS_DispatchToMainThread(new GetCameraResult(cameraControl, mOnSuccessCb));
 }

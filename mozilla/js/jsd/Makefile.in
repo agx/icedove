@@ -14,9 +14,7 @@ relativesrcdir  = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= jsdebug
 LIBRARY_NAME	= jsd
-DIRS	= idl
 CPPSRCS	 = \
 		jsd_xpc.cpp \
 		jshash.cpp
@@ -26,33 +24,27 @@ LIBXUL_LIBRARY = 1
 MODULE_NAME = JavaScript_Debugger
 EXPORT_LIBRARY = 1
 
-XPCSHELL_TESTS  = test
+DISABLED_XPCSHELL_TESTS  = test
 
 # REQUIRES	= java js
-
-EXPORTS		= jsdebug.h
 
 ifdef JS_THREADSAFE
 DEFINES         += -DJS_THREADSAFE
 endif
 
-CSRCS		= \
-		  jsdebug.c \
-		  jsd_atom.c \
-		  jsd_high.c \
-		  jsd_hook.c \
-		  jsd_lock.c \
-		  jsd_obj.c \
-		  jsd_scpt.c \
-		  jsd_stak.c \
-		  jsd_step.c \
-		  jsd_text.c \
-		  jsd_val.c \
+CPPSRCS		+= \
+		  jsdebug.cpp \
+		  jsd_atom.cpp \
+		  jsd_high.cpp \
+		  jsd_hook.cpp \
+		  jsd_lock.cpp \
+		  jsd_obj.cpp \
+		  jsd_scpt.cpp \
+		  jsd_stak.cpp \
+		  jsd_step.cpp \
+		  jsd_text.cpp \
+		  jsd_val.cpp \
 		  $(NULL)
-
-ifdef ENABLE_TESTS
-TOOL_DIRS		+= test
-endif
 
 include $(topsrcdir)/config/rules.mk
 

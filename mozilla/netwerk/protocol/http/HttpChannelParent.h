@@ -12,15 +12,20 @@
 #include "mozilla/dom/PBrowserParent.h"
 #include "mozilla/net/PHttpChannelParent.h"
 #include "mozilla/net/NeckoCommon.h"
+#include "mozilla/net/NeckoParent.h"
 #include "nsIParentRedirectingChannel.h"
 #include "nsIProgressEventSink.h"
-#include "nsITabParent.h"
 #include "nsHttpChannel.h"
 
 class nsICacheEntryDescriptor;
 class nsIAssociatedContentSecurity;
 
 namespace mozilla {
+
+namespace dom{
+class TabParent;
+}
+
 namespace net {
 
 class HttpChannelParentListener;
@@ -39,7 +44,9 @@ public:
   NS_DECL_NSIPROGRESSEVENTSINK
   NS_DECL_NSIINTERFACEREQUESTOR
 
-  HttpChannelParent(mozilla::dom::PBrowserParent* iframeEmbedding);
+  HttpChannelParent(mozilla::dom::PBrowserParent* iframeEmbedding,
+                    nsILoadContext* aLoadContext,
+                    PBOverrideStatus aStatus);
   virtual ~HttpChannelParent();
 
 protected:
@@ -47,6 +54,7 @@ protected:
                              const OptionalURIParams&   originalUri,
                              const OptionalURIParams&   docUri,
                              const OptionalURIParams&   referrerUri,
+                             const OptionalURIParams&   internalRedirectUri,
                              const uint32_t&            loadFlags,
                              const RequestHeaderTuples& requestHeaders,
                              const nsHttpAtom&          requestMethod,
@@ -61,8 +69,7 @@ protected:
                              const nsCString&           entityID,
                              const bool&                chooseApplicationCache,
                              const nsCString&           appCacheClientID,
-                             const bool&                allowSpdy,
-                             const IPC::SerializedLoadContext& loadContext) MOZ_OVERRIDE;
+                             const bool&                allowSpdy) MOZ_OVERRIDE;
 
   virtual bool RecvConnectChannel(const uint32_t& channelId);
   virtual bool RecvSetPriority(const uint16_t& priority);
@@ -71,10 +78,9 @@ protected:
   virtual bool RecvResume();
   virtual bool RecvCancel(const nsresult& status);
   virtual bool RecvRedirect2Verify(const nsresult& result,
-                                   const RequestHeaderTuples& changedHeaders);
-  virtual bool RecvUpdateAssociatedContentSecurity(const int32_t& high,
-                                                   const int32_t& low,
-                                                   const int32_t& broken,
+                                   const RequestHeaderTuples& changedHeaders,
+                                   const OptionalURIParams&   apiRedirectUri);
+  virtual bool RecvUpdateAssociatedContentSecurity(const int32_t& broken,
                                                    const int32_t& no);
   virtual bool RecvDocumentChannelCleanup();
   virtual bool RecvMarkOfflineCacheEntryAsForeign();
@@ -83,7 +89,7 @@ protected:
 
 protected:
   friend class mozilla::net::HttpChannelParentListener;
-  nsCOMPtr<nsITabParent> mTabParent;
+  nsRefPtr<mozilla::dom::TabParent> mTabParent;
 
 private:
   nsCOMPtr<nsIChannel>                    mChannel;
@@ -105,6 +111,8 @@ private:
   bool mSentRedirect1Begin          : 1;
   bool mSentRedirect1BeginFailed    : 1;
   bool mReceivedRedirect2Verify     : 1;
+
+  PBOverrideStatus mPBOverride;
 
   nsCOMPtr<nsILoadContext> mLoadContext;
 };

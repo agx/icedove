@@ -14,6 +14,7 @@ load("../../../resources/messageGenerator.js");
 // javascript mime emitter functions
 mimeMsg = {};
 Components.utils.import("resource:///modules/gloda/mimemsg.js", mimeMsg);
+Components.utils.import("resource:///modules/mailServices.js");
 
 // IMAP pump
 load("../../../resources/IMAPpump.js");
@@ -50,12 +51,10 @@ function loadImapMessage()
     ],
   });
 
-  let ioService = Cc["@mozilla.org/network/io-service;1"]
-                  .getService(Ci.nsIIOService);
   let msgURI =
-    ioService.newURI("data:text/plain;base64," +
-                     btoa(smsg.toMessageString()),
-                     null, null);
+    Services.io.newURI("data:text/plain;base64," +
+                       btoa(smsg.toMessageString()),
+                       null, null);
   let imapInbox =  gIMAPDaemon.getMailbox("INBOX")
   let message = new imapMessage(msgURI.spec, imapInbox.uidnext++, []);
   gIMAPMailbox.addMessage(message);
@@ -113,7 +112,7 @@ function testDetach()
   let msgHdr = gIMAPInbox.GetMessageHeader(2);
   do_check_neq(msgHdr, null);
   let messageContent = getContentFromMessage(msgHdr);
-  do_check_true(messageContent.indexOf("AttachmentDetached") != -1);
+  do_check_true(messageContent.contains("AttachmentDetached"));
 }
 
 // Cleanup
@@ -138,16 +137,13 @@ function run_test()
 {
   // Add folder listeners that will capture async events
   const nsIMFNService = Ci.nsIMsgFolderNotificationService;
-  let MFNService = Cc["@mozilla.org/messenger/msgnotificationservice;1"]
-                      .getService(nsIMFNService);
-  MFNService.addListener(mfnListener, nsIMFNService.msgsDeleted);
+  MailServices.mfn.addListener(mfnListener, nsIMFNService.msgsDeleted);
 
   // We need to register the dummyMsgWindow so that when we've finished running
   // the append url, in nsImapMailFolder::OnStopRunningUrl, we'll think the
   // Inbox is open in a folder and update it, which the detach code relies
   // on to finish the detach.
-  Cc["@mozilla.org/messenger/services/session;1"]
-    .getService(Ci.nsIMsgMailSession).AddMsgWindow(dummyMsgWindow);
+  MailServices.mailSession.AddMsgWindow(dummyMsgWindow);
 
   async_run_tests(tests);
 }

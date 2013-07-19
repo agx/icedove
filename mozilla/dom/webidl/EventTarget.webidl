@@ -10,19 +10,30 @@
  * liability, trademark and document use rules apply.
  */
 
-interface Event;
-
 interface EventTarget {
   /* Passing null for wantsUntrusted means "default behavior", which
      differs in content and chrome.  In content that default boolean
      value is true, while in chrome the default boolean value is
      false. */
+  [Throws]
   void addEventListener(DOMString type,
                         EventListener? listener,
                         optional boolean capture = false,
                         optional boolean? wantsUntrusted = null);
+  [Throws]
   void removeEventListener(DOMString type,
                            EventListener? listener,
                            optional boolean capture = false);
+  [Throws]
   boolean dispatchEvent(Event event);
+};
+
+// Mozilla extensions for use by JS-implemented event targets to
+// implement on* properties.
+partial interface EventTarget {
+  [ChromeOnly, Throws]
+  void setEventHandler(DOMString type, EventHandler handler);
+
+  [ChromeOnly]
+  EventHandler getEventHandler(DOMString type);
 };

@@ -8,8 +8,8 @@
 #include <iostream>
 #include <climits>
 
-#ifndef MOZ_CHECKEDINT_ENABLE_MOZ_ASSERTS
-#  error MOZ_CHECKEDINT_ENABLE_MOZ_ASSERTS should be defined by CheckedInt.h
+#ifndef MOZ_CHECKEDINT_USE_MFBT
+#  error "MOZ_CHECKEDINT_USE_MFBT should be defined by CheckedInt.h"
 #endif
 
 using namespace mozilla;
@@ -197,6 +197,8 @@ void test()
 
   if (isTSigned) {
     VERIFY_IS_VALID(-max);
+    VERIFY_IS_INVALID(-min);
+    VERIFY(-max - min == one);
     VERIFY_IS_VALID(-max - one);
     VERIFY_IS_VALID(negOne);
     VERIFY_IS_VALID(-max + negOne);
@@ -206,6 +208,9 @@ void test()
     VERIFY_IS_VALID(negOne + negOne);
     VERIFY(negOne + negOne == negTwo);
   } else {
+    VERIFY_IS_INVALID(-max);
+    VERIFY_IS_VALID(-min);
+    VERIFY(min == zero);
     VERIFY_IS_INVALID(negOne);
   }
 
@@ -413,12 +418,16 @@ void test()
   VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(int64_t)
   VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(uint64_t)
 
+  typedef signed char signedChar;
   typedef unsigned char unsignedChar;
   typedef unsigned short unsignedShort;
   typedef unsigned int  unsignedInt;
   typedef unsigned long unsignedLong;
+  typedef long long longLong;
+  typedef unsigned long long unsignedLongLong;
 
   VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(char)
+  VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(signedChar)
   VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(unsignedChar)
   VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(short)
   VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(unsignedShort)
@@ -426,6 +435,8 @@ void test()
   VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(unsignedInt)
   VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(long)
   VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(unsignedLong)
+  VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(longLong)
+  VERIFY_CONSTRUCTION_FROM_INTEGER_TYPE(unsignedLongLong)
 
   /* Test increment/decrement operators */
 
@@ -470,6 +481,7 @@ int main()
   test<uint64_t>();
 
   test<char>();
+  test<signed char>();
   test<unsigned char>();
   test<short>();
   test<unsigned short>();
@@ -477,10 +489,14 @@ int main()
   test<unsigned int>();
   test<long>();
   test<unsigned long>();
+  test<long long>();
+  test<unsigned long long>();
 
-  if (gIntegerTypesTested < 8) {
+  const int MIN_TYPES_TESTED = 9;
+  if (gIntegerTypesTested < MIN_TYPES_TESTED) {
     std::cerr << "Only " << gIntegerTypesTested << " have been tested. "
-              << "This should not be less than 8." << std::endl;
+              << "This should not be less than " << MIN_TYPES_TESTED << "."
+              << std::endl;
     gTestsFailed++;
   }
 

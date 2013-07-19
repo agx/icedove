@@ -16,6 +16,7 @@
 #endif
 #include <windows.h>
 #include <d3d9.h>
+#include <d3dcompiler.h>
 
 #include <set>
 #include <vector>
@@ -25,6 +26,19 @@
 #include "libEGL/Config.h"
 #include "libEGL/ShaderCache.h"
 #include "libEGL/Surface.h"
+
+const int versionWindowsVista = MAKEWORD(0x00, 0x06);
+const int versionWindows7 = MAKEWORD(0x01, 0x06);
+
+// Return the version of the operating system in a format suitable for ordering
+// comparison.
+inline int getComparableOSVersion()
+{
+    DWORD version = GetVersion();
+    int majorVersion = LOBYTE(LOWORD(version));
+    int minorVersion = HIBYTE(LOWORD(version));
+    return MAKEWORD(minorVersion, majorVersion);
+}
 
 namespace egl
 {
@@ -96,6 +110,8 @@ class Display
     virtual IDirect3DVertexShader9 *createVertexShader(const DWORD *function, size_t length);
     virtual IDirect3DPixelShader9 *createPixelShader(const DWORD *function, size_t length);
 
+    virtual HRESULT compileShaderSource(const char* hlsl, const char* sourceName, const char* profile, DWORD flags, ID3DBlob** binary, ID3DBlob** errorMessage);
+
   private:
     DISALLOW_COPY_AND_ASSIGN(Display);
 
@@ -131,6 +147,7 @@ class Display
     EGLint mMaxSwapInterval;
     EGLint mMinSwapInterval;
     bool mSoftwareDevice;
+    bool mSupportsNonPower2Textures;
     
     typedef std::set<Surface*> SurfaceSet;
     SurfaceSet mSurfaceSet;
@@ -147,6 +164,21 @@ class Display
 
     void initExtensionString();
     std::string mExtensionString;
+
+    typedef HRESULT (WINAPI *D3DCompileFunc)(LPCVOID pSrcData,
+                                             SIZE_T SrcDataSize,
+                                             LPCSTR pSourceName,
+                                             CONST D3D_SHADER_MACRO* pDefines,
+                                             ID3DInclude* pInclude,
+                                             LPCSTR pEntrypoint,
+                                             LPCSTR pTarget,
+                                             UINT Flags1,
+                                             UINT Flags2,
+                                             ID3DBlob** ppCode,
+                                             ID3DBlob** ppErrorMsgs);
+
+    HMODULE mD3dCompilerModule;
+    D3DCompileFunc mD3DCompileFunc;
 };
 }
 

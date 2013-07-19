@@ -19,22 +19,11 @@ VPATH       = \
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = hal
 LIBRARY_NAME   = hal_s
 FORCE_STATIC_LIB = 1
 LIBXUL_LIBRARY = 1
 EXPORT_LIBRARY = 1
 FAIL_ON_WARNINGS = 1
-
-EXPORTS_NAMESPACES = mozilla
-EXPORTS_mozilla = \
-  Hal.h \
-  HalImpl.h \
-  HalSandbox.h \
-  HalSensor.h \
-  HalTypes.h \
-  HalWakeLock.h \
-  $(NULL)
 
 CPPSRCS = \
   Hal.cpp \
@@ -42,6 +31,19 @@ CPPSRCS = \
   WindowIdentifier.cpp \
   HalWakeLock.cpp \
   $(NULL)
+
+ifeq (stub,$(MOZ_GAMEPAD_BACKEND))
+CPPSRCS += FallbackGamepad.cpp
+endif
+ifeq (cocoa,$(MOZ_GAMEPAD_BACKEND))
+CPPSRCS += CocoaGamepad.cpp
+endif
+ifeq (windows,$(MOZ_GAMEPAD_BACKEND))
+CPPSRCS += WindowsGamepad.cpp
+endif
+ifeq (linux,$(MOZ_GAMEPAD_BACKEND))
+CPPSRCS += LinuxGamepad.cpp
+endif
 
 ifeq (android,$(MOZ_WIDGET_TOOLKIT))
 CPPSRCS += \
@@ -57,6 +59,8 @@ CPPSRCS += \
   GonkSensor.cpp \
   UeventPoller.cpp \
   GonkSwitch.cpp \
+  GonkFMRadio.cpp \
+  GonkDiskSpaceWatcher.cpp \
   $(NULL)
 else ifeq (Linux,$(OS_TARGET))
 CPPSRCS += \
@@ -82,7 +86,7 @@ CPPSRCS += \
   $(NULL)
 else ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
 CPPSRCS += \
-  FallbackBattery.cpp \
+  CocoaBattery.cpp \
   FallbackVibration.cpp \
   FallbackPower.cpp \
   FallbackScreenConfiguration.cpp \
@@ -92,7 +96,7 @@ CMMSRCS += \
   CocoaSensor.mm \
   smslib.mm \
   $(NULL)
-else ifneq (,$(filter OpenBSD NetBSD FreeBSD DragonFlyBSD,$(OS_TARGET)))
+else ifneq (,$(filter OpenBSD NetBSD FreeBSD DragonFly,$(OS_TARGET)))
 CPPSRCS += \
   FallbackSensor.cpp \
   FallbackVibration.cpp \
@@ -116,6 +120,10 @@ CPPSRCS += \
   $(NULL)
 endif
 
+ifdef MOZ_GAMEPAD
+LOCAL_INCLUDES = -I$(topsrcdir)/dom/base
+endif
+
 # Fallbacks for backends implemented on Gonk only.
 ifneq (gonk,$(MOZ_WIDGET_TOOLKIT)) #{
 CPPSRCS += \
@@ -125,6 +133,9 @@ CPPSRCS += \
   FallbackSwitch.cpp \
   FallbackScreenPower.cpp \
   FallbackProcessPriority.cpp \
+  FallbackFMRadio.cpp \
+  FallbackFactoryReset.cpp \
+  FallbackDiskSpaceWatcher.cpp \
   $(NULL)
 endif #}
 
@@ -137,11 +148,12 @@ include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 include $(topsrcdir)/config/rules.mk
 
-CFLAGS          += $(MOZ_DBUS_GLIB_CFLAGS)
-CXXFLAGS        += $(MOZ_DBUS_GLIB_CFLAGS)
+CFLAGS          += $(GLIB_CFLAGS) $(MOZ_DBUS_GLIB_CFLAGS)
+CXXFLAGS        += $(GLIB_CFLAGS) $(MOZ_DBUS_GLIB_CFLAGS)
 
 ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
 # So that we can call nsScreenManagerGonk::GetConfiguration().
 LOCAL_INCLUDES += -I$(topsrcdir)/widget/gonk
 LOCAL_INCLUDES += -I$(topsrcdir)/widget/xpwidgets
+LOCAL_INCLUDES += -I$(ANDROID_SOURCE)/hardware/libhardware_legacy/include
 endif

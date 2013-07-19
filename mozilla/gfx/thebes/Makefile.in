@@ -9,142 +9,19 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= thebes
 LIBRARY_NAME	= thebes
 LIBXUL_LIBRARY	= 1
 EXPORT_LIBRARY	= 1
 
-EXPORTS	= \
-	gfx2DGlue.h \
-	gfx3DMatrix.h \
-	gfxASurface.h \
-	gfxAlphaRecovery.h \
-	gfxBlur.h \
-	gfxCachedTempSurface.h \
-	gfxColor.h \
-	gfxContext.h \
-	gfxDrawable.h \
-	gfxFailure.h \
-	gfxFont.h \
-	gfxFontConstants.h \
-	gfxFontFeatures.h \
-	gfxFontUtils.h \
-	gfxFontTest.h \
-	gfxImageSurface.h \
-	gfxLineSegment.h \
-	gfxMatrix.h \
-	gfxPath.h \
-	gfxPattern.h \
-	gfxPlatform.h \
-	gfxPoint.h \
-	gfxPoint3D.h \
-	gfxPointH3D.h \
-	gfxQuad.h \
-	gfxQuaternion.h \
-	gfxRect.h \
-	gfxSkipChars.h \
-	gfxTeeSurface.h \
-	gfxTypes.h \
-	gfxUtils.h \
-	gfxUserFontSet.h \
-	nsSurfaceTexture.h \
-	gfxSharedImageSurface.h \
-	gfxReusableSurfaceWrapper.h \
+ifndef _MSC_VER
+FAIL_ON_WARNINGS = 1
+endif # !_MSC_VER
+
+# gfxSVGGlyphs needs nsDOMParser.h
+LOCAL_INCLUDES += \
+	-I$(topsrcdir)/content/base/public \
+	-I$(topsrcdir)/content/xml/document/src \
 	$(NULL)
-
-ifeq ($(MOZ_WIDGET_TOOLKIT),android)
-EXPORTS += \
-	gfxAndroidPlatform.h \
-	gfxFT2Fonts.h \
-	gfxFT2FontBase.h \
-	$(NULL)
-endif
-
-ifeq ($(MOZ_WIDGET_TOOLKIT),gonk)
-EXPORTS += \
-	gfxAndroidPlatform.h \
-	gfxFT2Fonts.h \
-	gfxFT2FontBase.h \
-	$(NULL)
-endif
-
-ifeq ($(MOZ_WIDGET_TOOLKIT),cocoa)
-EXPORTS += \
-	gfxPlatformMac.h \
-	gfxQuartzSurface.h \
-	gfxQuartzImageSurface.h \
-	gfxQuartzNativeDrawing.h \
-	$(NULL)
-endif
-
-ifeq ($(MOZ_WIDGET_TOOLKIT),gtk2)
-EXPORTS += \
-	gfxFT2FontBase.h \
-	gfxGdkNativeRenderer.h \
-	gfxPDFSurface.h \
-	gfxPSSurface.h \
-	gfxPlatformGtk.h \
-	$(NULL)
-
-ifdef MOZ_X11
-EXPORTS += \
-	gfxXlibSurface.h \
-        gfxXlibNativeRenderer.h \
-	$(NULL)
-endif
-
-ifdef MOZ_PANGO
-EXPORTS += gfxPangoFonts.h
-else
-EXPORTS += gfxFT2Fonts.h
-endif
-
-endif
-
-ifeq ($(MOZ_WIDGET_TOOLKIT),os2)
-EXPORTS	+= \
-	gfxOS2Fonts.h \
-	gfxOS2Platform.h \
-	gfxOS2Surface.h \
-	gfxPDFSurface.h \
-	$(NULL)
-endif
-
-ifeq ($(MOZ_WIDGET_TOOLKIT),qt)
-EXPORTS += \
-	gfxFT2FontBase.h \
-	gfxQPainterSurface.h \
-	gfxQtNativeRenderer.h \
-	gfxQtPlatform.h \
-	gfxPDFSurface.h \
-	$(NULL)
-
-ifdef MOZ_X11
-EXPORTS += \
-	gfxXlibSurface.h \
-	$(NULL)
-endif
-
-ifdef MOZ_PANGO
-EXPORTS += gfxPangoFonts.h
-else
-EXPORTS += gfxFT2Fonts.h
-endif
-endif
-
-ifeq ($(MOZ_WIDGET_TOOLKIT),windows)
-EXPORTS	+= \
-	gfxPDFSurface.h \
-	gfxWindowsPlatform.h \
-	gfxWindowsSurface.h \
-	gfxWindowsNativeDrawing.h \
-	gfxDWriteFonts.h \
-	gfxD2DSurface.h \
-	gfxGDIFont.h \
-	gfxGDIFontList.h \
-	gfxPlatformFontList.h \
-	$(NULL)
-endif
 
 CPPSRCS	= \
 	gfx3DMatrix.cpp \
@@ -170,21 +47,16 @@ CPPSRCS	= \
 	gfxUserFontSet.cpp \
 	gfxUtils.cpp \
 	gfxScriptItemizer.cpp \
+	gfxGraphiteShaper.cpp \
 	gfxHarfBuzzShaper.cpp \
-	gfxSharedImageSurface.cpp \
+	gfxBaseSharedMemorySurface.cpp \
 	gfxReusableSurfaceWrapper.cpp \
 	nsSurfaceTexture.cpp \
+	gfxSVGGlyphs.cpp \
 	$(NULL)
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),$(findstring $(MOZ_WIDGET_TOOLKIT),android gtk2 gonk qt))
 DEFINES += -DMOZ_ENABLE_FREETYPE
-endif
-
-ifdef MOZ_GRAPHITE
-DEFINES += -DGRAPHITE2_STATIC
-CPPSRCS	+= \
-	gfxGraphiteShaper.cpp \
-	$(NULL)
 endif
 
 # Are we targeting x86 or x64?  If so, build gfxAlphaRecoverySSE2.cpp.
@@ -235,9 +107,6 @@ ACDEFINES +=	-UWIN32_LEAN_AND_MEAN
 endif
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),android)
-EXPORTS	+= \
-	gfxPDFSurface.h \
-	$(NULL)
 CPPSRCS += \
 	gfxAndroidPlatform.cpp \
 	gfxFT2Fonts.cpp \
@@ -253,9 +122,6 @@ DEFINES +=	-DMOZ_USING_ANDROID_JAVA_WIDGETS
 endif
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),gonk)
-EXPORTS	+= \
-	gfxPDFSurface.h \
-	$(NULL)
 CPPSRCS += \
 	gfxAndroidPlatform.cpp \
 	gfxFT2Fonts.cpp \
@@ -333,10 +199,12 @@ CMMSRCS = \
 
 endif
 
-CSRCS += woff.c
-
-DEFINES += -DIMPL_THEBES -DWOFF_MOZILLA_CLIENT -DHB_DONT_DEFINE_STDINT
-DEFINES += -DMOZ_OTS_REPORT_ERRORS
+DEFINES += \
+	-DIMPL_THEBES \
+	-DHB_DONT_DEFINE_STDINT \
+	-DMOZ_OTS_REPORT_ERRORS \
+	-DGRAPHITE2_STATIC \
+	$(NULL)
 
 ifeq (WINNT,$(OS_TARGET))
 DEFINES += -DOTS_DLL
@@ -381,3 +249,8 @@ ifdef SOLARIS_SUNPRO_CXX
 gfxAlphaRecoverySSE2.$(OBJ_SUFFIX): OS_CXXFLAGS += -xarch=sse2 -xO4
 endif
 endif
+
+PremultiplyTables.h: $(srcdir)/genTables.py
+	$(PYTHON) $(srcdir)/genTables.py
+
+gfxUtils.$(OBJ_SUFFIX): PremultiplyTables.h

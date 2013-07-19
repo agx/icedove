@@ -5,13 +5,18 @@
 
 #pragma once
 
+#ifdef USE_SKIA_GPU
+#include "skia/GrContext.h"
+#include "skia/GrGLInterface.h"
+#endif
+
 #include "skia/SkCanvas.h"
+
 #include "2D.h"
 #include "Rect.h"
 #include "PathSkia.h"
 #include <sstream>
 #include <vector>
-using namespace std;
 
 namespace mozilla {
 namespace gfx {
@@ -88,6 +93,9 @@ public:
 
   bool Init(const IntSize &aSize, SurfaceFormat aFormat);
   void Init(unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat);
+#ifdef USE_SKIA_GPU
+  void InitWithFBO(unsigned int aFBOID, GrContext* aGrContext, const IntSize &aSize, SurfaceFormat aFormat);
+#endif
   
   operator std::string() const {
     std::stringstream stream;
@@ -105,7 +113,7 @@ private:
   SkBitmap mBitmap;
   SkRefPtr<SkCanvas> mCanvas;
   SkRefPtr<SkDevice> mDevice;
-  vector<SourceSurfaceSkia*> mSnapshots;
+  std::vector<SourceSurfaceSkia*> mSnapshots;
 };
 
 }

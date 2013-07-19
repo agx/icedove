@@ -44,7 +44,7 @@ public:
     // use CGFontRef API to get direct access to system font data
     virtual hb_blob_t *GetFontTable(uint32_t aTag);
 
-    mozilla::RefPtr<mozilla::gfx::ScaledFont> GetScaledFont();
+    virtual mozilla::TemporaryRef<mozilla::gfx::ScaledFont> GetScaledFont(mozilla::gfx::DrawTarget *aTarget);
 
     virtual void SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
                                      FontCacheSizes*   aSizes) const;
@@ -57,14 +57,16 @@ protected:
     virtual void CreatePlatformShaper();
 
     // override to prefer CoreText shaping with fonts that depend on AAT
-    virtual bool ShapeWord(gfxContext *aContext,
-                           gfxShapedWord *aShapedWord,
+    virtual bool ShapeText(gfxContext      *aContext,
                            const PRUnichar *aText,
-                           bool aPreferPlatformShaping = false);
+                           uint32_t         aOffset,
+                           uint32_t         aLength,
+                           int32_t          aScript,
+                           gfxShapedText   *aShapedText,
+                           bool             aPreferPlatformShaping = false);
 
     void InitMetrics();
     void InitMetricsFromPlatform();
-    void InitMetricsFromATSMetrics(ATSFontRef aFontRef);
 
     // Get width and glyph ID for a character; uses aConvFactor
     // to convert font units as returned by CG to actual dimensions
@@ -81,8 +83,6 @@ protected:
 
     Metrics               mMetrics;
     uint32_t              mSpaceGlyph;
-
-    mozilla::RefPtr<mozilla::gfx::ScaledFont> mAzureFont;
 };
 
 #endif /* GFX_MACFONT_H */

@@ -32,7 +32,7 @@ public:
     {
         LOG(("Creating nsHttpConnectionInfo @%x\n", this));
 
-        mUsingHttpProxy = (proxyInfo && !nsCRT::strcmp(proxyInfo->Type(), "http"));
+        mUsingHttpProxy = (proxyInfo && proxyInfo->IsHTTP());
 
         if (mUsingHttpProxy) {
             mUsingConnect = mUsingSSL;  // SSL always uses CONNECT
@@ -105,8 +105,13 @@ public:
     void          SetAnonymous(bool anon)         
                                          { mHashKey.SetCharAt(anon ? 'A' : '.', 2); }
     bool          GetAnonymous() const   { return mHashKey.CharAt(2) == 'A'; }
+    void          SetPrivate(bool priv)  { mHashKey.SetCharAt(priv ? 'P' : '.', 3); }
+    bool          GetPrivate() const     { return mHashKey.CharAt(3) == 'P'; }
 
     const nsCString &GetHost() { return mHost; }
+
+    // Returns true for any kind of proxy (http, socks, etc..)
+    bool UsingProxy();
 
 private:
     nsrefcnt               mRef;

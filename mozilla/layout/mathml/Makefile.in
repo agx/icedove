@@ -11,9 +11,9 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = layout
 LIBRARY_NAME = gkmathml_s
 LIBXUL_LIBRARY	= 1
+FAIL_ON_WARNINGS = 1
 
 
 LOCAL_INCLUDES = \
@@ -47,6 +47,7 @@ CPPSRCS =         nsMathMLChar.cpp		        \
                   nsMathMLmstyleFrame.cpp		\
                   nsMathMLmsqrtFrame.cpp		\
                   nsMathMLmrootFrame.cpp		\
+                  nsMathMLSelectedFrame.cpp		\
                   nsMathMLmactionFrame.cpp		\
                   nsMathMLmencloseFrame.cpp		\
                   nsMathMLsemanticsFrame.cpp		\

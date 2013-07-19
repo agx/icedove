@@ -9,6 +9,8 @@
  *     we get a new password prompt and can enter the password.
  */
 
+Components.utils.import("resource:///modules/mailServices.js");
+Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 load("../../../resources/alertTestUtils.js");
@@ -17,7 +19,6 @@ var test = null;
 var server;
 var daemon;
 var incomingServer;
-var pop3Service;
 var attempt = 0;
 
 const kUserName = "testpop3";
@@ -70,8 +71,8 @@ function promptPasswordPS(aParent, aDialogTitle, aText, aPassword, aCheckMsg,
 }
 
 function getPopMail() {
-  pop3Service.GetNewMail(gDummyMsgWindow, urlListener, gLocalInboxFolder,
-                         incomingServer);
+  MailServices.pop3.GetNewMail(gDummyMsgWindow, urlListener, gLocalInboxFolder,
+                               incomingServer);
 
   server.performTest();
   return false;
@@ -120,11 +121,9 @@ function actually_run_test() {
 
   // Check that we haven't forgetton the login even though we've retried and
   // canceled.
-  let loginMgr = Cc["@mozilla.org/login-manager;1"].getService(Ci.nsILoginManager);
-
   let count = {};
-  let logins = loginMgr.findLogins(count, "mailbox://localhost", null,
-                                   "mailbox://localhost");
+  let logins = Services.logins.findLogins(count, "mailbox://localhost", null,
+                                          "mailbox://localhost");
 
   do_check_eq(count.value, 1);
   do_check_eq(logins[0].username, kUserName);
@@ -140,8 +139,8 @@ function actually_run_test() {
   dump("\nGot Mail 2\n");
 
   // Now check the new one has been saved.
-  logins = loginMgr.findLogins(count, "mailbox://localhost", null,
-                               "mailbox://localhost");
+  logins = Services.logins.findLogins(count, "mailbox://localhost", null,
+                                      "mailbox://localhost");
 
   do_check_eq(count.value, 1);
   do_check_eq(logins[0].username, kUserName);
@@ -182,19 +181,13 @@ function run_test()
   // it from signons.txt).
   loadLocalMailAccount();
 
-  var acctMgr = Cc["@mozilla.org/messenger/account-manager;1"]
-                  .getService(Ci.nsIMsgAccountManager);
-
-  incomingServer = acctMgr.createIncomingServer(kUserName, "localhost", "pop3");
+  incomingServer = MailServices.accounts.createIncomingServer(kUserName, "localhost", "pop3");
 
   incomingServer.port = POP3_PORT;
 
   // Check that we haven't got any messages in the folder, if we have its a test
   // setup issue.
   do_check_eq(gLocalInboxFolder.getTotalMessages(false), 0);
-
-  pop3Service = Cc["@mozilla.org/messenger/popservice;1"]
-                      .getService(Ci.nsIPop3Service);
 
   do_test_pending();
 

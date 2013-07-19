@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79 ft=cpp:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -13,12 +12,13 @@
 #include "jsfun.h"
 #include "jsopcode.h"
 #include "jsscript.h"
-#include "jsscope.h"
 
+#include "ion/AsmJS.h"
 #include "vm/GlobalObject.h"
 #include "vm/RegExpObject.h"
+#include "vm/Shape.h"
 
-#include "jsscopeinlines.h"
+#include "vm/Shape-inl.h"
 
 namespace js {
 
@@ -45,11 +45,13 @@ CurrentScriptFileLineOrigin(JSContext *cx, const char **file, unsigned *linenop,
                             LineOption opt = NOT_CALLED_FROM_JSOP_EVAL)
 {
     if (opt == CALLED_FROM_JSOP_EVAL) {
-        JS_ASSERT(JSOp(*cx->regs().pc) == JSOP_EVAL);
-        JS_ASSERT(*(cx->regs().pc + JSOP_EVAL_LENGTH) == JSOP_LINENO);
-        JSScript *script = cx->fp()->script();
-        *file = script->filename;
-        *linenop = GET_UINT16(cx->regs().pc + JSOP_EVAL_LENGTH);
+        JSScript *script = NULL;
+        jsbytecode *pc = NULL;
+        types::TypeScript::GetPcScript(cx, &script, &pc);
+        JS_ASSERT(JSOp(*pc) == JSOP_EVAL);
+        JS_ASSERT(*(pc + JSOP_EVAL_LENGTH) == JSOP_LINENO);
+        *file = script->filename();
+        *linenop = GET_UINT16(pc + JSOP_EVAL_LENGTH);
         *origin = script->originPrincipals;
         return;
     }
@@ -61,21 +63,33 @@ inline void
 ScriptCounts::destroy(FreeOp *fop)
 {
     fop->free_(pcCountsVector);
+    fop->delete_(ionCounts);
 }
 
 inline void
-MarkScriptFilename(JSRuntime *rt, const char *filename)
+MarkScriptBytecode(JSRuntime *rt, const jsbytecode *bytecode)
 {
     /*
-     * As an invariant, a ScriptFilenameEntry should not be 'marked' outside of
-     * a GC. Since SweepScriptFilenames is only called during a full gc,
+     * As an invariant, a ScriptBytecodeEntry should not be 'marked' outside of
+     * a GC. Since SweepScriptBytecodes is only called during a full gc,
      * to preserve this invariant, only mark during a full gc.
      */
     if (rt->gcIsFull)
-        ScriptFilenameEntry::fromFilename(filename)->marked = true;
+        SharedScriptData::fromBytecode(bytecode)->marked = true;
 }
 
+void
+SetFrameArgumentsObject(JSContext *cx, AbstractFramePtr frame,
+                        HandleScript script, JSObject *argsobj);
+
 } // namespace js
+
+inline const char *
+JSScript::filename() const
+{
+    JS_ASSERT(scriptSource_);
+    return scriptSource()->filename();
+}
 
 inline void
 JSScript::setFunction(JSFunction *fun)
@@ -87,7 +101,10 @@ inline JSFunction *
 JSScript::getFunction(size_t index)
 {
     JSObject *funobj = getObject(index);
-    JS_ASSERT(funobj->isFunction() && funobj->toFunction()->isInterpreted());
+#ifdef DEBUG
+    JSFunction *fun = funobj->toFunction();
+    JS_ASSERT_IF(fun->isNative(), IsAsmJSModuleNative(fun->native()));
+#endif
     return funobj->toFunction();
 }
 
@@ -98,14 +115,24 @@ JSScript::getCallerFunction()
     return getFunction(0);
 }
 
-inline JSObject *
+inline JSFunction *
+JSScript::functionOrCallerFunction()
+{
+    if (function())
+        return function();
+    if (savedCallerFun)
+        return getCallerFunction();
+    return NULL;
+}
+
+inline js::RegExpObject *
 JSScript::getRegExp(size_t index)
 {
     js::ObjectArray *arr = regexps();
     JS_ASSERT(uint32_t(index) < arr->length);
     JSObject *obj = arr->vector[index];
     JS_ASSERT(obj->isRegExp());
-    return obj;
+    return (js::RegExpObject *) obj;
 }
 
 inline bool
@@ -120,17 +147,6 @@ JSScript::isEmpty() const
     return JSOp(*pc) == JSOP_STOP;
 }
 
-inline bool
-JSScript::hasGlobal() const
-{
-    /*
-     * Make sure that we don't try to query information about global objects
-     * which have had their scopes cleared. compileAndGo code should not run
-     * anymore against such globals.
-     */
-    return compileAndGo && !global().isCleared();
-}
-
 inline js::GlobalObject &
 JSScript::global() const
 {
@@ -139,13 +155,6 @@ JSScript::global() const
      * can assert that maybeGlobal is non-null here.
      */
     return *compartment()->maybeGlobal();
-}
-
-inline bool
-JSScript::hasClearedGlobal() const
-{
-    JS_ASSERT(types);
-    return global().isCleared();
 }
 
 #ifdef JS_METHODJIT
@@ -170,14 +179,14 @@ inline void
 JSScript::writeBarrierPre(JSScript *script)
 {
 #ifdef JSGC_INCREMENTAL
-    if (!script)
+    if (!script || !script->runtime()->needsBarrier())
         return;
 
-    JSCompartment *comp = script->compartment();
-    if (comp->needsBarrier()) {
-        JS_ASSERT(!comp->rt->isHeapBusy());
+    JS::Zone *zone = script->zone();
+    if (zone->needsBarrier()) {
+        JS_ASSERT(!zone->rt->isHeapBusy());
         JSScript *tmp = script;
-        MarkScriptUnbarriered(comp->barrierTracer(), &tmp, "write barrier");
+        MarkScriptUnbarriered(zone->barrierTracer(), &tmp, "write barrier");
         JS_ASSERT(tmp == script);
     }
 #endif
@@ -186,6 +195,26 @@ JSScript::writeBarrierPre(JSScript *script)
 inline void
 JSScript::writeBarrierPost(JSScript *script, void *addr)
 {
+}
+
+inline JSPrincipals *
+JSScript::principals()
+{
+    return compartment()->principals;
+}
+
+inline JSFunction *
+JSScript::originalFunction() const {
+    if (!isCallsiteClone)
+        return NULL;
+    return enclosingScopeOrOriginalFunction_->toFunction();
+}
+
+inline void
+JSScript::setOriginalFunctionObject(JSObject *fun) {
+    JS_ASSERT(isCallsiteClone);
+    JS_ASSERT(fun->isFunction());
+    enclosingScopeOrOriginalFunction_ = fun;
 }
 
 #endif /* jsscriptinlines_h___ */

@@ -11,8 +11,7 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= test_intl_unicharutil
-XPCSHELL_TESTS	= unit
+DISABLED_XPCSHELL_TESTS	= unit
 
 USE_STATIC_LIBS = 1
 

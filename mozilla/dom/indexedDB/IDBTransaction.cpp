@@ -12,6 +12,7 @@
 #include "nsIScriptContext.h"
 
 #include "DOMError.h"
+#include "mozilla/dom/quota/QuotaManager.h"
 #include "mozilla/storage.h"
 #include "nsContentUtils.h"
 #include "nsDOMClassInfoID.h"
@@ -29,6 +30,7 @@
 #include "IDBFactory.h"
 #include "IDBObjectStore.h"
 #include "IndexedDatabaseManager.h"
+#include "ProfilerHelpers.h"
 #include "TransactionThreadPool.h"
 
 #include "ipc/IndexedDBChild.h"
@@ -36,10 +38,15 @@
 #define SAVEPOINT_NAME "savepoint"
 
 USING_INDEXEDDB_NAMESPACE
+using mozilla::dom::quota::QuotaManager;
 
 namespace {
 
 NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
+
+#ifdef MOZ_ENABLE_PROFILER_SPS
+uint64_t gNextSerialNumber = 1;
+#endif
 
 PLDHashOperator
 DoomCachedStatements(const nsACString& aQuery,
@@ -103,10 +110,7 @@ IDBTransaction::CreateInternal(IDBDatabase* aDatabase,
   nsRefPtr<IDBTransaction> transaction = new IDBTransaction();
 
   transaction->BindToOwner(aDatabase);
-  if (!transaction->SetScriptOwner(aDatabase->GetScriptOwner())) {
-    return nullptr;
-  }
-
+  transaction->SetScriptOwner(aDatabase->GetScriptOwner());
   transaction->mDatabase = aDatabase;
   transaction->mMode = aMode;
   transaction->mDatabaseInfo = aDatabase->Info();
@@ -166,6 +170,9 @@ IDBTransaction::IDBTransaction()
   mActorChild(nullptr),
   mActorParent(nullptr),
   mAbortCode(NS_OK),
+#ifdef MOZ_ENABLE_PROFILER_SPS
+  mSerialNumber(gNextSerialNumber++),
+#endif
   mCreating(false)
 #ifdef DEBUG
   , mFiredCompleteOrAbort(false)
@@ -189,8 +196,6 @@ IDBTransaction::~IDBTransaction()
     mActorChild->Send__delete__(mActorChild);
     NS_ASSERTION(!mActorChild, "Should have cleared in Send__delete__!");
   }
-
-  nsContentUtils::ReleaseWrapper(static_cast<nsIDOMEventTarget*>(this), this);
 }
 
 void
@@ -217,6 +222,14 @@ IDBTransaction::OnRequestFinished()
     mReadyState = IDBTransaction::COMMITTING;
     CommitOrRollback();
   }
+}
+
+void
+IDBTransaction::OnRequestDisconnected()
+{
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(mPendingRequests, "Mismatched calls!");
+  --mPendingRequests;
 }
 
 void
@@ -251,9 +264,9 @@ IDBTransaction::CommitOrRollback()
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
   if (!IndexedDatabaseManager::IsMainProcess()) {
-    NS_ASSERTION(mActorChild, "Must have an actor!");
-
-    mActorChild->SendAllRequestsFinished();
+    if (mActorChild) {
+      mActorChild->SendAllRequestsFinished();
+    }
 
     return NS_OK;
   }
@@ -329,19 +342,21 @@ IDBTransaction::RollbackSavepoint()
   nsCOMPtr<mozIStorageStatement> stmt = GetCachedStatement(NS_LITERAL_CSTRING(
     "ROLLBACK TO SAVEPOINT " SAVEPOINT_NAME
   ));
-  NS_ENSURE_TRUE(stmt,);
+  NS_ENSURE_TRUE_VOID(stmt);
 
   mozStorageStatementScoper scoper(stmt);
 
   nsresult rv = stmt->Execute();
-  NS_ENSURE_SUCCESS(rv,);
+  NS_ENSURE_SUCCESS_VOID(rv);
 }
 
 nsresult
 IDBTransaction::GetOrCreateConnection(mozIStorageConnection** aResult)
 {
-  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
   NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
+  NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
+
+  PROFILER_LABEL("IndexedDB", "IDBTransaction::GetOrCreateConnection");
 
   if (mDatabase->IsInvalidated()) {
     return NS_ERROR_NOT_AVAILABLE;
@@ -349,7 +364,8 @@ IDBTransaction::GetOrCreateConnection(mozIStorageConnection** aResult)
 
   if (!mConnection) {
     nsCOMPtr<mozIStorageConnection> connection =
-      IDBFactory::GetConnection(mDatabase->FilePath());
+      IDBFactory::GetConnection(mDatabase->FilePath(),
+                                mDatabase->Origin());
     NS_ENSURE_TRUE(connection, NS_ERROR_FAILURE);
 
     nsresult rv;
@@ -584,39 +600,19 @@ IDBTransaction::Abort(nsresult aErrorCode)
   return AbortInternal(aErrorCode, DOMError::CreateForNSResult(aErrorCode));
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(IDBTransaction)
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBTransaction,
                                                   IDBWrapperCache)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mDatabase,
-                                                       nsIDOMEventTarget)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mError);
-  NS_CYCLE_COLLECTION_TRAVERSE_EVENT_HANDLER(error)
-  NS_CYCLE_COLLECTION_TRAVERSE_EVENT_HANDLER(complete)
-  NS_CYCLE_COLLECTION_TRAVERSE_EVENT_HANDLER(abort)
-
-  for (uint32_t i = 0; i < tmp->mCreatedObjectStores.Length(); i++) {
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mCreatedObjectStores[i]");
-    cb.NoteXPCOMChild(static_cast<nsIIDBObjectStore*>(
-                      tmp->mCreatedObjectStores[i].get()));
-  }
-  for (uint32_t i = 0; i < tmp->mDeletedObjectStores.Length(); i++) {
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mDeletedObjectStores[i]");
-    cb.NoteXPCOMChild(static_cast<nsIIDBObjectStore*>(
-                      tmp->mDeletedObjectStores[i].get()));
-  }
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDatabase)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mError)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCreatedObjectStores)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDeletedObjectStores)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBTransaction, IDBWrapperCache)
   // Don't unlink mDatabase!
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mError);
-  NS_CYCLE_COLLECTION_UNLINK_EVENT_HANDLER(error)
-  NS_CYCLE_COLLECTION_UNLINK_EVENT_HANDLER(complete)
-  NS_CYCLE_COLLECTION_UNLINK_EVENT_HANDLER(abort)
-
-  tmp->mCreatedObjectStores.Clear();
-  tmp->mDeletedObjectStores.Clear();
-
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mError)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCreatedObjectStores)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mDeletedObjectStores)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBTransaction)
@@ -630,9 +626,9 @@ NS_IMPL_RELEASE_INHERITED(IDBTransaction, IDBWrapperCache)
 
 DOMCI_DATA(IDBTransaction, IDBTransaction)
 
-NS_IMPL_EVENT_HANDLER(IDBTransaction, error);
-NS_IMPL_EVENT_HANDLER(IDBTransaction, complete);
-NS_IMPL_EVENT_HANDLER(IDBTransaction, abort);
+NS_IMPL_EVENT_HANDLER(IDBTransaction, error)
+NS_IMPL_EVENT_HANDLER(IDBTransaction, complete)
+NS_IMPL_EVENT_HANDLER(IDBTransaction, abort)
 
 NS_IMETHODIMP
 IDBTransaction::GetDb(nsIIDBDatabase** aDB)
@@ -830,6 +826,8 @@ NS_IMETHODIMP
 CommitHelper::Run()
 {
   if (NS_IsMainThread()) {
+    PROFILER_MAIN_THREAD_LABEL("IndexedDB", "CommitHelper::Run");
+
     NS_ASSERTION(mDoomedObjects.IsEmpty(), "Didn't release doomed objects!");
 
     mTransaction->mReadyState = IDBTransaction::DONE;
@@ -851,7 +849,8 @@ CommitHelper::Run()
         DatabaseInfo::Remove(mTransaction->Database()->Id());
       }
 
-      event = CreateGenericEvent(NS_LITERAL_STRING(ABORT_EVT_STR),
+      event = CreateGenericEvent(mTransaction,
+                                 NS_LITERAL_STRING(ABORT_EVT_STR),
                                  eDoesBubble, eNotCancelable);
 
       // The transaction may already have an error object (e.g. if one of the
@@ -863,7 +862,8 @@ CommitHelper::Run()
       }
     }
     else {
-      event = CreateGenericEvent(NS_LITERAL_STRING(COMPLETE_EVT_STR),
+      event = CreateGenericEvent(mTransaction,
+                                 NS_LITERAL_STRING(COMPLETE_EVT_STR),
                                  eDoesNotBubble, eNotCancelable);
     }
     NS_ENSURE_TRUE(event, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
@@ -871,6 +871,10 @@ CommitHelper::Run()
     if (mListener) {
       mListener->NotifyTransactionPreComplete(mTransaction);
     }
+
+    IDB_PROFILER_MARK("IndexedDB Transaction %llu: Complete (rv = %lu)",
+                      "IDBTransaction[%llu] MT Complete",
+                      mTransaction->GetSerialNumber(), mAbortCode);
 
     bool dummy;
     if (NS_FAILED(mTransaction->DispatchEvent(event, &dummy))) {
@@ -890,13 +894,15 @@ CommitHelper::Run()
     return NS_OK;
   }
 
+  PROFILER_LABEL("IndexedDB", "CommitHelper::Run");
+
   IDBDatabase* database = mTransaction->Database();
   if (database->IsInvalidated()) {
     mAbortCode = NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
   }
 
   if (mConnection) {
-    IndexedDatabaseManager::SetCurrentWindow(database->GetOwner());
+    QuotaManager::SetCurrentWindow(database->GetOwner());
 
     if (NS_SUCCEEDED(mAbortCode) && mUpdateFileRefcountFunction &&
         NS_FAILED(mUpdateFileRefcountFunction->WillCommit(mConnection))) {
@@ -952,7 +958,7 @@ CommitHelper::Run()
     mConnection->Close();
     mConnection = nullptr;
 
-    IndexedDatabaseManager::SetCurrentWindow(nullptr);
+    QuotaManager::SetCurrentWindow(nullptr);
   }
 
   return NS_OK;
@@ -1071,14 +1077,14 @@ UpdateRefcountFunction::DidCommit()
   mFileInfoEntries.EnumerateRead(FileInfoUpdateCallback, nullptr);
 
   nsresult rv = RemoveJournals(mJournalsToRemoveAfterCommit);
-  NS_ENSURE_SUCCESS(rv,);
+  NS_ENSURE_SUCCESS_VOID(rv);
 }
 
 void
 UpdateRefcountFunction::DidAbort()
 {
   nsresult rv = RemoveJournals(mJournalsToRemoveAfterAbort);
-  NS_ENSURE_SUCCESS(rv,);
+  NS_ENSURE_SUCCESS_VOID(rv);
 }
 
 nsresult

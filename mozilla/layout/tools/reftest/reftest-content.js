@@ -7,40 +7,7 @@
 const CC = Components.classes;
 const CI = Components.interfaces;
 const CR = Components.results;
-
-/**
- * FIXME/bug 622224: work around lack of reliable setTimeout available
- * to frame scripts.
- */
-// This gives us >=2^30 unique timer IDs, enough for 1 per ms for 12.4
-// days.  Should be fine as a temporary workaround.
-var gNextTimeoutId = 0;
-var gTimeoutTable = { };        // int -> nsITimer
-
-function setTimeout(callbackFn, delayMs) {
-    var id = gNextTimeoutId++;
-    var timer = CC["@mozilla.org/timer;1"].createInstance(CI.nsITimer);
-    timer.initWithCallback({
-        notify: function notify_callback() {
-                    clearTimeout(id);
-                    callbackFn();
-                }
-        },
-        delayMs,
-        timer.TYPE_ONE_SHOT);
-
-    gTimeoutTable[id] = timer;
-
-    return id;
-}
-
-function clearTimeout(id) {
-    var timer = gTimeoutTable[id];
-    if (timer) {
-        timer.cancel();
-        delete gTimeoutTable[id];
-    }
-}
+const CU = Components.utils;
 
 const XHTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -48,7 +15,9 @@ const DEBUG_CONTRACTID = "@mozilla.org/xpcom/debug;1";
 const PRINTSETTINGS_CONTRACTID = "@mozilla.org/gfx/printsettings-service;1";
 
 // "<!--CLEAR-->"
-const BLANK_URL_FOR_CLEARING = "data:text/html,%3C%21%2D%2DCLEAR%2D%2D%3E";
+const BLANK_URL_FOR_CLEARING = "data:text/html;charset=UTF-8,%3C%21%2D%2DCLEAR%2D%2D%3E";
+
+CU.import("resource://gre/modules/Timer.jsm");
 
 var gBrowserIsRemote;
 var gHaveCanvasSnapshot = false;
@@ -265,6 +234,10 @@ function shouldWaitForReftestWaitRemoval(contentRootElement) {
                              .indexOf("reftest-wait") != -1;
 }
 
+function getNoPaintElements(contentRootElement) {
+  return contentRootElement.getElementsByClassName('reftest-no-paint');
+}
+
 // Initial state. When the document has loaded and all MozAfterPaint events and
 // all explicit paint waits are flushed, we can fire the MozReftestInvalidate
 // event and move to the next state.
@@ -391,6 +364,10 @@ function WaitForTestEnd(contentRootElement, inPrintMode) {
             // Notify the test document that now is a good time to test some invalidation
             LogInfo("MakeProgress: dispatching MozReftestInvalidate");
             if (contentRootElement) {
+                var elements = getNoPaintElements(contentRootElement);
+                for (var i = 0; i < elements.length; ++i) {
+                  windowUtils().checkAndClearPaintedState(elements[i]);
+                }
                 var notification = content.document.createEvent("Events");
                 notification.initEvent("MozReftestInvalidate", true, false);
                 contentRootElement.dispatchEvent(notification);
@@ -438,6 +415,14 @@ function WaitForTestEnd(contentRootElement, inPrintMode) {
                     LogInfo("MakeProgress: waiting for MozAfterPaint");
                 }
                 return;
+            }
+            if (contentRootElement) {
+              var elements = getNoPaintElements(contentRootElement);
+              for (var i = 0; i < elements.length; ++i) {
+                  if (windowUtils().checkAndClearPaintedState(elements[i])) {
+                      LogError("REFTEST TEST-UNEXPECTED-FAIL | element marked as reftest-no-paint got repainted!");
+                  }
+              }
             }
             LogInfo("MakeProgress: Completed");
             state = STATE_COMPLETED;
@@ -790,6 +775,7 @@ function SendUpdateCanvasForEvent(event)
 
     var rects = [ ];
     var rectList = event.clientRects;
+    LogInfo("SendUpdateCanvasForEvent with " + rectList.length + " rects");
     for (var i = 0; i < rectList.length; ++i) {
         var r = rectList[i];
         // Set left/top/right/bottom to "device pixel" boundaries
@@ -797,6 +783,7 @@ function SendUpdateCanvasForEvent(event)
         var top = Math.floor(roundTo(r.top*scale, 0.001));
         var right = Math.ceil(roundTo(r.right*scale, 0.001));
         var bottom = Math.ceil(roundTo(r.bottom*scale, 0.001));
+        LogInfo("Rect: " + left + " " + top + " " + right + " " + bottom);
 
         rects.push({ left: left, top: top, right: right, bottom: bottom });
     }

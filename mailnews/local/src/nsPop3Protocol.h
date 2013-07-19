@@ -310,8 +310,8 @@ private:
   int32_t m_totalBytesReceived; // total # bytes received for the connection
 
   virtual nsresult ProcessProtocolState(nsIURI * url, nsIInputStream * inputStream,
-                                        uint32_t sourceOffset, uint32_t length);
-  virtual nsresult SendData(const char * dataBuffer, bool aSuppressLogging = false);
+                                        uint64_t sourceOffset, uint32_t length);
+  virtual int32_t Pop3SendData(const char * dataBuffer, bool aSuppressLogging = false);
 
   virtual const char* GetType() {return "pop3";}
 

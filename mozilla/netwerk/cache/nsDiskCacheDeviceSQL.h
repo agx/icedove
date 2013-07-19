@@ -23,6 +23,7 @@
 
 class nsIURI;
 class nsOfflineCacheDevice;
+class mozIStorageService;
 
 class nsApplicationCacheNamespace MOZ_FINAL : public nsIApplicationCacheNamespace
 {
@@ -69,6 +70,7 @@ public:
    */
 
   virtual nsresult        Init();
+  nsresult                InitWithSqlite(mozIStorageService * ss);
   virtual nsresult        Shutdown();
 
   virtual const char *    GetDeviceID(void);
@@ -132,13 +134,14 @@ public:
                                                  const nsACString &ownerDomain);
   nsresult                EvictUnownedEntries(const char *clientID);
 
+  static nsresult         BuildApplicationCacheGroupID(nsIURI *aManifestURL,
+                                                       uint32_t appId, bool isInBrowserElement,
+                                                       nsACString &_result);
+
   nsresult                ActivateCache(const nsCSubstring &group,
                                         const nsCSubstring &clientID);
   bool                    IsActiveCache(const nsCSubstring &group,
                                         const nsCSubstring &clientID);
-  nsresult                GetGroupForCache(const nsCSubstring &clientID,
-                                           nsCString &out);
-
   nsresult                CreateApplicationCache(const nsACString &group,
                                                  nsIApplicationCache **out);
 
@@ -151,10 +154,13 @@ public:
   nsresult                DeactivateGroup(const nsACString &group);
 
   nsresult                ChooseApplicationCache(const nsACString &key,
+                                                 nsILoadContext *loadContext,
                                                  nsIApplicationCache **out);
 
   nsresult                CacheOpportunistically(nsIApplicationCache* cache,
                                                  const nsACString &key);
+
+  nsresult                DiscardByAppId(int32_t appID, bool isInBrowser);
 
   nsresult                GetGroups(uint32_t *count,char ***keys);
 
@@ -199,7 +205,7 @@ private:
   nsresult EnableEvictionObserver();
   nsresult DisableEvictionObserver();
 
-  bool CanUseCache(nsIURI *keyURI, const nsCString &clientID);
+  bool CanUseCache(nsIURI *keyURI, const nsACString &clientID, nsILoadContext *loadContext);
 
   nsresult MarkEntry(const nsCString &clientID,
                      const nsACString &key,
@@ -255,6 +261,7 @@ private:
   nsCOMPtr<mozIStorageStatement>  mStatement_DeactivateGroup;
   nsCOMPtr<mozIStorageStatement>  mStatement_FindClient;
   nsCOMPtr<mozIStorageStatement>  mStatement_FindClientByNamespace;
+  nsCOMPtr<mozIStorageStatement>  mStatement_EnumerateApps;
   nsCOMPtr<mozIStorageStatement>  mStatement_EnumerateGroups;
   nsCOMPtr<mozIStorageStatement>  mStatement_EnumerateGroupsTimeOrder;
 

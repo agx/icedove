@@ -367,16 +367,16 @@
 
 // Determines whether clone(2) is supported.
 // Usually it will only be available on Linux, excluding
-// Linux on the Itanium architecture.
+// Linux on the Itanium architecture, and x86 Android.
 // Also see http://linux.die.net/man/2/clone.
 #ifndef GTEST_HAS_CLONE
 // The user didn't tell us, so we need to figure it out.
 
-#if GTEST_OS_LINUX && !defined(__ia64__)
+#if GTEST_OS_LINUX && !defined(__ia64__) && !(defined(ANDROID) && defined(__i386__))
 #define GTEST_HAS_CLONE 1
 #else
 #define GTEST_HAS_CLONE 0
-#endif  // GTEST_OS_LINUX && !defined(__ia64__)
+#endif  // GTEST_OS_LINUX && !defined(__ia64__) && !(defined(ANDROID) && defined(__i386__))
 
 #endif  // GTEST_HAS_CLONE
 
@@ -859,7 +859,7 @@ class TypeWithSize<4> {
   // unsigned int has size 4 in both gcc and MSVC.
   //
   // As base/basictypes.h doesn't compile on Windows, we cannot use
-  // uint32, uint64, and etc here.
+  // uint32_t, uint64_t, and etc here.
   typedef int Int;
   typedef unsigned int UInt;
 };

@@ -27,9 +27,9 @@ const nsMsgMessageFlags = Ci.nsMsgMessageFlags;
 var gMsgFile1 = do_get_file("../../../data/bugmail10");
 const gMsgId1 = "200806061706.m56H6RWT004933@mrapp54.mozilla.org";
 var gMsgFile2 = do_get_file("../../../data/image-attach-test");
-const gMsgId2 = "4A947F73.5030709@xxx.com";
+const gMsgId2 = "4A947F73.5030709@example.com";
 var gMsgFile3 = do_get_file("../../../data/external-attach-test");
-const gMsgId3 = "876TY.5030709@xxx.com";
+const gMsgId3 = "876TY.5030709@example.com";
 
 var gFirstNewMsg;
 var gFirstMsgSize;
@@ -64,13 +64,11 @@ var streamListener =
 // Adds some messages directly to a mailbox (eg new mail)
 function addMessagesToServer(messages, mailbox, localFolder)
 {
-  let ioService = Cc["@mozilla.org/network/io-service;1"]
-                    .getService(Ci.nsIIOService);
-
   // For every message we have, we need to convert it to a file:/// URI
   messages.forEach(function (message)
   {
-    let URI = ioService.newFileURI(message.file).QueryInterface(Ci.nsIFileURL);
+    let URI =
+      Services.io.newFileURI(message.file).QueryInterface(Ci.nsIFileURL);
     message.spec = URI.spec;
   });
 
@@ -185,14 +183,11 @@ var tests = [
     // need to account for x-mozilla-status, status2, and envelope.
     gFirstMsgSize = messages[0].toMessageString().length + 102;
 
-    let ioService = Cc["@mozilla.org/network/io-service;1"]
-                      .getService(Ci.nsIIOService);
-
     messages.forEach(function (message)
     {
-      let dataUri = ioService.newURI("data:text/plain;base64," +
-                                      btoa(message.toMessageString()),
-                                     null, null);
+      let dataUri = Services.io.newURI("data:text/plain;base64," +
+                                       btoa(message.toMessageString()),
+                                       null, null);
       mbox.addMessage(new imapMessage(dataUri.spec, mbox.uidnext++, []));
     });
     gIMAPInbox.updateFolderWithListener(null, asyncUrlListener);

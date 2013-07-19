@@ -11,14 +11,11 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = crashreporter
-
 # Don't use the STL wrappers in the crashreporter clients; they don't
 # link with -lmozalloc, and it really doesn't matter here anyway.
 STL_FLAGS =
 
 ifneq ($(OS_TARGET),Android)
-PROGRAM = crashreporter$(BIN_SUFFIX)
 DIST_PROGRAM = crashreporter$(BIN_SUFFIX)
 
 # Don't link the updater against libmozglue.
@@ -73,7 +70,7 @@ $(DIST)/bin/crashreporter.crt: $(topsrcdir)/security/nss/lib/ckfw/builtins/certd
 
 # The xpcshell test case here verifies that the CA certificate list
 # works with OpenSSL.
-XPCSHELL_TESTS = maemo-unit
+DISABLED_XPCSHELL_TESTS = maemo-unit
 
 else
 CPPSRCS += crashreporter_linux.cpp
@@ -111,7 +108,7 @@ libs::
 endif
 
 ifeq (,$(filter-out Linux SunOS,$(OS_ARCH)))
-libs:: $(topsrcdir)/toolkit/themes/winstripe/global/throbber/Throbber-small.gif
+libs:: $(topsrcdir)/toolkit/themes/windows/global/throbber/Throbber-small.gif
 	$(INSTALL) $^ $(DIST)/bin
 endif
 

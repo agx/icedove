@@ -13,6 +13,7 @@
 #include "mozilla/Telemetry.h"
 #include "mozilla/Preferences.h"
 #include "prprf.h"
+#include <algorithm>
 
 #ifdef DEBUG
 // defined by the socket transport service while active
@@ -60,8 +61,7 @@ SpdySession2::SpdySession2(nsAHttpTransaction *aHttpTransaction,
     mOutputQueueSent(0),
     mLastReadEpoch(PR_IntervalNow()),
     mPingSentEpoch(0),
-    mNextPingID(1),
-    mPingThresholdExperiment(false)
+    mNextPingID(1)
 {
   NS_ABORT_IF_FALSE(PR_GetCurrentThread() == gSocketThread, "wrong thread");
 
@@ -81,40 +81,7 @@ SpdySession2::SpdySession2(nsAHttpTransaction *aHttpTransaction,
     AddStream(aHttpTransaction, firstPriority);
   mLastDataReadEpoch = mLastReadEpoch;
   
-  DeterminePingThreshold();
-}
-
-void
-SpdySession2::DeterminePingThreshold()
-{
   mPingThreshold = gHttpHandler->SpdyPingThreshold();
-
-  if (!mPingThreshold || !gHttpHandler->AllowExperiments())
-    return;
-
-  uint32_t randomVal = gHttpHandler->Get32BitsOfPseudoRandom();
-  
-  // Use the lower 10 bits to select 1 in 1024 sessions for the
-  // ping threshold experiment. Somewhat less than that will actually be
-  // used because random values greater than the total http idle timeout
-  // for the session are discarded.
-  if ((randomVal & 0x3ff) != 1)  // lottery
-    return;
-  
-  randomVal = randomVal >> 10; // those bits are used up
-
-  // This session has been selected - use a random ping threshold of 10 +
-  // a random number from 0 to 255, based on the next 8 bits of the
-  // random buffer
-  PRIntervalTime randomThreshold =
-    PR_SecondsToInterval((randomVal & 0xff) + 10);
-  if (randomThreshold > gHttpHandler->IdleTimeout())
-    return;
-  
-  mPingThreshold = randomThreshold;
-  mPingThresholdExperiment = true;
-  LOG3(("SpdySession2 %p Ping Threshold Experimental Selection : %dsec\n",
-        this, PR_IntervalToSeconds(mPingThreshold)));
 }
 
 PLDHashOperator
@@ -126,12 +93,31 @@ SpdySession2::ShutdownEnumerator(nsAHttpTransaction *key,
  
   // On a clean server hangup the server sets the GoAwayID to be the ID of
   // the last transaction it processed. If the ID of stream in the
-  // local session is greater than that it can safely be restarted because the
-  // server guarantees it was not partially processed.
-  if (self->mCleanShutdown && (stream->StreamID() > self->mGoAwayID))
+  // local stream is greater than that it can safely be restarted because the
+  // server guarantees it was not partially processed. Streams that have not
+  // registered an ID haven't actually been sent yet so they can always be
+  // restarted.
+  if (self->mCleanShutdown &&
+      (stream->StreamID() > self->mGoAwayID || !stream->HasRegisteredID()))
     self->CloseStream(stream, NS_ERROR_NET_RESET); // can be restarted
   else
     self->CloseStream(stream, NS_ERROR_ABORT);
+
+  return PL_DHASH_NEXT;
+}
+
+PLDHashOperator
+SpdySession2::GoAwayEnumerator(nsAHttpTransaction *key,
+                               nsAutoPtr<SpdyStream2> &stream,
+                               void *closure)
+{
+  SpdySession2 *self = static_cast<SpdySession2 *>(closure);
+
+  // these streams were not processed by the server and can be restarted.
+  // Do that after the enumerator completes to avoid the risk of
+  // a restart event re-entrantly modifying this hash.
+  if (stream->StreamID() > self->mGoAwayID || !stream->HasRegisteredID())
+    self->mGoAwayStreamsToRestart.Push(stream);
 
   return PL_DHASH_NEXT;
 }
@@ -241,7 +227,7 @@ SpdySession2::ReadTimeoutTick(PRIntervalTime now)
     if ((now - mLastReadEpoch) < mPingThreshold) {
       // recent activity means ping is not an issue
       if (mPingSentEpoch)
-        ClearPing(true);
+        mPingSentEpoch = 0;
       return;
     }
 
@@ -250,7 +236,7 @@ SpdySession2::ReadTimeoutTick(PRIntervalTime now)
       if ((now - mPingSentEpoch) >= gHttpHandler->SpdyPingTimeout()) {
         LOG(("SpdySession2::ReadTimeoutTick %p Ping Timer Exhaustion\n",
              this));
-        ClearPing(false);
+        mPingSentEpoch = 0;
         Close(NS_ERROR_NET_TIMEOUT);
       }
       return;
@@ -277,27 +263,6 @@ SpdySession2::ReadTimeoutTick(PRIntervalTime now)
            "ping ids exhausted marking goaway\n", this));
       mShouldGoAway = true;
     }
-}
-
-void
-SpdySession2::ClearPing(bool pingOK)
-{
-  mPingSentEpoch = 0;
-
-  if (mPingThresholdExperiment) {
-    LOG3(("SpdySession2::ClearPing %p mPingThresholdExperiment %dsec %s\n",
-          this, PR_IntervalToSeconds(mPingThreshold),
-          pingOK ? "pass" :"fail"));
-
-    if (pingOK)
-      Telemetry::Accumulate(Telemetry::SPDY_PING_EXPERIMENT_PASS,
-                            PR_IntervalToSeconds(mPingThreshold));
-    else
-      Telemetry::Accumulate(Telemetry::SPDY_PING_EXPERIMENT_FAIL,
-                            PR_IntervalToSeconds(mPingThreshold));
-    mPingThreshold = gHttpHandler->SpdyPingThreshold();
-    mPingThresholdExperiment = false;
-  }
 }
 
 uint32_t
@@ -337,13 +302,11 @@ SpdySession2::AddStream(nsAHttpTransaction *aHttpTransaction,
                        int32_t aPriority)
 {
   NS_ABORT_IF_FALSE(PR_GetCurrentThread() == gSocketThread, "wrong thread");
-  NS_ABORT_IF_FALSE(!mStreamTransactionHash.Get(aHttpTransaction),
-                    "AddStream duplicate transaction pointer");
 
   // integrity check
   if (mStreamTransactionHash.Get(aHttpTransaction)) {
     LOG3(("   New transaction already present\n"));
-    NS_ABORT_IF_FALSE(false, "New transaction already present in hash");
+    NS_ABORT_IF_FALSE(false, "AddStream duplicate transaction pointer");
     return false;
   }
 
@@ -420,6 +383,11 @@ SpdySession2::NetworkRead(nsAHttpSegmentWriter *writer, char *buf,
 {
   NS_ABORT_IF_FALSE(PR_GetCurrentThread() == gSocketThread, "wrong thread");
 
+  if (!count) {
+    *countWritten = 0;
+    return NS_OK;
+  }
+
   nsresult rv = writer->OnWriteSegment(buf, count, countWritten);
   if (NS_SUCCEEDED(rv) && *countWritten > 0)
     mLastReadEpoch = PR_IntervalNow();
@@ -431,6 +399,16 @@ SpdySession2::SetWriteCallbacks()
 {
   if (mConnection && (GetWriteQueueSize() || mOutputQueueUsed))
       mConnection->ResumeSend();
+}
+
+void
+SpdySession2::RealignOutputQueue()
+{
+  mOutputQueueUsed -= mOutputQueueSent;
+  memmove(mOutputQueueBuffer.get(),
+          mOutputQueueBuffer.get() + mOutputQueueSent,
+          mOutputQueueUsed);
+  mOutputQueueSent = 0;
 }
 
 void
@@ -466,11 +444,7 @@ SpdySession2::FlushOutputQueue()
   
   if ((mOutputQueueSent >= kQueueMinimumCleanup) &&
       ((mOutputQueueSize - mOutputQueueUsed) < kQueueTailRoom)) {
-    mOutputQueueUsed -= mOutputQueueSent;
-    memmove(mOutputQueueBuffer.get(),
-            mOutputQueueBuffer.get() + mOutputQueueSent,
-            mOutputQueueUsed);
-    mOutputQueueSent = 0;
+    RealignOutputQueue();
   }
 }
 
@@ -1342,7 +1316,7 @@ SpdySession2::HandlePing(SpdySession2 *self)
 
   if (pingID & 0x01) {
     // presumably a reply to our timeout ping
-    self->ClearPing(true);
+    self->mPingSentEpoch = 0;
   }
   else {
     // Servers initiate even numbered pings, go ahead and echo it back
@@ -1369,9 +1343,38 @@ SpdySession2::HandleGoAway(SpdySession2 *self)
   self->mGoAwayID =
     PR_ntohl(reinterpret_cast<uint32_t *>(self->mInputFrameBuffer.get())[2]);
   self->mCleanShutdown = true;
-  
-  LOG3(("SpdySession2::HandleGoAway %p GOAWAY Last-Good-ID 0x%X.",
-        self, self->mGoAwayID));
+
+  // Find streams greater than the last-good ID and mark them for deletion 
+  // in the mGoAwayStreamsToRestart queue with the GoAwayEnumerator. They can
+  // be restarted.
+  self->mStreamTransactionHash.Enumerate(GoAwayEnumerator, self);
+
+  // Process the streams marked for deletion and restart.
+  uint32_t size = self->mGoAwayStreamsToRestart.GetSize();
+  for (uint32_t count = 0; count < size; ++count) {
+    SpdyStream2 *stream =
+      static_cast<SpdyStream2 *>(self->mGoAwayStreamsToRestart.PopFront());
+
+    self->CloseStream(stream, NS_ERROR_NET_RESET);
+    if (stream->HasRegisteredID())
+      self->mStreamIDHash.Remove(stream->StreamID());
+    self->mStreamTransactionHash.Remove(stream->Transaction());
+  }
+
+  // Queued streams can also be deleted from this session and restarted
+  // in another one. (they were never sent on the network so they implicitly
+  // are not covered by the last-good id.
+  size = self->mQueuedStreams.GetSize();
+  for (uint32_t count = 0; count < size; ++count) {
+    SpdyStream2 *stream =
+      static_cast<SpdyStream2 *>(self->mQueuedStreams.PopFront());
+    self->CloseStream(stream, NS_ERROR_NET_RESET);
+    self->mStreamTransactionHash.Remove(stream->Transaction());
+  }
+
+  LOG3(("SpdySession2::HandleGoAway %p GOAWAY Last-Good-ID 0x%X."
+        "live streams=%d\n", self, self->mGoAwayID,
+        self->mStreamTransactionHash.Count()));
   self->ResumeRecv();
   self->ResetDownstreamState();
   return NS_OK;
@@ -1779,7 +1782,7 @@ SpdySession2::WriteSegments(nsAHttpSegmentWriter *writer,
 
   if (mDownstreamState == DISCARDING_DATA_FRAME) {
     char trash[4096];
-    uint32_t count = NS_MIN(4096U, mInputFrameDataSize - mInputFrameDataRead);
+    uint32_t count = std::min(4096U, mInputFrameDataSize - mInputFrameDataRead);
 
     if (!count) {
       ResetDownstreamState();
@@ -1867,9 +1870,6 @@ SpdySession2::Close(nsresult aReason)
 
   mClosed = true;
 
-  NS_ABORT_IF_FALSE(mStreamTransactionHash.Count() ==
-                    mStreamIDHash.Count(),
-                    "index corruption");
   mStreamTransactionHash.Enumerate(ShutdownEnumerator, this);
   mStreamIDHash.Clear();
   mStreamTransactionHash.Clear();
@@ -1968,7 +1968,7 @@ SpdySession2::OnReadSegment(const char *buf,
 }
 
 nsresult
-SpdySession2::CommitToSegmentSize(uint32_t count)
+SpdySession2::CommitToSegmentSize(uint32_t count, bool forceCommitment)
 {
   if (mOutputQueueUsed)
     FlushOutputQueue();
@@ -1976,19 +1976,25 @@ SpdySession2::CommitToSegmentSize(uint32_t count)
   // would there be enough room to buffer this if needed?
   if ((mOutputQueueUsed + count) <= (mOutputQueueSize - kQueueReserved))
     return NS_OK;
-  
-  // if we are using part of our buffers already, try again later
-  if (mOutputQueueUsed)
+
+  // if we are using part of our buffers already, try again later unless
+  // forceCommitment is set.
+  if (mOutputQueueUsed && !forceCommitment)
     return NS_BASE_STREAM_WOULD_BLOCK;
 
-  // not enough room to buffer even with completely empty buffers.
-  // normal frames are max 4kb, so the only case this can really happen
-  // is a SYN_STREAM with technically unbounded headers. That is highly
-  // unlikely, but possible. Create enough room for it because the buffers
-  // will be necessary - SSL does not absorb writes of very large sizes
-  // in single sends.
+  if (mOutputQueueUsed) {
+    // normally we avoid the memmove of RealignOutputQueue, but we'll try
+    // it if forceCommitment is set before growing the buffer.
+    RealignOutputQueue();
 
-  EnsureBuffer(mOutputQueueBuffer, count + kQueueReserved, 0, mOutputQueueSize);
+    // is there enough room now?
+    if ((mOutputQueueUsed + count) <= (mOutputQueueSize - kQueueReserved))
+      return NS_OK;
+  }
+
+  // resize the buffers as needed
+  EnsureBuffer(mOutputQueueBuffer, mOutputQueueUsed + count + kQueueReserved,
+               mOutputQueueUsed, mOutputQueueSize);
 
   NS_ABORT_IF_FALSE((mOutputQueueUsed + count) <=
                     (mOutputQueueSize - kQueueReserved),
@@ -2024,7 +2030,7 @@ SpdySession2::OnWriteSegment(char *buf,
       return NS_BASE_STREAM_CLOSED;
     }
     
-    count = NS_MIN(count, mInputFrameDataSize - mInputFrameDataRead);
+    count = std::min(count, mInputFrameDataSize - mInputFrameDataRead);
     rv = NetworkRead(mSegmentWriter, buf, count, countWritten);
     if (NS_FAILED(rv))
       return rv;
@@ -2050,7 +2056,7 @@ SpdySession2::OnWriteSegment(char *buf,
       return NS_BASE_STREAM_CLOSED;
     }
       
-    count = NS_MIN(count,
+    count = std::min(count,
                    mFlatHTTPResponseHeaders.Length() -
                    mFlatHTTPResponseHeadersOut);
     memcpy(buf,
@@ -2169,8 +2175,7 @@ SpdySession2::SetConnection(nsAHttpConnection *)
 }
 
 void
-SpdySession2::GetSecurityCallbacks(nsIInterfaceRequestor **,
-                                  nsIEventTarget **)
+SpdySession2::GetSecurityCallbacks(nsIInterfaceRequestor **)
 {
   // This is unexpected
   NS_ABORT_IF_FALSE(false, "SpdySession2::GetSecurityCallbacks()");
@@ -2195,7 +2200,7 @@ SpdySession2::Status()
   return NS_ERROR_UNEXPECTED;
 }
 
-uint8_t
+uint32_t
 SpdySession2::Caps()
 {
   NS_ABORT_IF_FALSE(false, "SpdySession2::Caps()");

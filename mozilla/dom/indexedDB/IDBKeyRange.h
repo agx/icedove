@@ -98,7 +98,7 @@ public:
                 spacecolon + lowerKey;
     }
     else {
-      nsCAutoString clause;
+      nsAutoCString clause;
 
       if (!Lower().IsUnset()) {
         // Lower key is set.
@@ -149,6 +149,8 @@ public:
 
   template <class T>
   void ToSerializedKeyRange(T& aKeyRange);
+
+  void DropJSObjects();
 
 private:
   ~IDBKeyRange();

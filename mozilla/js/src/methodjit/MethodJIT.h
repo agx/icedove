@@ -1,12 +1,13 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined jsjaeger_h__ && defined JS_METHODJIT
 #define jsjaeger_h__
+
+#include "mozilla/PodOperations.h"
 
 #ifdef JSGC_INCREMENTAL
 #define JSGC_INCREMENTAL_MJ
@@ -241,6 +242,9 @@ struct VMFrame
 #if defined(JS_CPU_ARM) || defined(JS_CPU_SPARC) || defined(JS_CPU_MIPS)
 // WARNING: Do not call this function directly from C(++) code because it is not ABI-compliant.
 extern "C" void JaegerStubVeneer(void);
+# if defined(JS_CPU_ARM)
+extern "C" void IonVeneer(void);
+# endif
 #endif
 
 namespace mjit {
@@ -331,10 +335,8 @@ enum RejoinState {
     /* Triggered a recompilation while placing the arguments to an apply on the stack. */
     REJOIN_CALL_SPLAT,
 
-    /* FALLTHROUGH ops which can be implemented as part of an IncOp. */
+    /* Like REJOIN_FALLTHROUGH, but handles getprop used as part of JSOP_INSTANCEOF. */
     REJOIN_GETTER,
-    REJOIN_POS,
-    REJOIN_BINARY,
 
     /*
      * For an opcode fused with IFEQ/IFNE, call returns a boolean indicating
@@ -594,6 +596,7 @@ namespace mjit {
 
 struct InlineFrame;
 struct CallSite;
+struct CompileTrigger;
 
 struct NativeMapEntry {
     size_t          bcOff;  /* bytecode offset in script */
@@ -654,6 +657,7 @@ struct JITChunk
                                            .ncode values may not be NULL. */
     uint32_t        nInlineFrames;
     uint32_t        nCallSites;
+    uint32_t        nCompileTriggers;
     uint32_t        nRootedTemplates;
     uint32_t        nRootedRegExps;
     uint32_t        nMonitoredBytecodes;
@@ -684,6 +688,7 @@ struct JITChunk
     NativeMapEntry *nmap() const;
     js::mjit::InlineFrame *inlineFrames() const;
     js::mjit::CallSite *callSites() const;
+    js::mjit::CompileTrigger *compileTriggers() const;
     JSObject **rootedTemplates() const;
     RegExpShared **rootedRegExps() const;
 
@@ -744,7 +749,7 @@ struct ChunkDescriptor
     /* Optional compiled code for the chunk. */
     JITChunk *chunk;
 
-    ChunkDescriptor() { PodZero(this); }
+    ChunkDescriptor() { mozilla::PodZero(this); }
 };
 
 /* Jump or fallthrough edge in the bytecode which crosses a chunk boundary. */
@@ -780,7 +785,7 @@ struct CrossChunkEdge
      */
     void *shimLabel;
 
-    CrossChunkEdge() { PodZero(this); }
+    CrossChunkEdge() { mozilla::PodZero(this); }
 };
 
 struct JITScript
@@ -809,6 +814,19 @@ struct JITScript
      * information is purged while retaining JIT info.
      */
     analyze::ScriptLiveness *liveness;
+
+    /*
+     * Number of calls made to IonMonkey functions, used to avoid slow
+     * JM -> Ion calls.
+     */
+    uint32_t        ionCalls;
+
+    /*
+     * If set, we decided to keep the JITChunk so that Ion can access its caches.
+     * The chunk has to be destroyed the next time the script runs in JM.
+     * Note that this flag implies nchunks == 1.
+     */
+    bool mustDestroyEntryChunk;
 
 #ifdef JS_MONOIC
     /* Inline cache at function entry for checking this/argument types. */
@@ -860,6 +878,8 @@ struct JITScript
 
     void trace(JSTracer *trc);
     void purgeCaches();
+
+    void disableScriptEntry();
 };
 
 /*
@@ -915,14 +935,20 @@ ReleaseScriptCode(FreeOp *fop, JSScript *script)
     script->destroyMJITInfo(fop);
 }
 
+// Cripple any JIT code for the specified script, such that the next time
+// execution reaches the script's entry or the OSR PC the script's code will
+// be destroyed.
+void
+DisableScriptCodeForIon(JSScript *script, jsbytecode *osrPC);
+
 // Expand all stack frames inlined by the JIT within a compartment.
 void
-ExpandInlineFrames(JSCompartment *compartment);
+ExpandInlineFrames(JS::Zone *zone);
 
 // Return all VMFrames in a compartment to the interpreter. This must be
 // followed by destroying all JIT code in the compartment.
 void
-ClearAllFrames(JSCompartment *compartment);
+ClearAllFrames(JS::Zone *zone);
 
 // Information about a frame inlined during compilation.
 struct InlineFrame
@@ -953,6 +979,25 @@ struct CallSite
 
     bool isTrap() const {
         return rejoin == REJOIN_TRAP;
+    }
+};
+
+// Information about a check inserted into the script for triggering Ion
+// compilation at a function or loop entry point.
+struct CompileTrigger
+{
+    uint32_t pcOffset;
+
+    // Offsets into the generated code of the conditional jump in the inline
+    // path and the start of the sync code for the trigger call in the out of
+    // line path.
+    JSC::CodeLocationJump inlineJump;
+    JSC::CodeLocationLabel stubLabel;
+
+    void initialize(uint32_t pcOffset, JSC::CodeLocationJump inlineJump, JSC::CodeLocationLabel stubLabel) {
+        this->pcOffset = pcOffset;
+        this->inlineJump = inlineJump;
+        this->stubLabel = stubLabel;
     }
 };
 
@@ -991,6 +1036,21 @@ IsLowerableFunCallOrApply(jsbytecode *pc)
 #endif
 }
 
+Shape *
+GetPICSingleShape(JSContext *cx, JSScript *script, jsbytecode *pc, bool constructing);
+
+static inline void
+PurgeCaches(JSScript *script)
+{
+    for (int constructing = 0; constructing <= 1; constructing++) {
+        for (int barriers = 0; barriers <= 1; barriers++) {
+            mjit::JITScript *jit = script->getJIT((bool) constructing, (bool) barriers);
+            if (jit)
+                jit->purgeCaches();
+        }
+    }
+}
+
 } /* namespace mjit */
 
 inline mjit::JITChunk *
@@ -1009,7 +1069,7 @@ inline JSScript *
 VMFrame::script()
 {
     if (regs.inlined())
-        return chunk()->inlineFrames()[regs.inlined()->inlineIndex].fun->script();
+        return chunk()->inlineFrames()[regs.inlined()->inlineIndex].fun->nonLazyScript();
     return fp()->script();
 }
 
@@ -1026,7 +1086,7 @@ VMFrame::pc()
 inline void *
 JSScript::nativeCodeForPC(bool constructing, jsbytecode *pc)
 {
-    js::mjit::JITScript *jit = getJIT(constructing, compartment()->compileBarriers());
+    js::mjit::JITScript *jit = getJIT(constructing, zone()->compileBarriers());
     if (!jit)
         return NULL;
     js::mjit::JITChunk *chunk = jit->chunk(pc);

@@ -85,7 +85,7 @@ var tests = [
   function checkTagSet() {
     let msgHdr = gIMAPInbox.msgDatabase.getMsgHdrForMessageID(gSynthMessage.messageId);
     let keywords = msgHdr.getStringProperty("keywords");
-    do_check_true(keywords.indexOf("randomtag") != -1);
+    do_check_true(keywords.contains("randomtag"));
     gSecondFolder.updateFolderWithListener(null, asyncUrlListener);
     yield false;
   },
@@ -97,7 +97,7 @@ var tests = [
   function checkTagCleared() {
     let msgHdr = gIMAPInbox.msgDatabase.getMsgHdrForMessageID(gSynthMessage.messageId);
     let keywords = msgHdr.getStringProperty("keywords");
-    do_check_eq(keywords.indexOf("randomtag"), -1);
+    do_check_false(keywords.contains("randomtag"));
   },
   teardown
 ];
@@ -115,12 +115,10 @@ function setup() {
   messages = messages.concat(gMessageGenerator.makeMessage());
   gSynthMessage = messages[0];
 
-  let ioService = Cc["@mozilla.org/network/io-service;1"]
-                  .getService(Ci.nsIIOService);
   let msgURI =
-    ioService.newURI("data:text/plain;base64," +
-                     btoa(gSynthMessage.toMessageString()),
-                     null, null);
+    Services.io.newURI("data:text/plain;base64," +
+                       btoa(gSynthMessage.toMessageString()),
+                       null, null);
   gMessage = new imapMessage(msgURI.spec, gIMAPMailbox.uidnext++, []);
   gIMAPMailbox.addMessage(gMessage);
 

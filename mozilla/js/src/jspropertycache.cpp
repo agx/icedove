@@ -1,24 +1,35 @@
-/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=98:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jspropertycache.h"
+
+#include "mozilla/PodOperations.h"
+
 #include "jscntxt.h"
-#include "jsnum.h"
+
 #include "jsobjinlines.h"
 #include "jsopcodeinlines.h"
-#include "jspropertycacheinlines.h"
 
 using namespace js;
+
+using mozilla::PodArrayZero;
 
 PropertyCacheEntry *
 PropertyCache::fill(JSContext *cx, JSObject *obj, JSObject *pobj, Shape *shape)
 {
-    JS_ASSERT(this == &JS_PROPERTY_CACHE(cx));
+    JS_ASSERT(this == &cx->propertyCache());
     JS_ASSERT(!cx->runtime->isHeapBusy());
+
+    /*
+     * Don't cache entries on indexed properties. Indexes can be added or
+     * deleted from the dense elements of objects along the prototype chain
+     * wihout any shape changes.
+     */
+    if (JSID_IS_INT(shape->propid()))
+        return JS_NO_PROP_CACHE_FILL;
 
     /*
      * Check for overdeep scope and prototype chain. Because resolve, getter,
@@ -108,9 +119,9 @@ PropertyCache::fullTest(JSContext *cx, jsbytecode *pc, JSObject **objp, JSObject
                         PropertyCacheEntry *entry)
 {
     JSObject *obj, *pobj;
-    JSScript *script = cx->stack.currentScript();
+    RootedScript script(cx, cx->stack.currentScript());
 
-    JS_ASSERT(this == &JS_PROPERTY_CACHE(cx));
+    JS_ASSERT(this == &cx->propertyCache());
     JS_ASSERT(uint32_t(pc - script->code) < script->length);
 
     JSOp op = JSOp(*pc);
@@ -163,8 +174,8 @@ PropertyCache::fullTest(JSContext *cx, jsbytecode *pc, JSObject **objp, JSObject
 
     if (pobj->lastProperty() == entry->pshape) {
 #ifdef DEBUG
-        PropertyName *name = GetNameFromBytecode(cx, script, pc, op);
-        JS_ASSERT(pobj->nativeContainsNoAllocation(NameToId(name)));
+        Rooted<PropertyName*> name(cx, GetNameFromBytecode(cx, script, pc, op));
+        JS_ASSERT(pobj->nativeContains(cx, name));
 #endif
         *pobjp = pobj;
         return NULL;

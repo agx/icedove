@@ -94,7 +94,9 @@ public:
     nsHttpChannel();
     virtual ~nsHttpChannel();
 
-    virtual nsresult Init(nsIURI *aURI, uint8_t aCaps, nsProxyInfo *aProxyInfo);
+    virtual nsresult Init(nsIURI *aURI, uint32_t aCaps, nsProxyInfo *aProxyInfo,
+                          uint32_t aProxyResolveFlags,
+                          nsIURI *aProxyURI);
 
     // Methods HttpBaseChannel didn't implement for us or that we override.
     //
@@ -112,6 +114,9 @@ public:
     // nsIResumableChannel
     NS_IMETHOD ResumeAt(uint64_t startPos, const nsACString& entityID);
 
+    NS_IMETHOD SetNotificationCallbacks(nsIInterfaceRequestor *aCallbacks);
+    NS_IMETHOD SetLoadGroup(nsILoadGroup *aLoadGroup);
+
 public: /* internal necko use only */ 
 
     void InternalSetUploadStream(nsIInputStream *uploadStream) 
@@ -120,7 +125,7 @@ public: /* internal necko use only */
       { mUploadStreamHasHeaders = hasHeaders; }
 
     nsresult SetReferrerInternal(nsIURI *referrer) {
-        nsCAutoString spec;
+        nsAutoCString spec;
         nsresult rv = referrer->GetAsciiSpec(spec);
         if (NS_FAILED(rv)) return rv;
         mReferrer = referrer;
@@ -149,10 +154,12 @@ private:
     typedef nsresult (nsHttpChannel::*nsContinueRedirectionFunc)(nsresult result);
 
     bool     RequestIsConditional();
+    nsresult BeginConnect();
     nsresult Connect();
     nsresult ContinueConnect();
     void     SpeculativeConnect();
     nsresult SetupTransaction();
+    void     SetupTransactionLoadGroupInfo();
     nsresult CallOnStartRequest();
     nsresult ProcessResponse();
     nsresult ContinueProcessResponse(nsresult);
@@ -174,19 +181,19 @@ private:
 
     // redirection specific methods
     void     HandleAsyncRedirect();
+    void     HandleAsyncAPIRedirect();
     nsresult ContinueHandleAsyncRedirect(nsresult);
     void     HandleAsyncNotModified();
     void     HandleAsyncFallback();
     nsresult ContinueHandleAsyncFallback(nsresult);
     nsresult PromptTempRedirect();
-    virtual nsresult SetupReplacementChannel(nsIURI *, nsIChannel *, bool preserveMethod);
+    nsresult StartRedirectChannelToURI(nsIURI *);
+    virtual  nsresult SetupReplacementChannel(nsIURI *, nsIChannel *, bool preserveMethod);
 
     // proxy specific methods
     nsresult ProxyFailover();
     nsresult AsyncDoReplaceWithProxy(nsIProxyInfo *);
     nsresult ContinueDoReplaceWithProxy(nsresult);
-    void HandleAsyncReplaceWithProxy();
-    nsresult ContinueHandleAsyncReplaceWithProxy(nsresult);
     nsresult ResolveProxy();
 
     // cache specific methods
@@ -236,8 +243,9 @@ private:
     nsresult DoAuthRetry(nsAHttpConnection *);
 
     void     HandleAsyncRedirectChannelToHttps();
-    nsresult AsyncRedirectChannelToHttps();
-    nsresult ContinueAsyncRedirectChannelToHttps(nsresult rv);
+    nsresult StartRedirectChannelToHttps();
+    nsresult ContinueAsyncRedirectChannelToURI(nsresult rv);
+    nsresult OpenRedirectChannel(nsresult rv);
 
     /**
      * A function that takes care of reading STS headers and enforcing STS 
@@ -255,7 +263,7 @@ private:
     // Ref RFC2616 13.10: "invalidation... MUST only be performed if
     // the host part is the same as in the Request-URI"
     inline bool HostPartIsTheSame(nsIURI *uri) {
-        nsCAutoString tmpHost1, tmpHost2;
+        nsAutoCString tmpHost1, tmpHost2;
         return (NS_SUCCEEDED(mURI->GetAsciiHost(tmpHost1)) &&
                 NS_SUCCEEDED(uri->GetAsciiHost(tmpHost2)) &&
                 (tmpHost1 == tmpHost2));
@@ -267,6 +275,10 @@ private:
                rv == NS_ERROR_UNKNOWN_PROTOCOL      ||
                rv == NS_ERROR_MALFORMED_URI;
     }
+
+    // Create a aggregate set of the current notification callbacks
+    // and ensure the transaction is updated to use it.
+    void UpdateAggregateCallbacks();
 
 private:
     nsCOMPtr<nsISupports>             mSecurityInfo;
@@ -301,9 +313,6 @@ private:
 
     // auth specific data
     nsCOMPtr<nsIHttpChannelAuthProvider> mAuthProvider;
-
-    // Proxy info to replace with
-    nsCOMPtr<nsIProxyInfo>            mTargetProxyInfo;
 
     // If the channel is associated with a cache, and the URI matched
     // a fallback namespace, this will hold the key for the fallback

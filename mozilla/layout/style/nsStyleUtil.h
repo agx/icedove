@@ -7,16 +7,16 @@
 
 #include "nsCoord.h"
 #include "nsCSSProperty.h"
+#include "nsIPrincipal.h"
+#include "nsSubstring.h"
 #include "gfxFontFeatures.h"
-#include "nsTArray.h"
-#include "nsCSSValue.h"
 
-struct nsStyleBackground;
-class nsString;
+class nsCSSValue;
 class nsStringComparator;
 class nsIContent;
-
-
+struct gfxFontFeature;
+class nsCSSValueList;
+template <class E> class nsTArray;
 
 // Style utility functions
 class nsStyleUtil {
@@ -25,14 +25,17 @@ public:
  static bool DashMatchCompare(const nsAString& aAttributeValue,
                                 const nsAString& aSelectorValue,
                                 const nsStringComparator& aComparator);
-                                
-  // Append a quoted (with "") and escaped version of aString to aResult.
-  static void AppendEscapedCSSString(const nsString& aString,
-                                     nsAString& aResult);
+
+  // Append a quoted (with 'quoteChar') and escaped version of aString
+  // to aResult.  'quoteChar' must be ' or ".
+  static void AppendEscapedCSSString(const nsAString& aString,
+                                     nsAString& aResult,
+                                     PRUnichar quoteChar = '"');
+
   // Append the identifier given by |aIdent| to |aResult|, with
   // appropriate escaping so that it can be reparsed to the same
   // identifier.
-  static void AppendEscapedCSSIdent(const nsString& aIdent,
+  static void AppendEscapedCSSIdent(const nsAString& aIdent,
                                     nsAString& aResult);
 
   // Append a bitmask-valued property's value(s) (space-separated) to aResult.
@@ -41,6 +44,8 @@ public:
                                     int32_t aFirstMask,
                                     int32_t aLastMask,
                                     nsAString& aResult);
+
+  static void AppendPaintOrderValue(uint8_t aValue, nsAString& aResult);
 
   static void AppendFontFeatureSettings(const nsTArray<gfxFontFeature>& aFeatures,
                                         nsAString& aResult);
@@ -73,6 +78,22 @@ public:
   static bool IsSignificantChild(nsIContent* aChild,
                                    bool aTextIsSignificant,
                                    bool aWhitespaceIsSignificant);
+  /*
+   *  Does this principal have a CSP that blocks the application of
+   *  inline styles ? Returns false if application of the style should
+   *  be blocked.
+   *
+   *  Note that the principal passed in here needs to be the principal
+   *  of the document, not of the style sheet. The document's principal
+   *  is where any Content Security Policy that should be used to
+   *  block or allow inline styles will be located.
+   */
+  static bool CSPAllowsInlineStyle(nsIPrincipal* aPrincipal,
+                                   nsIURI* aSourceURI,
+                                   uint32_t aLineNumber,
+                                   const nsSubstring& aStyleText,
+                                   nsresult* aRv);
+
 };
 
 

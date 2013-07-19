@@ -10,25 +10,15 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = necko
 LIBRARY_NAME   = neckodns_s
 LIBXUL_LIBRARY = 1
-XPIDL_MODULE   = necko_dns
-GRE_MODULE     = 1
-
-XPIDLSRCS = \
-  nsIDNSListener.idl \
-  nsIDNSRecord.idl \
-  nsIDNSService.idl \
-  nsIEffectiveTLDService.idl \
-  nsIIDNService.idl \
-  nsPIDNSService.idl \
-  $(NULL)
+FAIL_ON_WARNINGS := 1
 
 CPPSRCS = \
+  DNS.cpp \
   nsIDNService.cpp \
-  nsDNSService2.cpp \
   nsHostResolver.cpp \
+  nsDNSService2.cpp \
   nsEffectiveTLDService.cpp \
   $(NULL)
 
@@ -50,11 +40,14 @@ LOCAL_INCLUDES = \
 
 include $(topsrcdir)/config/rules.mk
 
-DEFINES += -DIMPL_NS_NET
+DEFINES += -DIMPL_NS_NET \
+           -DHB_DONT_DEFINE_STDINT \
+           $(NULL)
 
 # Generate the include file containing compact, static definitions
 # for effective TLD data.
 nsEffectiveTLDService.$(OBJ_SUFFIX): etld_data.inc
+nsEffectiveTLDService.h: etld_data.inc
 
 etld_data.inc: $(srcdir)/prepare_tlds.py $(srcdir)/effective_tld_names.dat
 	$(PYTHON) $(srcdir)/prepare_tlds.py $(srcdir)/effective_tld_names.dat > etld_data.inc

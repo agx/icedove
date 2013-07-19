@@ -11,7 +11,6 @@
  * optimizations.  Most users will not need to touch this file.
  */
 
-#include "prtypes.h"
 #include "mozilla/StandardInteger.h"
 
 /*
@@ -197,8 +196,11 @@ typedef unsigned int JDIMENSION;
  */
 
 #ifdef NEED_FAR_POINTERS
+#ifndef FAR
 #define FAR  far
+#endif
 #else
+#undef FAR
 #define FAR
 #endif
 

@@ -25,6 +25,9 @@
 @class mozAccessible;
 #endif
 
+namespace mozilla {
+namespace a11y {
+
 class AccessibleWrap : public Accessible
 {
 public: // construction, destruction
@@ -46,7 +49,7 @@ public: // construction, destruction
   virtual void Shutdown ();
   virtual void InvalidateChildren();
 
-  virtual bool AppendChild(Accessible* aAccessible);
+  virtual bool InsertChildAt(uint32_t aIdx, Accessible* aChild) MOZ_OVERRIDE;
   virtual bool RemoveChild(Accessible* aAccessible);
 
   virtual nsresult HandleAccEvent(AccEvent* aEvent);
@@ -107,5 +110,8 @@ private:
    */
   bool mNativeInited;  
 };
+
+} // namespace a11y
+} // namespace mozilla
 
 #endif

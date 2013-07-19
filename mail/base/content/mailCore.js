@@ -209,7 +209,7 @@ function MailToolboxCustomizeDone(aEvent, customizePopupId)
   if (this.UpdateMailToolbar != undefined)
     UpdateMailToolbar(focus);
 
-  var toolbox = document.getElementsByAttribute("doCustomization", "true")[0];
+  let toolbox = document.querySelector('[doCustomization="true"]');
   if (toolbox) {
     toolbox.removeAttribute("doCustomization");
 
@@ -217,10 +217,10 @@ function MailToolboxCustomizeDone(aEvent, customizePopupId)
     // customization wrapping preserves its children, but not its initialized
     // state. Fix that here.
     // Fix Bug 565045: Only treat "Get Message Button" if it is in our toolbox
-    var popup = toolbox.getElementsByAttribute("id", "button-getMsgPopup")[0];
+    let popup = toolbox.querySelector("#button-getMsgPopup");
     if (popup) {
       // We can't use _teardown here, because it'll remove the Get All menuitem
-      let sep = toolbox.getElementsByAttribute("id", "button-getAllNewMsgSeparator")[0];
+      let sep = toolbox.querySelector("#button-getAllNewMsgSeparator");
       while (popup.lastChild != sep)
         popup.removeChild(popup.lastChild);
     }
@@ -253,9 +253,7 @@ function onViewToolbarsPopupShowing(aEvent, toolboxIds, aInsertPoint)
 
     // We'll consider either childnodes that have a toolbarname attribute,
     // or externalToolbars.
-    let childToolbars = Array.slice(toolbox
-                                    .getElementsByAttribute("toolbarname",
-                                                            "*"));
+    let childToolbars = Array.slice(toolbox.querySelectorAll("[toolbarname]"));
     let potentialToolbars = childToolbars.concat(toolbox.externalToolbars);
 
     for (let [, toolbarElement] in Iterator(potentialToolbars)) {
@@ -393,7 +391,7 @@ function openAddonsMgr(aView)
     let emWindow;
     let browserWindow;
 
-    function receivePong(aSubject, aTopic, aData) {
+    let receivePong = function receivePong(aSubject, aTopic, aData) {
       let browserWin = aSubject.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
         .getInterface(Components.interfaces.nsIWebNavigation)
         .QueryInterface(Components.interfaces.nsIDocShellTreeItem)

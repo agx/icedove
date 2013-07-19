@@ -10,7 +10,6 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= ucvlatin
 LIBRARY_NAME	= ucvlatin_s
 FORCE_STATIC_LIB = 1
 LIBXUL_LIBRARY = 1
@@ -69,7 +68,7 @@ CPPSRCS		= \
 		nsVPSToUnicode.cpp \
 		nsUTF7ToUnicode.cpp \
 		nsMUTF7ToUnicode.cpp \
-		nsUCS2BEToUnicode.cpp \
+		nsUTF16ToUnicode.cpp \
 		nsT61ToUnicode.cpp \
 		nsUserDefinedToUnicode.cpp \
 		nsUnicodeToAscii.cpp \
@@ -124,7 +123,7 @@ CPPSRCS		= \
 		nsUnicodeToVPS.cpp \
 		nsUnicodeToUTF7.cpp \
 		nsUnicodeToMUTF7.cpp \
-		nsUnicodeToUCS2BE.cpp \
+		nsUnicodeToUTF16.cpp \
 		nsUnicodeToT61.cpp \
 		nsUnicodeToUserDefined.cpp \
 		nsUnicodeToSymbol.cpp \
@@ -132,8 +131,6 @@ CPPSRCS		= \
 		nsUnicodeToAdobeEuro.cpp \
 		nsUnicodeToTSCII.cpp \
 		$(NULL)
-
-EXPORTS		= nsUCvLatinCID.h
 
 LOCAL_INCLUDES = -I$(srcdir)/../util -I$(srcdir)/../src
 

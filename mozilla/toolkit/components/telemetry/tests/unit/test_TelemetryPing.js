@@ -27,12 +27,16 @@ const ADDON_NAME = "Telemetry test addon";
 const ADDON_HISTOGRAM = "addon-histogram";
 const FLASH_VERSION = "1.1.1.1";
 const SHUTDOWN_TIME = 10000;
+const FAILED_PROFILE_LOCK_ATTEMPTS = 2;
 
 // Constants from prio.h for nsIFileOutputStream.init
 const PR_WRONLY = 0x2;
 const PR_CREATE_FILE = 0x8;
 const PR_TRUNCATE = 0x20;
 const RW_OWNER = 0600;
+
+const NUMBER_OF_THREADS_TO_LAUNCH = 30;
+var gNumberOfThreadsLaunched = 0;
 
 const BinaryInputStream = Components.Constructor(
   "@mozilla.org/binaryinputstream;1",
@@ -44,10 +48,11 @@ var httpserver = new HttpServer();
 var gFinished = false;
 
 function telemetry_ping () {
-  const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsIObserver);
-  TelemetryPing.observe(null, "test-gather-startup", null);
-  TelemetryPing.observe(null, "test-enable-load-save-notifications", null);
-  TelemetryPing.observe(null, "test-ping", SERVER);
+  const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsITelemetryPing);
+  TelemetryPing.gatherStartup();
+  TelemetryPing.enableLoadSaveNotifications();
+  TelemetryPing.cacheProfileDirectory();
+  TelemetryPing.testPing(SERVER);
 }
 
 // Mostly useful so that you can dump payloads from decodeRequestPayload.
@@ -99,9 +104,9 @@ function telemetryObserver(aSubject, aTopic, aData) {
   let histogramsFile = getSavedHistogramsFile("saved-histograms.dat");
   setupTestData();
 
-  const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsIObserver);
-  TelemetryPing.observe(histogramsFile, "test-save-histograms", null);
-  TelemetryPing.observe(histogramsFile, "test-load-histograms", null);
+  const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsITelemetryPing);
+  TelemetryPing.saveHistograms(histogramsFile, true);
+  TelemetryPing.testLoadHistograms(histogramsFile, true);
   telemetry_ping();
 }
 
@@ -155,6 +160,8 @@ function checkPayloadInfo(payload, reason) {
   do_check_eq(payload.info.reason, reason);
   do_check_true("appUpdateChannel" in payload.info);
   do_check_true("locale" in payload.info);
+  do_check_true("revision" in payload.info);
+  do_check_true(payload.info.revision.startsWith("http"));
 
   try {
     // If we've not got nsIGfxInfoDebug, then this will throw and stop us doing
@@ -180,6 +187,17 @@ function checkPayload(request, reason, successfulPings) {
   do_check_true(payload.simpleMeasurements.uptime >= 0);
   do_check_true(payload.simpleMeasurements.startupInterrupted === 1);
   do_check_eq(payload.simpleMeasurements.shutdownDuration, SHUTDOWN_TIME);
+  do_check_eq(payload.simpleMeasurements.savedPings, 1);
+  do_check_true("maximalNumberOfConcurrentThreads" in payload.simpleMeasurements);
+  do_check_true(payload.simpleMeasurements.maximalNumberOfConcurrentThreads >= gNumberOfThreadsLaunched);
+
+  do_check_eq(payload.simpleMeasurements.failedProfileLockCount,
+              FAILED_PROFILE_LOCK_ATTEMPTS);
+  let profileDirectory = Services.dirsvc.get("ProfD", Ci.nsIFile);
+  let failedProfileLocksFile = profileDirectory.clone();
+  failedProfileLocksFile.append("Telemetry.FailedProfileLocks.txt");
+  do_check_true(!failedProfileLocksFile.exists());
+
 
   var isWindows = ("@mozilla.org/windows-registry-key;1" in Components.classes);
   if (isWindows) {
@@ -190,7 +208,9 @@ function checkPayload(request, reason, successfulPings) {
   const TELEMETRY_PING = "TELEMETRY_PING";
   const TELEMETRY_SUCCESS = "TELEMETRY_SUCCESS";
   const TELEMETRY_TEST_FLAG = "TELEMETRY_TEST_FLAG";
+  const READ_SAVED_PING_SUCCESS = "READ_SAVED_PING_SUCCESS";
   do_check_true(TELEMETRY_PING in payload.histograms);
+  do_check_true(READ_SAVED_PING_SUCCESS in payload.histograms);
   let rh = Telemetry.registeredHistograms;
   for (let name in rh) {
     if (/SQLITE/.test(name) && name in payload.histograms) {
@@ -206,7 +226,9 @@ function checkPayload(request, reason, successfulPings) {
     bucket_count: 3,
     histogram_type: 3,
     values: {0:1, 1:0},
-    sum: 1
+    sum: 0,
+    sum_squares_lo: 0,
+    sum_squares_hi: 0
   };
   let flag = payload.histograms[TELEMETRY_TEST_FLAG];
   do_check_eq(uneval(flag), uneval(expected_flag));
@@ -217,10 +239,15 @@ function checkPayload(request, reason, successfulPings) {
     bucket_count: 3,
     histogram_type: 2,
     values: {0:1, 1:successfulPings, 2:0},
-    sum: successfulPings
+    sum: successfulPings,
+    sum_squares_lo: successfulPings,
+    sum_squares_hi: 0
   };
   let tc = payload.histograms[TELEMETRY_SUCCESS];
   do_check_eq(uneval(tc), uneval(expected_tc));
+
+  let h = payload.histograms[READ_SAVED_PING_SUCCESS];
+  do_check_eq(h.values[0], 1);
 
   // The ping should include data from memory reporters.  We can't check that
   // this data is correct, because we can't control the values returned by the
@@ -263,7 +290,7 @@ function runAsyncTestObserver(aSubject, aTopic, aData) {
   httpserver.registerPathHandler(PATH, checkHistogramsAsync);
   let histogramsFile = getSavedHistogramsFile("saved-histograms2.dat");
 
-  const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsIObserver);
+  const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsITelemetryPing);
   Services.obs.addObserver(function(aSubject, aTopic, aData) {
     Services.obs.removeObserver(arguments.callee, aTopic);
 
@@ -272,9 +299,9 @@ function runAsyncTestObserver(aSubject, aTopic, aData) {
       telemetry_ping();
     }, "telemetry-test-load-complete", false);
 
-    TelemetryPing.observe(histogramsFile, "test-load-histograms", "async");
+    TelemetryPing.testLoadHistograms(histogramsFile, false);
   }, "telemetry-test-save-complete", false);
-  TelemetryPing.observe(histogramsFile, "test-save-histograms", "async");
+  TelemetryPing.saveHistograms(histogramsFile, false);
 }
 
 function checkPersistedHistogramsAsync(request, response) {
@@ -295,15 +322,25 @@ function checkHistogramsAsync(request, response) {
   checkPayload(request, "test-ping", 3);
 }
 
+function runInvalidJSONTest() {
+  let histogramsFile = getSavedHistogramsFile("invalid-histograms.dat");
+  writeStringToFile(histogramsFile, "this.is.invalid.JSON");
+  do_check_true(histogramsFile.exists());
+  
+  const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsITelemetryPing);
+  TelemetryPing.testLoadHistograms(histogramsFile, true);
+  do_check_false(histogramsFile.exists());
+}
+
 function runOldPingFileTest() {
   let histogramsFile = getSavedHistogramsFile("old-histograms.dat");
-  const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsIObserver);
-  TelemetryPing.observe(histogramsFile, "test-save-histograms", null);
+  const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsITelemetryPing);
+  TelemetryPing.saveHistograms(histogramsFile, true);
   do_check_true(histogramsFile.exists());
 
   let mtime = histogramsFile.lastModifiedTime;
   histogramsFile.lastModifiedTime = mtime - 8 * 24 * 60 * 60 * 1000; // 8 days.
-  TelemetryPing.observe(histogramsFile, "test-load-histograms", null);
+  TelemetryPing.testLoadHistograms(histogramsFile, true);
   do_check_false(histogramsFile.exists());
 }
 
@@ -401,11 +438,7 @@ function registerFakePluginHost() {
                             PLUGINHOST_CONTRACTID, PluginHostFactory);
 }
 
-function write_fake_shutdown_file() {
-  let profileDirectory = Services.dirsvc.get("ProfD", Ci.nsIFile);
-  let file = profileDirectory.clone();
-  file.append("Telemetry.ShutdownTime.txt");
-  let contents = "" + SHUTDOWN_TIME;
+function writeStringToFile(file, contents) {
   let ostream = Cc["@mozilla.org/network/safe-file-output-stream;1"]
                 .createInstance(Ci.nsIFileOutputStream);
   ostream.init(file, PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE,
@@ -415,7 +448,24 @@ function write_fake_shutdown_file() {
   ostream.close();
 }
 
+function write_fake_shutdown_file() {
+  let profileDirectory = Services.dirsvc.get("ProfD", Ci.nsIFile);
+  let file = profileDirectory.clone();
+  file.append("Telemetry.ShutdownTime.txt");
+  let contents = "" + SHUTDOWN_TIME;
+  writeStringToFile(file, contents);
+}
+
+function write_fake_failedprofilelocks_file() {
+  let profileDirectory = Services.dirsvc.get("ProfD", Ci.nsIFile);
+  let file = profileDirectory.clone();
+  file.append("Telemetry.FailedProfileLocks.txt");
+  let contents = "" + FAILED_PROFILE_LOCK_ATTEMPTS;
+  writeStringToFile(file, contents);
+}
+
 function run_test() {
+  do_test_pending();
   try {
     var gfxInfo = Cc["@mozilla.org/gfx/info;1"].getService(Ci.nsIGfxInfoDebug);
     gfxInfo.spoofVendorID("0xabcd");
@@ -428,9 +478,40 @@ function run_test() {
   do_get_profile();
   createAppInfo("xpcshell@tests.mozilla.org", "XPCShell", "1", "1.9.2");
 
+  // Make it look like we've previously failed to lock a profile a couple times.
+  write_fake_failedprofilelocks_file();
+
   // Make it look like we've shutdown before.
   write_fake_shutdown_file();
-  
+
+  let currentMaxNumberOfThreads = Telemetry.maximalNumberOfConcurrentThreads;
+  do_check_true(currentMaxNumberOfThreads > 0);
+
+  // Try to augment the maximal number of threads currently launched
+  let threads = [];
+  try {
+    for (let i = 0; i < currentMaxNumberOfThreads + 10; ++i) {
+      threads.push(Services.tm.newThread(0));
+    }
+  } catch (ex) {
+    // If memory is too low, it is possible that not all threads will be launched.
+  }
+  gNumberOfThreadsLaunched = threads.length;
+
+  do_check_true(Telemetry.maximalNumberOfConcurrentThreads >= gNumberOfThreadsLaunched);
+
+  do_register_cleanup(function() {
+    threads.forEach(function(thread) {
+      thread.shutdown();
+    });
+  });
+
+  Telemetry.asyncFetchTelemetryData(function () {
+    actualTest();
+  });
+}
+
+function actualTest() {
   // try to make LightweightThemeManager do stuff
   let gInternalManager = Cc["@mozilla.org/addons/integration;1"]
                          .getService(Ci.nsIObserver)
@@ -442,10 +523,13 @@ function run_test() {
   // fake plugin host for consistent flash version data
   registerFakePluginHost();
 
+  runInvalidJSONTest();
+
   Services.obs.addObserver(nonexistentServerObserver, "telemetry-test-xhr-complete", false);
   telemetry_ping();
   // spin the event loop
   do_test_pending();
   // ensure that test runs to completion
   do_register_cleanup(function () do_check_true(gFinished));
+  do_test_finished();
 }

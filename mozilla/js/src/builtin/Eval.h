@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99 ft=cpp:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -25,6 +24,13 @@ IndirectEval(JSContext *cx, unsigned argc, Value *vp);
 // the result is returned in args.rval.
 extern bool
 DirectEval(JSContext *cx, const CallArgs &args);
+
+// Performs a direct eval called from Ion code.
+extern bool
+DirectEvalFromIon(JSContext *cx,
+                  HandleObject scopeObj, HandleScript callerScript,
+                  HandleValue thisValue, HandleString str,
+                  jsbytecode * pc, MutableHandleValue vp);
 
 // True iff 'v' is the built-in eval function for the global object that
 // corresponds to 'scopeChain'.

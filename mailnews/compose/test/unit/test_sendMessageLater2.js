@@ -15,6 +15,8 @@
 load("../../../resources/logHelper.js");
 load("../../../resources/asyncTestUtils.js");
 
+Components.utils.import("resource:///modules/mailServices.js");
+
 var test = "sendMessageLater";
 var server = null;
 var gSentFolder;
@@ -36,8 +38,8 @@ var gLastSentMessage = 0;
 // 2 = sendUnsentMessages has exited.
 var gMessageSendStatus = 0;
 
-const kSender = "from@invalid.com";
-const kTo = "to@invalid.com";
+const kSender = "from@foo.invalid";
+const kTo = "to@foo.invalid";
 
 var msgSendLater = Cc["@mozilla.org/messengercompose/sendlater;1"]
                      .getService(Ci.nsIMsgSendLater);
@@ -223,12 +225,10 @@ function run_test() {
   // Check that the send later service thinks we don't have messages to send.
   do_check_eq(msgSendLater.hasUnsentMessages(identity), false);
 
-  var acctMgr = Cc["@mozilla.org/messenger/account-manager;1"]
-                  .getService(Ci.nsIMsgAccountManager);
-  acctMgr.setSpecialFolders();
+  MailServices.accounts.setSpecialFolders();
 
-  var account = acctMgr.createAccount();
-  var incomingServer = acctMgr.createIncomingServer("test", "localhost", "pop3");
+  let account = MailServices.accounts.createAccount();
+  let incomingServer = MailServices.accounts.createIncomingServer("test", "localhost", "pop3");
 
   var smtpServer = getBasicSmtpServer();
   identity = getSmtpIdentity(kSender, smtpServer);

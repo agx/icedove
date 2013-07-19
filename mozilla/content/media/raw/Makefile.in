@@ -7,23 +7,16 @@ DEPTH = @DEPTH@
 topsrcdir = @top_srcdir@
 srcdir = @srcdir@
 VPATH = @srcdir@
-FAIL_ON_WARNINGS := 1
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = content
 LIBRARY_NAME = gkconraw_s
 LIBXUL_LIBRARY = 1
-
-EXPORTS += \
-  nsRawDecoder.h \
-  nsRawReader.h \
-  nsRawStructs.h \
-  $(NULL)
+FAIL_ON_WARNINGS := 1
 
 CPPSRCS += \
-  nsRawDecoder.cpp \
-  nsRawReader.cpp \
+  RawDecoder.cpp \
+  RawReader.cpp \
   $(NULL)
 
 FORCE_STATIC_LIB = 1

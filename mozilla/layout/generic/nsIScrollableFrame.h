@@ -13,8 +13,11 @@
 #include "nsISupports.h"
 #include "nsCoord.h"
 #include "nsPresContext.h"
+#include "mozilla/gfx/Point.h"
+#include "nsIScrollbarOwner.h"
 
-#define NS_DEFAULT_VERTICAL_SCROLL_DISTANCE 3
+#define NS_DEFAULT_VERTICAL_SCROLL_DISTANCE   3
+#define NS_DEFAULT_HORIZONTAL_SCROLL_DISTANCE 5
 
 class nsBoxLayoutState;
 class nsIScrollPositionListener;
@@ -25,8 +28,9 @@ class nsIFrame;
  * APIs for examining scroll state, observing changes to scroll state,
  * and triggering scrolling.
  */
-class nsIScrollableFrame : public nsQueryFrame {
+class nsIScrollableFrame : public nsIScrollbarOwner {
 public:
+  typedef mozilla::gfx::Point Point;
 
   NS_DECL_QUERYFRAME_TARGET(nsIScrollableFrame)
 
@@ -77,7 +81,11 @@ public:
    */
   virtual nsMargin GetDesiredScrollbarSizes(nsPresContext* aPresContext,
                                             nsRenderingContext* aRC) = 0;
-
+  /**
+   * Return the width for non-disappearing scrollbars.
+   */
+  virtual nscoord GetNondisappearingScrollbarWidth(nsPresContext* aPresContext,
+                                                   nsRenderingContext* aRC) = 0;
   /**
    * Get the area of the scrollport relative to the origin of this frame's
    * border-box.
@@ -90,6 +98,10 @@ public:
    * This will always be a multiple of device pixels.
    */
   virtual nsPoint GetScrollPosition() const = 0;
+  /**
+   * As GetScrollPosition(), but uses the top-right as origin for RTL frames. 
+   */
+  virtual nsPoint GetLogicalScrollPosition() const = 0;
   /**
    * Get the area that must contain the scroll position. Typically
    * (but not always, e.g. for RTL content) x and y will be 0, and
@@ -141,9 +153,20 @@ public:
    * position, rounded to CSS pixels, matches aScrollPosition. If
    * aScrollPosition.x/y is different from the current CSS pixel position,
    * makes sure we only move in the direction given by the difference.
+   * Ensures that GetScrollPositionCSSPixels (the scroll position after
+   * rounding to CSS pixels) will be exactly aScrollPosition.
    * The scroll mode is INSTANT.
    */
   virtual void ScrollToCSSPixels(nsIntPoint aScrollPosition) = 0;
+  /**
+   * Scrolls to a particular position in float CSS pixels.
+   * This does not guarantee that GetScrollPositionCSSPixels equals
+   * aScrollPosition afterward. It tries to scroll as close to
+   * aScrollPosition as possible while scrolling by an integer
+   * number of layer pixels (so the operation is fast and looks clean).
+   * The scroll mode is INSTANT.
+   */
+  virtual void ScrollToCSSPixelsApproximate(const Point& aScrollPosition) = 0;
   /**
    * Returns the scroll position in integer CSS pixels, rounded to the nearest
    * pixel.
@@ -185,14 +208,6 @@ public:
   virtual void RemoveScrollPositionListener(nsIScrollPositionListener* aListener) = 0;
 
   /**
-   * Obtain the XUL box for the horizontal or vertical scrollbar, or null
-   * if there is no such box. Avoid using this, but may be useful for
-   * setting up a scrollbar mediator if you want to redirect scrollbar
-   * input.
-   */
-  virtual nsIFrame* GetScrollbarBox(bool aVertical) = 0;
-
-  /**
    * Internal method used by scrollbars to notify their scrolling
    * container of changes.
    */
@@ -210,6 +225,21 @@ public:
    * expectation that scrolling is going to happen.
    */
   virtual bool IsScrollingActive() = 0;
+  /**
+   * Call this when the layer(s) induced by active scrolling are being
+   * completely redrawn.
+   */
+  virtual void ResetScrollPositionForLayerPixelAlignment() = 0;
+  /**
+   * Was the current presentation state for this frame restored from history?
+   */
+  virtual bool DidHistoryRestore() = 0;
+  /**
+   * Clear the flag so that DidHistoryRestore() returns false until the next
+   * RestoreState call.
+   * @see nsIStatefulFrame::RestoreState
+   */
+  virtual void ClearDidHistoryRestore() = 0;
 };
 
 #endif

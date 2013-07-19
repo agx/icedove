@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * ***** BEGIN LICENSE BLOCK *****
  * Copyright (C) 2008 Apple Inc. All rights reserved.
@@ -417,6 +417,8 @@ public:
         {
             masm->m_assembler.linkJump(m_jmp, label.m_label);
         }
+
+        bool isSet() const { return m_jmp.isSet(); }
 
     private:
         JmpSrc m_jmp;

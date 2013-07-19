@@ -69,6 +69,10 @@ public:
 
     virtual FontType GetType() const { return FONT_TYPE_DWRITE; }
 
+    virtual mozilla::TemporaryRef<mozilla::gfx::ScaledFont> GetScaledFont(mozilla::gfx::DrawTarget *aTarget);
+
+    virtual cairo_scaled_font_t *GetCairoScaledFont();
+
 protected:
     friend class gfxDWriteShaper;
 
@@ -81,8 +85,6 @@ protected:
     bool HasBitmapStrikeForSize(uint32_t aSize);
 
     cairo_font_face_t *CairoFontFace();
-
-    cairo_scaled_font_t *CairoScaledFont();
 
     gfxFloat MeasureGlyphWidth(uint16_t aGlyph);
 
@@ -103,6 +105,7 @@ protected:
     bool mNeedsBold;
     bool mUseSubpixelPositions;
     bool mAllowManualShowGlyphs;
+    bool mAzureScaledFontIsCairo;
 };
 
 #endif

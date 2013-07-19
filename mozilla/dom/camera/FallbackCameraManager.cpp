@@ -5,18 +5,21 @@
 #include "DOMCameraManager.h"
 
 // From nsDOMCameraManager.
+nsresult
+nsDOMCameraManager::GetNumberOfCameras(int32_t& aDeviceCount)
+{
+  return NS_ERROR_NOT_IMPLEMENTED;
+};
 
-/* [implicit_jscontext] jsval getListOfCameras (); */
-NS_IMETHODIMP
-nsDOMCameraManager::GetListOfCameras(JSContext* cx, JS::Value* _retval)
+nsresult
+nsDOMCameraManager::GetCameraName(uint32_t aDeviceNum, nsCString& aDeviceName)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-using namespace mozilla;
-
+/* [implicit_jscontext] jsval getListOfCameras (); */
 NS_IMETHODIMP
-GetCameraTask::Run()
+nsDOMCameraManager::GetListOfCameras(JSContext* cx, JS::Value* _retval)
 {
   return NS_ERROR_NOT_IMPLEMENTED;
 }

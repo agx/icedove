@@ -41,9 +41,8 @@ function run_test()
    * Ok, prelude done. Read the original message from disk
    * (through a file URI), and add it to the Inbox.
    */
-  let gIOService = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
-
-  var msgfileuri = gIOService.newFileURI(gMsgFile).QueryInterface(Ci.nsIFileURL);
+  var msgfileuri =
+    Services.io.newFileURI(gMsgFile).QueryInterface(Ci.nsIFileURL);
 
   let message = new imapMessage(msgfileuri.spec, inbox.uidnext++, []);
   // report an artificially low size, like gmail and Exchange do
@@ -56,9 +55,7 @@ function run_test()
    * files). If we pass the test, we'll remove the file afterwards
    * (cf. UrlListener), otherwise it's kept in IMapMD.
    */
-  gSavedMsgFile = Cc["@mozilla.org/file/directory_service;1"]
-                  .getService(Ci.nsIProperties)
-                  .get("IMapMD", Ci.nsILocalFile);
+  gSavedMsgFile = Services.dirsvc.get("IMapMD", Ci.nsIFile);
   gSavedMsgFile.append(gFileName + ".eml");
 
   do_test_pending();

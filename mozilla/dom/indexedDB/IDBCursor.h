@@ -137,6 +137,12 @@ public:
     return mActorChild;
   }
 
+  IndexedDBCursorParent*
+  GetActorParent() const
+  {
+    return mActorParent;
+  }
+
   nsresult
   ContinueInternal(const Key& aKey,
                    int32_t aCount);
@@ -144,6 +150,8 @@ public:
 protected:
   IDBCursor();
   ~IDBCursor();
+
+  void DropJSObjects();
 
   static
   already_AddRefed<IDBCursor>

@@ -7,25 +7,26 @@
 #define nsXMLElement_h___
 
 #include "nsIDOMElement.h"
-#include "nsGenericElement.h"
+#include "mozilla/dom/Element.h"
 
-class nsXMLElement : public nsGenericElement,
+class nsXMLElement : public mozilla::dom::Element,
                      public nsIDOMElement
 {
 public:
   nsXMLElement(already_AddRefed<nsINodeInfo> aNodeInfo)
-    : nsGenericElement(aNodeInfo)
+    : mozilla::dom::Element(aNodeInfo)
   {
+    SetIsDOMBinding();
   }
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
   // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE(nsGenericElement::)
+  NS_FORWARD_NSIDOMNODE_TO_NSINODE
 
   // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT(nsGenericElement::)
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
 
   // nsINode interface methods
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
@@ -48,10 +49,12 @@ public:
                                 const nsAString& aValue,
                                 nsAttrValue& aResult);
 
-  // nsGenericElement overrides
+  // Element overrides
   virtual void NodeInfoChanged(nsINodeInfo* aOldNodeInfo);
 
-
+protected:
+  virtual JSObject* WrapNode(JSContext *aCx,
+                             JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 };
 
 #endif // nsXMLElement_h___

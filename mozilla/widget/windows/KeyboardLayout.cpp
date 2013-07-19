@@ -22,6 +22,7 @@
 
 #include <windows.h>
 #include <winuser.h>
+#include <algorithm>
 
 #ifndef WINABLEAPI
 #include <winable.h>
@@ -118,8 +119,9 @@ ModifierKeyState::InitInputEvent(nsInputEvent& aInputEvent) const
     case NS_WHEEL_EVENT:
     case NS_DRAG_EVENT:
     case NS_SIMPLE_GESTURE_EVENT:
-    case NS_MOZTOUCH_EVENT:
       InitMouseEvent(aInputEvent);
+      break;
+    default:
       break;
   }
 }
@@ -130,8 +132,7 @@ ModifierKeyState::InitMouseEvent(nsInputEvent& aMouseEvent) const
   NS_ASSERTION(aMouseEvent.eventStructType == NS_MOUSE_EVENT ||
                aMouseEvent.eventStructType == NS_WHEEL_EVENT ||
                aMouseEvent.eventStructType == NS_DRAG_EVENT ||
-               aMouseEvent.eventStructType == NS_SIMPLE_GESTURE_EVENT ||
-               aMouseEvent.eventStructType == NS_MOZTOUCH_EVENT,
+               aMouseEvent.eventStructType == NS_SIMPLE_GESTURE_EVENT,
                "called with non-mouse event");
 
   nsMouseEvent_base& mouseEvent = static_cast<nsMouseEvent_base&>(aMouseEvent);
@@ -198,7 +199,7 @@ UniCharsAndModifiers::UniCharsCaseInsensitiveEqual(
 UniCharsAndModifiers&
 UniCharsAndModifiers::operator+=(const UniCharsAndModifiers& aOther)
 {
-  uint32_t copyCount = NS_MIN(aOther.mLength, 5 - mLength);
+  uint32_t copyCount = std::min(aOther.mLength, 5 - mLength);
   NS_ENSURE_TRUE(copyCount > 0, *this);
   memcpy(&mChars[mLength], aOther.mChars, copyCount * sizeof(PRUnichar));
   memcpy(&mModifiers[mLength], aOther.mModifiers,
@@ -383,7 +384,8 @@ VirtualKey::FillKbdState(PBYTE aKbdState,
 NativeKey::NativeKey(const KeyboardLayout& aKeyboardLayout,
                      nsWindow* aWindow,
                      const MSG& aKeyOrCharMessage) :
-  mDOMKeyCode(0), mVirtualKeyCode(0), mOriginalVirtualKeyCode(0)
+  mDOMKeyCode(0), mMessage(aKeyOrCharMessage.message),
+  mVirtualKeyCode(0), mOriginalVirtualKeyCode(0)
 {
   mScanCode = WinUtils::GetScanCode(aKeyOrCharMessage.lParam);
   mIsExtended = WinUtils::IsExtendedScanCode(aKeyOrCharMessage.lParam);
@@ -391,7 +393,7 @@ NativeKey::NativeKey(const KeyboardLayout& aKeyboardLayout,
   // extended keys due to the API limitation.
   bool canComputeVirtualKeyCodeFromScanCode =
     (!mIsExtended || WinUtils::GetWindowsVersion() >= WinUtils::VISTA_VERSION);
-  switch (aKeyOrCharMessage.message) {
+  switch (mMessage) {
     case WM_KEYDOWN:
     case WM_KEYUP:
     case WM_SYSKEYDOWN:
@@ -539,6 +541,8 @@ NativeKey::NativeKey(const KeyboardLayout& aKeyboardLayout,
 
   mDOMKeyCode =
     aKeyboardLayout.ConvertNativeKeyCodeToDOMKeyCode(mOriginalVirtualKeyCode);
+  mKeyNameIndex =
+    aKeyboardLayout.ConvertNativeKeyCodeToKeyNameIndex(mOriginalVirtualKeyCode);
 }
 
 UINT
@@ -551,7 +555,6 @@ NativeKey::GetScanCodeWithExtendedFlag() const
   // no way to get virtual keycodes from scancode of extended keys.
   if (!mIsExtended ||
       WinUtils::GetWindowsVersion() < WinUtils::VISTA_VERSION) {
-    NS_WARNING("GetScanCodeWithExtendedFlat() returns without extended flag");
     return mScanCode;
   }
   return (0xE000 | mScanCode);
@@ -659,48 +662,66 @@ KeyboardLayout::IsDeadKey(uint8_t aVirtualKey,
            VirtualKey::ModifiersToShiftState(aModKeyState.GetModifiers()));
 }
 
-UniCharsAndModifiers
-KeyboardLayout::OnKeyDown(uint8_t aVirtualKey,
-                          const ModifierKeyState& aModKeyState)
+void
+KeyboardLayout::InitNativeKey(NativeKey& aNativeKey,
+                              const ModifierKeyState& aModKeyState)
 {
   if (mPendingKeyboardLayout) {
     LoadLayout(mPendingKeyboardLayout);
   }
 
-  int32_t virtualKeyIndex = GetKeyIndex(aVirtualKey);
+  uint8_t virtualKey = aNativeKey.GetOriginalVirtualKeyCode();
+  int32_t virtualKeyIndex = GetKeyIndex(virtualKey);
 
   if (virtualKeyIndex < 0) {
     // Does not produce any printable characters, but still preserves the
     // dead-key state.
-    return UniCharsAndModifiers();
+    return;
   }
 
+  bool isKeyDown = aNativeKey.IsKeyDownMessage();
   uint8_t shiftState =
     VirtualKey::ModifiersToShiftState(aModKeyState.GetModifiers());
 
   if (mVirtualKeys[virtualKeyIndex].IsDeadKey(shiftState)) {
-    if (mActiveDeadKey < 0) {
-      // Dead-key state activated. No characters generated.
-      mActiveDeadKey = aVirtualKey;
-      mDeadKeyShiftState = shiftState;
-      return UniCharsAndModifiers();
+    if ((isKeyDown && mActiveDeadKey < 0) ||
+        (!isKeyDown && mActiveDeadKey == virtualKey)) {
+      //  First dead key event doesn't generate characters.
+      if (isKeyDown) {
+        // Dead-key state activated at keydown.
+        mActiveDeadKey = virtualKey;
+        mDeadKeyShiftState = shiftState;
+      }
+      UniCharsAndModifiers deadChars =
+        mVirtualKeys[virtualKeyIndex].GetNativeUniChars(shiftState);
+      NS_ASSERTION(deadChars.mLength == 1,
+                   "dead key must generate only one character");
+      aNativeKey.mKeyNameIndex =
+        WidgetUtils::GetDeadKeyNameIndex(deadChars.mChars[0]);
+      return;
     }
 
     // Dead-key followed by another dead-key. Reset dead-key state and
     // return both dead-key characters.
     int32_t activeDeadKeyIndex = GetKeyIndex(mActiveDeadKey);
-    UniCharsAndModifiers result =
+    UniCharsAndModifiers prevDeadChars =
       mVirtualKeys[activeDeadKeyIndex].GetUniChars(mDeadKeyShiftState);
-    result += mVirtualKeys[virtualKeyIndex].GetUniChars(shiftState);
-    DeactivateDeadKeyState();
-    return result;
+    UniCharsAndModifiers newChars =
+      mVirtualKeys[virtualKeyIndex].GetUniChars(shiftState);
+    // But keypress events should be fired for each committed character.
+    aNativeKey.mCommittedCharsAndModifiers = prevDeadChars + newChars;
+    if (isKeyDown) {
+      DeactivateDeadKeyState();
+    }
+    return;
   }
 
   UniCharsAndModifiers baseChars =
     mVirtualKeys[virtualKeyIndex].GetUniChars(shiftState);
   if (mActiveDeadKey < 0) {
     // No dead-keys are active. Just return the produced characters.
-    return baseChars;
+    aNativeKey.mCommittedCharsAndModifiers = baseChars;
+    return;
   }
 
   // Dead-key was active. See if pressed base character does produce
@@ -712,20 +733,25 @@ KeyboardLayout::OnKeyDown(uint8_t aVirtualKey,
   if (compositeChar) {
     // Active dead-key and base character does produce exactly one
     // composite character.
-    UniCharsAndModifiers result;
-    result.Append(compositeChar, baseChars.mModifiers[0]);
-    DeactivateDeadKeyState();
-    return result;
+    aNativeKey.mCommittedCharsAndModifiers.Append(compositeChar,
+                                                  baseChars.mModifiers[0]);
+    if (isKeyDown) {
+      DeactivateDeadKeyState();
+    }
+    return;
   }
 
   // There is no valid dead-key and base character combination.
   // Return dead-key character followed by base character.
-  UniCharsAndModifiers result =
+  UniCharsAndModifiers deadChars =
     mVirtualKeys[activeDeadKeyIndex].GetUniChars(mDeadKeyShiftState);
-  result += baseChars;
-  DeactivateDeadKeyState();
+  // But keypress events should be fired for each committed character.
+  aNativeKey.mCommittedCharsAndModifiers = deadChars + baseChars;
+  if (isKeyDown) {
+    DeactivateDeadKeyState();
+  }
 
-  return result;
+  return;
 }
 
 UniCharsAndModifiers
@@ -1125,6 +1151,13 @@ KeyboardLayout::ConvertNativeKeyCodeToDOMKeyCode(UINT aNativeKeyCode) const
     case VK_SLEEP:
     case VK_NUMLOCK:
     case VK_SCROLL: // SCROLL LOCK
+    case VK_ATTN: // Attension key of IBM midrange computers, e.g., AS/400
+    case VK_CRSEL: // Cursor Selection
+    case VK_EXSEL: // Extend Selection
+    case VK_EREOF: // Erase EOF key of IBM 3270 keyboard layout
+    case VK_PLAY:
+    case VK_ZOOM:
+    case VK_PA1: // PA1 key of IBM 3270 keyboard layout
       return uint32_t(aNativeKeyCode);
 
     case VK_HELP:
@@ -1136,6 +1169,13 @@ KeyboardLayout::ConvertNativeKeyCodeToDOMKeyCode(UINT aNativeKeyCode) const
     case VK_RWIN:
       return NS_VK_WIN;
 
+    case VK_VOLUME_MUTE:
+      return NS_VK_VOLUME_MUTE;
+    case VK_VOLUME_DOWN:
+      return NS_VK_VOLUME_DOWN;
+    case VK_VOLUME_UP:
+      return NS_VK_VOLUME_UP;
+
     // Following keycodes are not defined in our DOM keycodes.
     case VK_BROWSER_BACK:
     case VK_BROWSER_FORWARD:
@@ -1144,9 +1184,6 @@ KeyboardLayout::ConvertNativeKeyCodeToDOMKeyCode(UINT aNativeKeyCode) const
     case VK_BROWSER_SEARCH:
     case VK_BROWSER_FAVORITES:
     case VK_BROWSER_HOME:
-    case VK_VOLUME_MUTE:
-    case VK_VOLUME_DOWN:
-    case VK_VOLUME_UP:
     case VK_MEDIA_NEXT_TRACK:
     case VK_MEDIA_STOP:
     case VK_MEDIA_PLAY_PAUSE:
@@ -1154,17 +1191,22 @@ KeyboardLayout::ConvertNativeKeyCodeToDOMKeyCode(UINT aNativeKeyCode) const
     case VK_LAUNCH_MEDIA_SELECT:
     case VK_LAUNCH_APP1:
     case VK_LAUNCH_APP2:
-    case VK_ATTN: // Attension key of IBM midrange computers, e.g., AS/400
-    case VK_CRSEL: // Cursor Selection
-    case VK_EXSEL: // Extend Selection
-    case VK_EREOF: // Erase EOF key of IBM 3270 keyboard layout
-    case VK_PLAY:
-    case VK_ZOOM:
-    case VK_PA1: // PA1 key of IBM 3270 keyboard layout
-    case VK_OEM_CLEAR:
       return 0;
 
-    // Following keycodes are only used by Nokia/Ericsson, we don't define them
+    // Following OEM specific virtual keycodes should pass through DOM keyCode
+    // for compatibility with the other browsers on Windows.
+
+    // Following OEM specific virtual keycodes are defined for Fujitsu/OASYS.
+    case VK_OEM_FJ_JISHO:
+    case VK_OEM_FJ_MASSHOU:
+    case VK_OEM_FJ_TOUROKU:
+    case VK_OEM_FJ_LOYA:
+    case VK_OEM_FJ_ROYA:
+    // Not sure what means "ICO".
+    case VK_ICO_HELP:
+    case VK_ICO_00:
+    case VK_ICO_CLEAR:
+    // Following OEM specific virtual keycodes are defined for Nokia/Ericsson.
     case VK_OEM_RESET:
     case VK_OEM_JUMP:
     case VK_OEM_PA1:
@@ -1178,6 +1220,15 @@ KeyboardLayout::ConvertNativeKeyCodeToDOMKeyCode(UINT aNativeKeyCode) const
     case VK_OEM_AUTO:
     case VK_OEM_ENLW:
     case VK_OEM_BACKTAB:
+    // VK_OEM_CLEAR is defined as not OEM specific, but let's pass though
+    // DOM keyCode like other OEM specific virtual keycodes.
+    case VK_OEM_CLEAR:
+      return uint32_t(aNativeKeyCode);
+
+    // 0xE1 is an OEM specific virtual keycode. However, the value is already
+    // used in our DOM keyCode for AltGr on Linux. So, this virtual keycode
+    // cannot pass through DOM keyCode.
+    case 0xE1:
       return 0;
 
     // Following keycodes are OEM keys which are keycodes for non-alphabet and
@@ -1197,10 +1248,7 @@ KeyboardLayout::ConvertNativeKeyCodeToDOMKeyCode(UINT aNativeKeyCode) const
     case VK_OEM_6:
     case VK_OEM_7:
     case VK_OEM_8:
-    case 0xE1: // OEM specific
     case VK_OEM_102:
-    case 0xE3: // OEM specific
-    case 0xE4: // OEM specific
     {
       NS_ASSERTION(IsPrintableCharKey(aNativeKeyCode),
                    "The key must be printable");
@@ -1230,6 +1278,24 @@ KeyboardLayout::ConvertNativeKeyCodeToDOMKeyCode(UINT aNativeKeyCode) const
   NS_WARNING("Unknown key code comes, please check latest MSDN document,"
              " there may be some new keycodes we have not known.");
   return 0;
+}
+
+KeyNameIndex
+KeyboardLayout::ConvertNativeKeyCodeToKeyNameIndex(uint8_t aVirtualKey) const
+{
+  switch (aVirtualKey) {
+
+#define NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX(aNativeKey, aKeyNameIndex) \
+    case aNativeKey: return aKeyNameIndex;
+
+#include "NativeKeyToDOMKeyName.h"
+
+#undef NS_NATIVE_KEY_TO_DOM_KEY_NAME_INDEX
+
+    default:
+      return IsPrintableCharKey(aVirtualKey) ? KEY_NAME_INDEX_PrintableKey :
+                                               KEY_NAME_INDEX_Unidentified;
+  }
 }
 
 /*****************************************************************************

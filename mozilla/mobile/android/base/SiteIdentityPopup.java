@@ -4,6 +4,8 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.util.HardwareUtils;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -29,6 +31,8 @@ public class SiteIdentityPopup extends PopupWindow {
     public static final String VERIFIED = "verified";
     public static final String IDENTIFIED = "identified";
 
+    private static SiteIdentityPopup sInstance;
+
     private Resources mResources;
     private boolean mInflated;
 
@@ -41,25 +45,32 @@ public class SiteIdentityPopup extends PopupWindow {
     private ImageView mLarry;
     private ImageView mArrow;
 
+    private int mYOffset;
+
     private SiteIdentityPopup() {
         super(GeckoApp.mAppContext);
 
         mResources = GeckoApp.mAppContext.getResources();
+        mYOffset = mResources.getDimensionPixelSize(R.dimen.menu_popup_offset);
         mInflated = false;
+        setAnimationStyle(R.style.PopupAnimation);
     }
 
-    private static class InstanceHolder {
-        private static final SiteIdentityPopup INSTANCE = new SiteIdentityPopup();
+    public static synchronized SiteIdentityPopup getInstance() {
+        if (sInstance == null) {
+            sInstance = new SiteIdentityPopup();
+        }
+        return sInstance;
     }
 
-    public static SiteIdentityPopup getInstance() {
-       return SiteIdentityPopup.InstanceHolder.INSTANCE;
+    public static synchronized void clearInstance() {
+        sInstance = null;
     }
 
     private void init() {
         setBackgroundDrawable(new BitmapDrawable());
         setOutsideTouchable(true);
-        setWindowLayoutMode(GeckoApp.mAppContext.isTablet() ? LayoutParams.WRAP_CONTENT : LayoutParams.FILL_PARENT,
+        setWindowLayoutMode(HardwareUtils.isTablet() ? LayoutParams.WRAP_CONTENT : LayoutParams.FILL_PARENT,
                 LayoutParams.WRAP_CONTENT);
 
         LayoutInflater inflater = LayoutInflater.from(GeckoApp.mAppContext);
@@ -68,9 +79,7 @@ public class SiteIdentityPopup extends PopupWindow {
 
         mHost = (TextView) layout.findViewById(R.id.host);
         mOwner = (TextView) layout.findViewById(R.id.owner);
-        mSupplemental = (TextView) layout.findViewById(R.id.supplemental);
         mVerifier = (TextView) layout.findViewById(R.id.verifier);
-        mEncrypted = (TextView) layout.findViewById(R.id.encrypted);
 
         mLarry = (ImageView) layout.findViewById(R.id.larry);
         mArrow = (ImageView) layout.findViewById(R.id.arrow);
@@ -112,24 +121,20 @@ public class SiteIdentityPopup extends PopupWindow {
             mHost.setText(host);
 
             String owner = identityData.getString("owner");
+
+            try {
+                String supplemental = identityData.getString("supplemental");
+                owner += "\n" + supplemental;
+            } catch (JSONException e) { }
+
             mOwner.setText(owner);
 
             String verifier = identityData.getString("verifier");
-            mVerifier.setText(verifier);
-
             String encrypted = identityData.getString("encrypted");
-            mEncrypted.setText(encrypted);
+            mVerifier.setText(verifier + "\n" + encrypted);
         } catch (JSONException e) {
             Log.e(LOGTAG, "Exception trying to get identity data", e);
             return;
-        }
-
-        try {
-            String supplemental = identityData.getString("supplemental");
-            mSupplemental.setText(supplemental);
-            mSupplemental.setVisibility(View.VISIBLE);
-        } catch (JSONException e) {
-            mSupplemental.setVisibility(View.INVISIBLE);
         }
 
         if (mode.equals(VERIFIED)) {
@@ -137,32 +142,28 @@ public class SiteIdentityPopup extends PopupWindow {
             mLarry.setImageResource(R.drawable.larry_blue);
             mHost.setTextColor(mResources.getColor(R.color.identity_verified));
             mOwner.setTextColor(mResources.getColor(R.color.identity_verified));
-            mSupplemental.setTextColor(mResources.getColor(R.color.identity_verified));
         } else {
             // Use a green theme for EV
             mLarry.setImageResource(R.drawable.larry_green);
             mHost.setTextColor(mResources.getColor(R.color.identity_identified));
             mOwner.setTextColor(mResources.getColor(R.color.identity_identified));
-            mSupplemental.setTextColor(mResources.getColor(R.color.identity_identified));
         }
 
         int[] anchorLocation = new int[2];
         v.getLocationOnScreen(anchorLocation);
 
-        int arrowWidth = mResources.getDimensionPixelSize(R.dimen.doorhanger_arrow_width);
+        int arrowWidth = mResources.getDimensionPixelSize(R.dimen.menu_popup_arrow_width);
         int leftMargin = anchorLocation[0] + (v.getWidth() - arrowWidth) / 2;
 
         int offset = 0;
-        if (GeckoApp.mAppContext.isTablet()) {
-            int popupWidth = mResources.getDimensionPixelSize(R.dimen.popup_width);
+        if (HardwareUtils.isTablet()) {
+            int popupWidth = mResources.getDimensionPixelSize(R.dimen.doorhanger_width);
             offset = 0 - popupWidth + arrowWidth*3/2 + v.getWidth()/2;
         }
 
         LayoutParams layoutParams = (LayoutParams) mArrow.getLayoutParams();
-        LayoutParams newLayoutParams = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
-        newLayoutParams.setMargins(leftMargin, layoutParams.topMargin, 0, 0);
-        mArrow.setLayoutParams(newLayoutParams);
+        layoutParams.setMargins(leftMargin, 0, 0, 0);
 
-        showAsDropDown(v, offset, 0);
+        showAsDropDown(v, offset, -mYOffset);
     }
 }

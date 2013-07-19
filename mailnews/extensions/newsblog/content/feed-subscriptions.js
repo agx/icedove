@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+Components.utils.import("resource:///modules/mailServices.js");
 Components.utils.import("resource://gre/modules/PluralForm.jsm");
 
 var FeedSubscriptions = {
@@ -34,9 +35,7 @@ var FeedSubscriptions = {
     let win = Services.wm.getMostRecentWindow("mail:3pane");
     if (win)
     {
-      win.FeedFolderNotificationService =
-        Cc["@mozilla.org/messenger/msgnotificationservice;1"].
-        getService(Ci.nsIMsgFolderNotificationService);
+      win.FeedFolderNotificationService = MailServices.mfn;
       win.FeedFolderNotificationService.addListener(this.FolderListener,
         Ci.nsIMsgFolderNotificationService.folderAdded |
         Ci.nsIMsgFolderNotificationService.folderDeleted |
@@ -109,19 +108,6 @@ var FeedSubscriptions = {
 
   mView:
   {
-    _atoms: [],
-    _getAtomFor: function(aName) {
-      if (!this._atoms[aName])
-        this._atoms[aName] = this._makeAtom(aName);
-      return this._atoms[aName];
-    },
-  
-    _makeAtom: function(aString) {
-      return Cc["@mozilla.org/atom-service;1"].
-             getService(Ci.nsIAtomService).
-             getAtom(aString);
-    },
-
     kRowIndexUndefined: -1,
 
     get currentItem() {
@@ -159,30 +145,17 @@ var FeedSubscriptions = {
     performAction: function(aAction)       {},
     performActionOnRow: function (aAction, aRow)       {},
     performActionOnCell: function(aAction, aRow, aCol) {},
-    getRowProperties: function(aRow, aProperties)      {},
-    getColumnProperties: function(aCol, aProperties)   {},
+    getRowProperties: function(aRow)                   { return ""; },
+    getColumnProperties: function(aCol)                { return ""; },
     getCellValue: function (aRow, aColumn)             {},
     setCellValue: function (aRow, aColumn, aValue)     {},
     setCellText: function (aRow, aColumn, aValue)      {},
 
-    getCellProperties: function (aRow, aColumn, aProperties) {
-//      aProperties.AppendElement(this._getAtomFor("folderNameCol"));
+    getCellProperties: function (aRow, aColumn) {
       let item = this.getItemAtIndex(aRow);
       let folder = item && item.folder ? item.folder : null;
-      if (folder)
-      {
-        if (folder.isServer)
-        {
-          aProperties.AppendElement(this._getAtomFor("serverType-rss"));
-          aProperties.AppendElement(this._getAtomFor("isServer-true"));
-        }
-        else
-          // It's a feed folder.
-          aProperties.AppendElement(this._getAtomFor("livemark"));
-      }
-      else
-        // It's a feed.
-        aProperties.AppendElement(this._getAtomFor("serverType-rss"));
+      return !folder ? "serverType-rss" :
+             folder.isServer ? "serverType=rss isServer-true" : "livemark";
     },
 
     isContainer: function (aRow)
@@ -974,7 +947,8 @@ var FeedSubscriptions = {
 
   onKeyPress: function(aEvent)
   {
-    if (aEvent.keyCode == aEvent.DOM_VK_DELETE)
+    if (aEvent.keyCode == aEvent.DOM_VK_DELETE &&
+        aEvent.target.id == "rssSubscriptionsList")
       this.removeFeed(true);
 
     this.clearStatusInfo();
@@ -1281,7 +1255,7 @@ var FeedSubscriptions = {
  */
   moveCopyFeed: function(aOldFeedIndex, aNewParentIndex, aMoveCopy)
   {
-    let moveFeed = aMoveCopy == "move" ? true : false;
+    let moveFeed = aMoveCopy == "move";
     let currentItem = this.mView.getItemAtIndex(aOldFeedIndex);
     if (!currentItem ||
         this.mView.getParentIndex(aOldFeedIndex) == aNewParentIndex)
@@ -2146,7 +2120,7 @@ var FeedSubscriptions = {
       stream.close();
     }
 
-    let body = opmlDom ? opmlDom.getElementsByTagName("body")[0] : null;
+    let body = opmlDom ? opmlDom.querySelector("body") : null;
 
     // Return if the OPML file is invalid or empty.
     if (!body || !body.childElementCount ||
@@ -2242,8 +2216,8 @@ var FeedSubscriptions = {
 
           // Create the feed.
           let quickMode = outline.hasAttribute("fz:quickMode") ?
-                          outline.getAttribute("fz:quickMode") == "true" ?
-                          true : false : rssServer.getBoolValue("quickMode");
+                          outline.getAttribute("fz:quickMode") == "true" :
+                          rssServer.getBoolValue("quickMode");
 
           if (firstFeedInFolderQuickMode === null)
             // The summary/web page pref applies to all feeds in a folder,

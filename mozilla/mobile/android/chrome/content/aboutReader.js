@@ -29,6 +29,8 @@ let AboutReader = function(doc, win) {
   this._winRef = Cu.getWeakReference(win);
 
   Services.obs.addObserver(this, "Reader:FaviconReturn", false);
+  Services.obs.addObserver(this, "Reader:Add", false);
+  Services.obs.addObserver(this, "Reader:Remove", false);
 
   this._article = null;
 
@@ -49,6 +51,7 @@ let AboutReader = function(doc, win) {
   body.addEventListener("touchstart", this, false);
   body.addEventListener("click", this, false);
 
+  win.addEventListener("unload", this, false);
   win.addEventListener("scroll", this, false);
   win.addEventListener("popstate", this, false);
   win.addEventListener("resize", this, false);
@@ -69,15 +72,28 @@ let AboutReader = function(doc, win) {
   this._setupSegmentedButton("color-scheme-buttons", colorSchemeOptions, colorScheme, this._setColorScheme.bind(this));
   this._setColorScheme(colorScheme);
 
+  let fontTypeOptions = [
+    { name: gStrings.GetStringFromName("aboutReader.fontTypeSansSerif"),
+      value: "sans-serif"},
+    { name: gStrings.GetStringFromName("aboutReader.fontTypeSerif"),
+      value: "serif"}
+  ];
+
+  let fontType = Services.prefs.getCharPref("reader.font_type");
+  this._setupSegmentedButton("font-type-buttons", fontTypeOptions, fontType, this._setFontType.bind(this));
+  this._setFontType(fontType);
+
   let fontTitle = gStrings.GetStringFromName("aboutReader.textTitle");
-  this._setupStepControl("font-size-control", fontTitle, this._onFontSizeChange.bind(this));
   this._fontSize = 0;
-  this._setFontSize(Services.prefs.getIntPref("reader.font_size"));
+  this._setupStepControl("font-size-control", fontTitle,
+    this._FONT_SIZE_MIN, this._FONT_SIZE_MAX, this._FONT_SIZE_STEP, Services.prefs.getIntPref("reader.font_size"),
+    this._onFontSizeChange.bind(this));
 
   let marginTitle = gStrings.GetStringFromName("aboutReader.marginTitle");
-  this._setupStepControl("margin-size-control", marginTitle, this._onMarginSizeChange.bind(this));
   this._marginSize = 0;
-  this._setMarginSize(Services.prefs.getIntPref("reader.margin_size"));
+  this._setupStepControl("margin-size-control", marginTitle,
+    this._MARGIN_SIZE_MIN, this._MARGIN_SIZE_MAX, this._MARGIN_SIZE_STEP, Services.prefs.getIntPref("reader.margin_size"),
+    this._onMarginSizeChange.bind(this));
 
   dump("Decoding query arguments");
   let queryArgs = this._decodeQueryString(win.location.href);
@@ -97,8 +113,12 @@ let AboutReader = function(doc, win) {
 }
 
 AboutReader.prototype = {
-  _STEP_INCREMENT: 0,
-  _STEP_DECREMENT: 1,
+  _FONT_SIZE_MIN: 1,
+  _FONT_SIZE_MAX: 7,
+  _FONT_SIZE_STEP: 1,
+  _MARGIN_SIZE_MIN: 5,
+  _MARGIN_SIZE_MAX: 25,
+  _MARGIN_SIZE_STEP: 5,
 
   _BLOCK_IMAGES_SELECTOR: ".content p > img:only-child, " +
                           ".content p > a:only-child > img:only-child, " +
@@ -141,12 +161,33 @@ AboutReader.prototype = {
     return this._messageElementRef.get();
   },
 
-  observe: function(aMessage, aTopic, aData) {
+  observe: function Reader_observe(aMessage, aTopic, aData) {
     switch(aTopic) {
       case "Reader:FaviconReturn": {
-        let info = JSON.parse(aData);
-        this._loadFavicon(info.url, info.faviconUrl);
-        Services.obs.removeObserver(this, "Reader:FaviconReturn", false);
+        let args = JSON.parse(aData);
+        this._loadFavicon(args.url, args.faviconUrl);
+        Services.obs.removeObserver(this, "Reader:FaviconReturn");
+        break;
+      }
+
+      case "Reader:Add": {
+        let args = JSON.parse(aData);
+        if (args.url == this._article.url) {
+          if (!this._isReadingListItem) {
+            this._isReadingListItem = true;
+            this._updateToggleButton();
+          }
+        }
+        break;
+      }
+
+      case "Reader:Remove": {
+        if (aData == this._article.url) {
+          if (this._isReadingListItem) {
+            this._isReadingListItem = false;
+            this._updateToggleButton();
+          }
+        }
         break;
       }
     }
@@ -177,6 +218,11 @@ AboutReader.prototype = {
       case "resize":
         this._updateImageMargins();
         break;
+
+      case "unload":
+        Services.obs.removeObserver(this, "Reader:Add");
+        Services.obs.removeObserver(this, "Reader:Remove");
+        break;
     }
   },
 
@@ -201,24 +247,28 @@ AboutReader.prototype = {
       gChromeWin.Reader.storeArticleInCache(this._article, function(success) {
         dump("Reader:Add (in reader) success=" + success);
 
+        let result = (success ? gChromeWin.Reader.READER_ADD_SUCCESS :
+            gChromeWin.Reader.READER_ADD_FAILED);
+
+        let json = JSON.stringify({ fromAboutReader: true, url: this._article.url });
+        Services.obs.notifyObservers(null, "Reader:Add", json);
+
         gChromeWin.sendMessageToJava({
-          gecko: {
-            type: "Reader:Added",
-            success: success,
-            title: this._article.title,
-            url: this._article.url,
-          }
+          type: "Reader:Added",
+          result: result,
+          title: this._article.title,
+          url: this._article.url,
         });
       }.bind(this));
     } else {
       gChromeWin.Reader.removeArticleFromCache(this._article.url , function(success) {
         dump("Reader:Remove (in reader) success=" + success);
 
+        Services.obs.notifyObservers(null, "Reader:Remove", this._article.url);
+
         gChromeWin.sendMessageToJava({
-          gecko: {
-            type: "Reader:Removed",
-            url: this._article.url
-          }
+          type: "Reader:Removed",
+          url: this._article.url
         });
       }.bind(this));
     }
@@ -228,11 +278,7 @@ AboutReader.prototype = {
     if (!this._article)
       return;
 
-    gChromeWin.sendMessageToJava({
-      gecko: {
-        type: "Reader:GoToReadingList"
-      }
-    });
+    gChromeWin.sendMessageToJava({ type: "Reader:GoToReadingList" });
   },
 
   _onShare: function Reader_onShare() {
@@ -240,28 +286,16 @@ AboutReader.prototype = {
       return;
 
     gChromeWin.sendMessageToJava({
-      gecko: {
-        type: "Reader:Share",
-        url: this._article.url,
-        title: this._article.title
-      }
+      type: "Reader:Share",
+      url: this._article.url,
+      title: this._article.title
     });
   },
 
-  _onMarginSizeChange: function Reader_onMarginSizeChange(operation) {
-    if (operation == this._STEP_INCREMENT)
-      this._setMarginSize(this._marginSize + 5);
-    else
-      this._setMarginSize(this._marginSize - 5);
-  },
-
-  _setMarginSize: function Reader_setMarginSize(newMarginSize) {
-    if (this._marginSize === newMarginSize)
-      return;
-
+  _onMarginSizeChange: function Reader_onMarginSizeChange(newMarginSize) {
     let doc = this._doc;
 
-    this._marginSize = Math.max(5, Math.min(25, newMarginSize));
+    this._marginSize = newMarginSize;
     doc.body.style.marginLeft = this._marginSize + "%";
     doc.body.style.marginRight = this._marginSize + "%";
 
@@ -270,23 +304,13 @@ AboutReader.prototype = {
     Services.prefs.setIntPref("reader.margin_size", this._marginSize);
   },
 
-  _onFontSizeChange: function Reader_onFontSizeChange(operation) {
-    if (operation == this._STEP_INCREMENT)
-      this._setFontSize(this._fontSize + 1);
-    else
-      this._setFontSize(this._fontSize - 1);
-  },
-
-  _setFontSize: function Reader_setFontSize(newFontSize) {
-    if (this._fontSize === newFontSize)
-      return;
-
+  _onFontSizeChange: function Reader_onFontSizeChange(newFontSize) {
     let bodyClasses = this._doc.body.classList;
 
     if (this._fontSize > 0)
       bodyClasses.remove("font-size" + this._fontSize);
 
-    this._fontSize = Math.max(1, Math.min(7, newFontSize));
+    this._fontSize = newFontSize;
     bodyClasses.add("font-size" + this._fontSize);
 
     Services.prefs.setIntPref("reader.font_size", this._fontSize);
@@ -305,6 +329,21 @@ AboutReader.prototype = {
     bodyClasses.add(this._colorScheme);
 
     Services.prefs.setCharPref("reader.color_scheme", this._colorScheme);
+  },
+
+  _setFontType: function Reader_setFontType(newFontType) {
+    if (this._fontType === newFontType)
+      return;
+
+    let bodyClasses = this._doc.body.classList;
+
+    if (this._fontType)
+      bodyClasses.remove(this._fontType);
+
+    this._fontType = newFontType;
+    bodyClasses.add(this._fontType);
+
+    Services.prefs.setCharPref("reader.font_type", this._fontType);
   },
 
   _getToolbarVisibility: function Reader_getToolbarVisibility() {
@@ -363,10 +402,8 @@ AboutReader.prototype = {
 
   _requestFavicon: function Reader_requestFavicon() {
     gChromeWin.sendMessageToJava({
-      gecko: {
-        type: "Reader:FaviconRequest",
-        url: this._article.url
-      }
+      type: "Reader:FaviconRequest",
+      url: this._article.url
     });
   },
 
@@ -427,6 +464,15 @@ AboutReader.prototype = {
     }
   },
 
+  _maybeSetTextDirection: function Read_maybeSetTextDirection(article){
+    if(!article.dir)
+      return;
+
+    //Set "dir" attribute on content
+    this._contentElement.setAttribute("dir", article.dir);
+    this._headerElement.setAttribute("dir", article.dir);
+  },
+
   _showError: function Reader_showError(error) {
     this._headerElement.style.display = "none";
     this._contentElement.style.display = "none";
@@ -449,7 +495,7 @@ AboutReader.prototype = {
 
     this._creditsElement.innerHTML = article.byline;
 
-    this._titleElement.innerHTML = article.title;
+    this._titleElement.textContent = article.title;
     this._doc.title = article.title;
 
     this._headerElement.style.display = "block";
@@ -460,6 +506,7 @@ AboutReader.prototype = {
     this._contentElement.innerHTML = "";
     this._contentElement.appendChild(contentFragment);
     this._updateImageMargins();
+    this._maybeSetTextDirection(article);
 
     this._contentElement.style.display = "block";
 
@@ -503,7 +550,7 @@ AboutReader.prototype = {
     return result;
   },
 
-  _setupStepControl: function Reader_setupStepControl(id, name, callback) {
+  _setupStepControl: function Reader_setupStepControl(id, name, min, max, step, initial, callback) {
     let doc = this._doc;
     let stepControl = doc.getElementById(id);
 
@@ -519,12 +566,34 @@ AboutReader.prototype = {
     minusButton.className = "button minus-button";
     stepControl.appendChild(minusButton);
 
+    let updateControls = function() {
+      current = Math.max(min, Math.min(max, current));
+      if (current == min) {
+        minusButton.classList.add("disabled");
+      } else {
+        minusButton.classList.remove("disabled");
+      }
+      if (current == max) {
+        plusButton.classList.add("disabled");
+      } else {
+        plusButton.classList.remove("disabled");
+      }
+    }
+
+    let current = initial;
+    updateControls();
+
     plusButton.addEventListener("click", function(aEvent) {
       if (!aEvent.isTrusted)
         return;
 
       aEvent.stopPropagation();
-      callback(this._STEP_INCREMENT);
+
+      if (current < max) {
+        current += step;
+        updateControls();
+        callback(current);
+      }
     }.bind(this), true);
 
     minusButton.addEventListener("click", function(aEvent) {
@@ -532,8 +601,16 @@ AboutReader.prototype = {
         return;
 
       aEvent.stopPropagation();
-      callback(this._STEP_DECREMENT);
+
+      if (current > min) {
+        current -= step;
+        updateControls();
+        callback(current);
+      }
     }.bind(this), true);
+
+    // Always callback initial current setting
+    callback(current);
   },
 
   _setupSegmentedButton: function Reader_setupSegmentedButton(id, options, initialValue, callback) {
@@ -548,6 +625,7 @@ AboutReader.prototype = {
       link.innerHTML = option.name;
       item.appendChild(link);
 
+      link.style.MozUserSelect = 'none';
       segmentedButton.appendChild(item);
 
       link.addEventListener("click", function(aEvent) {
@@ -628,6 +706,9 @@ AboutReader.prototype = {
           return;
 
         aEvent.stopPropagation();
+
+        if (!this._getToolbarVisibility())
+          return;
 
         let dropdownClasses = dropdown.classList;
 

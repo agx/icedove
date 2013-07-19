@@ -8,6 +8,7 @@
 #ifndef nsLeafFrame_h___
 #define nsLeafFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsFrame.h"
 #include "nsDisplayList.h"
 
@@ -22,11 +23,11 @@ public:
   NS_DECL_FRAMEARENA_HELPERS
 
   // nsIFrame replacements
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) {
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE {
     DO_GLOBAL_REFLOW_COUNT_DSP("nsLeafFrame");
-    return DisplayBorderBackgroundOutline(aBuilder, aLists);
+    DisplayBorderBackgroundOutline(aBuilder, aLists);
   }
 
   /**
@@ -53,7 +54,7 @@ public:
   NS_IMETHOD Reflow(nsPresContext*      aPresContext,
                     nsHTMLReflowMetrics& aDesiredSize,
                     const nsHTMLReflowState& aReflowState,
-                    nsReflowStatus&      aStatus);
+                    nsReflowStatus&      aStatus) MOZ_OVERRIDE;
   
   /**
    * This method does most of the work that Reflow() above need done.

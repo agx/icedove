@@ -17,7 +17,6 @@ nsBrowserStatusHandler.prototype =
   jsDefaultStatus : "",
   overLink : "",
   feeds : [],
-  popupNotifications : null,
 
   QueryInterface : function(aIID)
   {
@@ -161,7 +160,7 @@ nsBrowserStatusHandler.prototype =
 
   onLinkIconAvailable : function(aHref)
   {
-    if (gProxyFavIcon && pref.getBoolPref("browser.chrome.site_icons")) {
+    if (gProxyFavIcon && Services.prefs.getBoolPref("browser.chrome.site_icons")) {
       var browser = getBrowser();
       if (browser.userTypedValue === null)
         gProxyFavIcon.setAttribute("src", aHref);
@@ -225,13 +224,11 @@ nsBrowserStatusHandler.prototype =
         if (aRequest instanceof nsIChannel) {
           var location = aRequest.URI.spec;
           if (location != "about:blank") {
-            const kErrorBindingAborted = 0x804B0002;
-            const kErrorNetTimeout = 0x804B000E;
             switch (aStatus) {
-              case kErrorBindingAborted:
+              case Components.results.NS_BINDING_ABORTED:
                 msg = gNavigatorBundle.getString("nv_stopped");
                 break;
-              case kErrorNetTimeout:
+              case Components.results.NS_ERROR_NET_TIMEOUT:
                 msg = gNavigatorBundle.getString("nv_timeout");
                 break;
             }
@@ -335,12 +332,6 @@ nsBrowserStatusHandler.prototype =
         SetPageProxyState("invalid", null);
       }
 
-      // Only dismiss notifications if this onLocationChange represents an
-      // actual load (or an error page).
-      if (this.popupNotifications &&
-          !(aFlags & nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT))
-        this.popupNotifications.locationChange();
-
       PlacesStarButton.updateState();
 
       this.feedsMenu.setAttribute("disabled", "true");
@@ -368,23 +359,15 @@ nsBrowserStatusHandler.prototype =
     const wpl = Components.interfaces.nsIWebProgressListener;
     const wpl_security_bits = wpl.STATE_IS_SECURE |
                               wpl.STATE_IS_BROKEN |
-                              wpl.STATE_IS_INSECURE |
-                              wpl.STATE_SECURE_HIGH |
-                              wpl.STATE_SECURE_MED |
-                              wpl.STATE_SECURE_LOW;
+                              wpl.STATE_IS_INSECURE;
 
     /* aState is defined as a bitmask that may be extended in the future.
      * We filter out any unknown bits before testing for known values.
      */
     switch (aState & wpl_security_bits) {
-      case wpl.STATE_IS_SECURE | wpl.STATE_SECURE_HIGH:
+      case wpl.STATE_IS_SECURE:
         this.securityButton.setAttribute("level", "high");
         this.urlBar.setAttribute("level", "high");
-        break;
-      case wpl.STATE_IS_SECURE | wpl.STATE_SECURE_MED:
-      case wpl.STATE_IS_SECURE | wpl.STATE_SECURE_LOW:
-        this.securityButton.setAttribute("level", "low");
-        this.urlBar.setAttribute("level", "low");
         break;
       case wpl.STATE_IS_BROKEN:
         this.securityButton.setAttribute("level", "broken");

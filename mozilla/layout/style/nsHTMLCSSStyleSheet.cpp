@@ -8,27 +8,51 @@
  */
 
 #include "nsHTMLCSSStyleSheet.h"
-#include "nsCRT.h"
-#include "nsIAtom.h"
-#include "nsIURL.h"
-#include "nsCSSPseudoElements.h"
-#include "nsIStyleRule.h"
 #include "mozilla/css/StyleRule.h"
 #include "nsIStyleRuleProcessor.h"
 #include "nsPresContext.h"
 #include "nsIDocument.h"
 #include "nsCOMPtr.h"
 #include "nsRuleWalker.h"
-#include "nsRuleData.h"
 #include "nsRuleProcessorData.h"
 #include "mozilla/dom/Element.h"
+#include "nsAttrValue.h"
+#include "nsAttrValueInlines.h"
 
 using namespace mozilla::dom;
 namespace css = mozilla::css;
 
-nsHTMLCSSStyleSheet::nsHTMLCSSStyleSheet()
-  : mDocument(nullptr)
+namespace {
+
+PLDHashOperator
+ClearAttrCache(const nsAString& aKey, MiscContainer*& aValue, void*)
 {
+  // Ideally we'd just call MiscContainer::Evict, but we can't do that since
+  // we're iterating the hashtable.
+  MOZ_ASSERT(aValue->mType == nsAttrValue::eCSSStyleRule);
+
+  aValue->mValue.mCSSStyleRule->SetHTMLCSSStyleSheet(nullptr);
+  aValue->mValue.mCached = 0;
+
+  return PL_DHASH_REMOVE;
+}
+
+} // anonymous namespace
+
+nsHTMLCSSStyleSheet::nsHTMLCSSStyleSheet(nsIURI* aURL, nsIDocument* aDocument)
+  : mURL(aURL)
+  , mDocument(aDocument) // not refcounted!
+{
+  MOZ_ASSERT(aURL);
+  MOZ_ASSERT(aDocument);
+  mCachedStyleAttrs.Init();
+}
+
+nsHTMLCSSStyleSheet::~nsHTMLCSSStyleSheet()
+{
+  // We may go away before all of our cached style attributes do,
+  // so clean up any that are left.
+  mCachedStyleAttrs.Enumerate(ClearAttrCache, nullptr);
 }
 
 NS_IMPL_ISUPPORTS2(nsHTMLCSSStyleSheet,
@@ -82,21 +106,6 @@ nsHTMLCSSStyleSheet::RulesMatching(XULTreeRuleProcessorData* aData)
 }
 #endif
 
-nsresult
-nsHTMLCSSStyleSheet::Init(nsIURI* aURL, nsIDocument* aDocument)
-{
-  NS_PRECONDITION(aURL && aDocument, "null ptr");
-  if (! aURL || ! aDocument)
-    return NS_ERROR_NULL_POINTER;
-
-  if (mURL || mDocument)
-    return NS_ERROR_ALREADY_INITIALIZED;
-
-  mDocument = aDocument; // not refcounted!
-  mURL = aURL;
-  return NS_OK;
-}
-
 // Test if style is dependent on content state
 /* virtual */ nsRestyleHint
 nsHTMLCSSStyleSheet::HasStateDependentStyle(StateRuleProcessorData* aData)
@@ -139,6 +148,32 @@ nsHTMLCSSStyleSheet::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 nsHTMLCSSStyleSheet::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
+}
+
+void
+nsHTMLCSSStyleSheet::CacheStyleAttr(const nsAString& aSerialized,
+                                    MiscContainer* aValue)
+{
+  mCachedStyleAttrs.Put(aSerialized, aValue);
+}
+
+void
+nsHTMLCSSStyleSheet::EvictStyleAttr(const nsAString& aSerialized,
+                                    MiscContainer* aValue)
+{
+#ifdef DEBUG
+  {
+    NS_ASSERTION(aValue = mCachedStyleAttrs.Get(aSerialized),
+                 "Cached value does not match?!");
+  }
+#endif
+  mCachedStyleAttrs.Remove(aSerialized);
+}
+
+MiscContainer*
+nsHTMLCSSStyleSheet::LookupStyleAttr(const nsAString& aSerialized)
+{
+  return mCachedStyleAttrs.Get(aSerialized);
 }
 
 void
@@ -227,7 +262,7 @@ nsHTMLCSSStyleSheet::List(FILE* out, int32_t aIndent) const
   for (int32_t index = aIndent; --index >= 0; ) fputs("  ", out);
 
   fputs("HTML CSS Style Sheet: ", out);
-  nsCAutoString urlSpec;
+  nsAutoCString urlSpec;
   mURL->GetSpec(urlSpec);
   if (!urlSpec.IsEmpty()) {
     fputs(urlSpec.get(), out);

@@ -6,6 +6,7 @@
 #ifndef nsTextControlFrame_h___
 #define nsTextControlFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsContainerFrame.h"
 #include "nsBlockFrame.h"
 #include "nsIFormControlFrame.h"
@@ -16,14 +17,10 @@
 #include "nsStubMutationObserver.h"
 #include "nsITextControlElement.h"
 #include "nsIStatefulFrame.h"
-#include "nsContentUtils.h" // nsAutoScriptBlocker
 #include "nsIEditor.h"
 
 class nsISelectionController;
 class nsIDOMCharacterData;
-#ifdef ACCESSIBILITY
-class nsIAccessible;
-#endif
 class EditorInitializerEntryTracker;
 class nsTextEditorState;
 namespace mozilla {
@@ -45,7 +42,7 @@ public:
   nsTextControlFrame(nsIPresShell* aShell, nsStyleContext* aContext);
   virtual ~nsTextControlFrame();
 
-  virtual void DestroyFrom(nsIFrame* aDestructRoot);
+  virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
   virtual nsIScrollableFrame* GetScrollTargetFrame() {
     if (!IsScrollable())
@@ -59,7 +56,7 @@ public:
   virtual nsSize ComputeAutoSize(nsRenderingContext *aRenderingContext,
                                  nsSize aCBSize, nscoord aAvailableWidth,
                                  nsSize aMargin, nsSize aBorder,
-                                 nsSize aPadding, bool aShrinkWrap);
+                                 nsSize aPadding, bool aShrinkWrap) MOZ_OVERRIDE;
 
   NS_IMETHOD Reflow(nsPresContext*          aPresContext,
                     nsHTMLReflowMetrics&     aDesiredSize,
@@ -69,12 +66,10 @@ public:
   virtual nsSize GetMinSize(nsBoxLayoutState& aBoxLayoutState);
   virtual bool IsCollapsed();
 
-  DECL_DO_GLOBAL_REFLOW_COUNT_DSP(nsTextControlFrame, nsContainerFrame)
-
   virtual bool IsLeaf() const;
   
 #ifdef ACCESSIBILITY
-  virtual already_AddRefed<Accessible> CreateAccessible();
+  virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
 #endif
 
 #ifdef DEBUG
@@ -94,53 +89,54 @@ public:
   }
 
   // nsIAnonymousContentCreator
-  virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements);
+  virtual nsresult CreateAnonymousContent(nsTArray<ContentInfo>& aElements) MOZ_OVERRIDE;
   virtual void AppendAnonymousContentTo(nsBaseContentList& aElements,
-                                        uint32_t aFilter);
+                                        uint32_t aFilter) MOZ_OVERRIDE;
 
   // Utility methods to set current widget state
 
   NS_IMETHOD SetInitialChildList(ChildListID     aListID,
-                                 nsFrameList&    aChildList);
+                                 nsFrameList&    aChildList) MOZ_OVERRIDE;
+
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
 //==== BEGIN NSIFORMCONTROLFRAME
   virtual void SetFocus(bool aOn , bool aRepaint); 
   virtual nsresult SetFormProperty(nsIAtom* aName, const nsAString& aValue);
-  virtual nsresult GetFormProperty(nsIAtom* aName, nsAString& aValue) const; 
-
 
 //==== END NSIFORMCONTROLFRAME
 
 //==== NSITEXTCONTROLFRAME
 
-  NS_IMETHOD    GetEditor(nsIEditor **aEditor);
-  NS_IMETHOD    GetTextLength(int32_t* aTextLength);
-  NS_IMETHOD    SetSelectionStart(int32_t aSelectionStart);
-  NS_IMETHOD    SetSelectionEnd(int32_t aSelectionEnd);
+  NS_IMETHOD    GetEditor(nsIEditor **aEditor) MOZ_OVERRIDE;
+  NS_IMETHOD    SetSelectionStart(int32_t aSelectionStart) MOZ_OVERRIDE;
+  NS_IMETHOD    SetSelectionEnd(int32_t aSelectionEnd) MOZ_OVERRIDE;
   NS_IMETHOD    SetSelectionRange(int32_t aSelectionStart,
                                   int32_t aSelectionEnd,
-                                  SelectionDirection aDirection = eNone);
+                                  SelectionDirection aDirection = eNone) MOZ_OVERRIDE;
   NS_IMETHOD    GetSelectionRange(int32_t* aSelectionStart,
                                   int32_t* aSelectionEnd,
-                                  SelectionDirection* aDirection = nullptr);
-  NS_IMETHOD    GetOwnedSelectionController(nsISelectionController** aSelCon);
-  virtual nsFrameSelection* GetOwnedFrameSelection();
+                                  SelectionDirection* aDirection = nullptr) MOZ_OVERRIDE;
+  NS_IMETHOD    GetOwnedSelectionController(nsISelectionController** aSelCon) MOZ_OVERRIDE;
+  virtual nsFrameSelection* GetOwnedFrameSelection() MOZ_OVERRIDE;
 
-  nsresult GetPhonetic(nsAString& aPhonetic);
+  nsresult GetPhonetic(nsAString& aPhonetic) MOZ_OVERRIDE;
 
   /**
    * Ensure mEditor is initialized with the proper flags and the default value.
    * @throws NS_ERROR_NOT_INITIALIZED if mEditor has not been created
    * @throws various and sundry other things
    */
-  virtual nsresult EnsureEditorInitialized();
+  virtual nsresult EnsureEditorInitialized() MOZ_OVERRIDE;
 
 //==== END NSITEXTCONTROLFRAME
 
 //==== NSISTATEFULFRAME
 
-  NS_IMETHOD SaveState(SpecialStateID aStateID, nsPresState** aState);
-  NS_IMETHOD RestoreState(nsPresState* aState);
+  NS_IMETHOD SaveState(nsPresState** aState) MOZ_OVERRIDE;
+  NS_IMETHOD RestoreState(nsPresState* aState) MOZ_OVERRIDE;
 
 //=== END NSISTATEFULFRAME
 
@@ -179,7 +175,7 @@ public: //for methods who access nsTextControlFrame directly
   nsresult MaybeBeginSecureKeyboardInput();
   void MaybeEndSecureKeyboardInput();
 
-  NS_STACK_CLASS class ValueSetter {
+  class MOZ_STACK_CLASS ValueSetter {
   public:
     ValueSetter(nsIEditor* aEditor)
       : mEditor(aEditor)
@@ -247,28 +243,7 @@ protected:
     EditorInitializer(nsTextControlFrame* aFrame) :
       mFrame(aFrame) {}
 
-    NS_IMETHOD Run() {
-      if (mFrame) {
-        // need to block script to avoid bug 669767
-        nsAutoScriptBlocker scriptBlocker;
-
-        nsCOMPtr<nsIPresShell> shell =
-          mFrame->PresContext()->GetPresShell();
-        bool observes = shell->ObservesNativeAnonMutationsForPrint();
-        shell->ObserveNativeAnonMutationsForPrint(true);
-        // This can cause the frame to be destroyed (and call Revoke())
-        mFrame->EnsureEditorInitialized();
-        shell->ObserveNativeAnonMutationsForPrint(observes);
-
-        // The frame can *still* be destroyed even though we have a scriptblocker
-        // Bug 682684
-        if (!mFrame)
-          return NS_ERROR_FAILURE;
-
-        mFrame->FinishedInitializer();
-      }
-      return NS_OK;
-    }
+    NS_IMETHOD Run();
 
     // avoids use of nsWeakFrame
     void Revoke() {
@@ -343,7 +318,7 @@ protected:
                              nsSize&             aIntrinsicSize,
                              float               aFontSizeInflation);
 
-  nsresult ScrollSelectionIntoView();
+  nsresult ScrollSelectionIntoView() MOZ_OVERRIDE;
 
 private:
   //helper methods

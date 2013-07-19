@@ -13,13 +13,17 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=766694
 <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=766694">Mozilla Bug 766694</a>
 <p id="display"></p>
 <div id="content" style="display: none">
-  
+
 </div>
 <pre id="test">
 <script type="application/javascript">
 
 /** Test for Bug 766694 **/
 
+// This is a list of all interfaces that are exposed to every webpage.  Please only
+// add things to this list with great care.
+
+// IMPORTANT: Do not change this list without review from a DOM peer!
 var interfaceNamesInGlobalScope =
   [
     "MozApplicationEvent",
@@ -45,7 +49,6 @@ var interfaceNamesInGlobalScope =
     "DeviceMotionEvent",
     "GetSVGDocument",
     "SVGAnimatedPreserveAspectRatio",
-    "MozSmsRequest",
     "SVGViewElement",
     "HTMLTableSectionElement",
     "HTMLCollection",
@@ -64,13 +67,13 @@ var interfaceNamesInGlobalScope =
     "HTMLOptionElement",
     "Pkcs11",
     "NotifyAudioAvailableEvent",
+    "ElementReplaceEvent",
     "Array",
     "SVGZoomAndPan",
     "XULPopupElement",
     "MediaError",
     "DeviceStorageCursor",
     "DeviceStorageChangeEvent",
-    "DeviceStorageStat",
     "PageTransitionEvent",
     "DataContainerEvent",
     "MozCSSKeyframesRule",
@@ -88,7 +91,6 @@ var interfaceNamesInGlobalScope =
     "HTMLTableRowElement",
     "NodeFilter",
     "ClientRectList",
-    "WebGLExtensionLoseContext",
     "CanvasRenderingContext2D",
     "SVGPathSegLinetoVerticalRel",
     "MozAlarmsManager",
@@ -105,7 +107,6 @@ var interfaceNamesInGlobalScope =
     "SVGMarkerElement",
     "Rect",
     "SVGPathElement",
-    "WebGLUniformLocation",
     "SVGUseElement",
     "SVGAnimatedPoints",
     "DeviceAcceleration",
@@ -121,7 +122,6 @@ var interfaceNamesInGlobalScope =
     "AnimationEvent",
     "NavigatorDesktopNotification",
     "LoadStatus",
-    "WebGLBuffer",
     "MediaQueryList",
     "Contact",
     "MediaQueryListListener",
@@ -146,7 +146,6 @@ var interfaceNamesInGlobalScope =
     "SVGTransformList",
     "SVGTransformable",
     "XULControlElement",
-    "MozMobileConnection",
     "HTMLFrameSetElement",
     "CSSCharsetRule",
     "TouchList",
@@ -172,11 +171,10 @@ var interfaceNamesInGlobalScope =
     "XPathResult",
     "XMLDocument",
     "DocumentType",
-    "NamedNodeMap",
+    "MozNamedAttrMap",
     "DeviceProximityEvent",
     "XULLabeledControlElement",
     "MozWakeLock",
-    "WebGLFramebuffer",
     "MozConnection",
     "WebGLRenderingContext",
     "JSON",
@@ -192,7 +190,6 @@ var interfaceNamesInGlobalScope =
     "XULDocument",
     "XULMultiSelectControlElement",
     "SVGTitleElement",
-    "ContactProperties",
     "PerformanceTiming",
     "LSProgressEvent",
     "NSEvent",
@@ -243,7 +240,6 @@ var interfaceNamesInGlobalScope =
     "HTMLCanvasElement",
     "MouseEvent",
     "OfflineResourceList",
-    "ContactAddress",
     "Range",
     "MozCSSKeyframeRule",
     "SettingsLock",
@@ -256,19 +252,19 @@ var interfaceNamesInGlobalScope =
     "SVGViewSpec",
     "DOMException",
     "MozSmsMessage",
+    "MozMmsMessage",
     "SVGFESpecularLightingElement",
     "StorageObsolete",
     "ContactManager",
     "NSXPathExpression",
     "SVGLineElement",
     "SVGPathSegArcRel",
-    "WebGLExtension",
-    "WebGLExtensionDepthTexture",
     "XSLTProcessor",
     "SVGPathSegLinetoVerticalAbs",
     "SVGPathSegLinetoRel",
     "HTMLImageElement",
     "MozSmsEvent",
+    "MozMmsEvent",
     "CustomEvent",
     "XMLHttpRequestUpload",
     "SVGFEFuncBElement",
@@ -288,16 +284,12 @@ var interfaceNamesInGlobalScope =
     "IDBDatabase",
     "CSSPrimitiveValue",
     "SVGStopElement",
-    "WebGLExtensionCompressedTextureS3TC",
     "XULCommandEvent",
     "HTMLMediaElement",
     "SVGPathSegLinetoHorizontalAbs",
     "SVGAnimatedRect",
     "SVGTextContentElement",
-    "WebGLRenderbuffer",
     "TreeColumn",
-    "WebGLExtensionStandardDerivatives",
-    "WebGLShaderPrecisionFormat",
     "XPathNamespace",
     "FontFace",
     "SVGPathSegCurvetoCubicSmoothRel",
@@ -307,6 +299,7 @@ var interfaceNamesInGlobalScope =
     "NotifyPaintEvent",
     "XULTreeElement",
     "DragEvent",
+    "ClipboardEvent",
     "IDBObjectStore",
     "NodeSelector",
     "NavigatorUserMedia",
@@ -328,14 +321,12 @@ var interfaceNamesInGlobalScope =
     "Navigator",
     "SVGPathSegCurvetoQuadraticSmoothAbs",
     "HTMLButtonElement",
-    "WebGLProgram",
     "SVGPointList",
     "SVGFEColorMatrixElement",
     "USSDReceivedEvent",
     "SettingsManager",
     "DeviceRotationRate",
     "HTMLAudioElement",
-    "WebGLTexture",
     "SVGFEDistantLightElement",
     "HTMLOListElement",
     "ProcessingInstruction",
@@ -346,6 +337,7 @@ var interfaceNamesInGlobalScope =
     "SVGAnimatedNumber",
     "HTMLHtmlElement",
     "MozSmsManager",
+    "MozMobileMessageManager",
     "MozSmsFilter",
     "SVGFETileElement",
     "MozMobileConnectionInfo",
@@ -353,7 +345,7 @@ var interfaceNamesInGlobalScope =
     "HTMLSelectElement",
     "MessageEvent",
     "SVGFEImageElement",
-    "MozURLProperty",
+    "URL",
     "DeviceStorage",
     "SVGFEOffsetElement",
     "DOMImplementation",
@@ -370,7 +362,6 @@ var interfaceNamesInGlobalScope =
     "WindowUtils",
     "SVGAnimatedNumberList",
     "WindowCollection",
-    "WebGLExtensionTextureFilterAnisotropic",
     "SVGPathSegMovetoRel",
     "ChromeWindow",
     "Comment",
@@ -421,13 +412,11 @@ var interfaceNamesInGlobalScope =
     "XULMenuListElement",
     "SVGTransform",
     "SVGTextPositioningElement",
-    "ContactFindOptions",
     "SVGFEMergeElement",
     "FileRequest",
     "SVGDefsElement",
     "Element",
     "HTMLBaseElement",
-    "WebGLShader",
     "GeoPositionErrorCallback",
     "HTMLVideoElement",
     "MozSettingsEvent",
@@ -436,9 +425,9 @@ var interfaceNamesInGlobalScope =
     "SVGTests",
     "RGBColor",
     "HTMLLabelElement",
-    "MozSmsCursor",
     "EventSource",
     "MozNavigatorSms",
+    "MozNavigatorMobileMessage",
     "SVGSetElement",
     "GlobalObjectConstructor",
     "SVGAnimatedBoolean",
@@ -517,10 +506,7 @@ var interfaceNamesInGlobalScope =
     "HTMLParagraphElement",
     "EventTarget",
     "File",
-    "WebGLActiveInfo",
     "SVGGradientElement",
-    "ContactTelField",
-    "ContactField",
     "SVGFitToViewBox",
     "SVGAElement",
     "NavigatorCamera",
@@ -529,20 +515,57 @@ var interfaceNamesInGlobalScope =
     "CameraManager",
     "CSSSupportsRule",
     "MozMobileCellInfo",
-    "TCPSocket"
+    "UndoManager",
+    "DOMTransactionEvent",
+    "MozCanvasPrintState",
+    "TCPSocket",
+    "MozTimeManager",
+    "MozNavigatorTime",
+    "PermissionSettings",
+    "DataErrorEvent",
+    "DataChannel",
+    "MozNetworkStatsManager",
+    "MozNetworkStats",
+    "MozNetworkStatsData",
+    "RTCSessionDescription",
+    "RTCIceCandidate",
+    "RTCPeerConnection",
+    "LocalMediaStream",
+    "CSSConditionRule",
+    "CSSGroupingRule",
+    "AsyncScrollEventDetail",
+    "MozSmsSegmentInfo",
+    "DOMCursor",
+    "BlobEvent",
+    "Gamepad",
+    "GamepadEvent",
+    "GamepadButtonEvent",
+    "GamepadAxisMoveEvent",
+    "SpeechRecognitionEvent",
+    "SpeechRecognitionError",
+    "SpeechSynthesisEvent",
+    "PushManager",
+    "StyleSheetAddedEvent",
+    "StyleSheetRemovedEvent",
+    "MozMobileMessageThread",
+    "PaymentRequestInfo",
   ]
+// IMPORTANT: Do not change this list without review from a DOM peer!
 
-for (var i in Components.interfaces) {
+// If your interface is named nsIDOMSomeInterface and you don't mean to expose
+// it to every webpage, simply change its name to nsISomeInterface to fix this problem.
+
+for (var i in SpecialPowers.Components.interfaces) {
   var s = i.toString();
   var name = null;
   if (s.indexOf("nsIDOM") == 0) {
     name = s.substring("nsIDOM".length);
   } else if (s.indexOf("nsI") == 0) {
     name = s.substring("nsI".length);
-  } 
+  }
   if (name && (name in window)) {
     ok(interfaceNamesInGlobalScope.indexOf(name) >= 0,
-       "Unexpected interface name in global scope: " + name);
+       "If this is failing: DANGER, are you sure you want to expose the new interface " + name + " to all webpages as a property on the window?");
   }
 }
 

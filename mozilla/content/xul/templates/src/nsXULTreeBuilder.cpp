@@ -240,7 +240,7 @@ protected:
     /** 
      * The builder observers.
      */
-    nsCOMPtr<nsISupportsArray> mObservers;
+    nsCOMArray<nsIXULTreeBuilderObserver> mObservers;
 };
 
 //----------------------------------------------------------------------
@@ -270,34 +270,21 @@ NS_NewXULTreeBuilder(nsISupports* aOuter, REFNSIID aIID, void** aResult)
     return rv;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULTreeBuilder)
-
 NS_IMPL_ADDREF_INHERITED(nsXULTreeBuilder, nsXULTemplateBuilder)
 NS_IMPL_RELEASE_INHERITED(nsXULTreeBuilder, nsXULTemplateBuilder)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsXULTreeBuilder, nsXULTemplateBuilder)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mBoxObject)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mSelection)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mPersistStateStore)
-    NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mObservers)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mBoxObject)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mSelection)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mPersistStateStore)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mObservers)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-static bool TraverseObservers(nsISupports* aElement, void *aData)
-{
-    nsCycleCollectionTraversalCallback *cb =
-        static_cast<nsCycleCollectionTraversalCallback*>(aData);
-    NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(*cb, "mObservers[i]");
-    cb->NoteXPCOMChild(aElement);
-    return true;
-}
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXULTreeBuilder, nsXULTemplateBuilder)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mBoxObject)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mSelection)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mPersistStateStore)
-    if (tmp->mObservers) {
-        tmp->mObservers->EnumerateForwards(TraverseObservers, &cb);
-    }
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBoxObject)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSelection)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPersistStateStore)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mObservers)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 DOMCI_DATA(XULTreeBuilder, nsXULTreeBuilder)
@@ -361,20 +348,13 @@ nsXULTreeBuilder::GetIndexOfResource(nsIRDFResource* aResource, int32_t* aResult
 NS_IMETHODIMP
 nsXULTreeBuilder::AddObserver(nsIXULTreeBuilderObserver* aObserver)
 {
-    nsresult rv;  
-    if (!mObservers) {
-        rv = NS_NewISupportsArray(getter_AddRefs(mObservers));
-        if (NS_FAILED(rv))
-            return rv;
-    }
-
-    return mObservers->AppendElement(aObserver);
+    return mObservers.AppendObject(aObserver) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
 nsXULTreeBuilder::RemoveObserver(nsIXULTreeBuilderObserver* aObserver)
 {
-    return mObservers ? mObservers->RemoveElement(aObserver) : NS_ERROR_FAILURE;
+    return mObservers.RemoveObject(aObserver) ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
@@ -470,9 +450,8 @@ nsXULTreeBuilder::SetSelection(nsITreeSelection* aSelection)
 }
 
 NS_IMETHODIMP
-nsXULTreeBuilder::GetRowProperties(int32_t aIndex, nsISupportsArray* aProperties)
+nsXULTreeBuilder::GetRowProperties(int32_t aIndex, nsAString& aProps)
 {
-    NS_ENSURE_ARG_POINTER(aProperties);
     NS_PRECONDITION(aIndex >= 0 && aIndex < mRows.Count(), "bad row");
     if (aIndex < 0 || aIndex >= mRows.Count())
         return NS_ERROR_INVALID_ARG;
@@ -484,10 +463,7 @@ nsXULTreeBuilder::GetRowProperties(int32_t aIndex, nsISupportsArray* aProperties
         row->GetAttr(kNameSpaceID_None, nsGkAtoms::properties, raw);
 
         if (!raw.IsEmpty()) {
-            nsAutoString cooked;
-            SubstituteText(mRows[aIndex]->mMatch->mResult, raw, cooked);
-
-            nsTreeUtils::TokenizeProperties(cooked, aProperties);
+            SubstituteText(mRows[aIndex]->mMatch->mResult, raw, aProps);
         }
     }
 
@@ -495,10 +471,10 @@ nsXULTreeBuilder::GetRowProperties(int32_t aIndex, nsISupportsArray* aProperties
 }
 
 NS_IMETHODIMP
-nsXULTreeBuilder::GetCellProperties(int32_t aRow, nsITreeColumn* aCol, nsISupportsArray* aProperties)
+nsXULTreeBuilder::GetCellProperties(int32_t aRow, nsITreeColumn* aCol,
+                                    nsAString& aProps)
 {
     NS_ENSURE_ARG_POINTER(aCol);
-    NS_ENSURE_ARG_POINTER(aProperties);
     NS_PRECONDITION(aRow >= 0 && aRow < mRows.Count(), "bad row");
     if (aRow < 0 || aRow >= mRows.Count())
         return NS_ERROR_INVALID_ARG;
@@ -510,10 +486,7 @@ nsXULTreeBuilder::GetCellProperties(int32_t aRow, nsITreeColumn* aCol, nsISuppor
         cell->GetAttr(kNameSpaceID_None, nsGkAtoms::properties, raw);
 
         if (!raw.IsEmpty()) {
-            nsAutoString cooked;
-            SubstituteText(mRows[aRow]->mMatch->mResult, raw, cooked);
-
-            nsTreeUtils::TokenizeProperties(cooked, aProperties);
+            SubstituteText(mRows[aRow]->mMatch->mResult, raw, aProps);
         }
     }
 
@@ -521,11 +494,9 @@ nsXULTreeBuilder::GetCellProperties(int32_t aRow, nsITreeColumn* aCol, nsISuppor
 }
 
 NS_IMETHODIMP
-nsXULTreeBuilder::GetColumnProperties(nsITreeColumn* aCol,
-                                      nsISupportsArray* aProperties)
+nsXULTreeBuilder::GetColumnProperties(nsITreeColumn* aCol, nsAString& aProps)
 {
     NS_ENSURE_ARG_POINTER(aCol);
-    NS_ENSURE_ARG_POINTER(aProperties);
     // XXX sortactive fu
     return NS_OK;
 }
@@ -855,14 +826,11 @@ nsXULTreeBuilder::ToggleOpenState(int32_t aIndex)
             return rv;
     }
 
-    if (mObservers) {
-        uint32_t count;
-        mObservers->Count(&count);
-        for (uint32_t i = 0; i < count; ++i) {
-            nsCOMPtr<nsIXULTreeBuilderObserver> observer = do_QueryElementAt(mObservers, i);
-            if (observer)
-                observer->OnToggleOpenState(aIndex);
-        }
+    uint32_t count = mObservers.Count();
+    for (uint32_t i = 0; i < count; ++i) {
+        nsCOMPtr<nsIXULTreeBuilderObserver> observer = mObservers.SafeObjectAt(i);
+        if (observer)
+            observer->OnToggleOpenState(aIndex);
     }
 
     if (mPersistStateStore) {
@@ -908,17 +876,14 @@ nsXULTreeBuilder::CycleHeader(nsITreeColumn* aCol)
     nsCOMPtr<nsIDOMElement> element;
     aCol->GetElement(getter_AddRefs(element));
 
-    if (mObservers) {
-        nsAutoString id;
-        aCol->GetId(id);
+    nsAutoString id;
+    aCol->GetId(id);
 
-        uint32_t count;
-        mObservers->Count(&count);
-        for (uint32_t i = 0; i < count; ++i) {
-            nsCOMPtr<nsIXULTreeBuilderObserver> observer = do_QueryElementAt(mObservers, i);
-            if (observer)
-                observer->OnCycleHeader(id.get(), element);
-        }
+    uint32_t count = mObservers.Count();
+    for (uint32_t i = 0; i < count; ++i) {
+        nsCOMPtr<nsIXULTreeBuilderObserver> observer = mObservers.SafeObjectAt(i);
+        if (observer)
+            observer->OnCycleHeader(id.get(), element);
     }
 
     return Sort(element);
@@ -927,14 +892,11 @@ nsXULTreeBuilder::CycleHeader(nsITreeColumn* aCol)
 NS_IMETHODIMP
 nsXULTreeBuilder::SelectionChanged()
 {
-    if (mObservers) {
-        uint32_t count;
-        mObservers->Count(&count);
-        for (uint32_t i = 0; i < count; ++i) {
-            nsCOMPtr<nsIXULTreeBuilderObserver> observer = do_QueryElementAt(mObservers, i);
-            if (observer)
-                observer->OnSelectionChanged();
-        }
+    uint32_t count = mObservers.Count();
+    for (uint32_t i = 0; i < count; ++i) {
+        nsCOMPtr<nsIXULTreeBuilderObserver> observer = mObservers.SafeObjectAt(i);
+        if (observer)
+            observer->OnSelectionChanged();
     }
 
     return NS_OK;
@@ -944,17 +906,15 @@ NS_IMETHODIMP
 nsXULTreeBuilder::CycleCell(int32_t aRow, nsITreeColumn* aCol)
 {
     NS_ENSURE_ARG_POINTER(aCol);
-    if (mObservers) {
-        nsAutoString id;
-        aCol->GetId(id);
 
-        uint32_t count;
-        mObservers->Count(&count);
-        for (uint32_t i = 0; i < count; ++i) {
-            nsCOMPtr<nsIXULTreeBuilderObserver> observer = do_QueryElementAt(mObservers, i);
-            if (observer)
-                observer->OnCycleCell(aRow, id.get());
-        }
+    nsAutoString id;
+    aCol->GetId(id);
+
+    uint32_t count = mObservers.Count();
+    for (uint32_t i = 0; i < count; ++i) {
+        nsCOMPtr<nsIXULTreeBuilderObserver> observer = mObservers.SafeObjectAt(i);
+        if (observer)
+            observer->OnCycleCell(aRow, id.get());
     }
 
     return NS_OK;
@@ -1029,14 +989,11 @@ nsXULTreeBuilder::SetCellText(int32_t aRow, nsITreeColumn* aCol, const nsAString
 NS_IMETHODIMP
 nsXULTreeBuilder::PerformAction(const PRUnichar* aAction)
 {
-    if (mObservers) {  
-        uint32_t count;
-        mObservers->Count(&count);
-        for (uint32_t i = 0; i < count; ++i) {
-            nsCOMPtr<nsIXULTreeBuilderObserver> observer = do_QueryElementAt(mObservers, i);
-            if (observer)
-                observer->OnPerformAction(aAction);
-        }
+    uint32_t count = mObservers.Count();
+    for (uint32_t i = 0; i < count; ++i) {
+        nsCOMPtr<nsIXULTreeBuilderObserver> observer = mObservers.SafeObjectAt(i);
+        if (observer)
+            observer->OnPerformAction(aAction);
     }
 
     return NS_OK;
@@ -1045,14 +1002,11 @@ nsXULTreeBuilder::PerformAction(const PRUnichar* aAction)
 NS_IMETHODIMP
 nsXULTreeBuilder::PerformActionOnRow(const PRUnichar* aAction, int32_t aRow)
 {
-    if (mObservers) {  
-        uint32_t count;
-        mObservers->Count(&count);
-        for (uint32_t i = 0; i < count; ++i) {
-            nsCOMPtr<nsIXULTreeBuilderObserver> observer = do_QueryElementAt(mObservers, i);
-            if (observer)
-                observer->OnPerformActionOnRow(aAction, aRow);
-        }
+    uint32_t count = mObservers.Count();
+    for (uint32_t i = 0; i < count; ++i) {
+        nsCOMPtr<nsIXULTreeBuilderObserver> observer = mObservers.SafeObjectAt(i);
+        if (observer)
+            observer->OnPerformActionOnRow(aAction, aRow);
     }
 
     return NS_OK;
@@ -1062,17 +1016,14 @@ NS_IMETHODIMP
 nsXULTreeBuilder::PerformActionOnCell(const PRUnichar* aAction, int32_t aRow, nsITreeColumn* aCol)
 {
     NS_ENSURE_ARG_POINTER(aCol);
-    if (mObservers) {  
-        nsAutoString id;
-        aCol->GetId(id);
+    nsAutoString id;
+    aCol->GetId(id);
 
-        uint32_t count;
-        mObservers->Count(&count);
-        for (uint32_t i = 0; i < count; ++i) {
-            nsCOMPtr<nsIXULTreeBuilderObserver> observer = do_QueryElementAt(mObservers, i);
-            if (observer)
-                observer->OnPerformActionOnCell(aAction, aRow, id.get());
-        }
+    uint32_t count = mObservers.Count();
+    for (uint32_t i = 0; i < count; ++i) {
+        nsCOMPtr<nsIXULTreeBuilderObserver> observer = mObservers.SafeObjectAt(i);
+        if (observer)
+            observer->OnPerformActionOnCell(aAction, aRow, id.get());
     }
 
     return NS_OK;
@@ -1083,8 +1034,7 @@ void
 nsXULTreeBuilder::NodeWillBeDestroyed(const nsINode* aNode)
 {
     nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
-    if (mObservers)
-        mObservers->Clear();
+    mObservers.Clear();
 
     nsXULTemplateBuilder::NodeWillBeDestroyed(aNode);
 }
@@ -1637,8 +1587,7 @@ nsXULTreeBuilder::OpenSubtreeForQuerySet(nsTreeRows::Subtree* aSubtree,
         }
 
         nsTemplateMatch *newmatch =
-            nsTemplateMatch::Create(mPool, aQuerySet->Priority(),
-                                    nextresult, nullptr);
+            nsTemplateMatch::Create(aQuerySet->Priority(), nextresult, nullptr);
         if (!newmatch)
             return NS_ERROR_OUT_OF_MEMORY;
 
@@ -1651,7 +1600,7 @@ nsXULTreeBuilder::OpenSubtreeForQuerySet(nsTreeRows::Subtree* aSubtree,
                     nsCOMPtr<nsIRDFResource> parentid;
                     rv = GetResultResource(iter->mMatch->mResult, getter_AddRefs(parentid));
                     if (NS_FAILED(rv)) {
-                        nsTemplateMatch::Destroy(mPool, newmatch, false);
+                        nsTemplateMatch::Destroy(newmatch, false);
                         return rv;
                     }
 
@@ -1664,7 +1613,7 @@ nsXULTreeBuilder::OpenSubtreeForQuerySet(nsTreeRows::Subtree* aSubtree,
 
             if (cyclic) {
                 NS_WARNING("tree cannot handle cyclic graphs");
-                nsTemplateMatch::Destroy(mPool, newmatch, false);
+                nsTemplateMatch::Destroy(newmatch, false);
                 continue;
             }
 
@@ -1673,7 +1622,7 @@ nsXULTreeBuilder::OpenSubtreeForQuerySet(nsTreeRows::Subtree* aSubtree,
             rv = DetermineMatchedRule(nullptr, nextresult, aQuerySet,
                                       &matchedrule, &ruleindex);
             if (NS_FAILED(rv)) {
-                nsTemplateMatch::Destroy(mPool, newmatch, false);
+                nsTemplateMatch::Destroy(newmatch, false);
                 return rv;
             }
 
@@ -1681,7 +1630,7 @@ nsXULTreeBuilder::OpenSubtreeForQuerySet(nsTreeRows::Subtree* aSubtree,
                 rv = newmatch->RuleMatched(aQuerySet, matchedrule, ruleindex,
                                            nextresult);
                 if (NS_FAILED(rv)) {
-                    nsTemplateMatch::Destroy(mPool, newmatch, false);
+                    nsTemplateMatch::Destroy(newmatch, false);
                     return rv;
                 }
 
@@ -1762,7 +1711,7 @@ nsXULTreeBuilder::RemoveMatchesFor(nsTreeRows::Subtree& subtree)
         if (mMatchMap.Get(id, &existingmatch)) {
             while (existingmatch) {
                 nsTemplateMatch* nextmatch = existingmatch->mNext;
-                nsTemplateMatch::Destroy(mPool, existingmatch, true);
+                nsTemplateMatch::Destroy(existingmatch, true);
                 existingmatch = nextmatch;
             }
 
@@ -1850,7 +1799,7 @@ nsXULTreeBuilder::CompareResults(nsIXULTemplateResult* aLeft, nsIXULTemplateResu
         nsCOMPtr<nsISupports> ref;
         nsresult rv = aLeft->GetBindingObjectFor(mRefVariable, getter_AddRefs(ref));
         if (NS_FAILED(rv))
-            return rv;
+            return 0;
 
         nsCOMPtr<nsIRDFResource> container = do_QueryInterface(ref);
         if (container) {
@@ -1918,16 +1867,13 @@ nsXULTreeBuilder::CanDrop(int32_t index, int32_t orientation,
                           nsIDOMDataTransfer* dataTransfer, bool *_retval)
 {
     *_retval = false;
-    if (mObservers) {
-        uint32_t count;
-        mObservers->Count(&count);
-        for (uint32_t i = 0; i < count; ++i) {
-            nsCOMPtr<nsIXULTreeBuilderObserver> observer = do_QueryElementAt(mObservers, i);
-            if (observer) {
-                observer->CanDrop(index, orientation, dataTransfer, _retval);
-                if (*_retval)
-                    break;
-            }
+    uint32_t count = mObservers.Count();
+    for (uint32_t i = 0; i < count; ++i) {
+        nsCOMPtr<nsIXULTreeBuilderObserver> observer = mObservers.SafeObjectAt(i);
+        if (observer) {
+            observer->CanDrop(index, orientation, dataTransfer, _retval);
+            if (*_retval)
+                break;
         }
     }
 
@@ -1937,17 +1883,14 @@ nsXULTreeBuilder::CanDrop(int32_t index, int32_t orientation,
 NS_IMETHODIMP
 nsXULTreeBuilder::Drop(int32_t row, int32_t orient, nsIDOMDataTransfer* dataTransfer)
 {
-    if (mObservers) {
-        uint32_t count;
-        mObservers->Count(&count);
-        for (uint32_t i = 0; i < count; ++i) {
-            nsCOMPtr<nsIXULTreeBuilderObserver> observer = do_QueryElementAt(mObservers, i);
-            if (observer) {
-                bool canDrop = false;
-                observer->CanDrop(row, orient, dataTransfer, &canDrop);
-                if (canDrop)
-                    observer->OnDrop(row, orient, dataTransfer);
-            }
+    uint32_t count = mObservers.Count();
+    for (uint32_t i = 0; i < count; ++i) {
+        nsCOMPtr<nsIXULTreeBuilderObserver> observer = mObservers.SafeObjectAt(i);
+        if (observer) {
+            bool canDrop = false;
+            observer->CanDrop(row, orient, dataTransfer, &canDrop);
+            if (canDrop)
+                observer->OnDrop(row, orient, dataTransfer);
         }
     }
 

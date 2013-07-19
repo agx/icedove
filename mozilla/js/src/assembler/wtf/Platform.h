@@ -245,6 +245,7 @@
 #endif
 
 #define WTF_ARM_ARCH_AT_LEAST(N) (CPU(ARM) && WTF_ARM_ARCH_VERSION >= N)
+#define WTF_ARM_ARCH_AT_LEAST_5 (WTF_CPU_ARM && WTF_ARM_ARCH_VERSION >= 5)
 
 /* Set WTF_ARM_ARCH_VERSION */
 #if   defined(__ARM_ARCH_4__) \
@@ -1174,6 +1175,11 @@
 #define WARN_UNUSED_RETURN __attribute__ ((warn_unused_result))
 #else
 #define WARN_UNUSED_RETURN
+#endif
+
+/* COMPILER(CLANG) - Clang  */
+#if defined(__clang__)
+#define WTF_COMPILER_CLANG 1
 #endif
 
 #if !ENABLE_NETSCAPE_PLUGIN_API || (ENABLE_NETSCAPE_PLUGIN_API && ((WTF_OS_UNIX && (WTF_PLATFORM_QT || WTF_PLATFORM_WX)) || WTF_PLATFORM_GTK))

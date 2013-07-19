@@ -259,7 +259,7 @@ XPCCallContext::GetResolveName() const
 }
 
 inline jsid
-XPCCallContext::SetResolveName(jsid name)
+XPCCallContext::SetResolveName(JS::HandleId name)
 {
     CHECK_STATE(HAVE_CONTEXT);
     return XPCJSRuntime::Get()->SetResolveName(name);
@@ -596,22 +596,6 @@ xpc_ForcePropertyResolve(JSContext* cx, JSObject* obj, jsid id)
     if (!JS_LookupPropertyById(cx, obj, id, &prop))
         return false;
     return true;
-}
-
-inline JSObject*
-xpc_NewSystemInheritingJSObject(JSContext *cx, JSClass *clasp, JSObject *proto,
-                                bool uniqueType, JSObject *parent)
-{
-    // Global creation should go through XPCWrappedNative::WrapNewGlobal().
-    MOZ_ASSERT(!(clasp->flags & JSCLASS_IS_GLOBAL));
-
-    JSObject *obj;
-    if (uniqueType) {
-        obj = JS_NewObjectWithUniqueType(cx, clasp, proto, parent);
-    } else {
-        obj = JS_NewObject(cx, clasp, proto, parent);
-    }
-    return obj;
 }
 
 inline jsid

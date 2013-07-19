@@ -10,14 +10,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= ucvcn
 LIBRARY_NAME	= ucvcn_s
 FORCE_STATIC_LIB=1
 LIBXUL_LIBRARY = 1
 
 
 CPPSRCS		= \
-		nsGB2312ToUnicodeV2.cpp \
 		nsUnicodeToGB2312V2.cpp \
 		nsGBKToUnicode.cpp \
 		nsUnicodeToGBK.cpp \
@@ -27,8 +25,6 @@ CPPSRCS		= \
 		nsUnicodeToHZ.cpp \
 		nsGBKConvUtil.cpp \
 		$(NULL)
-
-EXPORTS		= nsUCvCnCID.h
 
 LOCAL_INCLUDES = -I$(srcdir)/../util
 

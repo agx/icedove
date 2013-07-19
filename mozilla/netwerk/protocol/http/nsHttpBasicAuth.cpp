@@ -8,7 +8,6 @@
 #include "nsHttpBasicAuth.h"
 #include "plbase64.h"
 #include "plstr.h"
-#include "prmem.h"
 #include "nsString.h"
 
 //-----------------------------------------------------------------------------
@@ -71,7 +70,7 @@ nsHttpBasicAuth::GenerateCredentials(nsIHttpAuthenticableChannel *authChannel,
     NS_ENSURE_TRUE(isBasicAuth, NS_ERROR_UNEXPECTED);
 
     // we work with ASCII around here
-    nsCAutoString userpass;
+    nsAutoCString userpass;
     LossyCopyUTF16toASCII(user, userpass);
     userpass.Append(':'); // always send a ':' (see bug 129565)
     if (password)

@@ -10,17 +10,11 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= layout
 LIBRARY_NAME	= gktable_s
 LIBXUL_LIBRARY	= 1
 FAIL_ON_WARNINGS = 1
 
 
-
-EXPORTS		= \
-		nsITableCellLayout.h \
-		nsITableLayout.h \
-		$(NULL)
 
 CPPSRCS		= \
 		BasicTableLayoutStrategy.cpp \
@@ -39,9 +33,6 @@ CPPSRCS		= \
 
 # we don't want the shared lib, but we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
-
-TEST_DIRS += test
-
 
 include $(topsrcdir)/config/rules.mk
 

@@ -1,6 +1,6 @@
-/* -*- Mode: c++; c-basic-offset: 4; tab-width: 40; indent-tabs-mode: nil -*- */
-/* vim: set ts=40 sw=4 et tw=99: */
-/* This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -13,11 +13,27 @@
 
 #include "jsobjinlines.h"
 
+// Sentinel value used to initialize ArrayBufferViews' NEXT_BUFFER_SLOTs to
+// show that they have not yet been added to any ArrayBuffer list
+JSObject * const UNSET_BUFFER_LINK = (JSObject*)0x2;
+
+inline void
+js::ArrayBufferObject::setElementsHeader(js::ObjectElements *header, uint32_t bytes)
+{
+    header->flags = 0;
+    header->initializedLength = bytes;
+
+    // NB: one or both of these fields is clobbered by GetViewList to store the
+    // 'views' link. Set them to 0 to effectively initialize 'views' to NULL.
+    header->length = 0;
+    header->capacity = 0;
+}
+
 inline uint32_t
 js::ArrayBufferObject::byteLength() const
 {
     JS_ASSERT(isArrayBuffer());
-    return getElementsHeader()->length;
+    return getElementsHeader()->initializedLength;
 }
 
 inline uint8_t *
@@ -48,6 +64,12 @@ ArrayBufferObject::hasData() const
     return getClass() == &ArrayBufferClass;
 }
 
+inline bool
+ArrayBufferObject::isAsmJSArrayBuffer() const
+{
+    return getElementsHeader()->isAsmJSArrayBuffer();
+}
+
 static inline int32_t
 ClampIntForUint8Array(int32_t x)
 {
@@ -62,7 +84,7 @@ inline Value
 TypedArray::lengthValue(JSObject *obj)
 {
     JS_ASSERT(obj->isTypedArray());
-    return obj->getFixedSlot(FIELD_LENGTH);
+    return obj->getFixedSlot(LENGTH_SLOT);
 }
 
 inline uint32_t
@@ -75,7 +97,7 @@ inline Value
 TypedArray::byteOffsetValue(JSObject *obj)
 {
     JS_ASSERT(obj->isTypedArray());
-    return obj->getFixedSlot(FIELD_BYTEOFFSET);
+    return obj->getFixedSlot(BYTEOFFSET_SLOT);
 }
 
 inline uint32_t
@@ -88,7 +110,7 @@ inline Value
 TypedArray::byteLengthValue(JSObject *obj)
 {
     JS_ASSERT(obj->isTypedArray());
-    return obj->getFixedSlot(FIELD_BYTELENGTH);
+    return obj->getFixedSlot(BYTELENGTH_SLOT);
 }
 
 inline uint32_t
@@ -101,14 +123,14 @@ inline uint32_t
 TypedArray::type(JSObject *obj)
 {
     JS_ASSERT(obj->isTypedArray());
-    return obj->getFixedSlot(FIELD_TYPE).toInt32();
+    return obj->getFixedSlot(TYPE_SLOT).toInt32();
 }
 
 inline Value
 TypedArray::bufferValue(JSObject *obj)
 {
     JS_ASSERT(obj->isTypedArray());
-    return obj->getFixedSlot(FIELD_BUFFER);
+    return obj->getFixedSlot(BUFFER_SLOT);
 }
 
 inline ArrayBufferObject *
@@ -121,7 +143,7 @@ inline void *
 TypedArray::viewData(JSObject *obj)
 {
     JS_ASSERT(obj->isTypedArray());
-    return (void *)obj->getPrivate(NUM_FIXED_SLOTS);
+    return (void *)obj->getPrivate(DATA_SLOT);
 }
 
 inline uint32_t
@@ -158,27 +180,32 @@ DataViewObject::is(const Value &v)
 }
 
 #ifdef JSGC_GENERATIONAL
-class TypedArrayPrivateRef : public gc::BufferableRef
+class ArrayBufferViewByteOffsetRef : public gc::BufferableRef
 {
     JSObject *obj;
-    ArrayBufferObject *buffer;
-    size_t byteOffset;
 
   public:
-    TypedArrayPrivateRef(JSObject *obj, ArrayBufferObject *buffer, size_t byteOffset)
-      : obj(obj), buffer(buffer), byteOffset(byteOffset) {}
+    explicit ArrayBufferViewByteOffsetRef(JSObject *obj) : obj(obj) {}
 
     bool match(void *location) {
-        // The private field  of obj is not traced, but needs to be updated by mark.
+        /* The private field  of obj is not traced, but needs to be updated by mark. */
         return false;
     }
 
-    void mark(JSTracer *trc) {}
+    void mark(JSTracer *trc) {
+        /* Update obj's private to point to the moved buffer's array data. */
+        MarkObjectUnbarriered(trc, &obj, "TypedArray");
+        HeapSlot &bufSlot = obj->getReservedSlotRef(BufferView::BUFFER_SLOT);
+        gc::MarkSlot(trc, &bufSlot, "TypedArray::BUFFER_SLOT");
+        ArrayBufferObject &buf = bufSlot.toObject().asArrayBuffer();
+        int32_t offset = obj->getReservedSlot(BufferView::BYTEOFFSET_SLOT).toInt32();
+        obj->initPrivate(buf.dataPointer() + offset);
+    }
 };
 #endif
 
 static inline void
-InitTypedArrayDataPointer(JSObject *obj, ArrayBufferObject *buffer, size_t byteOffset)
+InitArrayBufferViewDataPointer(JSObject *obj, ArrayBufferObject *buffer, size_t byteOffset)
 {
     /*
      * N.B. The base of the array's data is stored in the object's
@@ -187,11 +214,21 @@ InitTypedArrayDataPointer(JSObject *obj, ArrayBufferObject *buffer, size_t byteO
      */
     obj->initPrivate(buffer->dataPointer() + byteOffset);
 #ifdef JSGC_GENERATIONAL
-    JSCompartment *comp = obj->compartment();
-    JS_ASSERT(comp == buffer->compartment());
-    if (comp->gcNursery.isInside(buffer))
-        comp->gcStoreBuffer.putGeneric(TypedArrayPrivateRef(obj, buffer, byteOffset));
+    if (IsInsideNursery(obj->runtime(), buffer) && buffer->hasFixedElements())
+        obj->runtime()->gcStoreBuffer.putGeneric(ArrayBufferViewByteOffsetRef(obj));
 #endif
+}
+
+static NewObjectKind
+DataViewNewObjectKind(JSContext *cx, uint32_t byteLength, JSObject *proto)
+{
+    if (!proto && byteLength >= TypedArray::SINGLETON_TYPE_BYTE_LENGTH)
+        return SingletonObject;
+    jsbytecode *pc;
+    JSScript *script = cx->stack.currentScript(&pc);
+    if (!script)
+        return GenericObject;
+    return types::UseNewTypeForInitializer(cx, script, pc, &DataViewClass);
 }
 
 inline DataViewObject *
@@ -202,24 +239,26 @@ DataViewObject::create(JSContext *cx, uint32_t byteOffset, uint32_t byteLength,
     JS_ASSERT(byteLength <= INT32_MAX);
 
     RootedObject proto(cx, protoArg);
-    RootedObject obj(cx, NewBuiltinClassInstance(cx, &DataViewClass));
+    RootedObject obj(cx);
+
+    NewObjectKind newKind = DataViewNewObjectKind(cx, byteLength, proto);
+    obj = NewBuiltinClassInstance(cx, &DataViewClass, newKind);
     if (!obj)
         return NULL;
 
     if (proto) {
-        types::TypeObject *type = proto->getNewType(cx);
+        types::TypeObject *type = proto->getNewType(cx, &DataViewClass);
         if (!type)
             return NULL;
         obj->setType(type);
     } else if (cx->typeInferenceEnabled()) {
         if (byteLength >= TypedArray::SINGLETON_TYPE_BYTE_LENGTH) {
-            if (!JSObject::setSingletonType(cx, obj))
-                return NULL;
+            JS_ASSERT(obj->hasSingletonType());
         } else {
             jsbytecode *pc;
             RootedScript script(cx, cx->stack.currentScript(&pc));
             if (script) {
-                if (!types::SetInitializerObjectType(cx, script, pc, obj))
+                if (!types::SetInitializerObjectType(cx, script, pc, obj, newKind))
                     return NULL;
             }
         }
@@ -231,10 +270,15 @@ DataViewObject::create(JSContext *cx, uint32_t byteOffset, uint32_t byteLength,
     dvobj.setFixedSlot(BYTEOFFSET_SLOT, Int32Value(byteOffset));
     dvobj.setFixedSlot(BYTELENGTH_SLOT, Int32Value(byteLength));
     dvobj.setFixedSlot(BUFFER_SLOT, ObjectValue(*arrayBuffer));
-    InitTypedArrayDataPointer(obj, arrayBuffer, byteOffset);
+    dvobj.setFixedSlot(NEXT_VIEW_SLOT, PrivateValue(NULL));
+    dvobj.setFixedSlot(NEXT_BUFFER_SLOT, PrivateValue(UNSET_BUFFER_LINK));
+    InitArrayBufferViewDataPointer(obj, arrayBuffer, byteOffset);
     JS_ASSERT(byteOffset + byteLength <= arrayBuffer->byteLength());
 
-    JS_ASSERT(dvobj.numFixedSlots() == RESERVED_SLOTS);
+    // Verify that the private slot is at the expected place
+    JS_ASSERT(dvobj.numFixedSlots() == DATA_SLOT);
+
+    arrayBuffer->asArrayBuffer().addView(&dvobj);
 
     return &dvobj;
 }
@@ -264,11 +308,11 @@ DataViewObject::dataPointer()
     return getPrivate();
 }
 
-inline JSObject &
+inline ArrayBufferObject &
 DataViewObject::arrayBuffer()
 {
     JS_ASSERT(isDataView());
-    return getReservedSlot(BUFFER_SLOT).toObject();
+    return getReservedSlot(BUFFER_SLOT).toObject().asArrayBuffer();
 }
 
 inline bool

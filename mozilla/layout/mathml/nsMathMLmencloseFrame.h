@@ -7,6 +7,7 @@
 #ifndef nsMathMLmencloseFrame_h___
 #define nsMathMLmencloseFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
 #include "nsMathMLContainerFrame.h"
 
@@ -54,12 +55,12 @@ public:
   
   virtual nsresult
   MeasureForWidth(nsRenderingContext& aRenderingContext,
-                  nsHTMLReflowMetrics& aDesiredSize);
+                  nsHTMLReflowMetrics& aDesiredSize) MOZ_OVERRIDE;
   
   NS_IMETHOD
   AttributeChanged(int32_t         aNameSpaceID,
                    nsIAtom*        aAttribute,
-                   int32_t         aModType);
+                   int32_t         aModType) MOZ_OVERRIDE;
   
   virtual void
   SetAdditionalStyleContext(int32_t          aIndex, 
@@ -67,18 +68,18 @@ public:
   virtual nsStyleContext*
   GetAdditionalStyleContext(int32_t aIndex) const;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   NS_IMETHOD
-  InheritAutomaticData(nsIFrame* aParent);
+  InheritAutomaticData(nsIFrame* aParent) MOZ_OVERRIDE;
 
   NS_IMETHOD
-  TransmitAutomaticData();
+  TransmitAutomaticData() MOZ_OVERRIDE;
 
   virtual nscoord
-  FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize);
+  FixInterFrameSpacing(nsHTMLReflowMetrics& aDesiredSize) MOZ_OVERRIDE;
 
 protected:
   nsMathMLmencloseFrame(nsStyleContext* aContext);
@@ -108,10 +109,10 @@ protected:
 
   // Display a frame of the specified type.
   // @param aType Type of frame to display
-  nsresult DisplayNotation(nsDisplayListBuilder* aBuilder,
-                           nsIFrame* aFrame, const nsRect& aRect,
-                           const nsDisplayListSet& aLists,
-                           nscoord aThickness, nsMencloseNotation aType);
+  void DisplayNotation(nsDisplayListBuilder* aBuilder,
+                       nsIFrame* aFrame, const nsRect& aRect,
+                       const nsDisplayListSet& aLists,
+                       nscoord aThickness, nsMencloseNotation aType);
 };
 
 #endif /* nsMathMLmencloseFrame_h___ */

@@ -11,9 +11,6 @@ FAIL_ON_WARNINGS = 1
 
 include $(DEPTH)/config/autoconf.mk
 
-TEST_DIRS += tests
-
-MODULE		= editor
 LIBRARY_NAME	= htmleditor_s
 LIBXUL_LIBRARY	= 1
 
@@ -41,8 +38,7 @@ CPPSRCS  = \
            $(NULL)
 
 ifdef ENABLE_EDITOR_API_LOG
-CPPSRCS += nsHTMLEditorLog.cpp             \
-           nsEditorTxnLog.cpp              \
+CPPSRCS += nsEditorTxnLog.cpp              \
            $(NULL)
 
 DEFINES += -DENABLE_EDITOR_API_LOG
@@ -61,3 +57,9 @@ INCLUDES        += -I$(topsrcdir)/editor/libeditor/base \
                    -I$(topsrcdir)/content/base/src \
                    -I$(topsrcdir)/layout/style \
                    $(NULL)
+
+LOCAL_INCLUDES += \
+  -I$(topsrcdir)/layout/generic \
+  -I$(topsrcdir)/layout/tables \
+  -I$(topsrcdir)/layout/xul/base/src \
+  $(null)

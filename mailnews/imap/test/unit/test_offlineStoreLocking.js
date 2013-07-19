@@ -4,9 +4,6 @@
  * with offline store locking correctly.
  */
 
-const nsIIOService = Cc["@mozilla.org/network/io-service;1"]
-                       .getService(Ci.nsIIOService);
-
 load("../../../resources/logHelper.js");
 load("../../../resources/mailTestUtils.js");
 load("../../../resources/asyncTestUtils.js");
@@ -14,6 +11,7 @@ load("../../../resources/messageGenerator.js");
 load("../../../resources/alertTestUtils.js");
 load("../../../resources/IMAPpump.js");
 
+Components.utils.import("resource:///modules/mailServices.js");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 
@@ -23,20 +21,18 @@ var gGotAlert = false;
 var gMovedMsgId;
 
 function alert(aDialogTitle, aText) {
-//  do_check_eq(aText.indexOf("Connection to server Mail for  timed out."), 0);
+//  do_check_true(aText.startsWith("Connection to server Mail for  timed out."));
   gGotAlert = true;
 }
 
 function addGeneratedMessagesToServer(messages, mailbox)
 {
-  let ioService = Cc["@mozilla.org/network/io-service;1"]
-                    .getService(Ci.nsIIOService);
   // Create the imapMessages and store them on the mailbox
   messages.forEach(function (message)
   {
-    let dataUri = ioService.newURI("data:text/plain;base64," +
-                                    btoa(message.toMessageString()),
-                                   null, null);
+    let dataUri = Services.io.newURI("data:text/plain;base64," +
+                                     btoa(message.toMessageString()),
+                                     null, null);
     mailbox.addMessage(new imapMessage(dataUri.spec, mailbox.uidnext++, []));
   });
 }
@@ -136,19 +132,16 @@ var tests = [
     // Thunderbird itself does move/copies pseudo-offline, but that's too
     // hard to test because of the half-second delay.
     gIMAPServer.stop();
-    nsIIOService.offline = true;
+    Services.io.offline = true;
     let trashHdr;
     let enumerator = gIMAPTrashFolder.msgDatabase.EnumerateMessages();
     let msgHdr = enumerator.getNext().QueryInterface(Ci.nsIMsgDBHdr);
     gMovedMsgId = msgHdr.messageId;
     let array = Cc["@mozilla.org/array;1"].createInstance(Ci.nsIMutableArray);
     array.appendElement(msgHdr, false);
-    const gCopyService = Cc["@mozilla.org/messenger/messagecopyservice;1"]
-                          .getService(Ci.nsIMsgCopyService);
-
     gIMAPInbox.compact(asyncUrlListener, gDummyMsgWindow);
-    gCopyService.CopyMessages(gIMAPTrashFolder, array, gIMAPInbox, true,
-                              CopyListener, null, true);
+    MailServices.copy.CopyMessages(gIMAPTrashFolder, array, gIMAPInbox, true,
+                                   CopyListener, null, true);
   },
   function verifyNoOfflineMsg() {
     try {

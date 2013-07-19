@@ -6,10 +6,11 @@
 #include "nsDOMMouseScrollEvent.h"
 #include "nsDOMClassInfoID.h"
 
-nsDOMMouseScrollEvent::nsDOMMouseScrollEvent(nsPresContext* aPresContext,
+nsDOMMouseScrollEvent::nsDOMMouseScrollEvent(mozilla::dom::EventTarget* aOwner,
+                                             nsPresContext* aPresContext,
                                              nsInputEvent* aEvent)
-  : nsDOMMouseEvent(aPresContext, aEvent ? aEvent :
-                                  new nsMouseScrollEvent(false, 0, nullptr))
+  : nsDOMMouseEvent(aOwner, aPresContext,
+                    aEvent ? aEvent : new nsMouseScrollEvent(false, 0, nullptr))
 {
   if (aEvent) {
     mEventIsInternal = false;
@@ -23,6 +24,7 @@ nsDOMMouseScrollEvent::nsDOMMouseScrollEvent(nsPresContext* aPresContext,
   if(mEvent->eventStructType == NS_MOUSE_SCROLL_EVENT) {
     mDetail = static_cast<nsMouseScrollEvent*>(mEvent)->delta;
   }
+  SetIsDOMBinding();
 }
 
 nsDOMMouseScrollEvent::~nsDOMMouseScrollEvent()
@@ -77,21 +79,27 @@ NS_IMETHODIMP
 nsDOMMouseScrollEvent::GetAxis(int32_t* aResult)
 {
   NS_ENSURE_ARG_POINTER(aResult);
-
-  if (mEvent->eventStructType == NS_MOUSE_SCROLL_EVENT) {
-    *aResult = static_cast<nsMouseScrollEvent*>(mEvent)->isHorizontal ?
-                 static_cast<int32_t>(HORIZONTAL_AXIS) :
-                 static_cast<int32_t>(VERTICAL_AXIS);
-  } else {
-    *aResult = 0;
-  }
+  *aResult = Axis();
   return NS_OK;
 }
 
+int32_t
+nsDOMMouseScrollEvent::Axis()
+{
+  if (mEvent->eventStructType == NS_MOUSE_SCROLL_EVENT) {
+    return static_cast<nsMouseScrollEvent*>(mEvent)->isHorizontal ?
+             static_cast<int32_t>(HORIZONTAL_AXIS) :
+             static_cast<int32_t>(VERTICAL_AXIS);
+  }
+  return 0;
+}
+
 nsresult NS_NewDOMMouseScrollEvent(nsIDOMEvent** aInstancePtrResult,
+                                   mozilla::dom::EventTarget* aOwner,
                                    nsPresContext* aPresContext,
                                    nsInputEvent *aEvent) 
 {
-  nsDOMMouseScrollEvent* it = new nsDOMMouseScrollEvent(aPresContext, aEvent);
+  nsDOMMouseScrollEvent* it =
+    new nsDOMMouseScrollEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }

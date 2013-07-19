@@ -10,12 +10,12 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= imgicon
 LIBRARY_NAME	= imgicon
 IS_COMPONENT	= 1
 MODULE_NAME	= nsIconDecoderModule
 LIBXUL_LIBRARY = 1
 EXPORT_LIBRARY = 1
+FAIL_ON_WARNINGS = 1
 
 ifneq (,$(filter gtk2,$(MOZ_WIDGET_TOOLKIT)))
 PLATFORM = gtk
@@ -46,8 +46,6 @@ CPPSRCS		= \
 		nsIconModule.cpp \
 		nsIconProtocolHandler.cpp \
 		$(NULL)
-
-XPIDLSRCS	= nsIIconURI.idl
 
 SHARED_LIBRARY_LIBS = $(PLATFORM)/$(LIB_PREFIX)imgicon$(PLATFORM)_s.$(LIB_SUFFIX)
 

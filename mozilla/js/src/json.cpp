@@ -1,9 +1,10 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "json.h"
 
 #include "mozilla/FloatingPoint.h"
 
@@ -11,40 +12,33 @@
 #include "jsapi.h"
 #include "jsarray.h"
 #include "jsatom.h"
-#include "jsbool.h"
 #include "jscntxt.h"
-#include "jsfun.h"
 #include "jsinterp.h"
-#include "jsiter.h"
 #include "jsnum.h"
 #include "jsobj.h"
-#include "json.h"
 #include "jsonparser.h"
-#include "jsprf.h"
 #include "jsstr.h"
 #include "jstypes.h"
 #include "jsutil.h"
-#include "jsxml.h"
 
-#include "frontend/TokenStream.h"
 #include "vm/StringBuffer.h"
 
 #include "jsatominlines.h"
 #include "jsboolinlines.h"
-#include "jsinferinlines.h"
 #include "jsobjinlines.h"
-
-#include "vm/Stack-inl.h"
 
 using namespace js;
 using namespace js::gc;
 using namespace js::types;
 
+using mozilla::IsFinite;
+using mozilla::Maybe;
+
 Class js::JSONClass = {
     js_JSON_str,
     JSCLASS_HAS_CACHED_PROTO(JSProto_JSON),
     JS_PropertyStub,        /* addProperty */
-    JS_PropertyStub,        /* delProperty */
+    JS_DeletePropertyStub,  /* delProperty */
     JS_PropertyStub,        /* getProperty */
     JS_StrictPropertyStub,  /* setProperty */
     JS_EnumerateStub,
@@ -59,23 +53,20 @@ js_json_parse(JSContext *cx, unsigned argc, Value *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 
     /* Step 1. */
-    JSLinearString *linear;
-    if (argc >= 1) {
-        JSString *str = ToString(cx, args[0]);
-        if (!str)
-            return false;
-        linear = str->ensureLinear(cx);
-        if (!linear)
-            return false;
-    } else {
-        linear = cx->runtime->atomState.typeAtoms[JSTYPE_VOID];
-    }
-    JS::Anchor<JSString *> anchor(linear);
+    JSString *str = (argc >= 1) ? ToString<CanGC>(cx, args[0]) : cx->names().undefined;
+    if (!str)
+        return false;
+
+    JSStableString *stable = str->ensureStable(cx);
+    if (!stable)
+        return false;
+
+    JS::Anchor<JSString *> anchor(stable);
 
     RootedValue reviver(cx, (argc >= 2) ? args[1] : UndefinedValue());
 
     /* Steps 2-5. */
-    return ParseJSONWithReviver(cx, linear->chars(), linear->length(), reviver, args.rval());
+    return ParseJSONWithReviver(cx, stable->chars(), stable->length(), reviver, args.rval());
 }
 
 /* ES5 15.12.3. */
@@ -279,11 +270,10 @@ PreprocessValue(JSContext *cx, HandleObject holder, KeyType key, MutableHandleVa
     RootedString keyStr(cx);
 
     /* Step 2. */
-    if (vp.get().isObject()) {
+    if (vp.isObject()) {
         RootedValue toJSON(cx);
-        RootedId id(cx, NameToId(cx->runtime->atomState.toJSONAtom));
-        Rooted<JSObject*> obj(cx, &vp.get().toObject());
-        if (!GetMethod(cx, obj, id, 0, &toJSON))
+        RootedObject obj(cx, &vp.toObject());
+        if (!JSObject::getProperty(cx, obj, obj, cx->names().toJSON, &toJSON))
             return false;
 
         if (js_IsCallable(toJSON)) {
@@ -329,14 +319,14 @@ PreprocessValue(JSContext *cx, HandleObject holder, KeyType key, MutableHandleVa
 
     /* Step 4. */
     if (vp.get().isObject()) {
-        JSObject &obj = vp.get().toObject();
+        RootedObject obj(cx, &vp.get().toObject());
         if (ObjectClassIs(obj, ESClass_Number, cx)) {
             double d;
             if (!ToNumber(cx, vp, &d))
                 return false;
             vp.set(NumberValue(d));
         } else if (ObjectClassIs(obj, ESClass_String, cx)) {
-            JSString *str = ToStringSlow(cx, vp);
+            JSString *str = ToStringSlow<CanGC>(cx, vp);
             if (!str)
                 return false;
             vp.set(StringValue(str));
@@ -360,7 +350,7 @@ PreprocessValue(JSContext *cx, HandleObject holder, KeyType key, MutableHandleVa
 static inline bool
 IsFilteredValue(const Value &v)
 {
-    return v.isUndefined() || js_IsCallable(v) || VALUE_IS_XML(v);
+    return v.isUndefined() || js_IsCallable(v);
 }
 
 /* ES5 15.12.3 JO. */
@@ -556,7 +546,7 @@ Str(JSContext *cx, const Value &v, StringifyContext *scx)
     /* Step 9. */
     if (v.isNumber()) {
         if (v.isDouble()) {
-            if (!MOZ_DOUBLE_IS_FINITE(v.toDouble()))
+            if (!IsFinite(v.toDouble()))
                 return scx->sb.append("null");
         }
 
@@ -573,7 +563,7 @@ Str(JSContext *cx, const Value &v, StringifyContext *scx)
 
     scx->depth++;
     JSBool ok;
-    if (ObjectClassIs(v.toObject(), ESClass_Array, cx))
+    if (ObjectClassIs(obj, ESClass_Array, cx))
         ok = JA(cx, obj, scx);
     else
         ok = JO(cx, obj, scx);
@@ -596,7 +586,7 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
     if (replacer) {
         if (replacer->isCallable()) {
             /* Step 4a(i): use replacer to transform values.  */
-        } else if (ObjectClassIs(*replacer, ESClass_Array, cx)) {
+        } else if (ObjectClassIs(replacer, ESClass_Array, cx)) {
             /*
              * Step 4b: The spec algorithm is unhelpfully vague about the exact
              * steps taken when the replacer is an array, regarding the exact
@@ -628,10 +618,10 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
             /* Step 4b(ii). */
             uint32_t len;
             JS_ALWAYS_TRUE(GetLengthProperty(cx, replacer, &len));
-            if (replacer->isDenseArray())
-                len = Min(len, replacer->getDenseArrayCapacity());
+            if (replacer->isArray() && !replacer->isIndexed())
+                len = Min(len, replacer->getDenseInitializedLength());
 
-            HashSet<jsid> idSet(cx);
+            HashSet<jsid, JsidHasher> idSet(cx);
             if (!idSet.init(len))
                 return false;
 
@@ -645,30 +635,29 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
                 if (!JSObject::getElement(cx, replacer, replacer, i, &v))
                     return false;
 
-                jsid id;
+                RootedId id(cx);
                 if (v.isNumber()) {
                     /* Step 4b(iv)(4). */
                     int32_t n;
                     if (v.isNumber() && ValueFitsInInt32(v, &n) && INT_FITS_IN_JSID(n)) {
                         id = INT_TO_JSID(n);
                     } else {
-                        if (!ValueToId(cx, v, &id))
+                        if (!ValueToId<CanGC>(cx, v, &id))
                             return false;
                     }
                 } else if (v.isString() ||
-                           (v.isObject() &&
-                            (ObjectClassIs(v.toObject(), ESClass_String, cx) ||
-                             ObjectClassIs(v.toObject(), ESClass_Number, cx))))
+                           IsObjectWithClass(v, ESClass_String, cx) ||
+                           IsObjectWithClass(v, ESClass_Number, cx))
                 {
                     /* Step 4b(iv)(3), 4b(iv)(5). */
-                    if (!ValueToId(cx, v, &id))
+                    if (!ValueToId<CanGC>(cx, v, &id))
                         return false;
                 } else {
                     continue;
                 }
 
                 /* Step 4b(iv)(6). */
-                HashSet<jsid>::AddPtr p = idSet.lookupForAdd(id);
+                HashSet<jsid, JsidHasher>::AddPtr p = idSet.lookupForAdd(id);
                 if (!p) {
                     /* Step 4b(iv)(6)(a). */
                     if (!idSet.add(p, id) || !propertyList.append(id))
@@ -682,14 +671,14 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
 
     /* Step 5. */
     if (space.isObject()) {
-        JSObject &spaceObj = space.toObject();
+        RootedObject spaceObj(cx, &space.toObject());
         if (ObjectClassIs(spaceObj, ESClass_Number, cx)) {
             double d;
             if (!ToNumber(cx, space, &d))
                 return false;
             space = NumberValue(d);
         } else if (ObjectClassIs(spaceObj, ESClass_String, cx)) {
-            JSString *str = ToStringSlow(cx, space);
+            JSString *str = ToStringSlow<CanGC>(cx, space);
             if (!str)
                 return false;
             space = StringValue(str);
@@ -725,7 +714,7 @@ js_Stringify(JSContext *cx, MutableHandleValue vp, JSObject *replacer_, Value sp
         return false;
 
     /* Step 10. */
-    RootedId emptyId(cx, NameToId(cx->runtime->atomState.emptyAtom));
+    RootedId emptyId(cx, NameToId(cx->names().empty));
     if (!DefineNativeProperty(cx, wrapper, emptyId, vp, JS_PropertyStub, JS_StrictPropertyStub,
                               JSPROP_ENUMERATE, 0, 0))
     {
@@ -770,31 +759,25 @@ Walk(JSContext *cx, HandleObject holder, HandleId name, HandleValue reviver, Mut
             RootedId id(cx);
             RootedValue newElement(cx);
             for (uint32_t i = 0; i < length; i++) {
-                if (!IndexToId(cx, i, id.address()))
+                if (!IndexToId(cx, i, &id))
                     return false;
 
                 /* Step 2a(iii)(1). */
                 if (!Walk(cx, obj, id, reviver, &newElement))
                     return false;
 
-                /*
-                 * Arrays which begin empty and whose properties are always
-                 * incrementally appended are always dense, no matter their
-                 * length, under current dense/slow array heuristics.
-                 * Also, deleting a property from a dense array which is not
-                 * currently being enumerated never makes it slow.  This array
-                 * is never exposed until the reviver sees it below, so it must
-                 * be dense and isn't currently being enumerated.  Therefore
-                 * property definition and deletion will always succeed,
-                 * and we need not check for failure.
-                 */
                 if (newElement.isUndefined()) {
                     /* Step 2a(iii)(2). */
-                    JS_ALWAYS_TRUE(array_deleteElement(cx, obj, i, &newElement, false));
+                    JSBool succeeded;
+                    if (!JSObject::deleteByValue(cx, obj, IdToValue(id), &succeeded))
+                        return false;
                 } else {
                     /* Step 2a(iii)(3). */
-                    JS_ALWAYS_TRUE(array_defineElement(cx, obj, i, newElement, JS_PropertyStub,
-                                                       JS_StrictPropertyStub, JSPROP_ENUMERATE));
+                    if (!DefineNativeProperty(cx, obj, id, newElement, JS_PropertyStub,
+                                              JS_StrictPropertyStub, JSPROP_ENUMERATE, 0, 0))
+                    {
+                        return false;
+                    }
                 }
             }
         } else {
@@ -814,7 +797,8 @@ Walk(JSContext *cx, HandleObject holder, HandleId name, HandleValue reviver, Mut
 
                 if (newElement.isUndefined()) {
                     /* Step 2b(ii)(2). */
-                    if (!JSObject::deleteByValue(cx, obj, IdToValue(id), &newElement, false))
+                    JSBool succeeded;
+                    if (!JSObject::deleteByValue(cx, obj, IdToValue(id), &succeeded))
                         return false;
                 } else {
                     /* Step 2b(ii)(3). */
@@ -856,18 +840,16 @@ Revive(JSContext *cx, HandleValue reviver, MutableHandleValue vp)
     if (!obj)
         return false;
 
-    if (!JSObject::defineProperty(cx, obj, cx->runtime->atomState.emptyAtom, vp))
+    if (!JSObject::defineProperty(cx, obj, cx->names().empty, vp))
         return false;
 
-    Rooted<jsid> id(cx, NameToId(cx->runtime->atomState.emptyAtom));
+    Rooted<jsid> id(cx, NameToId(cx->names().empty));
     return Walk(cx, obj, id, reviver, vp);
 }
 
-namespace js {
-
 JSBool
-ParseJSONWithReviver(JSContext *cx, const jschar *chars, size_t length, HandleValue reviver,
-                     MutableHandleValue vp, DecodingMode decodingMode /* = STRICT */)
+js::ParseJSONWithReviver(JSContext *cx, StableCharPtr chars, size_t length, HandleValue reviver,
+                         MutableHandleValue vp, DecodingMode decodingMode /* = STRICT */)
 {
     /* 15.12.2 steps 2-3. */
     JSONParser parser(cx, chars, length,
@@ -881,18 +863,16 @@ ParseJSONWithReviver(JSContext *cx, const jschar *chars, size_t length, HandleVa
     return true;
 }
 
-} /* namespace js */
-
 #if JS_HAS_TOSOURCE
 static JSBool
 json_toSource(JSContext *cx, unsigned argc, Value *vp)
 {
-    vp->setString(CLASS_NAME(cx, JSON));
+    vp->setString(cx->names().JSON);
     return JS_TRUE;
 }
 #endif
 
-static JSFunctionSpec json_static_methods[] = {
+static const JSFunctionSpec json_static_methods[] = {
 #if JS_HAS_TOSOURCE
     JS_FN(js_toSource_str,  json_toSource,      0, 0),
 #endif
@@ -902,7 +882,7 @@ static JSFunctionSpec json_static_methods[] = {
 };
 
 JSObject *
-js_InitJSONClass(JSContext *cx, JSObject *obj)
+js_InitJSONClass(JSContext *cx, HandleObject obj)
 {
     Rooted<GlobalObject*> global(cx, &obj->asGlobal());
 
@@ -914,8 +894,8 @@ js_InitJSONClass(JSContext *cx, JSObject *obj)
     if (!global->getOrCreateBooleanPrototype(cx))
         return NULL;
 
-    RootedObject JSON(cx, NewObjectWithClassProto(cx, &JSONClass, NULL, global));
-    if (!JSON || !JSObject::setSingletonType(cx, JSON))
+    RootedObject JSON(cx, NewObjectWithClassProto(cx, &JSONClass, NULL, global, SingletonObject));
+    if (!JSON)
         return NULL;
 
     if (!JS_DefineProperty(cx, global, js_JSON_str, OBJECT_TO_JSVAL(JSON),

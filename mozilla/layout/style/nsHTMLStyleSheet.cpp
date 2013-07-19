@@ -18,19 +18,13 @@
  */
 
 #include "nsHTMLStyleSheet.h"
-#include "nsINameSpaceManager.h"
-#include "nsIAtom.h"
-#include "nsIURL.h"
 #include "nsMappedAttributes.h"
-#include "nsILink.h"
-#include "nsStyleContext.h"
 #include "nsGkAtoms.h"
 #include "nsPresContext.h"
 #include "nsEventStates.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsStyleConsts.h"
-#include "nsCSSAnonBoxes.h"
 #include "nsRuleWalker.h"
 #include "nsRuleData.h"
 #include "nsError.h"
@@ -58,6 +52,8 @@ nsHTMLStyleSheet::HTMLColorRule::MapRuleInfoInto(nsRuleData* aRuleData)
 /* virtual */ void
 nsHTMLStyleSheet::HTMLColorRule::List(FILE* out, int32_t aIndent) const
 {
+  for (int32_t index = aIndent; --index >= 0; ) fputs("  ", out);
+  fputs("[html color rule] {}\n", out);
 }
 #endif
 
@@ -68,6 +64,8 @@ NS_IMPL_ISUPPORTS1(nsHTMLStyleSheet::GenericTableRule, nsIStyleRule)
 /* virtual */ void
 nsHTMLStyleSheet::GenericTableRule::List(FILE* out, int32_t aIndent) const
 {
+  for (int32_t index = aIndent; --index >= 0; ) fputs("  ", out);
+  fputs("[generic table rule] {}\n", out);
 }
 #endif
 
@@ -168,7 +166,7 @@ NS_IMPL_ISUPPORTS2(nsHTMLStyleSheet, nsIStyleSheet, nsIStyleRuleProcessor)
 nsHTMLStyleSheet::RulesMatching(ElementRuleProcessorData* aData)
 {
   nsRuleWalker *ruleWalker = aData->mRuleWalker;
-  if (aData->mElement->IsHTML()) {
+  if (aData->mElement->IsHTML() && !ruleWalker->AuthorStyleDisabled()) {
     nsIAtom* tag = aData->mElement->Tag();
 
     // if we have anchor colors, check if this is an anchor with an href
@@ -208,8 +206,12 @@ nsHTMLStyleSheet::RulesMatching(ElementRuleProcessorData* aData)
     }
   } // end html element
 
-    // just get the style rules from the content
-  aData->mElement->WalkContentStyleRules(ruleWalker);
+  // just get the style rules from the content.  For SVG we do this even if
+  // author style is disabled, because SVG presentational hints aren't
+  // considered style.
+  if (!ruleWalker->AuthorStyleDisabled() || aData->mElement->IsSVG()) {
+    aData->mElement->WalkContentStyleRules(ruleWalker);
+  }
 }
 
 // Test if style is dependent on content state
@@ -453,14 +455,14 @@ nsHTMLStyleSheet::UniqueMappedAttributes(nsMappedAttributes* aMapped)
     // We added a new entry to the hashtable, so we have a new unique set.
     entry->mAttributes = aMapped;
   }
-  NS_ADDREF(entry->mAttributes); // for caller
-  return entry->mAttributes;
+  nsRefPtr<nsMappedAttributes> ret = entry->mAttributes;
+  return ret.forget();
 }
 
 void
 nsHTMLStyleSheet::DropMappedAttributes(nsMappedAttributes* aMapped)
 {
-  NS_ENSURE_TRUE(aMapped, /**/);
+  NS_ENSURE_TRUE_VOID(aMapped);
 
   NS_ASSERTION(mMappedAttrTable.ops, "table uninitialized");
 #ifdef DEBUG
@@ -480,7 +482,7 @@ nsHTMLStyleSheet::List(FILE* out, int32_t aIndent) const
   for (int32_t index = aIndent; --index >= 0; ) fputs("  ", out);
 
   fputs("HTML Style Sheet: ", out);
-  nsCAutoString urlSpec;
+  nsAutoCString urlSpec;
   mURL->GetSpec(urlSpec);
   if (!urlSpec.IsEmpty()) {
     fputs(urlSpec.get(), out);

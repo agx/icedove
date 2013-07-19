@@ -1,5 +1,5 @@
 const gHttpTestRoot = getRootDirectory(gTestPath).replace("chrome://mochitests/content/", "http://127.0.0.1:8888/");
-const EXPECTED_PLUGINSCRIPTED_EVENT_COUNT = 6;
+const EXPECTED_PLUGINSCRIPTED_EVENT_COUNT = 7;
 
 var gTestBrowser = null;
 var gNextTestList = [];
@@ -13,10 +13,14 @@ function test() {
   waitForExplicitFinish();
   registerCleanupFunction(function() {
     Services.prefs.clearUserPref("plugins.click_to_play");
+    var plugin = getTestPlugin();
+    plugin.enabledState = Ci.nsIPluginTag.STATE_ENABLED;
     gTestBrowser.removeEventListener("load", pageLoad, true);
     gTestBrowser.removeEventListener("PluginScripted", pluginScripted, true);
   });
   Services.prefs.setBoolPref("plugins.click_to_play", true);
+  var plugin = getTestPlugin();
+  plugin.enabledState = Ci.nsIPluginTag.STATE_CLICKTOPLAY;
 
   gBrowser.selectedTab = gBrowser.addTab();
   gTestBrowser = gBrowser.selectedBrowser;
@@ -90,6 +94,35 @@ function testNoEventFired() {
   ok(notification.dismissed, "notification should not be showing (" + getCurrentTestLocation() + ")");
   ok(!gPluginScriptedFired, "PluginScripted should not have fired (" + getCurrentTestLocation() + ")");
 
+  prepareTest(testDenyPermissionPart1, gHttpTestRoot + "plugin_test_noScriptNoPopup.html");
+}
+
+function testDenyPermissionPart1() {
+  var notification = PopupNotifications.getNotification("click-to-play-plugins", gTestBrowser);
+  ok(notification, "test deny permission: should have a click-to-play notification");
+  // Simulate clicking the "Deny Always" button.
+  notification.secondaryActions[1].callback();
+  gPluginScriptedFired = false;
+  prepareTest(testDenyPermissionPart2, gHttpTestRoot + "plugin_test_scriptedPopup1.html");
+}
+
+function testDenyPermissionPart2() {
+  var condition = function() gPluginScriptedFired;
+  waitForCondition(condition, testDenyPermissionPart3, "test deny permission: waited too long for PluginScripted event");
+}
+
+function testDenyPermissionPart3() {
+  var condition = function() gTestBrowser._pluginScriptedState == gPluginHandler.PLUGIN_SCRIPTED_STATE_DONE;
+  waitForCondition(condition, testDenyPermissionPart4, "test deny permission: waited too long for PluginScripted event handling");
+}
+
+function testDenyPermissionPart4() {
+  var notification = PopupNotifications.getNotification("click-to-play-plugins", gTestBrowser);
+  ok(!notification, "test deny permission: should not have a click-to-play notification");
+
+  var pluginHost = Components.classes["@mozilla.org/plugin/host;1"].getService(Components.interfaces.nsIPluginHost);
+  Services.perms.remove("127.0.0.1:8888", pluginHost.getPermissionStringForType("application/x-test"));
+
   runNextTest();
 }
 
@@ -99,7 +132,7 @@ function testExpectNoPopupPart1() {
 }
 
 function testExpectNoPopupPart2() {
-  var condition = function() gTestBrowser._pluginScriptedState == PLUGIN_SCRIPTED_STATE_DONE;
+  var condition = function() gTestBrowser._pluginScriptedState == gPluginHandler.PLUGIN_SCRIPTED_STATE_DONE;
   waitForCondition(condition, testExpectNoPopupPart3, "waited too long for PluginScripted event handling (" + getCurrentTestLocation() + ")");
 }
 
@@ -115,7 +148,10 @@ function testExpectPopupPart1() {
   var notification = PopupNotifications.getNotification("click-to-play-plugins", gTestBrowser);
   ok(notification, "should have a click-to-play notification (" + getCurrentTestLocation() + ")");
 
-  var condition = function() !notification.dismissed;
+  var condition = function() {
+    var notification = PopupNotifications.getNotification("click-to-play-plugins", gTestBrowser);
+    return !notification.dismissed;
+  };
   waitForCondition(condition, testExpectPopupPart2, "waited too long for popup notification to show (" + getCurrentTestLocation() + ")");
 }
 

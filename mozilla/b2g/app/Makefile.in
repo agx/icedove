@@ -8,6 +8,8 @@ srcdir    = @srcdir@
 VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
+USE_RCS_MK := 1
+include $(topsrcdir)/config/makefiles/rcs.mk
 
 PREF_JS_EXPORTS = $(srcdir)/b2g.js
 
@@ -16,9 +18,22 @@ DEFINES += -DENABLE_MARIONETTE=1
 endif
 
 ifndef LIBXUL_SDK
-PROGRAM=$(MOZ_APP_NAME)$(BIN_SUFFIX)
 
 CPPSRCS = nsBrowserApp.cpp
+
+ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
+CPPSRCS += BootAnimation.cpp
+LIBS += \
+  -lui \
+  -lhardware_legacy \
+  -lhardware \
+  -lcutils \
+  $(DEPTH)/media/libpng/$(LIB_PREFIX)mozpng.$(LIB_SUFFIX) \
+  $(MOZ_ZLIB_LIBS) \
+  $(NULL)
+OS_LDFLAGS += -Wl,--export-dynamic
+LOCAL_INCLUDES += -I$(ANDROID_SOURCE)/hardware/libhardware_legacy/include
+endif
 
 LOCAL_INCLUDES += -I$(topsrcdir)/toolkit/xre
 LOCAL_INCLUDES += -I$(topsrcdir)/xpcom/base
@@ -34,6 +49,13 @@ LIBS += \
   $(EXTRA_DSO_LIBS) \
   $(XPCOM_STANDALONE_GLUE_LDOPTS) \
   $(NULL)
+
+ifeq (gonk,$(MOZ_WIDGET_TOOLKIT))
+LIBS += \
+  -lbinder \
+  -lutils \
+  $(NULL)
+endif
 
 ifeq ($(OS_ARCH),WINNT)
 OS_LIBS += $(call EXPAND_LIBNAME,version)
@@ -59,15 +81,9 @@ DEFINES += \
   -DMOZ_UPDATER=$(MOZ_UPDATER) \
   $(NULL)
 
-# strip a trailing slash from the repo URL because it's not always present,
-# and we want to construct a working URL in buildconfig.html
-# make+shell+sed = awful
-_dollar=$$
-SOURCE_REPO := $(shell cd $(srcdir)/.. && hg showconfig paths.default 2>/dev/null | head -n1 | sed -e "s/^ssh:/http:/" -e "s/\/$(_dollar)//" )
-# extra sanity check for old versions of hg
-# that don't support showconfig
-ifeq (http,$(patsubst http%,http,$(SOURCE_REPO)))
-DEFINES += -DMOZ_SOURCE_REPO="$(SOURCE_REPO)"
+source_repo ?= $(call getSourceRepo,$(srcdir)/..)
+ifneq (,$(filter http%,$(source_repo)))
+  DEFINES += -DMOZ_SOURCE_REPO="$(source_repo)"
 endif
 
 ifeq ($(OS_ARCH),WINNT)
@@ -135,9 +151,13 @@ endif # SKIP_COPY_XULRUNNER
 
 	$(NSINSTALL) -D $(DIST)/bin/chrome/icons/default
 
+# Copy the app icon for b2g-desktop
 ifeq ($(OS_ARCH),WINNT)
 	cp $(srcdir)/$(APP_ICON).ico $(DIST)/bin/chrome/icons/default/$(APP_ICON).ico
 	$(REDIT_PATH)/redit$(HOST_BIN_SUFFIX) $(DIST)/bin/$(APP_BINARY) $(srcdir)/$(APP_ICON).ico
+	cp $(srcdir)/$(APP_ICON).ico $(DIST)/bin/chrome/icons/default/default.ico
+else ifneq (gonk,$(MOZ_WIDGET_TOOLKIT))
+	cp $(srcdir)/default.png $(DIST)/bin/chrome/icons/default/default.png
 endif
 
 endif

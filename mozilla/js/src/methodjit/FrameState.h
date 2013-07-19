@@ -1,12 +1,13 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined jsjaeger_framestate_h__ && defined JS_METHODJIT
 #define jsjaeger_framestate_h__
+
+#include "mozilla/PodOperations.h"
 
 #include "jsanalyze.h"
 #include "jsapi.h"
@@ -318,7 +319,7 @@ class FrameState
      * Pushes a number onto the operation stack.
      *
      * If asInt32 is set to true, then the FS will attempt to optimize
-     * syncing the type as int32. Only use this parameter when the fast-path
+     * syncing the type as int32_t. Only use this parameter when the fast-path
      * guaranteed that the stack slot was guarded to be an int32_t originally.
      *
      * For example, checking LHS and RHS as ints guarantees that if the LHS
@@ -696,11 +697,10 @@ class FrameState
 
     /* Compiler-owned metadata about stack entries, reset on push/pop/copy. */
     struct StackEntryExtra {
-        bool initArray;
         JSObject *initObject;
         types::StackTypeSet *types;
         JSAtom *name;
-        void reset() { PodZero(this); }
+        void reset() { mozilla::PodZero(this); }
     };
     StackEntryExtra& extra(const FrameEntry *fe) {
         JS_ASSERT(fe >= a->args && fe < a->sp);
@@ -826,7 +826,7 @@ class FrameState
 #ifdef DEBUG
     void assertValidRegisterState() const;
 #else
-    inline void assertValidRegisterState() const {};
+    inline void assertValidRegisterState() const {}
 #endif
 
     // Return an address, relative to the StackFrame, that represents where
@@ -1043,7 +1043,7 @@ class FrameState
     /* State for the active stack frame. */
 
     struct ActiveFrame {
-        ActiveFrame() { PodZero(this); }
+        ActiveFrame() { mozilla::PodZero(this); }
 
         ActiveFrame *parent;
 

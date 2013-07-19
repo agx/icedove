@@ -1,6 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -8,6 +7,7 @@
 #if !defined jslogic_h__ && defined JS_METHODJIT
 #define jslogic_h__
 
+#include "jsfuninlines.h"
 #include "MethodJIT.h"
 
 namespace js {
@@ -26,8 +26,9 @@ void JS_FASTCALL NewInitObject(VMFrame &f, JSObject *base);
 void JS_FASTCALL Trap(VMFrame &f, uint32_t trapTypes);
 void JS_FASTCALL DebuggerStatement(VMFrame &f, jsbytecode *pc);
 void JS_FASTCALL Interrupt(VMFrame &f, jsbytecode *pc);
+void JS_FASTCALL TriggerIonCompile(VMFrame &f);
 void JS_FASTCALL RecompileForInline(VMFrame &f);
-void JS_FASTCALL InitElem(VMFrame &f, uint32_t last);
+void JS_FASTCALL InitElem(VMFrame &f);
 void JS_FASTCALL InitProp(VMFrame &f, PropertyName *name);
 
 void JS_FASTCALL HitStackQuota(VMFrame &f);
@@ -56,15 +57,22 @@ void JS_FASTCALL ScriptProbeOnlyEpilogue(VMFrame &f);
  *       to JM native code. Then all fields are non-NULL.
  */
 struct UncachedCallResult {
-    JSFunction *fun;          // callee function
-    void       *codeAddr;     // code address of compiled callee function
-    bool       unjittable;    // did we try to JIT and fail?
+    RootedFunction fun;        // callee function
+    RootedFunction original;   // NULL if fun is not a callsite clone, else
+                               // points to the original function.
+    void           *codeAddr;  // code address of compiled callee function
+    bool           unjittable; // did we try to JIT and fail?
+
+    UncachedCallResult(JSContext *cx) : fun(cx), original(cx) {}
 
     void init() {
         fun = NULL;
+        original = NULL;
         codeAddr = NULL;
         unjittable = false;
     }
+    inline bool setFunction(JSContext *cx, CallArgs &args,
+                            HandleScript callScript, jsbytecode *callPc);
 };
 
 /*
@@ -72,18 +80,18 @@ struct UncachedCallResult {
  * These functions either execute the function, return a native code
  * pointer that can be used to call the function, or throw.
  */
-void UncachedCallHelper(VMFrame &f, uint32_t argc, bool lowered, UncachedCallResult *ucr);
-void UncachedNewHelper(VMFrame &f, uint32_t argc, UncachedCallResult *ucr);
+void UncachedCallHelper(VMFrame &f, uint32_t argc, bool lowered, UncachedCallResult &ucr);
+void UncachedNewHelper(VMFrame &f, uint32_t argc, UncachedCallResult &ucr);
 
 void JS_FASTCALL CreateThis(VMFrame &f, JSObject *proto);
 void JS_FASTCALL Throw(VMFrame &f);
 
-void * JS_FASTCALL LookupSwitch(VMFrame &f, jsbytecode *pc);
 void * JS_FASTCALL TableSwitch(VMFrame &f, jsbytecode *origPc);
 
 void JS_FASTCALL BindName(VMFrame &f, PropertyName *name);
 JSObject * JS_FASTCALL BindGlobalName(VMFrame &f);
 void JS_FASTCALL SetName(VMFrame &f, PropertyName *name);
+void JS_FASTCALL IntrinsicName(VMFrame &f, PropertyName *name);
 void JS_FASTCALL Name(VMFrame &f);
 void JS_FASTCALL GetProp(VMFrame &f, PropertyName *name);
 void JS_FASTCALL GetPropNoCache(VMFrame &f, PropertyName *name);

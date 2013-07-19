@@ -15,7 +15,7 @@
 
 // This is the schema version. Update it at any schema change and add a
 // corresponding migrateVxx method below.
-#define DATABASE_SCHEMA_VERSION 21
+#define DATABASE_SCHEMA_VERSION 23
 
 // Fired after Places inited.
 #define TOPIC_PLACES_INIT_COMPLETE "places-init-complete"
@@ -272,6 +272,8 @@ protected:
   nsresult MigrateV19Up();
   nsresult MigrateV20Up();
   nsresult MigrateV21Up();
+  nsresult MigrateV22Up();
+  nsresult MigrateV23Up();
 
   nsresult UpdateBookmarkRootTitles();
   nsresult CheckAndUpdateGUIDs();
@@ -295,7 +297,6 @@ private:
   mutable StatementCache mAsyncThreadStatements;
 
   int32_t mDBPageSize;
-  enum JournalMode mCurrentJournalMode;
   uint16_t mDatabaseStatus;
   bool mShuttingDown;
 };

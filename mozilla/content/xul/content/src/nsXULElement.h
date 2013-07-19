@@ -19,13 +19,11 @@
 #include "nsINodeInfo.h"
 #include "nsIControllers.h"
 #include "nsIDOMElement.h"
-#include "nsIDOMEventTarget.h"
 #include "nsIDOMXULElement.h"
 #include "nsIDOMXULMultSelectCntrlEl.h"
 #include "nsEventListenerManager.h"
 #include "nsIRDFCompositeDataSource.h"
 #include "nsIRDFResource.h"
-#include "nsBindingManager.h"
 #include "nsIURI.h"
 #include "nsIXULTemplateBuilder.h"
 #include "nsIBoxObject.h"
@@ -34,9 +32,9 @@
 #include "nsGkAtoms.h"
 #include "nsAutoPtr.h"
 #include "nsStyledElement.h"
-#include "nsDOMScriptObjectHolder.h"
 #include "nsIFrameLoader.h"
 #include "jspubtd.h"
+#include "nsFrameLoader.h"
 
 class nsIDocument;
 class nsString;
@@ -186,6 +184,9 @@ public:
 
     void Unlink();
 
+    // Trace all scripts held by this element and its children.
+    void TraceAllScripts(JSTracer* aTrc);
+
     nsPrototypeArray         mChildren;
 
     nsCOMPtr<nsINodeInfo>    mNodeInfo;           // [OWNER]
@@ -197,7 +198,11 @@ public:
     nsXULPrototypeAttribute* mAttributes;         // [OWNER]
 };
 
-class nsXULDocument;
+namespace mozilla {
+namespace dom {
+class XULDocument;
+} // namespace dom
+} // namespace mozilla
 
 class nsXULPrototypeScript : public nsXULPrototypeNode
 {
@@ -229,27 +234,28 @@ public:
 
     void UnlinkJSObjects();
 
-    void Set(nsScriptObjectHolder<JSScript>& aHolder)
-    {
-        Set(aHolder.get());
-    }
     void Set(JSScript* aObject);
 
-    struct ScriptObjectHolder
+    JSScript *GetScriptObject()
     {
-        ScriptObjectHolder() : mObject(nullptr)
-        {
+        return mScriptObject;
+    }
+
+    void TraceScriptObject(JSTracer* aTrc)
+    {
+        if (mScriptObject) {
+            JS_CallScriptTracer(aTrc, &mScriptObject, "active window XUL prototype script");
         }
-        JSScript* mObject;
-    };
+    }
 
     nsCOMPtr<nsIURI>         mSrcURI;
     uint32_t                 mLineNo;
     bool                     mSrcLoading;
     bool                     mOutOfLine;
-    nsXULDocument*           mSrcLoadWaiters;   // [OWNER] but not COMPtr
+    mozilla::dom::XULDocument* mSrcLoadWaiters;   // [OWNER] but not COMPtr
     uint32_t                 mLangVersion;
-    ScriptObjectHolder       mScriptObject;
+private:
+    JSScript*                mScriptObject;
 };
 
 class nsXULPrototypeText : public nsXULPrototypeNode
@@ -317,36 +323,38 @@ public:
 
  */
 
-#define XUL_ELEMENT_TEMPLATE_GENERATED (1 << ELEMENT_TYPE_SPECIFIC_BITS_OFFSET)
+#define XUL_ELEMENT_FLAG_BIT(n_) NODE_FLAG_BIT(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + (n_))
 
-// Make sure we have space for our bit
-PR_STATIC_ASSERT(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET < 32);
+// XUL element specific bits
+enum {
+  XUL_ELEMENT_TEMPLATE_GENERATED =        XUL_ELEMENT_FLAG_BIT(0),
+  XUL_ELEMENT_HAS_CONTENTMENU_LISTENER =  XUL_ELEMENT_FLAG_BIT(1),
+  XUL_ELEMENT_HAS_POPUP_LISTENER =        XUL_ELEMENT_FLAG_BIT(2)
+};
+
+// Make sure we have space for our bits
+PR_STATIC_ASSERT((ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + 2) < 32);
+
+#undef XUL_ELEMENT_FLAG_BIT
 
 class nsScriptEventHandlerOwnerTearoff;
 
-class nsXULElement : public nsStyledElement, public nsIDOMXULElement
+class nsXULElement : public nsStyledElement,
+                     public nsIDOMXULElement
 {
-public:
-
-    /** Typesafe, non-refcounting cast from nsIContent.  Cheaper than QI. **/
-    static nsXULElement* FromContent(nsIContent *aContent)
-    {
-        if (aContent->IsXUL())
-            return static_cast<nsXULElement*>(aContent);
-        return nullptr;
-    }
-
 public:
     nsXULElement(already_AddRefed<nsINodeInfo> aNodeInfo);
 
     static nsresult
     Create(nsXULPrototypeElement* aPrototype, nsIDocument* aDocument,
-           bool aIsScriptable, mozilla::dom::Element** aResult);
+           bool aIsScriptable, bool aIsRoot, mozilla::dom::Element** aResult);
+
+    NS_IMPL_FROMCONTENT(nsXULElement, kNameSpaceID_XUL)
 
     // nsISupports
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED_NO_UNLINK(nsXULElement,
-                                                       nsGenericElement)
+                                                       mozilla::dom::Element)
 
     // nsINode
     virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
@@ -389,10 +397,13 @@ public:
     bool GetTemplateGenerated() { return HasFlag(XUL_ELEMENT_TEMPLATE_GENERATED); }
 
     // nsIDOMNode
-    NS_FORWARD_NSIDOMNODE(nsGenericElement::)
+    NS_FORWARD_NSIDOMNODE_TO_NSINODE
+    // And since that shadowed GetParentElement with the XPCOM
+    // signature, pull in the one we care about.
+    using nsStyledElement::GetParentElement;
 
     // nsIDOMElement
-    NS_FORWARD_NSIDOMELEMENT(nsGenericElement::)
+    NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
 
     // nsIDOMXULElement
     NS_DECL_NSIDOMXULELEMENT
@@ -401,22 +412,182 @@ public:
     virtual nsEventStates IntrinsicState() const;
 
     nsresult GetFrameLoader(nsIFrameLoader** aFrameLoader);
-    already_AddRefed<nsFrameLoader> GetFrameLoader();
     nsresult SwapFrameLoaders(nsIFrameLoaderOwner* aOtherOwner);
 
     virtual void RecompileScriptEventListeners();
 
     // This function should ONLY be used by BindToTree implementations.
     // The function exists solely because XUL elements store the binding
-    // parent as a member instead of in the slots, as nsGenericElement does.
+    // parent as a member instead of in the slots, as Element does.
     void SetXULBindingParent(nsIContent* aBindingParent)
     {
       mBindingParent = aBindingParent;
     }
 
-    virtual nsXPCClassInfo* GetClassInfo();
-
     virtual nsIDOMNode* AsDOMNode() { return this; }
+
+    virtual bool IsEventAttributeName(nsIAtom* aName) MOZ_OVERRIDE;
+
+    void SetXULAttr(nsIAtom* aName, const nsAString& aValue,
+                    mozilla::ErrorResult& aError)
+    {
+        aError = SetAttr(kNameSpaceID_None, aName, aValue, true);
+    }
+    void SetXULBoolAttr(nsIAtom* aName, bool aValue)
+    {
+        if (aValue) {
+            SetAttr(kNameSpaceID_None, aName, NS_LITERAL_STRING("true"), true);
+        } else {
+            UnsetAttr(kNameSpaceID_None, aName, true);
+        }
+    }
+
+    // WebIDL API
+    // The XPCOM getter is fine for our string attributes.
+    // The XPCOM setter is fine for our bool attributes.
+    void SetClassName(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::_class, aValue, rv);
+    }
+    void SetAlign(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::align, aValue, rv);
+    }
+    void SetDir(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::dir, aValue, rv);
+    }
+    void SetFlex(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::flex, aValue, rv);
+    }
+    void SetFlexGroup(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::flexgroup, aValue, rv);
+    }
+    void SetOrdinal(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::ordinal, aValue, rv);
+    }
+    void SetOrient(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::orient, aValue, rv);
+    }
+    void SetPack(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::pack, aValue, rv);
+    }
+    bool Hidden() const
+    {
+        return BoolAttrIsTrue(nsGkAtoms::hidden);
+    }
+    bool Collapsed() const
+    {
+        return BoolAttrIsTrue(nsGkAtoms::collapsed);
+    }
+    void SetObserves(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::observes, aValue, rv);
+    }
+    void SetMenu(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::menu, aValue, rv);
+    }
+    void SetContextMenu(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::contextmenu, aValue, rv);
+    }
+    void SetTooltip(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::tooltip, aValue, rv);
+    }
+    void SetWidth(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::width, aValue, rv);
+    }
+    void SetHeight(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::height, aValue, rv);
+    }
+    void SetMinWidth(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::minwidth, aValue, rv);
+    }
+    void SetMinHeight(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::minheight, aValue, rv);
+    }
+    void SetMaxWidth(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::maxwidth, aValue, rv);
+    }
+    void SetMaxHeight(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::maxheight, aValue, rv);
+    }
+    void SetPersist(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::persist, aValue, rv);
+    }
+    void SetLeft(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::left, aValue, rv);
+    }
+    void SetTop(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::top, aValue, rv);
+    }
+    void SetDatasources(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::datasources, aValue, rv);
+    }
+    void SetRef(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::ref, aValue, rv);
+    }
+    void SetTooltipText(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::tooltiptext, aValue, rv);
+    }
+    void SetStatusText(const nsAString& aValue, mozilla::ErrorResult& rv)
+    {
+        SetXULAttr(nsGkAtoms::statustext, aValue, rv);
+    }
+    bool AllowEvents() const
+    {
+        return BoolAttrIsTrue(nsGkAtoms::allowevents);
+    }
+    already_AddRefed<nsIRDFCompositeDataSource> GetDatabase();
+    already_AddRefed<nsIXULTemplateBuilder> GetBuilder();
+    already_AddRefed<nsIRDFResource> GetResource(mozilla::ErrorResult& rv);
+    nsIControllers* GetControllers(mozilla::ErrorResult& rv);
+    already_AddRefed<nsIBoxObject> GetBoxObject(mozilla::ErrorResult& rv);
+    void Focus(mozilla::ErrorResult& rv);
+    void Blur(mozilla::ErrorResult& rv);
+    void Click(mozilla::ErrorResult& rv);
+    // The XPCOM DoCommand never fails, so it's OK for us.
+    already_AddRefed<nsINodeList>
+      GetElementsByAttribute(const nsAString& aAttribute,
+                             const nsAString& aValue);
+    already_AddRefed<nsINodeList>
+      GetElementsByAttributeNS(const nsAString& aNamespaceURI,
+                               const nsAString& aAttribute,
+                               const nsAString& aValue,
+                               mozilla::ErrorResult& rv);
+    // Style() inherited from nsStyledElement
+    already_AddRefed<nsFrameLoader> GetFrameLoader();
+    void SwapFrameLoaders(nsXULElement& aOtherOwner, mozilla::ErrorResult& rv);
+
+    // For XUL, the parent is the parent element, if any
+    nsINode* GetParentObject() const
+    {
+        Element* parent = GetParentElement();
+        if (parent) {
+            return parent;
+        }
+        return nsStyledElement::GetParentObject();
+    }
+
 protected:
 
     // This can be removed if EnsureContentsGenerated dies.
@@ -435,7 +606,7 @@ protected:
 
     nsresult AddPopupListener(nsIAtom* aName);
 
-    class nsXULSlots : public nsGenericElement::nsDOMSlots
+    class nsXULSlots : public mozilla::dom::Element::nsDOMSlots
     {
     public:
         nsXULSlots();
@@ -505,7 +676,7 @@ protected:
     }
 
     void UnregisterAccessKey(const nsAString& aOldValue);
-    bool BoolAttrIsTrue(nsIAtom* aName);
+    bool BoolAttrIsTrue(nsIAtom* aName) const;
 
     friend nsresult
     NS_NewXULElement(nsIContent** aResult, nsINodeInfo *aNodeInfo);
@@ -514,7 +685,7 @@ protected:
 
     static already_AddRefed<nsXULElement>
     Create(nsXULPrototypeElement* aPrototype, nsINodeInfo *aNodeInfo,
-           bool aIsScriptable);
+           bool aIsScriptable, bool aIsRoot);
 
     bool IsReadWriteTextElement() const
     {
@@ -524,6 +695,11 @@ protected:
             (tag == nsGkAtoms::textbox || tag == nsGkAtoms::textarea) &&
             !HasAttr(kNameSpaceID_None, nsGkAtoms::readonly);
     }
+
+    virtual JSObject* WrapNode(JSContext *aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+
+    void MaybeUpdatePrivateLifetime();
 };
 
 #endif // nsXULElement_h__

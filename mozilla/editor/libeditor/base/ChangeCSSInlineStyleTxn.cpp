@@ -20,22 +20,19 @@
 #include "nsString.h"                   // for nsAutoString, nsString, etc
 #include "nsUnicharUtils.h"
 #include "nsXPCOM.h"                    // for NS_Free
-#include "prtypes.h"                    // for PRUnichar, uint32_t
 
 class nsIEditor;
 
 #define kNullCh (PRUnichar('\0'))
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(ChangeCSSInlineStyleTxn)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(ChangeCSSInlineStyleTxn,
                                                 EditTxn)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mElement)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mElement)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(ChangeCSSInlineStyleTxn,
                                                   EditTxn)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mElement)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElement)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(ChangeCSSInlineStyleTxn)

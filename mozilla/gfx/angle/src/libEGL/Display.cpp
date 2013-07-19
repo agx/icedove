@@ -70,7 +70,8 @@ egl::Display *Display::getDisplay(EGLNativeDisplayType displayId)
 Display::Display(EGLNativeDisplayType displayId, HDC deviceContext, bool software) : mDc(deviceContext)
 {
     mD3d9Module = NULL;
-    
+    mD3dCompilerModule = NULL;
+
     mD3d9 = NULL;
     mD3d9Ex = NULL;
     mDevice = NULL;
@@ -127,6 +128,31 @@ bool Display::initialize()
 
     typedef HRESULT (WINAPI *Direct3DCreate9ExFunc)(UINT, IDirect3D9Ex**);
     Direct3DCreate9ExFunc Direct3DCreate9ExPtr = reinterpret_cast<Direct3DCreate9ExFunc>(GetProcAddress(mD3d9Module, "Direct3DCreate9Ex"));
+
+  #if defined(ANGLE_PRELOADED_D3DCOMPILER_MODULE_NAMES)
+      // Find a D3DCompiler module that had already been loaded based on a predefined list of versions.
+      static TCHAR* d3dCompilerNames[] = ANGLE_PRELOADED_D3DCOMPILER_MODULE_NAMES;
+  
+      for (int i = 0; i < sizeof(d3dCompilerNames) / sizeof(*d3dCompilerNames); ++i)
+      {
+          if (GetModuleHandleEx(0, d3dCompilerNames[i], &mD3dCompilerModule))
+          {
+              break;
+          }
+      }
+  #else
+      // Load the version of the D3DCompiler DLL associated with the Direct3D version ANGLE was built with.
+      mD3dCompilerModule = LoadLibrary(D3DCOMPILER_DLL);
+  #endif  // ANGLE_PRELOADED_D3DCOMPILER_MODULE_NAMES
+  
+      if (!mD3dCompilerModule)
+      {
+          terminate();
+          return false;
+      }
+  
+      mD3DCompileFunc = reinterpret_cast<D3DCompileFunc>(GetProcAddress(mD3dCompilerModule, "D3DCompile"));
+      ASSERT(mD3DCompileFunc);
 
     // Use Direct3D9Ex if available. Among other things, this version is less
     // inclined to report a lost context, for example when the user switches
@@ -196,6 +222,12 @@ bool Display::initialize()
 
         mD3d9->GetAdapterIdentifier(mAdapter, 0, &mAdapterIdentifier);
 
+        // ATI cards on XP have problems with non-power-of-two textures.
+        mSupportsNonPower2Textures = !(mDeviceCaps.TextureCaps & D3DPTEXTURECAPS_POW2) &&
+           !(mDeviceCaps.TextureCaps & D3DPTEXTURECAPS_CUBEMAP_POW2) &&
+           !(mDeviceCaps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL) &&
+           !(getComparableOSVersion() < versionWindowsVista && mAdapterIdentifier.VendorId == VENDOR_ID_AMD);
+
         const D3DFORMAT renderTargetFormats[] =
         {
             D3DFMT_A1R5G5B5,
@@ -225,7 +257,7 @@ bool Display::initialize()
 
         ConfigSet configSet;
 
-        for (int formatIndex = 0; formatIndex < sizeof(renderTargetFormats) / sizeof(D3DFORMAT); formatIndex++)
+        for (unsigned int formatIndex = 0; formatIndex < sizeof(renderTargetFormats) / sizeof(D3DFORMAT); formatIndex++)
         {
             D3DFORMAT renderTargetFormat = renderTargetFormats[formatIndex];
 
@@ -233,7 +265,7 @@ bool Display::initialize()
 
             if (SUCCEEDED(result))
             {
-                for (int depthStencilIndex = 0; depthStencilIndex < sizeof(depthStencilFormats) / sizeof(D3DFORMAT); depthStencilIndex++)
+                for (unsigned int depthStencilIndex = 0; depthStencilIndex < sizeof(depthStencilFormats) / sizeof(D3DFORMAT); depthStencilIndex++)
                 {
                     D3DFORMAT depthStencilFormat = depthStencilFormats[depthStencilIndex];
                     HRESULT result = D3D_OK;
@@ -360,6 +392,12 @@ void Display::terminate()
     if (mD3d9Module)
     {
         mD3d9Module = NULL;
+    }
+
+    if (mD3dCompilerModule)
+    {
+        FreeLibrary(mD3dCompilerModule);
+        mD3dCompilerModule = NULL;
     }
 }
 
@@ -1230,6 +1268,11 @@ IDirect3DVertexShader9 *Display::createVertexShader(const DWORD *function, size_
     return mVertexShaderCache.create(function, length);
 }
 
+HRESULT Display::compileShaderSource(const char* hlsl, const char* sourceName, const char* profile, DWORD flags, ID3DBlob** binary, ID3DBlob** errorMessage)
+{
+    return mD3DCompileFunc(hlsl, strlen(hlsl), sourceName, NULL, NULL, "main", profile, flags, 0, binary, errorMessage);
+}
+
 IDirect3DPixelShader9 *Display::createPixelShader(const DWORD *function, size_t length)
 {
     return mPixelShaderCache.create(function, length);
@@ -1254,9 +1297,7 @@ bool Display::getVertexTextureSupport() const
 
 bool Display::getNonPower2TextureSupport() const
 {
-    return !(mDeviceCaps.TextureCaps & D3DPTEXTURECAPS_POW2) &&
-           !(mDeviceCaps.TextureCaps & D3DPTEXTURECAPS_CUBEMAP_POW2) &&
-           !(mDeviceCaps.TextureCaps & D3DPTEXTURECAPS_NONPOW2CONDITIONAL);
+    return mSupportsNonPower2Textures;
 }
 
 bool Display::getOcclusionQuerySupport() const

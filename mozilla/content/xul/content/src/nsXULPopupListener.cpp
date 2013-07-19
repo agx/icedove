@@ -24,7 +24,6 @@
 #include "nsIDOMWindow.h"
 #include "nsIDOMXULDocument.h"
 #include "nsIDocument.h"
-#include "nsIDOMEventTarget.h"
 #include "nsServiceManagerUtils.h"
 #include "nsIPrincipal.h"
 #include "nsIScriptSecurityManager.h"
@@ -33,18 +32,21 @@
 #include "nsHTMLReflowState.h"
 #include "nsIObjectLoadingContent.h"
 #include "mozilla/Preferences.h"
-#include "mozilla/dom/Element.h"
+#include "mozilla/dom/EventTarget.h"
+#include "mozilla/dom/FragmentOrElement.h"
 
 // for event firing in context menus
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsFocusManager.h"
 #include "nsPIDOMWindow.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsError.h"
 #include "nsMenuFrame.h"
+#include "nsDOMEvent.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 // on win32 and os/2, context menus come up on mouse up. On other platforms,
 // they appear on mouse down. Certain bits of code care about this difference.
@@ -52,7 +54,8 @@ using namespace mozilla;
 #define NS_CONTEXT_MENU_IS_MOUSEUP 1
 #endif
 
-nsXULPopupListener::nsXULPopupListener(nsIDOMElement *aElement, bool aIsContext)
+nsXULPopupListener::nsXULPopupListener(mozilla::dom::Element* aElement,
+                                       bool aIsContext)
   : mElement(aElement), mPopupContent(nullptr), mIsContext(aIsContext)
 {
 }
@@ -65,6 +68,25 @@ nsXULPopupListener::~nsXULPopupListener(void)
 NS_IMPL_CYCLE_COLLECTION_2(nsXULPopupListener, mElement, mPopupContent)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsXULPopupListener)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXULPopupListener)
+
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsXULPopupListener)
+  // If the owner, mElement, can be skipped, so can we.
+  if (tmp->mElement) {
+    return mozilla::dom::FragmentOrElement::CanSkip(tmp->mElement, true);
+  }
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_END
+
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_IN_CC_BEGIN(nsXULPopupListener)
+  if (tmp->mElement) {
+    return mozilla::dom::FragmentOrElement::CanSkipInCC(tmp->mElement);
+  }
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_IN_CC_END
+
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_BEGIN(nsXULPopupListener)
+  if (tmp->mElement) {
+    return mozilla::dom::FragmentOrElement::CanSkipThis(tmp->mElement);
+  }
+NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsXULPopupListener)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEventListener)
@@ -93,8 +115,7 @@ nsXULPopupListener::HandleEvent(nsIDOMEvent* aEvent)
   }
 
   // Get the node that was clicked on.
-  nsCOMPtr<nsIDOMEventTarget> target;
-  mouseEvent->GetTarget(getter_AddRefs(target));
+  EventTarget* target = mouseEvent->InternalDOMEvent()->GetTarget();
   nsCOMPtr<nsIDOMNode> targetNode = do_QueryInterface(target);
 
   if (!targetNode && mIsContext) {
@@ -212,7 +233,7 @@ nsXULPopupListener::FireFocusOnTargetContent(nsIDOMNode* aTargetNode)
     nsIFrame* targetFrame = content->GetPrimaryFrame();
     if (!targetFrame) return NS_ERROR_FAILURE;
 
-    const nsStyleUserInterface* ui = targetFrame->GetStyleUserInterface();
+    const nsStyleUserInterface* ui = targetFrame->StyleUserInterface();
     bool suppressBlur = (ui->mUserFocus == NS_STYLE_USER_FOCUS_IGNORE);
 
     nsCOMPtr<nsIDOMElement> element;
@@ -279,8 +300,8 @@ GetImmediateChild(nsIContent* aContent, nsIAtom *aTag)
        child;
        child = child->GetNextSibling()) {
     if (child->Tag() == aTag) {
-      NS_ADDREF(child);
-      return child;
+      nsCOMPtr<nsIContent> ret = child;
+      return ret.forget();
     }
   }
 
@@ -307,44 +328,37 @@ nsXULPopupListener::LaunchPopup(nsIDOMEvent* aEvent, nsIContent* aTargetContent)
 {
   nsresult rv = NS_OK;
 
-  nsAutoString type(NS_LITERAL_STRING("popup"));
-  if (mIsContext)
-    type.AssignLiteral("context");
+  nsIAtom* type = mIsContext ? nsGkAtoms::context : nsGkAtoms::popup;
 
   nsAutoString identifier;
-  mElement->GetAttribute(type, identifier);
+  mElement->GetAttr(kNameSpaceID_None, type, identifier);
 
   if (identifier.IsEmpty()) {
-    if (type.EqualsLiteral("popup"))
-      mElement->GetAttribute(NS_LITERAL_STRING("menu"), identifier);
-    else if (type.EqualsLiteral("context"))
-      mElement->GetAttribute(NS_LITERAL_STRING("contextmenu"), identifier);
+    if (type == nsGkAtoms::popup) {
+      mElement->GetAttr(kNameSpaceID_None, nsGkAtoms::menu, identifier);
+    } else {
+      mElement->GetAttr(kNameSpaceID_None, nsGkAtoms::contextmenu, identifier);
+    }
     if (identifier.IsEmpty())
       return rv;
   }
 
   // Try to find the popup content and the document.
-  nsCOMPtr<nsIContent> content = do_QueryInterface(mElement);
-  nsCOMPtr<nsIDocument> document = content->GetDocument();
-
-  // Turn the document into a DOM document so we can use getElementById
-  nsCOMPtr<nsIDOMDocument> domDocument = do_QueryInterface(document);
-  if (!domDocument) {
-    NS_ERROR("Popup attached to an element that isn't in XUL!");
+  nsCOMPtr<nsIDocument> document = mElement->GetDocument();
+  if (!document) {
+    NS_WARNING("No document!");
     return NS_ERROR_FAILURE;
   }
 
   // Handle the _child case for popups and context menus
-  nsCOMPtr<nsIDOMElement> popupElement;
-
+  nsCOMPtr<nsIContent> popup;
   if (identifier.EqualsLiteral("_child")) {
-    nsCOMPtr<nsIContent> popup = GetImmediateChild(content, nsGkAtoms::menupopup);
-    if (popup)
-      popupElement = do_QueryInterface(popup);
-    else {
-      nsCOMPtr<nsIDOMDocumentXBL> nsDoc(do_QueryInterface(domDocument));
+    popup = GetImmediateChild(mElement, nsGkAtoms::menupopup);
+    if (!popup) {
+      nsCOMPtr<nsIDOMDocumentXBL> nsDoc(do_QueryInterface(document));
       nsCOMPtr<nsIDOMNodeList> list;
-      nsDoc->GetAnonymousNodes(mElement, getter_AddRefs(list));
+      nsCOMPtr<nsIDOMElement> el = do_QueryInterface(mElement);
+      nsDoc->GetAnonymousNodes(el, getter_AddRefs(list));
       if (list) {
         uint32_t ctr,listLength;
         nsCOMPtr<nsIDOMNode> node;
@@ -355,15 +369,13 @@ nsXULPopupListener::LaunchPopup(nsIDOMEvent* aEvent, nsIContent* aTargetContent)
 
           if (childContent->NodeInfo()->Equals(nsGkAtoms::menupopup,
                                                kNameSpaceID_XUL)) {
-            popupElement = do_QueryInterface(childContent);
+            popup.swap(childContent);
             break;
           }
         }
       }
     }
-  }
-  else if (NS_FAILED(rv = domDocument->GetElementById(identifier,
-                                              getter_AddRefs(popupElement)))) {
+  } else if (!(popup = document->GetElementById(identifier))) {
     // Use getElementById to obtain the popup content and gracefully fail if 
     // we didn't find any popup content in the document. 
     NS_ERROR("GetElementById had some kind of spasm.");
@@ -371,12 +383,11 @@ nsXULPopupListener::LaunchPopup(nsIDOMEvent* aEvent, nsIContent* aTargetContent)
   }
 
   // return if no popup was found or the popup is the element itself.
-  if ( !popupElement || popupElement == mElement)
+  if (!popup || popup == mElement)
     return NS_OK;
 
   // Submenus can't be used as context menus or popups, bug 288763.
   // Similar code also in nsXULTooltipListener::GetTooltipFor.
-  nsCOMPtr<nsIContent> popup = do_QueryInterface(popupElement);
   nsIContent* parent = popup->GetParent();
   if (parent) {
     nsMenuFrame* menu = do_QueryFrame(parent->GetPrimaryFrame());
@@ -397,7 +408,7 @@ nsXULPopupListener::LaunchPopup(nsIDOMEvent* aEvent, nsIContent* aTargetContent)
       (mPopupContent->HasAttr(kNameSpaceID_None, nsGkAtoms::position) ||
        (mPopupContent->HasAttr(kNameSpaceID_None, nsGkAtoms::popupanchor) &&
         mPopupContent->HasAttr(kNameSpaceID_None, nsGkAtoms::popupalign)))) {
-    pm->ShowPopup(mPopupContent, content, EmptyString(), 0, 0,
+    pm->ShowPopup(mPopupContent, mElement, EmptyString(), 0, 0,
                   false, true, false, aEvent);
   }
   else {

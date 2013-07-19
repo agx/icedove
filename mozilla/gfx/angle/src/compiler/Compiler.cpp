@@ -4,6 +4,7 @@
 // found in the LICENSE file.
 //
 
+#include "compiler/ArrayBoundsClamper.h"
 #include "compiler/BuiltInFunctionEmulator.h"
 #include "compiler/DetectRecursion.h"
 #include "compiler/ForLoopUnroll.h"
@@ -124,6 +125,8 @@ bool TCompiler::Init(const ShBuiltInResources& resources)
         return false;
     InitExtensionBehavior(resources, extensionBehavior);
 
+    hashFunction = resources.HashFunction;
+
     return true;
 }
 
@@ -190,10 +193,15 @@ bool TCompiler::compile(const char* const shaderStrings[],
         if (success && (compileOptions & SH_EMULATE_BUILT_IN_FUNCTIONS))
             builtInFunctionEmulator.MarkBuiltInFunctionsForEmulation(root);
 
+        // Clamping uniform array bounds needs to happen after validateLimitations pass.
+        if (success && (compileOptions & SH_CLAMP_INDIRECT_ARRAY_BOUNDS))
+            arrayBoundsClamper.MarkIndirectArrayBoundsForClamping(root);
+
         // Call mapLongVariableNames() before collectAttribsUniforms() so in
         // collectAttribsUniforms() we already have the mapped symbol names and
         // we could composite mapped and original variable names.
-        if (success && (compileOptions & SH_MAP_LONG_VARIABLE_NAMES))
+        // Also, if we hash all the names, then no need to do this for long names.
+        if (success && (compileOptions & SH_MAP_LONG_VARIABLE_NAMES) && hashFunction == NULL)
             mapLongVariableNames(root);
 
         if (success && (compileOptions & SH_ATTRIBUTES_UNIFORMS)) {
@@ -234,6 +242,7 @@ bool TCompiler::InitBuiltInSymbolTable(const ShBuiltInResources& resources)
 
 void TCompiler::clearResults()
 {
+    arrayBoundsClamper.Cleanup();
     infoSink.info.erase();
     infoSink.obj.erase();
     infoSink.debug.erase();
@@ -242,6 +251,8 @@ void TCompiler::clearResults()
     uniforms.clear();
 
     builtInFunctionEmulator.Cleanup();
+
+    nameMap.clear();
 }
 
 bool TCompiler::detectRecursion(TIntermNode* root)
@@ -317,7 +328,7 @@ bool TCompiler::enforceVertexShaderTimingRestrictions(TIntermNode* root)
 
 void TCompiler::collectAttribsUniforms(TIntermNode* root)
 {
-    CollectAttribsUniforms collect(attribs, uniforms);
+    CollectAttribsUniforms collect(attribs, uniforms, hashFunction);
     root->traverse(&collect);
 }
 
@@ -348,3 +359,9 @@ const BuiltInFunctionEmulator& TCompiler::getBuiltInFunctionEmulator() const
 {
     return builtInFunctionEmulator;
 }
+
+const ArrayBoundsClamper& TCompiler::getArrayBoundsClamper() const
+{
+    return arrayBoundsClamper;
+}
+

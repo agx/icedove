@@ -38,7 +38,7 @@ PromptService.prototype = {
     let doc = this.getDocument();
     if (!doc) {
       let fallback = this._getFallbackService();
-      return fallback.getPrompt(domWin, iid);
+      return fallback.QueryInterface(Ci.nsIPromptFactory).getPrompt(domWin, iid);
     }
 
     let p = new Prompt(domWin, doc);
@@ -127,18 +127,31 @@ Prompt.prototype = {
     if (aCheckMsg)
       aInputs.push({ type: "checkbox", label: PromptUtils.cleanUpLabel(aCheckMsg), checked: aCheckState.value });
 
-    if (this._domWin)
+    let callerWin;
+    if (this._domWin) {
       PromptUtils.fireDialogEvent(this._domWin, "DOMWillOpenModalDialog");
+      let winUtils = this._domWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      callerWin = winUtils.enterModalStateWithWindow();
+    }
 
     let msg = { type: "Prompt:Show" };
     if (aTitle) msg.title = aTitle;
     if (aText) msg.text = aText;
     msg.buttons = aButtons || [
-      { label: PromptUtils.getLocaleString("OK") },
-      { label: PromptUtils.getLocaleString("Cancel") }
+      PromptUtils.getLocaleString("OK"),
+      PromptUtils.getLocaleString("Cancel")
     ];
     msg.inputs = aInputs;
-    return PromptUtils.sendMessageToJava(msg);
+
+    let retval = PromptUtils.sendMessageToJava(msg);
+
+    if (this._domWin) {
+      let winUtils = this._domWin.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+      winUtils.leaveModalStateWithWindow(callerWin);
+      PromptUtils.fireDialogEvent(this._domWin, "DOMModalDialogClosed");
+    }
+
+    return retval;
   },
 
   /*
@@ -181,17 +194,17 @@ Prompt.prototype = {
   /* ----------  nsIPrompt  ---------- */
 
   alert: function alert(aTitle, aText) {
-    this.commonPrompt(aTitle, aText, [{ label: PromptUtils.getLocaleString("OK") }], "", {value: false}, []);
+    this.commonPrompt(aTitle, aText, [ PromptUtils.getLocaleString("OK") ], "", { value: false }, []);
   },
 
   alertCheck: function alertCheck(aTitle, aText, aCheckMsg, aCheckState) {
-    let data = this.commonPrompt(aTitle, aText, [{ label: PromptUtils.getLocaleString("OK") }], aCheckMsg, aCheckState, []);
+    let data = this.commonPrompt(aTitle, aText, [ PromptUtils.getLocaleString("OK") ], aCheckMsg, aCheckState, []);
     if (aCheckMsg)
       aCheckState.value = data.checkbox == "true";
   },
 
   confirm: function confirm(aTitle, aText) {
-    let data = this.commonPrompt(aTitle, aText, null, "", {value: false}, []);
+    let data = this.commonPrompt(aTitle, aText, null, "", { value: false }, []);
     return (data.button == 0);
   },
 
@@ -237,7 +250,7 @@ Prompt.prototype = {
       }
 
       if (bTitle)
-        buttons.push({label:bTitle});
+        buttons.push(bTitle);
 
       aButtonFlags >>= 8;
     }
@@ -248,7 +261,7 @@ Prompt.prototype = {
   },
 
   nsIPrompt_prompt: function nsIPrompt_prompt(aTitle, aText, aValue, aCheckMsg, aCheckState) {
-    let inputs = [{ type: "textbox", value: aValue.value }];
+    let inputs = [{ type: "textbox", value: aValue.value, autofocus: true }];
     let data = this.commonPrompt(aTitle, aText, null, aCheckMsg, aCheckState, inputs);
 
     let ok = data.button == 0;
@@ -261,7 +274,7 @@ Prompt.prototype = {
 
   nsIPrompt_promptPassword: function nsIPrompt_promptPassword(
       aTitle, aText, aPassword, aCheckMsg, aCheckState) {
-    let inputs = [{ type: "password", hint: PromptUtils.getLocaleString("password", "passwdmgr"), value: aPassword.value || "" }];
+    let inputs = [{ type: "password", hint: PromptUtils.getLocaleString("password", "passwdmgr"), value: aPassword.value || "", autofocus: true }];
     let data = this.commonPrompt(aTitle, aText, null, aCheckMsg, aCheckState, inputs);
 
     let ok = data.button == 0;
@@ -274,7 +287,7 @@ Prompt.prototype = {
 
   nsIPrompt_promptUsernameAndPassword: function nsIPrompt_promptUsernameAndPassword(
       aTitle, aText, aUsername, aPassword, aCheckMsg, aCheckState) {
-    let inputs = [{ type: "textbox",  hint: PromptUtils.getLocaleString("username", "passwdmgr"), value: aUsername.value },
+    let inputs = [{ type: "textbox",  hint: PromptUtils.getLocaleString("username", "passwdmgr"), value: aUsername.value, autofocus: true },
                   { type: "password", hint: PromptUtils.getLocaleString("password", "passwdmgr"), value: aPassword.value }];
     let data = this.commonPrompt(aTitle, aText, null, aCheckMsg, aCheckState, inputs);
 
@@ -289,11 +302,8 @@ Prompt.prototype = {
   },
 
   select: function select(aTitle, aText, aCount, aSelectList, aOutSelection) {
-    let data = this.commonPrompt(aTitle, aText, [
-      { label: PromptUtils.getLocaleString("OK") }
-    ], "", {value: false}, [
-      { type: "menulist",  values: aSelectList },
-    ]);
+    let data = this.commonPrompt(aTitle, aText, [ PromptUtils.getLocaleString("OK") ], "",
+                                { value: false }, [{ type: "menulist",  values: aSelectList }]);
 
     let ok = data.button == 0;
     if (ok)
@@ -555,7 +565,7 @@ let PromptUtils = {
     let check = { value: false };
     let selectedLogin;
 
-    checkLabel = this.getLocaleString("rememberPassword", "passwdmgr");
+    checkLabel = this.getLocaleString("saveButton", "passwdmgr");
 
     // XXX Like the original code, we can't deal with multiple
     // account selection. (bug 227632)
@@ -750,14 +760,22 @@ let PromptUtils = {
   },
 
   sendMessageToJava: function(aMsg) {
-    let data = Cc["@mozilla.org/android/bridge;1"].getService(Ci.nsIAndroidBridge).handleGeckoMessage(JSON.stringify({ gecko: aMsg }));
+    let data = Cc["@mozilla.org/android/bridge;1"].getService(Ci.nsIAndroidBridge).handleGeckoMessage(JSON.stringify(aMsg));
     return JSON.parse(data);
   },
 
   fireDialogEvent: function(aDomWin, aEventName) {
-    let event = aDomWin.document.createEvent("Events");
-    event.initEvent(aEventName, true, true);
-    aDomWin.dispatchEvent(event);
+    // accessing the document object can throw if this window no longer exists. See bug 789888.
+    try {
+      if (!aDomWin.document)
+        return;
+      let event = aDomWin.document.createEvent("Events");
+      event.initEvent(aEventName, true, true);
+      let winUtils = aDomWin.QueryInterface(Ci.nsIInterfaceRequestor)
+                           .getInterface(Ci.nsIDOMWindowUtils);
+      winUtils.dispatchEventToChromeOnly(aDomWin, event);
+    } catch(ex) {
+    }
   }
 };
 
@@ -769,4 +787,4 @@ XPCOMUtils.defineLazyGetter(PromptUtils, "bundle", function () {
   return Services.strings.createBundle("chrome://global/locale/commonDialogs.properties");
 });
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([PromptService]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([PromptService]);

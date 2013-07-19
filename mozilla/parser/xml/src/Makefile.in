@@ -9,7 +9,6 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= xml
 LIBRARY_NAME	= saxp
 
 MOZILLA_INTERNAL_API = 1
@@ -20,12 +19,6 @@ CPPSRCS		= \
 		nsSAXAttributes.cpp \
 		nsSAXLocator.cpp \
 		nsSAXXMLReader.cpp \
-		$(NULL)
-
-EXPORTS		= \
-		nsSAXAttributes.h \
-		nsSAXLocator.h \
-		nsSAXXMLReader.h \
 		$(NULL)
 
 FORCE_STATIC_LIB = 1

@@ -337,18 +337,10 @@ postfix_expression
                 else
                     $$->setType(TType($1->getBasicType(), $1->getPrecision(), EvqConst, (int) (*$3.string).size()));
             } else {
-                if (fields.num == 1) {
-                    ConstantUnion *unionArray = new ConstantUnion[1];
-                    unionArray->setIConst(fields.offsets[0]);
-                    TIntermTyped* index = context->intermediate.addConstantUnion(unionArray, TType(EbtInt, EbpUndefined, EvqConst), $3.line);
-                    $$ = context->intermediate.addIndex(EOpIndexDirect, $1, index, $2.line);
-                    $$->setType(TType($1->getBasicType(), $1->getPrecision()));
-                } else {
-                    TString vectorString = *$3.string;
-                    TIntermTyped* index = context->intermediate.addSwizzle(fields, $3.line);
-                    $$ = context->intermediate.addIndex(EOpVectorSwizzle, $1, index, $2.line);
-                    $$->setType(TType($1->getBasicType(), $1->getPrecision(), EvqTemporary, (int) vectorString.size()));
-                }
+                TString vectorString = *$3.string;
+                TIntermTyped* index = context->intermediate.addSwizzle(fields, $3.line);
+                $$ = context->intermediate.addIndex(EOpVectorSwizzle, $1, index, $2.line);
+                $$->setType(TType($1->getBasicType(), $1->getPrecision(), EvqTemporary, (int) vectorString.size()));
             }
         } else if ($1->isMatrix()) {
             TMatrixFields fields;
@@ -1208,7 +1200,7 @@ init_declarator_list
         if (context->structQualifierErrorCheck($3.line, $$.type))
             context->recover();
 
-        if (context->nonInitConstErrorCheck($3.line, *$3.string, $$.type))
+        if (context->nonInitConstErrorCheck($3.line, *$3.string, $$.type, false))
             context->recover();
 
         TVariable* variable = 0;
@@ -1221,7 +1213,7 @@ init_declarator_list
         if (context->structQualifierErrorCheck($3.line, $1.type))
             context->recover();
 
-        if (context->nonInitConstErrorCheck($3.line, *$3.string, $1.type))
+        if (context->nonInitConstErrorCheck($3.line, *$3.string, $1.type, true))
             context->recover();
 
         $$ = $1;
@@ -1239,7 +1231,7 @@ init_declarator_list
         if (context->structQualifierErrorCheck($3.line, $1.type))
             context->recover();
 
-        if (context->nonInitConstErrorCheck($3.line, *$3.string, $1.type))
+        if (context->nonInitConstErrorCheck($3.line, *$3.string, $1.type, true))
             context->recover();
 
         $$ = $1;
@@ -1293,7 +1285,7 @@ single_declaration
         if (context->structQualifierErrorCheck($2.line, $$.type))
             context->recover();
 
-        if (context->nonInitConstErrorCheck($2.line, *$2.string, $$.type))
+        if (context->nonInitConstErrorCheck($2.line, *$2.string, $$.type, false))
             context->recover();
             
             $$.type = $1;
@@ -1324,7 +1316,7 @@ single_declaration
         if (context->structQualifierErrorCheck($2.line, $1))
             context->recover();
 
-        if (context->nonInitConstErrorCheck($2.line, *$2.string, $1))
+        if (context->nonInitConstErrorCheck($2.line, *$2.string, $1, true))
             context->recover();
 
         $$.type = $1;

@@ -5,18 +5,19 @@
 #include "nsDOMClassInfoID.h"
 #include "nsDOMDeviceMotionEvent.h"
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMDeviceMotionEvent)
+using namespace mozilla;
+using namespace mozilla::dom;
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsDOMDeviceMotionEvent, nsDOMEvent)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mAcceleration)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mAccelerationIncludingGravity)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mRotationRate)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAcceleration)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAccelerationIncludingGravity)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRotationRate)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsDOMDeviceMotionEvent, nsDOMEvent)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mAcceleration)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mAccelerationIncludingGravity)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mRotationRate)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAcceleration)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAccelerationIncludingGravity)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRotationRate)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_ADDREF_INHERITED(nsDOMDeviceMotionEvent, nsDOMEvent)
@@ -25,7 +26,6 @@ NS_IMPL_RELEASE_INHERITED(nsDOMDeviceMotionEvent, nsDOMEvent)
 DOMCI_DATA(DeviceMotionEvent, nsDOMDeviceMotionEvent)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsDOMDeviceMotionEvent)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMDeviceMotionEvent)
   NS_INTERFACE_MAP_ENTRY(nsIDOMDeviceMotionEvent)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(DeviceMotionEvent)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEvent)
@@ -49,12 +49,31 @@ nsDOMDeviceMotionEvent::InitDeviceMotionEvent(const nsAString & aEventTypeArg,
   return NS_OK;
 }
 
+void
+nsDOMDeviceMotionEvent::InitDeviceMotionEvent(const nsAString& aType,
+                                              bool aCanBubble,
+                                              bool aCancelable,
+                                              nsIDOMDeviceAcceleration* aAcceleration,
+                                              nsIDOMDeviceAcceleration* aAccelerationIncludingGravity,
+                                              nsIDOMDeviceRotationRate* aRotationRate,
+                                              double aInterval,
+                                              ErrorResult& aRv)
+{
+  aRv = InitDeviceMotionEvent(aType,
+                              aCanBubble,
+                              aCancelable,
+                              aAcceleration,
+                              aAccelerationIncludingGravity,
+                              aRotationRate,
+                              aInterval);
+}
+
 NS_IMETHODIMP
 nsDOMDeviceMotionEvent::GetAcceleration(nsIDOMDeviceAcceleration **aAcceleration)
 {
   NS_ENSURE_ARG_POINTER(aAcceleration);
 
-  NS_IF_ADDREF(*aAcceleration = mAcceleration);
+  NS_IF_ADDREF(*aAcceleration = GetAcceleration());
   return NS_OK;
 }
 
@@ -63,7 +82,8 @@ nsDOMDeviceMotionEvent::GetAccelerationIncludingGravity(nsIDOMDeviceAcceleration
 {
   NS_ENSURE_ARG_POINTER(aAccelerationIncludingGravity);
 
-  NS_IF_ADDREF(*aAccelerationIncludingGravity = mAccelerationIncludingGravity);
+  NS_IF_ADDREF(*aAccelerationIncludingGravity =
+               GetAccelerationIncludingGravity());
   return NS_OK;
 }
 
@@ -72,7 +92,7 @@ nsDOMDeviceMotionEvent::GetRotationRate(nsIDOMDeviceRotationRate **aRotationRate
 {
   NS_ENSURE_ARG_POINTER(aRotationRate);
 
-  NS_IF_ADDREF(*aRotationRate = mRotationRate);
+  NS_IF_ADDREF(*aRotationRate = GetRotationRate());
   return NS_OK;
 }
 
@@ -81,19 +101,21 @@ nsDOMDeviceMotionEvent::GetInterval(double *aInterval)
 {
   NS_ENSURE_ARG_POINTER(aInterval);
 
-  *aInterval = mInterval;
+  *aInterval = Interval();
   return NS_OK;
 }
 
 
 nsresult
 NS_NewDOMDeviceMotionEvent(nsIDOMEvent** aInstancePtrResult,
+                           mozilla::dom::EventTarget* aOwner,
                            nsPresContext* aPresContext,
                            nsEvent *aEvent) 
 {
   NS_ENSURE_ARG_POINTER(aInstancePtrResult);
 
-  nsDOMDeviceMotionEvent* it = new nsDOMDeviceMotionEvent(aPresContext, aEvent);
+  nsDOMDeviceMotionEvent* it =
+    new nsDOMDeviceMotionEvent(aOwner, aPresContext, aEvent);
   return CallQueryInterface(it, aInstancePtrResult);
 }
 

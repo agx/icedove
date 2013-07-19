@@ -61,17 +61,15 @@ public:
    * called, DidDirty() needs to be called on the sheet.
    */
   nsresult DeleteStyleRuleAt(uint32_t aIndex);
-  nsresult InsertStyleRulesAt(uint32_t aIndex,
-                              nsCOMArray<Rule>& aRules);
+  nsresult InsertStyleRuleAt(uint32_t aIndex, Rule* aRule);
   nsresult ReplaceStyleRule(Rule *aOld, Rule *aNew);
 
   virtual bool UseForPresentation(nsPresContext* aPresContext,
                                     nsMediaQueryResultCacheKey& aKey) = 0;
 
-  NS_MUST_OVERRIDE size_t   // non-virtual -- it is only called by subclasses
-    SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
-  virtual size_t
-    SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const = 0;
+  // non-virtual -- it is only called by subclasses
+  size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const = 0;
 
 protected:
   // to help implement nsIDOMCSSRule

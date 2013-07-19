@@ -67,7 +67,7 @@ void MaemoLocationProvider::LocationChanged(LocationGPSDevice* device, void* sel
     return;
 
   MaemoLocationProvider* provider = static_cast<MaemoLocationProvider*>(self);
-  NS_ENSURE_TRUE(provider, );
+  NS_ENSURE_TRUE_VOID(provider);
   provider->LocationUpdate(device);
 }
 
@@ -201,7 +201,7 @@ NS_IMETHODIMP MaemoLocationProvider::Startup()
   return NS_OK;
 }
 
-NS_IMETHODIMP MaemoLocationProvider::Watch(nsIGeolocationUpdate *callback)
+NS_IMETHODIMP MaemoLocationProvider::Watch(nsIGeolocationUpdate *callback, bool aRequestPrivate)
 {
   if (mCallback)
     return NS_OK;

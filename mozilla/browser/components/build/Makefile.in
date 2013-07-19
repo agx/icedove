@@ -9,7 +9,6 @@ VPATH=@srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = browsercomps
 LIBRARY_NAME = browsercomps
 SHORT_LIBNAME = brwsrcmp
 IS_COMPONENT = 1
@@ -17,8 +16,6 @@ MODULE_NAME = nsBrowserCompsModule
 FORCE_SHARED_LIB = 1
 
 USE_STATIC_LIBS = 1
-
-EXPORTS = nsBrowserCompsCID.h
 
 CPPSRCS = nsModule.cpp \
           $(NULL)
@@ -30,7 +27,6 @@ endif
 LOCAL_INCLUDES = \
 	-I$(srcdir)/../shell/src \
 	-I$(srcdir)/../feeds/src \
-	-I$(srcdir)/../privatebrowsing/src \
 	-I$(srcdir)/../about \
 	-I$(srcdir)/../dirprovider \
 	$(NULL)
@@ -41,7 +37,6 @@ endif
 
 SHARED_LIBRARY_LIBS = \
 	../feeds/src/$(LIB_PREFIX)browser_feeds_s.$(LIB_SUFFIX) \
-	../privatebrowsing/src/$(LIB_PREFIX)privatebrowsing_s.$(LIB_SUFFIX) \
 	../about/$(LIB_PREFIX)browserabout_s.$(LIB_SUFFIX) \
 	../dirprovider/$(LIB_PREFIX)browserdir_s.$(LIB_SUFFIX) \
 	$(NULL)

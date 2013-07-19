@@ -95,13 +95,36 @@ dbus_bool_t dbus_func_send_async(DBusConnection *conn,
   reply = dbus_connection_send_with_reply(conn, msg,
                                           &call,
                                           timeout_ms);
-  if (reply) {
+  /**
+   * dbus_connection_send_with_reply() may return TRUE but leave *pending_return
+   * as NULL, we'd better to check both reply value and return DBusPendingCall.
+   */
+  if (!reply || !call) {
+    goto done;
+  }
+
+  /*
+   * Workaround bug 827888
+   *
+   * When we set the notify callback, the call might have already been
+   * completed. In this case the call never gets handled. To workaround
+   * the problem, we test if the call has been completed and if so, run
+   * the notify handler explicitly.
+   *
+   * To fix bug 827888, we'd need to do this atomically; or make dbus
+   * run the notifier function automatically if the call has been
+   * completed meanwhile.
+   */
+  if (dbus_pending_call_get_completed(call)) {
+    dbus_func_args_async_callback(call, pending);
+  } else {
     dbus_pending_call_set_notify(call,
                                  dbus_func_args_async_callback,
                                  pending,
                                  NULL);
   }
 
+done:
   if (msg) dbus_message_unref(msg);
   return reply;
 }
@@ -264,11 +287,27 @@ DBusMessage * dbus_func_args_error(DBusConnection *conn,
 int dbus_returns_int32(DBusMessage *reply) 
 {
   DBusError err;
-  int ret = -1;
+  int32_t ret = -1;
 
   dbus_error_init(&err);
   if (!dbus_message_get_args(reply, &err,
                              DBUS_TYPE_INT32, &ret,
+                             DBUS_TYPE_INVALID)) {
+    LOG_AND_FREE_DBUS_ERROR_WITH_MSG(&err, reply);
+  }
+
+  dbus_message_unref(reply);
+  return ret;
+}
+
+int dbus_returns_uint32(DBusMessage *reply)
+{
+  DBusError err;
+  uint32_t ret = -1;
+
+  dbus_error_init(&err);
+  if (!dbus_message_get_args(reply, &err,
+                             DBUS_TYPE_UINT32, &ret,
                              DBUS_TYPE_INVALID)) {
     LOG_AND_FREE_DBUS_ERROR_WITH_MSG(&err, reply);
   }

@@ -1,9 +1,10 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "mozilla/DebugOnly.h"
 
 #include "MethodJIT.h"
 #include "jsnum.h"
@@ -23,6 +24,7 @@
 #include "InlineFrameAssembler.h"
 #include "jscompartment.h"
 #include "jsopcodeinlines.h"
+#include "jsworkers.h"
 
 #include "builtin/RegExp.h"
 #include "vm/RegExpStatics.h"
@@ -32,6 +34,13 @@
 #include "jstypedarrayinlines.h"
 #include "vm/RegExpObject-inl.h"
 
+#include "ion/BaselineJIT.h"
+#include "ion/Ion.h"
+
+#if JS_TRACE_LOGGING
+#include "TraceLogging.h"
+#endif
+
 using namespace js;
 using namespace js::mjit;
 #if defined(JS_POLYIC) || defined(JS_MONOIC)
@@ -39,17 +48,28 @@ using namespace js::mjit::ic;
 #endif
 using namespace js::analyze;
 
+using mozilla::DebugOnly;
+
 #define RETURN_IF_OOM(retval)                                   \
     JS_BEGIN_MACRO                                              \
         if (oomInVector || masm.oom() || stubcc.masm.oom())     \
             return retval;                                      \
     JS_END_MACRO
 
+static inline bool IsIonEnabled(JSContext *cx)
+{
+#ifdef JS_ION
+    return ion::IsEnabled(cx);
+#else
+    return false;
+#endif
+}
+
 /*
  * Number of times a script must be called or had a backedge before we try to
- * inline its calls.
+ * inline its calls. This is only used if IonMonkey is disabled.
  */
-static const size_t USES_BEFORE_INLINING = 10000;
+static const size_t USES_BEFORE_INLINING = 10240;
 
 mjit::Compiler::Compiler(JSContext *cx, JSScript *outerScript,
                          unsigned chunkIndex, bool isConstructing)
@@ -59,12 +79,12 @@ mjit::Compiler::Compiler(JSContext *cx, JSScript *outerScript,
     isConstructing(isConstructing),
     outerChunk(outerJIT()->chunkDescriptor(chunkIndex)),
     ssa(cx, outerScript),
-    globalObj(cx, outerScript->hasGlobal() ? &outerScript->global() : NULL),
+    globalObj(cx, outerScript->compileAndGo ? &outerScript->global() : NULL),
     globalSlots(globalObj ? globalObj->getRawSlots() : NULL),
-    sps(&cx->runtime->spsProfiler, &script, &PC),
-    masm(&sps),
+    sps(&cx->runtime->spsProfiler),
+    masm(&sps, &PC),
     frame(cx, *thisFromCtor(), masm, stubcc),
-    a(NULL), outer(NULL), script(NULL), PC(NULL), loop(NULL),
+    a(NULL), outer(NULL), script_(cx), PC(NULL), loop(NULL),
     inlineFrames(CompilerAllocPolicy(cx, *thisFromCtor())),
     branchPatches(CompilerAllocPolicy(cx, *thisFromCtor())),
 #if defined JS_MONOIC
@@ -80,6 +100,7 @@ mjit::Compiler::Compiler(JSContext *cx, JSScript *outerScript,
 #endif
     callPatches(CompilerAllocPolicy(cx, *thisFromCtor())),
     callSites(CompilerAllocPolicy(cx, *thisFromCtor())),
+    compileTriggers(CompilerAllocPolicy(cx, *thisFromCtor())),
     doubleList(CompilerAllocPolicy(cx, *thisFromCtor())),
     rootedTemplates(CompilerAllocPolicy(cx, *thisFromCtor())),
     rootedRegExps(CompilerAllocPolicy(cx, *thisFromCtor())),
@@ -100,11 +121,15 @@ mjit::Compiler::Compiler(JSContext *cx, JSScript *outerScript,
     gcNumber(cx->runtime->gcNumber),
     pcLengths(NULL)
 {
-    /* Once a script starts getting really hot we will inline calls in it. */
-    if (!debugMode() && cx->typeInferenceEnabled() && globalObj &&
-        (outerScript->getUseCount() >= USES_BEFORE_INLINING ||
-         cx->hasRunOption(JSOPTION_METHODJIT_ALWAYS))) {
-        inlining_ = true;
+    JS_ASSERT(cx->jaegerCompilationAllowed());
+
+    if (!IsIonEnabled(cx)) {
+        /* Once a script starts getting really hot we will inline calls in it. */
+        if (!debugMode() && cx->typeInferenceEnabled() && globalObj &&
+            (outerScript->getUseCount() >= USES_BEFORE_INLINING ||
+             cx->hasOption(JSOPTION_METHODJIT_ALWAYS))) {
+            inlining_ = true;
+        }
     }
 }
 
@@ -113,11 +138,20 @@ mjit::Compiler::compile()
 {
     JS_ASSERT(!outerChunkRef().chunk);
 
+#if JS_TRACE_LOGGING
+    AutoTraceLog logger(TraceLogging::defaultLogger(),
+                        TraceLogging::JM_COMPILE_START,
+                        TraceLogging::JM_COMPILE_STOP,
+                        outerScript);
+#endif
+
     CompileStatus status = performCompilation();
     if (status != Compile_Okay && status != Compile_Retry) {
+        mjit::ExpandInlineFrames(cx->zone());
+        mjit::Recompiler::clearStackReferences(cx->runtime->defaultFreeOp(), outerScript);
         if (!outerScript->ensureHasMJITInfo(cx))
             return Compile_Error;
-        JSScript::JITScriptHandle *jith = outerScript->jitHandle(isConstructing, cx->compartment->compileBarriers());
+        JSScript::JITScriptHandle *jith = outerScript->jitHandle(isConstructing, cx->zone()->compileBarriers());
         JSScript::ReleaseCode(cx->runtime->defaultFreeOp(), jith);
         jith->setUnjittable();
 
@@ -134,11 +168,6 @@ mjit::Compiler::compile()
 CompileStatus
 mjit::Compiler::checkAnalysis(HandleScript script)
 {
-    if (script->hasClearedGlobal()) {
-        JaegerSpew(JSpew_Abort, "script has a cleared global\n");
-        return Compile_Abort;
-    }
-
     if (!script->ensureRanAnalysis(cx))
         return Compile_Error;
 
@@ -193,7 +222,7 @@ mjit::Compiler::scanInlineCalls(uint32_t index, uint32_t depth)
     ScriptAnalysis *analysis = script->analysis();
 
     /* Don't inline from functions which could have a non-global scope object. */
-    if (!script->hasGlobal() ||
+    if (!script->compileAndGo ||
         &script->global() != globalObj ||
         (script->function() && script->function()->getParent() != globalObj) ||
         (script->function() && script->function()->isHeavyweight()) ||
@@ -273,7 +302,7 @@ mjit::Compiler::scanInlineCalls(uint32_t index, uint32_t depth)
                 okay = false;
                 break;
             }
-            RootedScript script(cx, fun->script());
+            RootedScript script(cx, fun->nonLazyScript());
 
             /*
              * Don't inline calls to scripts which haven't been analyzed.
@@ -299,7 +328,7 @@ mjit::Compiler::scanInlineCalls(uint32_t index, uint32_t depth)
              */
             if (!globalObj ||
                 fun->getParent() != globalObj ||
-                outerScript->strictModeCode != script->strictModeCode) {
+                outerScript->strict != script->strict) {
                 okay = false;
                 break;
             }
@@ -329,13 +358,15 @@ mjit::Compiler::scanInlineCalls(uint32_t index, uint32_t depth)
             if (status != Compile_Okay)
                 return status;
 
-            if (!script->analysis()->inlineable(argc)) {
+            if (!script->analysis()->jaegerInlineable(argc)) {
                 okay = false;
                 break;
             }
 
-            if (types::HeapTypeSet::HasObjectFlags(cx, fun->getType(cx),
-                                                   types::OBJECT_FLAG_UNINLINEABLE)) {
+            types::TypeObject *funType = fun->getType(cx);
+            if (!funType ||
+                types::HeapTypeSet::HasObjectFlags(cx, funType, types::OBJECT_FLAG_UNINLINEABLE))
+            {
                 okay = false;
                 break;
             }
@@ -345,7 +376,7 @@ mjit::Compiler::scanInlineCalls(uint32_t index, uint32_t depth)
              * the outer script will be recompiled if any type information
              * changes in stack values within the callee.
              */
-            types::HeapTypeSet::WatchObjectStateChange(cx, fun->getType(cx));
+            types::HeapTypeSet::WatchObjectStateChange(cx, funType);
 
             /*
              * Don't inline scripts which use 'this' if it is possible they
@@ -372,7 +403,7 @@ mjit::Compiler::scanInlineCalls(uint32_t index, uint32_t depth)
                 continue;
 
             JSFunction *fun = obj->toFunction();
-            RootedScript script(cx, fun->script());
+            RootedScript script(cx, fun->nonLazyScript());
 
             CompileStatus status = addInlineFrame(script, nextDepth, index, pc);
             if (status != Compile_Okay)
@@ -384,12 +415,13 @@ mjit::Compiler::scanInlineCalls(uint32_t index, uint32_t depth)
 }
 
 CompileStatus
-mjit::Compiler::pushActiveFrame(JSScript *script, uint32_t argc)
+mjit::Compiler::pushActiveFrame(JSScript *scriptArg, uint32_t argc)
 {
+    RootedScript script(cx, scriptArg);
     if (cx->runtime->profilingScripts && !script->hasScriptCounts)
         script->initScriptCounts(cx);
 
-    ActiveFrame *newa = OffTheBooks::new_<ActiveFrame>(cx);
+    ActiveFrame *newa = js_new<ActiveFrame>(cx);
     if (!newa) {
         js_ReportOutOfMemory(cx);
         return Compile_Error;
@@ -440,7 +472,7 @@ mjit::Compiler::pushActiveFrame(JSScript *script, uint32_t argc)
         return Compile_Error;
     }
 
-    newa->jumpMap = (Label *)OffTheBooks::malloc_(sizeof(Label) * script->length);
+    newa->jumpMap = js_pod_malloc<Label>(script->length);
     if (!newa->jumpMap) {
         js_ReportOutOfMemory(cx);
         return Compile_Error;
@@ -456,10 +488,10 @@ mjit::Compiler::pushActiveFrame(JSScript *script, uint32_t argc)
             return status;
     }
 
-    if (!sps.enterInlineFrame())
+    if (script != outerScript && !sps.enterInlineFrame())
         return Compile_Error;
 
-    this->script = script;
+    this->script_ = script;
     this->analysis = newAnalysis;
     this->PC = script->code;
     this->a = newa;
@@ -475,8 +507,8 @@ mjit::Compiler::popActiveFrame()
     a->stubCodeEnd = stubcc.size();
     this->PC = a->parentPC;
     this->a = (ActiveFrame *) a->parent;
-    this->script = a->script;
-    this->analysis = this->script->analysis();
+    this->script_ = a->script;
+    this->analysis = this->script_->analysis();
 
     frame.popActiveFrame();
     sps.leaveInlineFrame();
@@ -496,13 +528,13 @@ CompileStatus
 mjit::Compiler::performCompilation()
 {
     JaegerSpew(JSpew_Scripts,
-               "compiling script (file \"%s\") (line \"%d\") (length \"%d\") (chunk \"%d\")\n",
-               outerScript->filename, outerScript->lineno, outerScript->length, chunkIndex);
+               "compiling script (file \"%s\") (line \"%d\") (length \"%d\") (chunk \"%d\") (usecount \"%d\")\n",
+               outerScript->filename(), outerScript->lineno, outerScript->length, chunkIndex, (int) outerScript->getUseCount());
 
     if (inlining()) {
         JaegerSpew(JSpew_Inlining,
                    "inlining calls in script (file \"%s\") (line \"%d\")\n",
-                   outerScript->filename, outerScript->lineno);
+                   outerScript->filename(), outerScript->lineno);
     }
 
 #ifdef JS_METHODJIT_SPEW
@@ -514,10 +546,10 @@ mjit::Compiler::performCompilation()
     outerScript->debugMode = debugMode();
 #endif
 
-    JS_ASSERT(cx->compartment->activeInference);
+    JS_ASSERT(cx->compartment->activeAnalysis);
 
     {
-        types::AutoEnterCompilation enter(cx);
+        types::AutoEnterCompilation enter(cx, types::CompilerOutput::MethodJIT);
         if (!enter.init(outerScript, isConstructing, chunkIndex)) {
             js_ReportOutOfMemory(cx);
             return Compile_Error;
@@ -530,7 +562,7 @@ mjit::Compiler::performCompilation()
 
         if (outerScript->hasScriptCounts || Probes::wantNativeAddressInfo(cx)) {
             size_t length = ssa.frameLength(ssa.numFrames() - 1);
-            pcLengths = (PCLengthEntry *) OffTheBooks::calloc_(sizeof(pcLengths[0]) * length);
+            pcLengths = js_pod_calloc<PCLengthEntry>(length);
             if (!pcLengths)
                 return Compile_Error;
         }
@@ -538,7 +570,7 @@ mjit::Compiler::performCompilation()
         if (chunkIndex == 0)
             CHECK_STATUS(generatePrologue());
         else
-            sps.setPushed();
+            sps.setPushed(script_);
         CHECK_STATUS(generateMethod());
         if (outerJIT() && chunkIndex == outerJIT()->nchunks - 1)
             CHECK_STATUS(generateEpilogue());
@@ -573,20 +605,20 @@ mjit::Compiler::ActiveFrame::ActiveFrame(JSContext *cx)
 
 mjit::Compiler::ActiveFrame::~ActiveFrame()
 {
-    js::Foreground::free_(jumpMap);
+    js_free(jumpMap);
     if (varTypes)
-        js::Foreground::free_(varTypes);
+        js_free(varTypes);
 }
 
 mjit::Compiler::~Compiler()
 {
     if (outer)
-        cx->delete_(outer);
+        js_delete(outer);
     for (unsigned i = 0; i < inlineFrames.length(); i++)
-        cx->delete_(inlineFrames[i]);
+        js_delete(inlineFrames[i]);
     while (loop) {
         LoopState *nloop = loop->outer;
-        cx->delete_(loop);
+        js_delete(loop);
         loop = nloop;
     }
 }
@@ -616,8 +648,7 @@ mjit::Compiler::prepareInferenceTypes(JSScript *script, ActiveFrame *a)
      * only if a variable has the same value on all incoming edges.
      */
 
-    a->varTypes = (VarType *)
-        OffTheBooks::calloc_(TotalSlots(script) * sizeof(VarType));
+    a->varTypes = js_pod_calloc<VarType>(TotalSlots(script));
     if (!a->varTypes) {
         js_ReportOutOfMemory(cx);
         return Compile_Error;
@@ -637,7 +668,7 @@ mjit::Compiler::prepareInferenceTypes(JSScript *script, ActiveFrame *a)
  * allow more gathering of type information and less recompilation.
  */
 static const size_t USES_BEFORE_COMPILE       = 16;
-static const size_t INFER_USES_BEFORE_COMPILE = 40;
+static const size_t INFER_USES_BEFORE_COMPILE = 43;
 
 /* Target maximum size, in bytecode length, for a compiled chunk of a script. */
 static uint32_t CHUNK_LIMIT = 1500;
@@ -758,31 +789,6 @@ MakeJITScript(JSContext *cx, JSScript *script)
                 }
             }
 
-            if (op == JSOP_LOOKUPSWITCH) {
-                unsigned defaultOffset = offset + GET_JUMP_OFFSET(pc);
-                jsbytecode *pc2 = pc + JUMP_OFFSET_LEN;
-                unsigned npairs = GET_UINT16(pc2);
-                pc2 += UINT16_LEN;
-
-                CrossChunkEdge edge;
-                edge.source = offset;
-                edge.target = defaultOffset;
-                if (!currentEdges.append(edge))
-                    return NULL;
-
-                while (npairs) {
-                    pc2 += UINT32_INDEX_LEN;
-                    unsigned targetOffset = offset + GET_JUMP_OFFSET(pc2);
-                    CrossChunkEdge edge;
-                    edge.source = offset;
-                    edge.target = targetOffset;
-                    if (!currentEdges.append(edge))
-                        return NULL;
-                    pc2 += JUMP_OFFSET_LEN;
-                    npairs--;
-                }
-            }
-
             if (unsigned(offset - chunkStart) > CHUNK_LIMIT)
                 finishChunk = true;
 
@@ -833,7 +839,7 @@ MakeJITScript(JSContext *cx, JSScript *script)
                     return NULL;
 
                 /* Add an edge for fallthrough from this chunk to the next one. */
-                if (!BytecodeNoFallThrough(op)) {
+                if (BytecodeFallsThrough(op)) {
                     CrossChunkEdge edge;
                     edge.source = offset;
                     edge.target = nextOffset;
@@ -867,7 +873,7 @@ MakeJITScript(JSContext *cx, JSScript *script)
     size_t dataSize = sizeof(JITScript)
         + (chunks.length() * sizeof(ChunkDescriptor))
         + (edges.length() * sizeof(CrossChunkEdge));
-    uint8_t *cursor = (uint8_t *) OffTheBooks::calloc_(dataSize);
+    uint8_t *cursor = (uint8_t *) js_calloc(dataSize);
     if (!cursor)
         return NULL;
 
@@ -904,9 +910,9 @@ MakeJITScript(JSContext *cx, JSScript *script)
 
     /* Generate a pool with all cross chunk shims, and set shimLabel for each edge. */
     jsbytecode *pc;
-    SPSInstrumentation sps(&cx->runtime->spsProfiler, &script, &pc);
-    Assembler masm(&sps);
-    sps.setPushed();
+    MJITInstrumentation sps(&cx->runtime->spsProfiler);
+    Assembler masm(&sps, &pc);
+    sps.setPushed(script);
     for (unsigned i = 0; i < jit->nedges; i++) {
         pc = script->code + jitEdges[i].target;
         jitEdges[i].shimLabel = (void *) masm.distanceOf(masm.label());
@@ -914,7 +920,7 @@ MakeJITScript(JSContext *cx, JSScript *script)
         masm.fallibleVMCall(true, JS_FUNC_TO_DATA_PTR(void *, stubs::CrossChunkShim),
                             pc, NULL, script->nfixed + analysis->getCode(pc).stackDepth);
     }
-    LinkerHelper linker(masm, JSC::METHOD_CODE);
+    LinkerHelper linker(masm, JSC::JAEGER_CODE);
     JSC::ExecutablePool *ep = linker.init(cx);
     if (!ep)
         return NULL;
@@ -936,30 +942,100 @@ MakeJITScript(JSContext *cx, JSScript *script)
     return jit;
 }
 
+static inline bool
+IonGetsFirstChance(JSContext *cx, JSScript *script, jsbytecode *pc, CompileRequest request)
+{
+#ifdef JS_ION
+    if (!ion::IsEnabled(cx))
+        return false;
+
+    // If the script is not hot, use JM. recompileCheckHelper will insert a check
+    // to trigger a recompile when the script becomes hot.
+    if (script->getUseCount() < ion::js_IonOptions.usesBeforeCompile)
+        return false;
+
+    // If we're called from JM, use JM to avoid slow JM -> Ion calls.
+    if (request == CompileRequest_JIT)
+        return false;
+
+    // If there's no way this script is going to be Ion compiled, let JM take over.
+    if (!script->canIonCompile())
+        return false;
+
+    // If we cannot enter Ion because bailouts are expected, let JM take over.
+    if (script->hasIonScript() && script->ionScript()->bailoutExpected())
+        return false;
+
+    // If we cannot enter Ion because it was compiled for OSR at a different PC,
+    // let JM take over until the PC is reached. Don't do this until the script
+    // reaches a high use count, as if we do this prematurely we may get stuck
+    // in JM code.
+    if (OffThreadCompilationEnabled(cx) && script->hasIonScript() &&
+        pc && script->ionScript()->osrPc() && script->ionScript()->osrPc() != pc &&
+        script->getUseCount() >= ion::js_IonOptions.usesBeforeCompile * 2)
+    {
+        return false;
+    }
+
+    // If ion compilation is pending or in progress on another thread, continue
+    // using JM until that compilation finishes.
+    if (script->isIonCompilingOffThread())
+        return false;
+
+    return true;
+#endif
+    return false;
+}
+
 CompileStatus
 mjit::CanMethodJIT(JSContext *cx, JSScript *script, jsbytecode *pc,
                    bool construct, CompileRequest request, StackFrame *frame)
 {
-  restart:
+    bool compiledOnce = false;
+  checkOutput:
     if (!cx->methodJitEnabled)
         return Compile_Abort;
 
+    if (!cx->jaegerCompilationAllowed())
+        return Compile_Abort;
+
+#ifdef JS_ION
+    if (ion::IsBaselineEnabled(cx) || ion::IsEnabled(cx))
+        return Compile_Abort;
+#endif
+
     /*
-     * If an SPS frame has already been pushed and profiling has since been
-     * turned off, then we can't enter the jit because the epilogue of a pop
-     * will not be emitted. Otherwise, we're safe with respect to balancing the
-     * push/pops to the SPS sampling stack.
+     * If SPS (profiling) is enabled, then the emitted instrumentation has to be
+     * careful to not wildly write to random locations. This is relevant
+     * whenever the status of profiling (on/off) is changed while JS is running.
+     * All pushed frames still need to be popped, but newly emitted code may
+     * have slightly different behavior.
+     *
+     * For a new function, this doesn't matter at all, but if we're compiling
+     * the current function, then the writes start to matter. If an SPS frame
+     * has been pushed and SPS is still enabled, then we're good to go. If an
+     * SPS frame has not been pushed, and SPS is not enabled, then we're still
+     * good to go. If, however, the two are different, then we cannot emit JIT
+     * code because the instrumentation will be wrong one way or another.
      */
-    if (frame->hasPushedSPSFrame() && !cx->runtime->spsProfiler.enabled())
+    if (frame->script() == script && pc != script->code) {
+        if (frame->hasPushedSPSFrame() != cx->runtime->spsProfiler.enabled())
+            return Compile_Skipped;
+    }
+
+    if (IonGetsFirstChance(cx, script, pc, request)) {
+        if (script->hasIonScript())
+            script->incUseCount();
         return Compile_Skipped;
+    }
 
     if (script->hasMJITInfo()) {
-        JSScript::JITScriptHandle *jith = script->jitHandle(construct, cx->compartment->compileBarriers());
+        JSScript::JITScriptHandle *jith = script->jitHandle(construct, cx->zone()->compileBarriers());
         if (jith->isUnjittable())
             return Compile_Abort;
     }
 
-    if (!cx->hasRunOption(JSOPTION_METHODJIT_ALWAYS) &&
+    if (!cx->hasOption(JSOPTION_METHODJIT_ALWAYS) &&
         (cx->typeInferenceEnabled()
          ? script->incUseCount() <= INFER_USES_BEFORE_COMPILE
          : script->incUseCount() <= USES_BEFORE_COMPILE))
@@ -979,7 +1055,7 @@ mjit::CanMethodJIT(JSContext *cx, JSScript *script, jsbytecode *pc,
     if (!script->ensureHasMJITInfo(cx))
         return Compile_Error;
 
-    JSScript::JITScriptHandle *jith = script->jitHandle(construct, cx->compartment->compileBarriers());
+    JSScript::JITScriptHandle *jith = script->jitHandle(construct, cx->zone()->compileBarriers());
 
     JITScript *jit;
     if (jith->isEmpty()) {
@@ -992,7 +1068,7 @@ mjit::CanMethodJIT(JSContext *cx, JSScript *script, jsbytecode *pc,
             FreeOp *fop = cx->runtime->defaultFreeOp();
             jit->destroy(fop);
             fop->free_(jit);
-            goto restart;
+            return Compile_Skipped;
         }
 
         jith->setValid(jit);
@@ -1003,10 +1079,25 @@ mjit::CanMethodJIT(JSContext *cx, JSScript *script, jsbytecode *pc,
     unsigned chunkIndex = jit->chunkIndex(pc);
     ChunkDescriptor &desc = jit->chunkDescriptor(chunkIndex);
 
+    if (jit->mustDestroyEntryChunk) {
+        // We kept this chunk around so that Ion can get info from its caches.
+        // If we end up here, we decided not to use Ion so we can destroy the
+        // chunk now.
+        JS_ASSERT(jit->nchunks == 1);
+        jit->mustDestroyEntryChunk = false;
+
+        if (desc.chunk) {
+            jit->destroyChunk(cx->runtime->defaultFreeOp(), chunkIndex, /* resetUses = */ false);
+            return Compile_Skipped;
+        }
+    }
+
     if (desc.chunk)
         return Compile_Okay;
+    if (compiledOnce)
+        return Compile_Skipped;
 
-    if (!cx->hasRunOption(JSOPTION_METHODJIT_ALWAYS) &&
+    if (!cx->hasOption(JSOPTION_METHODJIT_ALWAYS) &&
         ++desc.counter <= INFER_USES_BEFORE_COMPILE)
     {
         return Compile_Skipped;
@@ -1014,7 +1105,7 @@ mjit::CanMethodJIT(JSContext *cx, JSScript *script, jsbytecode *pc,
 
     CompileStatus status;
     {
-        types::AutoEnterTypeInference enter(cx, true);
+        types::AutoEnterAnalysis enter(cx);
 
         Compiler cc(cx, script, chunkIndex, construct);
         status = cc.compile();
@@ -1032,7 +1123,8 @@ mjit::CanMethodJIT(JSContext *cx, JSScript *script, jsbytecode *pc,
          * Compiling a script can occasionally trigger its own recompilation,
          * so go back through the compilation logic.
          */
-        goto restart;
+        compiledOnce = true;
+        goto checkOutput;
     }
 
     /* Non-OOM errors should have an associated exception. */
@@ -1051,7 +1143,7 @@ mjit::Compiler::generatePrologue()
      * If there is no function, then this can only be called via JaegerShot(),
      * which expects an existing frame to be initialized like the interpreter.
      */
-    if (script->function()) {
+    if (script_->function()) {
         Jump j = masm.jump();
 
         /*
@@ -1061,8 +1153,12 @@ mjit::Compiler::generatePrologue()
         fastEntryLabel = masm.label();
 
         /* Store this early on so slow paths can access it. */
-        masm.storePtr(ImmPtr(script->function()),
+        masm.storePtr(ImmPtr(script_->function()),
                       Address(JSFrameReg, StackFrame::offsetOfExec()));
+        if (script_->isCallsiteClone) {
+            masm.storeValue(ObjectValue(*script_->function()),
+                            Address(JSFrameReg, StackFrame::offsetOfCallee(script_->function())));
+        }
 
         {
             /*
@@ -1074,13 +1170,13 @@ mjit::Compiler::generatePrologue()
             arityLabel = stubcc.masm.label();
 
             Jump argMatch = stubcc.masm.branch32(Assembler::Equal, JSParamReg_Argc,
-                                                 Imm32(script->function()->nargs));
+                                                 Imm32(script_->function()->nargs));
 
             if (JSParamReg_Argc != Registers::ArgReg1)
                 stubcc.masm.move(JSParamReg_Argc, Registers::ArgReg1);
 
             /* Slow path - call the arity check function. Returns new fp. */
-            stubcc.masm.storePtr(ImmPtr(script->function()),
+            stubcc.masm.storePtr(ImmPtr(script_->function()),
                                  Address(JSFrameReg, StackFrame::offsetOfExec()));
             OOL_STUBCALL(stubs::FixupArity, REJOIN_NONE);
             stubcc.masm.move(Registers::ReturnReg, JSFrameReg);
@@ -1095,7 +1191,7 @@ mjit::Compiler::generatePrologue()
                 this->argsCheckStub = stubcc.masm.label();
                 this->argsCheckJump.linkTo(this->argsCheckStub, &stubcc.masm);
 #endif
-                stubcc.masm.storePtr(ImmPtr(script->function()),
+                stubcc.masm.storePtr(ImmPtr(script_->function()),
                                      Address(JSFrameReg, StackFrame::offsetOfExec()));
                 OOL_STUBCALL(stubs::CheckArgumentTypes, REJOIN_CHECK_ARGUMENTS);
 #ifdef JS_MONOIC
@@ -1111,7 +1207,7 @@ mjit::Compiler::generatePrologue()
          * any inline frames we end up generating, or a callee's stack frame
          * we write to before the callee checks the stack.
          */
-        uint32_t nvals = VALUES_PER_STACK_FRAME + script->nslots + StackSpace::STACK_JIT_EXTRA;
+        uint32_t nvals = VALUES_PER_STACK_FRAME + script_->nslots + StackSpace::STACK_JIT_EXTRA;
         masm.addPtr(Imm32(nvals * sizeof(Value)), JSFrameReg, Registers::ReturnReg);
         Jump stackCheck = masm.branchPtr(Assembler::AboveOrEqual, Registers::ReturnReg,
                                          FrameAddress(offsetof(VMFrame, stackLimit)));
@@ -1137,11 +1233,11 @@ mjit::Compiler::generatePrologue()
          * set for global and eval frames, and will have been set by
          * HeavyweightFunctionPrologue for heavyweight function frames.
          */
-        if (!script->function()->isHeavyweight() && analysis->usesScopeChain()) {
+        if (!script_->function()->isHeavyweight() && analysis->usesScopeChain()) {
             RegisterID t0 = Registers::ReturnReg;
             Jump hasScope = masm.branchTest32(Assembler::NonZero,
                                               FrameFlagsAddress(), Imm32(StackFrame::HAS_SCOPECHAIN));
-            masm.loadPayload(Address(JSFrameReg, StackFrame::offsetOfCallee(script->function())), t0);
+            masm.loadPayload(Address(JSFrameReg, StackFrame::offsetOfCallee(script_->function())), t0);
             masm.loadPtr(Address(t0, JSFunction::offsetOfEnvironment()), t0);
             masm.storePtr(t0, Address(JSFrameReg, StackFrame::offsetOfScopeChain()));
             hasScope.linkTo(masm.label(), &masm);
@@ -1153,11 +1249,11 @@ mjit::Compiler::generatePrologue()
          * fp->u.nactual. fp->u.nactual is only set when numActual != numFormal,
          * so store 'fp->u.nactual = numFormal' when there is no over/underflow.
          */
-        if (script->argumentsHasVarBinding()) {
+        if (script_->argumentsHasVarBinding()) {
             Jump hasArgs = masm.branchTest32(Assembler::NonZero, FrameFlagsAddress(),
                                              Imm32(StackFrame::UNDERFLOW_ARGS |
                                                    StackFrame::OVERFLOW_ARGS));
-            masm.storePtr(ImmPtr((void *)(size_t) script->function()->nargs),
+            masm.storePtr(ImmPtr((void *)(size_t) script_->function()->nargs),
                           Address(JSFrameReg, StackFrame::offsetOfNumActual()));
             hasArgs.linkTo(masm.label(), &masm);
         }
@@ -1167,7 +1263,7 @@ mjit::Compiler::generatePrologue()
 
     if (cx->typeInferenceEnabled()) {
 #ifdef DEBUG
-        if (script->function()) {
+        if (script_->function()) {
             prepareStubCall(Uses(0));
             INLINE_STUBCALL(stubs::AssertArgumentTypes, REJOIN_NONE);
         }
@@ -1176,11 +1272,11 @@ mjit::Compiler::generatePrologue()
     }
 
     /* Inline StackFrame::prologue. */
-    if (script->isActiveEval && script->strictModeCode) {
+    if (script_->isActiveEval && script_->strict) {
         prepareStubCall(Uses(0));
         INLINE_STUBCALL(stubs::StrictEvalPrologue, REJOIN_EVAL_PROLOGUE);
-    } else if (script->function()) {
-        if (script->function()->isHeavyweight()) {
+    } else if (script_->function()) {
+        if (script_->function()->isHeavyweight()) {
             prepareStubCall(Uses(0));
             INLINE_STUBCALL(stubs::HeavyweightFunctionPrologue, REJOIN_FUNCTION_PROLOGUE);
         }
@@ -1190,8 +1286,12 @@ mjit::Compiler::generatePrologue()
     }
 
     CompileStatus status = methodEntryHelper();
-    if (status == Compile_Okay)
-        recompileCheckHelper();
+    if (status == Compile_Okay) {
+        if (IsIonEnabled(cx))
+            ionCompileHelper();
+        else
+            inliningCompileHelper();
+    }
 
     return status;
 }
@@ -1200,7 +1300,7 @@ void
 mjit::Compiler::ensureDoubleArguments()
 {
     /* Convert integer arguments which were inferred as (int|double) to doubles. */
-    for (uint32_t i = 0; script->function() && i < script->function()->nargs; i++) {
+    for (uint32_t i = 0; script_->function() && i < script_->function()->nargs; i++) {
         uint32_t slot = ArgSlot(i);
         if (a->varTypes[slot].getTypeTag() == JSVAL_TYPE_DOUBLE && analysis->trackSlot(slot))
             frame.ensureDouble(frame.getArg(i));
@@ -1211,19 +1311,8 @@ void
 mjit::Compiler::markUndefinedLocal(uint32_t offset, uint32_t i)
 {
     uint32_t depth = ssa.getFrame(a->inlineIndex).depth;
-    uint32_t slot = LocalSlot(script, i);
     Address local(JSFrameReg, sizeof(StackFrame) + (depth + i) * sizeof(Value));
-    if (!cx->typeInferenceEnabled() || !analysis->trackSlot(slot)) {
-        masm.storeValue(UndefinedValue(), local);
-    } else {
-        Lifetime *lifetime = analysis->liveness(slot).live(offset);
-        if (lifetime)
-            masm.storeValue(UndefinedValue(), local);
-#ifdef DEBUG
-        else
-            masm.storeValue(ObjectValueCrashOnTouch(), local);
-#endif
-    }
+    masm.storeValue(UndefinedValue(), local);
 }
 
 void
@@ -1233,14 +1322,14 @@ mjit::Compiler::markUndefinedLocals()
      * Set locals to undefined. Skip locals which aren't closed and are known
      * to be defined before used,
      */
-    for (uint32_t i = 0; i < script->nfixed; i++)
+    for (uint32_t i = 0; i < script_->nfixed; i++)
         markUndefinedLocal(0, i);
 
 #ifdef DEBUG
     uint32_t depth = ssa.getFrame(a->inlineIndex).depth;
-    for (uint32_t i = script->nfixed; i < script->nslots; i++) {
+    for (uint32_t i = script_->nfixed; i < script_->nslots; i++) {
         Address local(JSFrameReg, sizeof(StackFrame) + (depth + i) * sizeof(Value));
-        masm.storeValue(ObjectValueCrashOnTouch(), local);
+        masm.storeValue(JS::ObjectValueCrashOnTouch(), local);
     }
 #endif
 }
@@ -1321,7 +1410,7 @@ mjit::Compiler::finishThisUp()
 
     JSC::ExecutableAllocator &execAlloc = cx->runtime->execAlloc();
     JSC::ExecutablePool *execPool;
-    uint8_t *result = (uint8_t *)execAlloc.alloc(codeSize, &execPool, JSC::METHOD_CODE);
+    uint8_t *result = (uint8_t *)execAlloc.alloc(codeSize, &execPool, JSC::JAEGER_CODE);
     if (!result) {
         js_ReportOutOfMemory(cx);
         return Compile_Error;
@@ -1331,8 +1420,8 @@ mjit::Compiler::finishThisUp()
     masm.executableCopy(result);
     stubcc.masm.executableCopy(result + masm.size());
 
-    JSC::LinkBuffer fullCode(result, codeSize, JSC::METHOD_CODE);
-    JSC::LinkBuffer stubCode(result + masm.size(), stubcc.size(), JSC::METHOD_CODE);
+    JSC::LinkBuffer fullCode(result, codeSize, JSC::JAEGER_CODE);
+    JSC::LinkBuffer stubCode(result + masm.size(), stubcc.size(), JSC::JAEGER_CODE);
 
     JS_ASSERT(!loop);
 
@@ -1348,6 +1437,7 @@ mjit::Compiler::finishThisUp()
                       sizeof(NativeMapEntry) * nNmapLive +
                       sizeof(InlineFrame) * inlineFrames.length() +
                       sizeof(CallSite) * callSites.length() +
+                      sizeof(CompileTrigger) * compileTriggers.length() +
                       sizeof(JSObject*) * rootedTemplates.length() +
                       sizeof(RegExpShared*) * rootedRegExps.length() +
                       sizeof(uint32_t) * monitoredBytecodes.length() +
@@ -1365,7 +1455,7 @@ mjit::Compiler::finishThisUp()
 #endif
                       0;
 
-    uint8_t *cursor = (uint8_t *)OffTheBooks::calloc_(dataSize);
+    uint8_t *cursor = (uint8_t *)js_calloc(dataSize);
     if (!cursor) {
         execPool->release();
         js_ReportOutOfMemory(cx);
@@ -1375,14 +1465,14 @@ mjit::Compiler::finishThisUp()
     JITChunk *chunk = new(cursor) JITChunk;
     cursor += sizeof(JITChunk);
 
-    JS_ASSERT(outerScript == script);
+    JS_ASSERT(outerScript == script_);
 
     chunk->code = JSC::MacroAssemblerCodeRef(result, execPool, masm.size() + stubcc.size());
     chunk->pcLengths = pcLengths;
 
     if (chunkIndex == 0) {
         jit->invokeEntry = result;
-        if (script->function()) {
+        if (script_->function()) {
             jit->arityCheckEntry = stubCode.locationOf(arityLabel).executableAddress();
             jit->argsCheckEntry = stubCode.locationOf(argsCheckLabel).executableAddress();
             jit->fastEntry = fullCode.locationOf(fastEntryLabel).executableAddress();
@@ -1466,7 +1556,8 @@ mjit::Compiler::finishThisUp()
         }
 
         JSScript *script =
-            (from.inlineIndex == UINT32_MAX) ? outerScript : inlineFrames[from.inlineIndex]->script;
+            (from.inlineIndex == UINT32_MAX) ? outerScript.get()
+                                             : inlineFrames[from.inlineIndex]->script;
         uint32_t codeOffset = from.ool
                             ? masm.size() + from.returnOffset
                             : from.returnOffset;
@@ -1479,6 +1570,16 @@ mjit::Compiler::finishThisUp()
          */
         if (from.loopPatch.hasPatch)
             stubCode.patch(from.loopPatch.codePatch, result + codeOffset);
+    }
+
+    CompileTrigger *jitCompileTriggers = (CompileTrigger *)cursor;
+    chunk->nCompileTriggers = compileTriggers.length();
+    cursor += sizeof(CompileTrigger) * chunk->nCompileTriggers;
+    for (size_t i = 0; i < chunk->nCompileTriggers; i++) {
+        const InternalCompileTrigger &trigger = compileTriggers[i];
+        jitCompileTriggers[i].initialize(trigger.pc - outerScript->code,
+                                         fullCode.locationOf(trigger.inlineJump),
+                                         stubCode.locationOf(trigger.stubLabel));
     }
 
     JSObject **jitRootedTemplates = (JSObject **)cursor;
@@ -1508,7 +1609,7 @@ mjit::Compiler::finishThisUp()
         jitTypeBarrierBytecodes[i] = typeBarrierBytecodes[i];
 
 #if defined JS_MONOIC
-    if (chunkIndex == 0 && script->function()) {
+    if (chunkIndex == 0 && script_->function()) {
         JS_ASSERT(jit->argsCheckPool == NULL);
         if (cx->typeInferenceEnabled()) {
             jit->argsCheckStub = stubCode.locationOf(argsCheckStub);
@@ -1568,6 +1669,7 @@ mjit::Compiler::finishThisUp()
     chunk->nCallICs = callICs.length();
     cursor += sizeof(ic::CallICInfo) * chunk->nCallICs;
     for (size_t i = 0; i < chunk->nCallICs; i++) {
+        jitCallICs[i].funGuardLabel = fullCode.locationOf(callICs[i].funGuardLabel);
         jitCallICs[i].funGuard = fullCode.locationOf(callICs[i].funGuard);
         jitCallICs[i].funJump = fullCode.locationOf(callICs[i].funJump);
         jitCallICs[i].slowPathStart = stubCode.locationOf(callICs[i].slowPathStart);
@@ -1584,6 +1686,11 @@ mjit::Compiler::finishThisUp()
                  fullCode.locationOf(callICs[i].funGuard);
         jitCallICs[i].joinPointOffset = offset;
         JS_ASSERT(jitCallICs[i].joinPointOffset == offset);
+
+        offset = fullCode.locationOf(callICs[i].ionJoinPoint) -
+                 fullCode.locationOf(callICs[i].funGuard);
+        jitCallICs[i].ionJoinOffset = offset;
+        JS_ASSERT(jitCallICs[i].ionJoinOffset == offset);
 
         /* Compute the OOL call offset. */
         offset = stubCode.locationOf(callICs[i].oolCall) -
@@ -1629,7 +1736,7 @@ mjit::Compiler::finishThisUp()
         if (equalityICs[i].trampoline) {
             jitEqualityICs[i].target = stubCode.locationOf(equalityICs[i].trampolineStart);
         } else {
-            uint32_t offs = uint32_t(equalityICs[i].jumpTarget - script->code);
+            uint32_t offs = uint32_t(equalityICs[i].jumpTarget - script_->code);
             JS_ASSERT(jumpMap[offs].isSet());
             jitEqualityICs[i].target = fullCode.locationOf(jumpMap[offs]);
         }
@@ -1700,7 +1807,7 @@ mjit::Compiler::finishThisUp()
         new (&to) ic::SetElementIC();
         from.copyTo(to, fullCode, stubCode);
 
-        to.strictMode = script->strictModeCode;
+        to.strictMode = script_->strict;
         to.vr = from.vr;
         to.objReg = from.objReg;
         to.objRemat = from.objRemat.toInt32();
@@ -1785,7 +1892,7 @@ mjit::Compiler::finishThisUp()
 
     for (size_t i = 0; i < jumpTableEdges.length(); i++) {
         JumpTableEdge edge = jumpTableEdges[i];
-        if (bytecodeInChunk(script->code + edge.target)) {
+        if (bytecodeInChunk(script_->code + edge.target)) {
             JS_ASSERT(jumpMap[edge.target].isSet());
             jumpVec[i] = (void *)(result + masm.distanceOf(jumpMap[edge.target]));
         } else {
@@ -1817,7 +1924,7 @@ mjit::Compiler::finishThisUp()
     if (!Probes::registerMJITCode(cx, chunk,
                                   a, (JSActiveFrame**) inlineFrames.begin())) {
         execPool->release();
-        cx->free_(chunk);
+        js_free(chunk);
         js_ReportOutOfMemory(cx);
         return Compile_Error;
     }
@@ -1832,17 +1939,17 @@ mjit::Compiler::finishThisUp()
             JS_ASSERT(!edge.sourceJump1 && !edge.sourceJump2);
             void *label = edge.targetLabel ? edge.targetLabel : edge.shimLabel;
             CodeLocationLabel targetLabel(label);
-            JSOp op = JSOp(script->code[edge.source]);
+            JSOp op = JSOp(script_->code[edge.source]);
             if (op == JSOP_TABLESWITCH) {
                 if (edge.jumpTableEntries)
-                    cx->free_(edge.jumpTableEntries);
+                    js_free(edge.jumpTableEntries);
                 CrossChunkEdge::JumpTableEntryVector *jumpTableEntries = NULL;
                 bool failed = false;
                 for (unsigned j = 0; j < chunkJumps.length(); j++) {
                     ChunkJumpTableEdge nedge = chunkJumps[j];
                     if (nedge.edge.source == edge.source && nedge.edge.target == edge.target) {
                         if (!jumpTableEntries) {
-                            jumpTableEntries = OffTheBooks::new_<CrossChunkEdge::JumpTableEntryVector>();
+                            jumpTableEntries = js_new<CrossChunkEdge::JumpTableEntryVector>();
                             if (!jumpTableEntries)
                                 failed = true;
                         }
@@ -1853,7 +1960,7 @@ mjit::Compiler::finishThisUp()
                 }
                 if (failed) {
                     execPool->release();
-                    cx->free_(chunk);
+                    js_free(chunk);
                     js_ReportOutOfMemory(cx);
                     return Compile_Error;
                 }
@@ -1900,8 +2007,8 @@ mjit::Compiler::finishThisUp()
         if (IsJaegerSpewChannelActive(JSpew_JSOps)) {                         \
             Sprinter sprinter(cx);                                            \
             sprinter.init();                                                  \
-            RootedScript script_(cx, script);                                 \
-            js_Disassemble1(cx, script_, PC, PC - script->code,               \
+            RootedScript script(cx, script_);                                 \
+            js_Disassemble1(cx, script, PC, PC - script_->code,               \
                             JS_TRUE, &sprinter);                              \
             JaegerSpew(JSpew_JSOps, "    %2d %s",                             \
                        frame.stackDepth(), sprinter.string());                \
@@ -1934,7 +2041,7 @@ mjit::Compiler::shouldStartLoop(jsbytecode *head)
      */
     if (*head == JSOP_LOOPHEAD && analysis->getLoop(head)) {
         uint32_t backedge = analysis->getLoop(head)->backedge;
-        if (!bytecodeInChunk(script->code + backedge))
+        if (!bytecodeInChunk(script_->code + backedge))
             return false;
         return true;
     }
@@ -1944,7 +2051,7 @@ mjit::Compiler::shouldStartLoop(jsbytecode *head)
 CompileStatus
 mjit::Compiler::generateMethod()
 {
-    SrcNoteLineScanner scanner(script->notes(), script->lineno);
+    SrcNoteLineScanner scanner(script_->notes(), script_->lineno);
 
     /* For join points, whether there was fallthrough from the previous opcode. */
     bool fallthrough = true;
@@ -1955,14 +2062,14 @@ mjit::Compiler::generateMethod()
     if (!outerJIT())
         return Compile_Retry;
 
-    uint32_t chunkBegin = 0, chunkEnd = script->length;
+    uint32_t chunkBegin = 0, chunkEnd = script_->length;
     if (!a->parent) {
         const ChunkDescriptor &desc =
             outerJIT()->chunkDescriptor(chunkIndex);
         chunkBegin = desc.begin;
         chunkEnd = desc.end;
 
-        while (PC != script->code + chunkBegin) {
+        while (PC != script_->code + chunkBegin) {
             Bytecode *opinfo = analysis->maybeCode(PC);
             if (opinfo) {
                 if (opinfo->jumpTarget) {
@@ -1970,7 +2077,7 @@ mjit::Compiler::generateMethod()
                     const SlotValue *newv = analysis->newValues(PC);
                     if (newv) {
                         while (newv->slot) {
-                            if (newv->slot < TotalSlots(script)) {
+                            if (newv->slot < TotalSlots(script_)) {
                                 VarType &vt = a->varTypes[newv->slot];
                                 vt.setTypes(analysis->getValueTypes(newv->value));
                             }
@@ -1979,7 +2086,7 @@ mjit::Compiler::generateMethod()
                     }
                 }
                 if (analyze::BytecodeUpdatesSlot(JSOp(*PC))) {
-                    uint32_t slot = GetBytecodeSlot(script, PC);
+                    uint32_t slot = GetBytecodeSlot(script_, PC);
                     if (analysis->trackSlot(slot)) {
                         VarType &vt = a->varTypes[slot];
                         vt.setTypes(analysis->pushedTypes(PC, 0));
@@ -1997,11 +2104,14 @@ mjit::Compiler::generateMethod()
         }
     }
 
+    /* Use a common root to avoid frequent re-rooting. */
+    RootedPropertyName name0(cx);
+
     for (;;) {
         JSOp op = JSOp(*PC);
         int trap = stubs::JSTRAP_NONE;
 
-        if (script->hasBreakpointsAt(PC))
+        if (script_->hasBreakpointsAt(PC))
             trap |= stubs::JSTRAP_TRAP;
 
         Bytecode *opinfo = analysis->maybeCode(PC);
@@ -2016,11 +2126,11 @@ mjit::Compiler::generateMethod()
             continue;
         }
 
-        if (PC >= script->code + script->length)
+        if (PC >= script_->code + script_->length)
             break;
 
-        scanner.advanceTo(PC - script->code);
-        if (script->stepModeEnabled() &&
+        scanner.advanceTo(PC - script_->code);
+        if (script_->stepModeEnabled() &&
             (scanner.isLineHeader() || opinfo->jumpTarget))
         {
             trap |= stubs::JSTRAP_SINGLESTEP;
@@ -2049,7 +2159,7 @@ mjit::Compiler::generateMethod()
         fixedIntToDoubleEntries.clear();
         fixedDoubleToAnyEntries.clear();
 
-        if (PC >= script->code + chunkEnd) {
+        if (PC >= script_->code + chunkEnd) {
             if (fallthrough) {
                 if (opinfo->jumpTarget)
                     fixDoubleTypes(PC);
@@ -2089,7 +2199,7 @@ mjit::Compiler::generateMethod()
                     if (pcLengths && lastPC) {
                         /* Track this sync code for the previous op. */
                         size_t length = masm.size() - masm.distanceOf(start);
-                        uint32_t offset = ssa.frameLength(a->inlineIndex) + lastPC - script->code;
+                        uint32_t offset = ssa.frameLength(a->inlineIndex) + lastPC - script_->code;
                         pcLengths[offset].codeLengthAugment += length;
                     }
                     JS_ASSERT(frame.consistentRegisters(PC));
@@ -2109,7 +2219,7 @@ mjit::Compiler::generateMethod()
             frame.syncAndForgetEverything();
         }
         frame.assertValidRegisterState();
-        a->jumpMap[uint32_t(PC - script->code)] = masm.label();
+        a->jumpMap[uint32_t(PC - script_->code)] = masm.label();
 
         if (cx->typeInferenceEnabled() && opinfo->safePoint) {
             /*
@@ -2122,7 +2232,7 @@ mjit::Compiler::generateMethod()
             if (newv) {
                 while (newv->slot) {
                     if (newv->value.kind() == SSAValue::PHI &&
-                        newv->value.phiOffset() == uint32_t(PC - script->code) &&
+                        newv->value.phiOffset() == uint32_t(PC - script_->code) &&
                         analysis->trackSlot(newv->slot) &&
                         a->varTypes[newv->slot].getTypeTag() == JSVAL_TYPE_DOUBLE) {
                         FrameEntry *fe = frame.getSlotEntry(newv->slot);
@@ -2143,9 +2253,9 @@ mjit::Compiler::generateMethod()
         JS_ASSERT(frame.stackDepth() == opinfo->stackDepth);
 
         if (op == JSOP_LOOPHEAD && analysis->getLoop(PC)) {
-            jsbytecode *backedge = script->code + analysis->getLoop(PC)->backedge;
+            jsbytecode *backedge = script_->code + analysis->getLoop(PC)->backedge;
             if (!bytecodeInChunk(backedge)){
-                for (uint32_t slot = ArgSlot(0); slot < TotalSlots(script); slot++) {
+                for (uint32_t slot = ArgSlot(0); slot < TotalSlots(script_); slot++) {
                     if (a->varTypes[slot].getTypeTag() == JSVAL_TYPE_DOUBLE) {
                         FrameEntry *fe = frame.getSlotEntry(slot);
                         masm.ensureInMemoryDouble(frame.addressOf(fe));
@@ -2183,8 +2293,8 @@ mjit::Compiler::generateMethod()
 
         JSValueType arithFirstUseType = JSVAL_TYPE_UNKNOWN;
         JSValueType arithSecondUseType = JSVAL_TYPE_UNKNOWN;
-        if (script->hasScriptCounts && !!(js_CodeSpec[op].format & JOF_ARITH)) {
-            if (GetUseCount(script, PC - script->code) == 1) {
+        if (script_->hasScriptCounts && !!(js_CodeSpec[op].format & JOF_ARITH)) {
+            if (GetUseCount(script_, PC - script_->code) == 1) {
                 FrameEntry *use = frame.peek(-1);
                 /*
                  * Pretend it's a binary operation and the second operand has
@@ -2207,7 +2317,7 @@ mjit::Compiler::generateMethod()
          * miss them when taking the jump. This is delayed for other opcodes,
          * as we want to skip updating for ops we didn't generate any code for.
          */
-        if (script->hasScriptCounts && JOF_OPTYPE(op) == JOF_JUMP)
+        if (script_->hasScriptCounts && JOF_OPTYPE(op) == JOF_JUMP)
             updatePCCounts(PC, &countsUpdated);
 
     /**********************
@@ -2219,6 +2329,9 @@ mjit::Compiler::generateMethod()
         switch (op) {
           BEGIN_CASE(JSOP_NOP)
           END_CASE(JSOP_NOP)
+
+          BEGIN_CASE(JSOP_NOTEARG)
+          END_CASE(JSOP_NOTEARG)
 
           BEGIN_CASE(JSOP_UNDEFINED)
             frame.push(UndefinedValue());
@@ -2243,7 +2356,7 @@ mjit::Compiler::generateMethod()
           END_CASE(JSOP_POPV)
 
           BEGIN_CASE(JSOP_RETURN)
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 updatePCCounts(PC, &countsUpdated);
             emitReturn(frame.peek(-1));
             fallthrough = false;
@@ -2252,8 +2365,8 @@ mjit::Compiler::generateMethod()
           BEGIN_CASE(JSOP_GOTO)
           BEGIN_CASE(JSOP_DEFAULT)
           {
-            unsigned targetOffset = FollowBranch(cx, script, PC - script->code);
-            jsbytecode *target = script->code + targetOffset;
+            unsigned targetOffset = FollowBranch(cx, script_, PC - script_->code);
+            jsbytecode *target = script_->code + targetOffset;
 
             fixDoubleTypes(target);
 
@@ -2297,7 +2410,7 @@ mjit::Compiler::generateMethod()
           END_CASE(JSOP_IFNE)
 
           BEGIN_CASE(JSOP_ARGUMENTS)
-            if (script->needsArgsObj()) {
+            if (script_->needsArgsObj()) {
                 prepareStubCall(Uses(0));
                 INLINE_STUBCALL(stubs::Arguments, REJOIN_FALLTHROUGH);
                 pushSyncedEntry(0);
@@ -2305,25 +2418,6 @@ mjit::Compiler::generateMethod()
                 frame.push(MagicValue(JS_OPTIMIZED_ARGUMENTS));
             }
           END_CASE(JSOP_ARGUMENTS)
-          BEGIN_CASE(JSOP_ACTUALSFILLED)
-          {
-
-            // We never inline things with defaults because of the switch.
-            JS_ASSERT(a == outer);
-            RegisterID value = frame.allocReg(), nactual = frame.allocReg();
-            int32_t defstart = GET_UINT16(PC);
-            masm.move(Imm32(defstart), value);
-            masm.load32(Address(JSFrameReg, StackFrame::offsetOfNumActual()), nactual);
-
-            // Best would be a single instruction where available (like
-            // cmovge on x86), but there's no way get that yet, so jump.
-            Jump j = masm.branch32(Assembler::LessThan, nactual, Imm32(defstart));
-            masm.move(nactual, value);
-            j.linkTo(masm.label(), &masm);
-            frame.freeReg(nactual);
-            frame.pushInt32(value);
-          }
-          END_CASE(JSOP_ACTUALSFILLED)
 
           BEGIN_CASE(JSOP_ITERNEXT)
             iterNext();
@@ -2383,7 +2477,7 @@ mjit::Compiler::generateMethod()
           BEGIN_CASE(JSOP_EQ)
           BEGIN_CASE(JSOP_NE)
           {
-           if (script->hasScriptCounts) {
+           if (script_->hasScriptCounts) {
                updateArithCounts(PC, NULL, arithFirstUseType, arithSecondUseType);
                arithUpdated = true;
            }
@@ -2397,7 +2491,7 @@ mjit::Compiler::generateMethod()
             /* Get jump target, if any. */
             jsbytecode *target = NULL;
             if (fused != JSOP_NOP) {
-                if (script->hasScriptCounts)
+                if (script_->hasScriptCounts)
                     updatePCCounts(PC, &countsUpdated);
                 target = next + GET_JUMP_OFFSET(next);
                 fixDoubleTypes(target);
@@ -2551,6 +2645,7 @@ mjit::Compiler::generateMethod()
                 /* Watch for overflow in constant propagation. */
                 types::TypeSet *pushed = pushedTypeSet(0);
                 if (!v.isInt32() && pushed && !pushed->hasType(types::Type::DoubleType())) {
+                    RootedScript script(cx, script_);
                     types::TypeScript::MonitorOverflow(cx, script, PC);
                     return Compile_Retry;
                 }
@@ -2570,10 +2665,10 @@ mjit::Compiler::generateMethod()
           BEGIN_CASE(JSOP_DELNAME)
           {
             uint32_t index = GET_UINT32_INDEX(PC);
-            PropertyName *name = script->getName(index);
+            name0 = script_->getName(index);
 
             prepareStubCall(Uses(0));
-            masm.move(ImmPtr(name), Registers::ArgReg1);
+            masm.move(ImmPtr(name0), Registers::ArgReg1);
             INLINE_STUBCALL(stubs::DelName, REJOIN_FALLTHROUGH);
             pushSyncedEntry(0);
           }
@@ -2582,11 +2677,11 @@ mjit::Compiler::generateMethod()
           BEGIN_CASE(JSOP_DELPROP)
           {
             uint32_t index = GET_UINT32_INDEX(PC);
-            PropertyName *name = script->getName(index);
+            name0 = script_->getName(index);
 
             prepareStubCall(Uses(1));
-            masm.move(ImmPtr(name), Registers::ArgReg1);
-            INLINE_STUBCALL(STRICT_VARIANT(script, stubs::DelProp), REJOIN_FALLTHROUGH);
+            masm.move(ImmPtr(name0), Registers::ArgReg1);
+            INLINE_STUBCALL(STRICT_VARIANT(script_, stubs::DelProp), REJOIN_FALLTHROUGH);
             frame.pop();
             pushSyncedEntry(0);
           }
@@ -2595,7 +2690,7 @@ mjit::Compiler::generateMethod()
           BEGIN_CASE(JSOP_DELELEM)
           {
             prepareStubCall(Uses(2));
-            INLINE_STUBCALL(STRICT_VARIANT(script, stubs::DelElem), REJOIN_FALLTHROUGH);
+            INLINE_STUBCALL(STRICT_VARIANT(script_, stubs::DelElem), REJOIN_FALLTHROUGH);
             frame.popn(2);
             pushSyncedEntry(0);
           }
@@ -2614,13 +2709,14 @@ mjit::Compiler::generateMethod()
           BEGIN_CASE(JSOP_GETPROP)
           BEGIN_CASE(JSOP_CALLPROP)
           BEGIN_CASE(JSOP_LENGTH)
-            if (!jsop_getprop(script->getName(GET_UINT32_INDEX(PC)), knownPushedType(0)))
+            name0 = script_->getName(GET_UINT32_INDEX(PC));
+            if (!jsop_getprop(name0, knownPushedType(0)))
                 return Compile_Error;
           END_CASE(JSOP_GETPROP)
 
           BEGIN_CASE(JSOP_GETELEM)
           BEGIN_CASE(JSOP_CALLELEM)
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 updateElemCounts(PC, frame.peek(-2), frame.peek(-1));
             if (!jsop_getelem())
                 return Compile_Error;
@@ -2632,7 +2728,7 @@ mjit::Compiler::generateMethod()
 
           BEGIN_CASE(JSOP_SETELEM)
           {
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 updateElemCounts(PC, frame.peek(-3), frame.peek(-2));
             jsbytecode *next = &PC[JSOP_SETELEM_LENGTH];
             bool pop = (JSOp(*next) == JSOP_POP && !analysis->jumpTarget(next));
@@ -2670,7 +2766,7 @@ mjit::Compiler::generateMethod()
                     done = true;
                 else if (status != Compile_InlineAbort)
                     return status;
-                if (script->hasScriptCounts) {
+                if (script_->hasScriptCounts) {
                     /* Code generated while inlining has been accounted for. */
                     countsUpdated = true;
                 }
@@ -2691,25 +2787,26 @@ mjit::Compiler::generateMethod()
           BEGIN_CASE(JSOP_NAME)
           BEGIN_CASE(JSOP_CALLNAME)
           {
-            PropertyName *name = script->getName(GET_UINT32_INDEX(PC));
-            jsop_name(name, knownPushedType(0));
-            frame.extra(frame.peek(-1)).name = name;
+            name0 = script_->getName(GET_UINT32_INDEX(PC));
+            jsop_name(name0, knownPushedType(0));
+            frame.extra(frame.peek(-1)).name = name0;
           }
           END_CASE(JSOP_NAME)
 
-          BEGIN_CASE(JSOP_INTRINSICNAME)
+          BEGIN_CASE(JSOP_GETINTRINSIC)
           BEGIN_CASE(JSOP_CALLINTRINSIC)
           {
-            PropertyName *name = script->getName(GET_UINT32_INDEX(PC));
-            jsop_intrinsicname(name, knownPushedType(0));
-            frame.extra(frame.peek(-1)).name = name;
+            name0 = script_->getName(GET_UINT32_INDEX(PC));
+            if (!jsop_intrinsic(name0, knownPushedType(0)))
+                return Compile_Error;
+            frame.extra(frame.peek(-1)).name = name0;
           }
-          END_CASE(JSOP_INTRINSICNAME)
+          END_CASE(JSOP_GETINTRINSIC)
 
           BEGIN_CASE(JSOP_IMPLICITTHIS)
           {
             prepareStubCall(Uses(0));
-            masm.move(ImmPtr(script->getName(GET_UINT32_INDEX(PC))), Registers::ArgReg1);
+            masm.move(ImmPtr(script_->getName(GET_UINT32_INDEX(PC))), Registers::ArgReg1);
             INLINE_STUBCALL(stubs::ImplicitThis, REJOIN_FALLTHROUGH);
             frame.pushSynced(JSVAL_TYPE_UNKNOWN);
           }
@@ -2717,13 +2814,13 @@ mjit::Compiler::generateMethod()
 
           BEGIN_CASE(JSOP_DOUBLE)
           {
-            double d = script->getConst(GET_UINT32_INDEX(PC)).toDouble();
+            double d = script_->getConst(GET_UINT32_INDEX(PC)).toDouble();
             frame.push(Value(DoubleValue(d)));
           }
           END_CASE(JSOP_DOUBLE)
 
           BEGIN_CASE(JSOP_STRING)
-            frame.push(StringValue(script->getAtom(GET_UINT32_INDEX(PC))));
+            frame.push(StringValue(script_->getAtom(GET_UINT32_INDEX(PC))));
           END_CASE(JSOP_STRING)
 
           BEGIN_CASE(JSOP_ZERO)
@@ -2737,6 +2834,10 @@ mjit::Compiler::generateMethod()
           BEGIN_CASE(JSOP_NULL)
             frame.push(NullValue());
           END_CASE(JSOP_NULL)
+
+          BEGIN_CASE(JSOP_CALLEE)
+            frame.pushCallee();
+          END_CASE(JSOP_CALLEE)
 
           BEGIN_CASE(JSOP_THIS)
             jsop_this();
@@ -2768,7 +2869,7 @@ mjit::Compiler::generateMethod()
              * double types, as we don't track types of slots in scripts with
              * switch statements (could be fixed).
              */
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 updatePCCounts(PC, &countsUpdated);
 #if defined JS_CPU_ARM /* Need to implement jump(BaseIndex) for ARM */
             frame.syncAndKillEverything();
@@ -2787,21 +2888,6 @@ mjit::Compiler::generateMethod()
             break;
           END_CASE(JSOP_TABLESWITCH)
 
-          BEGIN_CASE(JSOP_LOOKUPSWITCH)
-            if (script->hasScriptCounts)
-                updatePCCounts(PC, &countsUpdated);
-            frame.syncAndForgetEverything();
-            masm.move(ImmPtr(PC), Registers::ArgReg1);
-
-            /* prepareStubCall() is not needed due to syncAndForgetEverything() */
-            INLINE_STUBCALL(stubs::LookupSwitch, REJOIN_NONE);
-            frame.pop();
-
-            masm.jump(Registers::ReturnReg);
-            PC += js_GetVariableBytecodeLength(PC);
-            break;
-          END_CASE(JSOP_LOOKUPSWITCH)
-
           BEGIN_CASE(JSOP_CASE)
             // X Y
 
@@ -2817,7 +2903,7 @@ mjit::Compiler::generateMethod()
 
           BEGIN_CASE(JSOP_STRICTEQ)
           BEGIN_CASE(JSOP_STRICTNE)
-            if (script->hasScriptCounts) {
+            if (script_->hasScriptCounts) {
                 updateArithCounts(PC, NULL, arithFirstUseType, arithSecondUseType);
                 arithUpdated = true;
             }
@@ -2832,7 +2918,7 @@ mjit::Compiler::generateMethod()
           BEGIN_CASE(JSOP_MOREITER)
           {
             /* At the byte level, this is always fused with IFNE or IFNEX. */
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 updatePCCounts(PC, &countsUpdated);
             jsbytecode *target = &PC[JSOP_MOREITER_LENGTH];
             JSOp next = JSOp(*target);
@@ -2864,7 +2950,7 @@ mjit::Compiler::generateMethod()
             uint32_t arg = GET_SLOTNO(PC);
             if (JSObject *singleton = pushedSingleton(0))
                 frame.push(ObjectValue(*singleton));
-            else if (script->argsObjAliasesFormals())
+            else if (script_->argsObjAliasesFormals())
                 jsop_aliasedArg(arg, /* get = */ true);
             else
                 frame.pushArg(arg);
@@ -2881,7 +2967,7 @@ mjit::Compiler::generateMethod()
             bool pop = JSOp(*next) == JSOP_POP && !analysis->jumpTarget(next);
 
             uint32_t arg = GET_SLOTNO(PC);
-            if (script->argsObjAliasesFormals())
+            if (script_->argsObjAliasesFormals())
                 jsop_aliasedArg(arg, /* get = */ false, pop);
             else
                 frame.storeArg(arg, pop);
@@ -2969,62 +3055,27 @@ mjit::Compiler::generateMethod()
             frame.pop();
           END_CASE(JSOP_INITPROP)
 
+          BEGIN_CASE(JSOP_INITELEM_ARRAY)
+            jsop_initelem_array();
+          END_CASE(JSOP_INITELEM_ARRAY)
+
           BEGIN_CASE(JSOP_INITELEM)
-            jsop_initelem();
+            prepareStubCall(Uses(3));
+            INLINE_STUBCALL(stubs::InitElem, REJOIN_FALLTHROUGH);
             frame.popn(2);
           END_CASE(JSOP_INITELEM)
 
-          BEGIN_CASE(JSOP_INCARG)
-          BEGIN_CASE(JSOP_DECARG)
-          BEGIN_CASE(JSOP_ARGINC)
-          BEGIN_CASE(JSOP_ARGDEC)
-            if (script->hasScriptCounts) {
-                restoreVarType();
-                FrameEntry *fe = frame.getArg(GET_SLOTNO(PC));
-                if (fe->isTypeKnown())
-                    arithFirstUseType = fe->getKnownType();
-            }
-
-            if (!jsop_arginc(op, GET_SLOTNO(PC)))
-                return Compile_Retry;
-
-            if (script->hasScriptCounts) {
-                FrameEntry *fe = frame.getArg(GET_SLOTNO(PC));
-                updateArithCounts(PC, fe, arithFirstUseType, JSVAL_TYPE_INT32);
-                arithUpdated = true;
-            }
-          END_CASE(JSOP_ARGDEC)
-
-          BEGIN_CASE(JSOP_INCLOCAL)
-          BEGIN_CASE(JSOP_DECLOCAL)
-          BEGIN_CASE(JSOP_LOCALINC)
-          BEGIN_CASE(JSOP_LOCALDEC)
-            if (script->hasScriptCounts) {
-                restoreVarType();
-                FrameEntry *fe = frame.getLocal(GET_SLOTNO(PC));
-                if (fe->isTypeKnown())
-                    arithFirstUseType = fe->getKnownType();
-            }
-
-            if (!jsop_localinc(op, GET_SLOTNO(PC)))
-                return Compile_Retry;
-
-            if (script->hasScriptCounts) {
-                FrameEntry *fe = frame.getLocal(GET_SLOTNO(PC));
-                updateArithCounts(PC, fe, arithFirstUseType, JSVAL_TYPE_INT32);
-                arithUpdated = true;
-            }
-          END_CASE(JSOP_LOCALDEC)
-
           BEGIN_CASE(JSOP_BINDNAME)
-            jsop_bindname(script->getName(GET_UINT32_INDEX(PC)));
+            name0 = script_->getName(GET_UINT32_INDEX(PC));
+            jsop_bindname(name0);
           END_CASE(JSOP_BINDNAME)
 
           BEGIN_CASE(JSOP_SETPROP)
           {
             jsbytecode *next = &PC[JSOP_SETPROP_LENGTH];
             bool pop = JSOp(*next) == JSOP_POP && !analysis->jumpTarget(next);
-            if (!jsop_setprop(script->getName(GET_UINT32_INDEX(PC)), pop))
+            name0 = script_->getName(GET_UINT32_INDEX(PC));
+            if (!jsop_setprop(name0, pop))
                 return Compile_Error;
           }
           END_CASE(JSOP_SETPROP)
@@ -3033,7 +3084,8 @@ mjit::Compiler::generateMethod()
           {
             jsbytecode *next = &PC[JSOP_SETNAME_LENGTH];
             bool pop = JSOp(*next) == JSOP_POP && !analysis->jumpTarget(next);
-            if (!jsop_setprop(script->getName(GET_UINT32_INDEX(PC)), pop))
+            name0 = script_->getName(GET_UINT32_INDEX(PC));
+            if (!jsop_setprop(name0, pop))
                 return Compile_Error;
           }
           END_CASE(JSOP_SETNAME)
@@ -3100,38 +3152,38 @@ mjit::Compiler::generateMethod()
 
           BEGIN_CASE(JSOP_DEFFUN)
           {
-            JSFunction *innerFun = script->getFunction(GET_UINT32_INDEX(PC));
+            JSFunction *innerFun = script_->getFunction(GET_UINT32_INDEX(PC));
 
             prepareStubCall(Uses(0));
             masm.move(ImmPtr(innerFun), Registers::ArgReg1);
-            INLINE_STUBCALL(STRICT_VARIANT(script, stubs::DefFun), REJOIN_FALLTHROUGH);
+            INLINE_STUBCALL(STRICT_VARIANT(script_, stubs::DefFun), REJOIN_FALLTHROUGH);
           }
           END_CASE(JSOP_DEFFUN)
 
           BEGIN_CASE(JSOP_DEFVAR)
           BEGIN_CASE(JSOP_DEFCONST)
           {
-            PropertyName *name = script->getName(GET_UINT32_INDEX(PC));
+            name0 = script_->getName(GET_UINT32_INDEX(PC));
 
             prepareStubCall(Uses(0));
-            masm.move(ImmPtr(name), Registers::ArgReg1);
+            masm.move(ImmPtr(name0), Registers::ArgReg1);
             INLINE_STUBCALL(stubs::DefVarOrConst, REJOIN_FALLTHROUGH);
           }
           END_CASE(JSOP_DEFVAR)
 
           BEGIN_CASE(JSOP_SETCONST)
           {
-            PropertyName *name = script->getName(GET_UINT32_INDEX(PC));
+            name0 = script_->getName(GET_UINT32_INDEX(PC));
 
             prepareStubCall(Uses(1));
-            masm.move(ImmPtr(name), Registers::ArgReg1);
+            masm.move(ImmPtr(name0), Registers::ArgReg1);
             INLINE_STUBCALL(stubs::SetConst, REJOIN_FALLTHROUGH);
           }
           END_CASE(JSOP_SETCONST)
 
           BEGIN_CASE(JSOP_LAMBDA)
           {
-            JSFunction *fun = script->getFunction(GET_UINT32_INDEX(PC));
+            JSFunction *fun = script_->getFunction(GET_UINT32_INDEX(PC));
 
             JSObjStubFun stub = stubs::Lambda;
             uint32_t uses = 0;
@@ -3161,7 +3213,7 @@ mjit::Compiler::generateMethod()
             uint32_t index = GET_UINT32_INDEX(PC);
             if (!jsop_getgname(index))
                 return Compile_Error;
-            frame.extra(frame.peek(-1)).name = script->getName(index);
+            frame.extra(frame.peek(-1)).name = script_->getName(index);
           }
           END_CASE(JSOP_GETGNAME)
 
@@ -3169,7 +3221,8 @@ mjit::Compiler::generateMethod()
           {
             jsbytecode *next = &PC[JSOP_SETGNAME_LENGTH];
             bool pop = JSOp(*next) == JSOP_POP && !analysis->jumpTarget(next);
-            if (!jsop_setgname(script->getName(GET_UINT32_INDEX(PC)), pop))
+            name0 = script_->getName(GET_UINT32_INDEX(PC));
+            if (!jsop_setgname(name0, pop))
                 return Compile_Error;
           }
           END_CASE(JSOP_SETGNAME)
@@ -3181,7 +3234,7 @@ mjit::Compiler::generateMethod()
 
           BEGIN_CASE(JSOP_OBJECT)
           {
-            JSObject *object = script->getObject(GET_UINT32_INDEX(PC));
+            JSObject *object = script_->getObject(GET_UINT32_INDEX(PC));
             RegisterID reg = frame.allocReg();
             masm.move(ImmPtr(object), reg);
             frame.pushTypedPayload(JSVAL_TYPE_OBJECT, reg);
@@ -3193,21 +3246,22 @@ mjit::Compiler::generateMethod()
           END_CASE(JSOP_UINT24)
 
           BEGIN_CASE(JSOP_STOP)
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 updatePCCounts(PC, &countsUpdated);
             emitReturn(NULL);
             goto done;
           END_CASE(JSOP_STOP)
 
           BEGIN_CASE(JSOP_GETXPROP)
-            if (!jsop_xname(script->getName(GET_UINT32_INDEX(PC))))
+            name0 = script_->getName(GET_UINT32_INDEX(PC));
+            if (!jsop_xname(name0))
                 return Compile_Error;
           END_CASE(JSOP_GETXPROP)
 
           BEGIN_CASE(JSOP_ENTERBLOCK)
           BEGIN_CASE(JSOP_ENTERLET0)
           BEGIN_CASE(JSOP_ENTERLET1)
-            enterBlock(&script->getObject(GET_UINT32_INDEX(PC))->asStaticBlock());
+            enterBlock(&script_->getObject(GET_UINT32_INDEX(PC))->asStaticBlock());
           END_CASE(JSOP_ENTERBLOCK);
 
           BEGIN_CASE(JSOP_LEAVEBLOCK)
@@ -3223,19 +3277,24 @@ mjit::Compiler::generateMethod()
           END_CASE(JSOP_INT32)
 
           BEGIN_CASE(JSOP_HOLE)
-            frame.push(MagicValue(JS_ARRAY_HOLE));
+            frame.push(MagicValue(JS_ELEMENTS_HOLE));
           END_CASE(JSOP_HOLE)
 
           BEGIN_CASE(JSOP_LOOPHEAD)
-          {
-            if (analysis->jumpTarget(PC)) {
+            if (analysis->jumpTarget(PC))
                 interruptCheckHelper();
-                recompileCheckHelper();
-            }
-          }
           END_CASE(JSOP_LOOPHEAD)
 
           BEGIN_CASE(JSOP_LOOPENTRY)
+            // Unlike JM, IonMonkey OSR enters loops at the LOOPENTRY op.
+            // Insert the recompile check here so that we can immediately
+            // enter Ion.
+            if (loop) {
+                if (IsIonEnabled(cx))
+                    ionCompileHelper();
+                else
+                    inliningCompileHelper();
+            }
           END_CASE(JSOP_LOOPENTRY)
 
           BEGIN_CASE(JSOP_DEBUGGER)
@@ -3260,18 +3319,18 @@ mjit::Compiler::generateMethod()
              * this if we did any opcode fusions, we don't keep track of the
              * associated type sets in such cases.
              */
-            unsigned nuses = GetUseCount(script, lastPC - script->code);
-            unsigned ndefs = GetDefCount(script, lastPC - script->code);
+            unsigned nuses = GetUseCount(script_, lastPC - script_->code);
+            unsigned ndefs = GetDefCount(script_, lastPC - script_->code);
             for (unsigned i = 0; i < ndefs; i++) {
                 FrameEntry *fe = frame.getStack(opinfo->stackDepth - nuses + i);
                 if (fe) {
                     /* fe may be NULL for conditionally pushed entries, e.g. JSOP_AND */
-                    frame.extra(fe).types = analysis->pushedTypes(lastPC - script->code, i);
+                    frame.extra(fe).types = analysis->pushedTypes(lastPC - script_->code, i);
                 }
             }
         }
 
-        if (script->hasScriptCounts) {
+        if (script_->hasScriptCounts) {
             size_t length = masm.size() - masm.distanceOf(inlineStart);
             bool typesUpdated = false;
 
@@ -3287,7 +3346,7 @@ mjit::Compiler::generateMethod()
             /* Update information about the result type of access operations. */
             if (PCCounts::accessOp(op) &&
                 op != JSOP_SETPROP && op != JSOP_SETELEM) {
-                FrameEntry *fe = (GetDefCount(script, lastPC - script->code) == 1)
+                FrameEntry *fe = (GetDefCount(script_, lastPC - script_->code) == 1)
                     ? frame.peek(-1)
                     : frame.peek(-2);
                 updatePCTypes(lastPC, fe);
@@ -3301,7 +3360,7 @@ mjit::Compiler::generateMethod()
         if (pcLengths) {
             size_t length     = masm.size() - masm.distanceOf(inlineStart);
             size_t stubLength = stubcc.size() - stubcc.masm.distanceOf(stubStart);
-            uint32_t offset   = ssa.frameLength(a->inlineIndex) + lastPC - script->code;
+            uint32_t offset   = ssa.frameLength(a->inlineIndex) + lastPC - script_->code;
             pcLengths[offset].inlineLength += length;
             pcLengths[offset].stubLength   += stubLength;
         }
@@ -3319,7 +3378,7 @@ mjit::Compiler::generateMethod()
 void
 mjit::Compiler::updatePCCounts(jsbytecode *pc, bool *updated)
 {
-    JS_ASSERT(script->hasScriptCounts);
+    JS_ASSERT(script_->hasScriptCounts);
 
     Label start = masm.label();
 
@@ -3329,7 +3388,7 @@ mjit::Compiler::updatePCCounts(jsbytecode *pc, bool *updated)
      * code and generated code, respectively, and add them to the accumulated
      * total for the op.
      */
-    uint32_t offset = ssa.frameLength(a->inlineIndex) + pc - script->code;
+    uint32_t offset = ssa.frameLength(a->inlineIndex) + pc - script_->code;
 
     /*
      * Base register for addresses, we can't use AbsoluteAddress in all places.
@@ -3340,7 +3399,7 @@ mjit::Compiler::updatePCCounts(jsbytecode *pc, bool *updated)
     RegisterID reg = Registers::ReturnReg;
     masm.storePtr(reg, frame.addressOfTop());
 
-    PCCounts counts = script->getPCCounts(pc);
+    PCCounts counts = script_->getPCCounts(pc);
 
     /*
      * The inlineLength represents the actual length of the opcode generated,
@@ -3390,7 +3449,7 @@ HasPayloadType(types::TypeSet *types)
 void
 mjit::Compiler::updatePCTypes(jsbytecode *pc, FrameEntry *fe)
 {
-    JS_ASSERT(script->hasScriptCounts);
+    JS_ASSERT(script_->hasScriptCounts);
 
     /*
      * Get a temporary register, as for updatePCCounts. Don't overlap with
@@ -3403,7 +3462,7 @@ mjit::Compiler::updatePCTypes(jsbytecode *pc, FrameEntry *fe)
     }
     masm.push(reg);
 
-    PCCounts counts = script->getPCCounts(pc);
+    PCCounts counts = script_->getPCCounts(pc);
 
     /* Update the counts for pushed type tags and possible access types. */
     if (fe->isTypeKnown()) {
@@ -3482,7 +3541,7 @@ void
 mjit::Compiler::updateArithCounts(jsbytecode *pc, FrameEntry *fe,
                                   JSValueType firstUseType, JSValueType secondUseType)
 {
-    JS_ASSERT(script->hasScriptCounts);
+    JS_ASSERT(script_->hasScriptCounts);
 
     RegisterID reg = Registers::ReturnReg;
     masm.push(reg);
@@ -3512,19 +3571,19 @@ mjit::Compiler::updateArithCounts(jsbytecode *pc, FrameEntry *fe,
         count = PCCounts::ARITH_UNKNOWN;
     }
 
-    masm.bumpCount(&script->getPCCounts(pc).get(count), reg);
+    masm.bumpCount(&script_->getPCCounts(pc).get(count), reg);
     masm.pop(reg);
 }
 
 void
 mjit::Compiler::updateElemCounts(jsbytecode *pc, FrameEntry *obj, FrameEntry *id)
 {
-    JS_ASSERT(script->hasScriptCounts);
+    JS_ASSERT(script_->hasScriptCounts);
 
     RegisterID reg = Registers::ReturnReg;
     masm.push(reg);
 
-    PCCounts counts = script->getPCCounts(pc);
+    PCCounts counts = script_->getPCCounts(pc);
 
     PCCounts::ElementCounts count;
     if (id->isTypeKnown()) {
@@ -3540,11 +3599,12 @@ mjit::Compiler::updateElemCounts(jsbytecode *pc, FrameEntry *obj, FrameEntry *id
 
     if (obj->mightBeType(JSVAL_TYPE_OBJECT)) {
         types::StackTypeSet *types = frame.extra(obj).types;
-        if (types && !types->hasObjectFlags(cx, types::OBJECT_FLAG_NON_TYPED_ARRAY) &&
-            types->getTypedArrayType() != TypedArray::TYPE_MAX) {
+        if (types && types->getTypedArrayType() != TypedArray::TYPE_MAX) {
             count = PCCounts::ELEM_OBJECT_TYPED;
-        } else if (types && !types->hasObjectFlags(cx, types::OBJECT_FLAG_NON_DENSE_ARRAY)) {
-            if (!types->hasObjectFlags(cx, types::OBJECT_FLAG_NON_PACKED_ARRAY))
+        } else if (types && types->getKnownClass() == &ArrayClass &&
+                   !types->hasObjectFlags(cx, types::OBJECT_FLAG_SPARSE_INDEXES |
+                                          types::OBJECT_FLAG_LENGTH_OVERFLOW)) {
+            if (!types->hasObjectFlags(cx, types::OBJECT_FLAG_NON_PACKED))
                 count = PCCounts::ELEM_OBJECT_PACKED;
             else
                 count = PCCounts::ELEM_OBJECT_DENSE;
@@ -3567,7 +3627,7 @@ mjit::Compiler::bumpPropCount(jsbytecode *pc, int count)
         return;
     RegisterID reg = Registers::ReturnReg;
     masm.push(reg);
-    masm.bumpCount(&script->getPCCounts(pc).get(count), reg);
+    masm.bumpCount(&script_->getPCCounts(pc).get(count), reg);
     masm.pop(reg);
 }
 
@@ -3591,10 +3651,10 @@ mjit::Compiler::knownJump(jsbytecode *pc)
 bool
 mjit::Compiler::jumpInScript(Jump j, jsbytecode *pc)
 {
-    JS_ASSERT(pc >= script->code && uint32_t(pc - script->code) < script->length);
+    JS_ASSERT(pc >= script_->code && uint32_t(pc - script_->code) < script_->length);
 
     if (pc < PC) {
-        j.linkTo(a->jumpMap[uint32_t(pc - script->code)], &masm);
+        j.linkTo(a->jumpMap[uint32_t(pc - script_->code)], &masm);
         return true;
     }
     return branchPatches.append(BranchPatch(j, pc, a->inlineIndex));
@@ -3668,7 +3728,7 @@ mjit::Compiler::fixPrimitiveReturn(Assembler *masm, FrameEntry *fe)
     JS_ASSERT(isConstructing);
 
     bool ool = (masm != &this->masm);
-    Address thisv(JSFrameReg, StackFrame::offsetOfThis(script->function()));
+    Address thisv(JSFrameReg, StackFrame::offsetOfThis(script_->function()));
 
     // We can just load |thisv| if either of the following is true:
     //  (1) There is no explicit return value, AND fp->rval is not used.
@@ -3779,7 +3839,7 @@ mjit::Compiler::emitInlineReturnValue(FrameEntry *fe)
 void
 mjit::Compiler::emitReturn(FrameEntry *fe)
 {
-    JS_ASSERT_IF(!script->function(), JSOp(*PC) == JSOP_STOP);
+    JS_ASSERT_IF(!script_->function(), JSOp(*PC) == JSOP_STOP);
 
     /* Only the top of the stack can be returned. */
     JS_ASSERT_IF(fe, fe == frame.peek(-1));
@@ -3877,7 +3937,7 @@ mjit::Compiler::emitStubCall(void *ptr, DataLabelPtr *pinline)
 {
     JaegerSpew(JSpew_Insns, " ---- CALLING STUB ---- \n");
 
-    masm.bumpStubCount(script, PC, Registers::tempCallReg());
+    masm.bumpStubCount(script_, PC, Registers::tempCallReg());
 
     Call cl = masm.fallibleVMCall(cx->typeInferenceEnabled(),
                                   ptr, outerPC(), pinline, frame.totalDepth());
@@ -3915,15 +3975,135 @@ mjit::Compiler::interruptCheckHelper()
     stubcc.rejoin(Changes(0));
 }
 
-void
-mjit::Compiler::recompileCheckHelper()
+static inline bool
+MaybeIonCompileable(JSContext *cx, JSScript *script, bool *recompileCheckForIon)
 {
+#ifdef JS_ION
+    *recompileCheckForIon = true;
+
+    if (!ion::IsEnabled(cx))
+        return false;
+    if (!script->canIonCompile())
+        return false;
+
+    // If this script is small, doesn't have any function calls, and doesn't have
+    // any big loops, then throwing in a recompile check and causing an invalidation
+    // when we otherwise wouldn't have would be wasteful.
+    if (script->isShortRunning())
+        *recompileCheckForIon = false;
+
+    return true;
+#endif
+    return false;
+}
+
+void
+mjit::Compiler::ionCompileHelper()
+{
+    JS_ASSERT(script_ == outerScript);
+
+    JS_ASSERT(IsIonEnabled(cx));
+    JS_ASSERT(!inlining());
+
+#ifdef JS_ION
+    if (debugMode() || !globalObj || !cx->typeInferenceEnabled() || outerScript->hasIonScript())
+        return;
+
+    bool recompileCheckForIon = false;
+    if (!MaybeIonCompileable(cx, outerScript, &recompileCheckForIon))
+        return;
+
+    uint32_t minUses = ion::UsesBeforeIonRecompile(outerScript, PC);
+
+    uint32_t *useCountAddress = script_->addressOfUseCount();
+    masm.add32(Imm32(1), AbsoluteAddress(useCountAddress));
+
+    // We cannot inline a JM -> Ion constructing call.
+    // Compiling this function is pointless and would disable the JM -> JM fastpath.
+    // This function will start running in Ion, when caller runs in Ion/Interpreter.
+    if (isConstructing && outerScript->code == PC)
+        return;
+
+    // If we don't want to do a recompileCheck for Ion, then this just needs to
+    // increment the useCount so that we know when to recompile this function
+    // from an Ion call.  No need to call out to recompiler stub.
+    if (!recompileCheckForIon)
+        return;
+
+    const void *ionScriptAddress = script_->addressOfIonScript();
+
+#ifdef JS_CPU_X64
+    // Allocate a temp register. Note that we have to do this before calling
+    // syncExitAndJump below.
+    RegisterID reg = frame.allocReg();
+#endif
+
+    InternalCompileTrigger trigger;
+    trigger.pc = PC;
+    trigger.stubLabel = stubcc.syncExitAndJump(Uses(0));
+
+    // Trigger ion compilation if (a) the script has been used enough times for
+    // this opcode, and (b) the script does not already have ion information
+    // (whether successful, failed, or in progress off thread compilation)
+    // *OR* off thread compilation is not being used.
+    //
+    // If off thread compilation is in use, we retain the CompileTrigger so
+    // that (b) can be short circuited to force a call to TriggerIonCompile
+    // (see DisableScriptAtPC).
+    //
+    // If off thread compilation is not in use, (b) is unnecessary and
+    // negatively affects tuning on some benchmarks (see bug 774253). Thus,
+    // we immediately short circuit the check for (b).
+
+    Label secondTest = stubcc.masm.label();
+
+#if defined(JS_CPU_X86) || defined(JS_CPU_ARM)
+    trigger.inlineJump = masm.branch32(Assembler::GreaterThanOrEqual,
+                                       AbsoluteAddress(useCountAddress),
+                                       Imm32(minUses));
+    Jump scriptJump = stubcc.masm.branch32(Assembler::Equal,
+                                           AbsoluteAddress((void *)ionScriptAddress),
+                                           Imm32(0));
+#elif defined(JS_CPU_X64)
+    /* Handle processors that can't load from absolute addresses. */
+    masm.move(ImmPtr(useCountAddress), reg);
+    trigger.inlineJump = masm.branch32(Assembler::GreaterThanOrEqual,
+                                       Address(reg),
+                                       Imm32(minUses));
+    stubcc.masm.move(ImmPtr((void *)ionScriptAddress), reg);
+    Jump scriptJump = stubcc.masm.branchPtr(Assembler::Equal, Address(reg), ImmPtr(NULL));
+    frame.freeReg(reg);
+#else
+#error "Unknown platform"
+#endif
+
+    stubcc.linkExitDirect(trigger.inlineJump,
+                          OffThreadCompilationEnabled(cx)
+                          ? secondTest
+                          : trigger.stubLabel);
+
+    scriptJump.linkTo(trigger.stubLabel, &stubcc.masm);
+    stubcc.crossJump(stubcc.masm.jump(), masm.label());
+
+    stubcc.leave();
+    OOL_STUBCALL(stubs::TriggerIonCompile, REJOIN_RESUME);
+    stubcc.rejoin(Changes(0));
+
+    compileTriggers.append(trigger);
+#endif /* JS_ION */
+}
+
+void
+mjit::Compiler::inliningCompileHelper()
+{
+    JS_ASSERT(!IsIonEnabled(cx));
+
     if (inlining() || debugMode() || !globalObj ||
         !analysis->hasFunctionCalls() || !cx->typeInferenceEnabled()) {
         return;
     }
 
-    uint32_t *addr = script->addressOfUseCount();
+    uint32_t *addr = script_->addressOfUseCount();
     masm.add32(Imm32(1), AbsoluteAddress(addr));
 #if defined(JS_CPU_X86) || defined(JS_CPU_ARM)
     Jump jump = masm.branch32(Assembler::GreaterThanOrEqual, AbsoluteAddress(addr),
@@ -3965,7 +4145,7 @@ mjit::Compiler::methodEntryHelper()
     /* Ensure that we've flagged that the push has happened */
     if (sps.enabled()) {
         RegisterID reg = frame.allocReg();
-        sps.pushManual(masm, reg);
+        sps.pushManual(script_, masm, reg);
         frame.freeReg(reg);
     }
     return Compile_Okay;
@@ -3977,7 +4157,7 @@ mjit::Compiler::profilingPushHelper()
     if (!sps.enabled())
         return Compile_Okay;
     RegisterID reg = frame.allocReg();
-    if (!sps.push(cx, masm, reg))
+    if (!sps.push(cx, script_, masm, reg))
         return Compile_Error;
 
     /* Set the flags that we've pushed information onto the SPS stack */
@@ -3996,8 +4176,10 @@ mjit::Compiler::profilingPopHelper()
         sps.skipNextReenter();
         prepareStubCall(Uses(0));
         INLINE_STUBCALL(stubs::ScriptProbeOnlyEpilogue, REJOIN_RESUME);
-    } else {
-        sps.pop(masm);
+    } else if (cx->runtime->spsProfiler.enabled()) {
+        RegisterID reg = frame.allocReg();
+        sps.pop(masm, reg);
+        frame.freeReg(reg);
     }
 }
 
@@ -4126,7 +4308,7 @@ mjit::Compiler::inlineCallHelper(uint32_t argc, bool callingNew, FrameSize &call
     interruptCheckHelper();
     if (sps.enabled()) {
         RegisterID reg = frame.allocReg();
-        sps.leave(masm, reg);
+        sps.leave(PC, masm, reg);
         frame.freeReg(reg);
     }
 
@@ -4167,6 +4349,7 @@ mjit::Compiler::inlineCallHelper(uint32_t argc, bool callingNew, FrameSize &call
      */
     bool lowerFunCallOrApply = IsLowerableFunCallOrApply(PC);
 
+    RootedScript script(cx, script_);
     bool newType = callingNew && cx->typeInferenceEnabled() && types::UseNewType(cx, script, PC);
 
 #ifdef JS_MONOIC
@@ -4263,11 +4446,11 @@ mjit::Compiler::inlineCallHelper(uint32_t argc, bool callingNew, FrameSize &call
 
     callIC.typeMonitored = monitored(PC) || hasTypeBarriers(PC);
 
-    if (script == outerScript) {
+    if (script_ == outerScript) {
         if (monitored(PC))
-            monitoredBytecodes.append(PC - script->code);
+            monitoredBytecodes.append(PC - script_->code);
         if (hasTypeBarriers(PC))
-            typeBarrierBytecodes.append(PC - script->code);
+            typeBarrierBytecodes.append(PC - script_->code);
     }
 
     /* Test the type if necessary. Failing this always takes a really slow path. */
@@ -4286,6 +4469,7 @@ mjit::Compiler::inlineCallHelper(uint32_t argc, bool callingNew, FrameSize &call
      * callee is scripted, compiled/compilable, and argc == nargs, then this
      * guard is patched, and the compiled code address is baked in.
      */
+    callIC.funGuardLabel = masm.label();
     Jump j = masm.branchPtrWithPatch(Assembler::NotEqual, icCalleeData, callIC.funGuard);
     callIC.funJump = j;
 
@@ -4309,7 +4493,7 @@ mjit::Compiler::inlineCallHelper(uint32_t argc, bool callingNew, FrameSize &call
         /* Test if the function is scripted. */
         stubcc.masm.load16(Address(icCalleeData, offsetof(JSFunction, flags)), tmp);
         Jump isNative = stubcc.masm.branchTest32(Assembler::Zero, tmp,
-                                                 Imm32(JSFUN_INTERPRETED));
+                                                 Imm32(JSFunction::INTERPRETED));
         tempRegs.putReg(tmp);
 
         /*
@@ -4408,6 +4592,7 @@ mjit::Compiler::inlineCallHelper(uint32_t argc, bool callingNew, FrameSize &call
     callIC.joinPoint = callPatch.joinPoint = masm.label();
     callIC.callIndex = callSites.length();
     addReturnSite();
+    callIC.ionJoinPoint = masm.label();
     if (lowerFunCallOrApply)
         uncachedCallPatch.joinPoint = callIC.joinPoint;
 
@@ -4483,9 +4668,14 @@ mjit::Compiler::inlineScriptedFunction(uint32_t argc, bool callingNew)
     Vector<JSScript *> inlineCallees(CompilerAllocPolicy(cx, *this));
     for (unsigned i = 0; i < ssa.numFrames(); i++) {
         if (ssa.iterFrame(i).parent == a->inlineIndex && ssa.iterFrame(i).parentpc == PC) {
-            JSScript *script = ssa.iterFrame(i).script;
-            inlineCallees.append(script);
-            if (script->analysis()->numReturnSites() > 1)
+            JSScript *script_ = ssa.iterFrame(i).script;
+
+            /* Don't inline if any of the callees should be cloned at callsite. */
+            if (script_->shouldCloneAtCallsite)
+                return Compile_InlineAbort;
+
+            inlineCallees.append(script_);
+            if (script_->analysis()->numReturnSites() > 1)
                 calleeMultipleReturns = true;
         }
     }
@@ -4495,7 +4685,7 @@ mjit::Compiler::inlineScriptedFunction(uint32_t argc, bool callingNew)
 
     if (sps.enabled()) {
         RegisterID reg = frame.allocReg();
-        sps.leave(masm, reg);
+        sps.leave(PC, masm, reg);
         frame.freeReg(reg);
     }
 
@@ -4549,7 +4739,7 @@ mjit::Compiler::inlineScriptedFunction(uint32_t argc, bool callingNew)
     for (unsigned i = 0; i < inlineCallees.length(); i++) {
         if (entrySnapshot)
             frame.restoreFromSnapshot(entrySnapshot);
-        
+
         JSScript *script = inlineCallees[i];
         CompileStatus status;
 
@@ -4560,7 +4750,7 @@ mjit::Compiler::inlineScriptedFunction(uint32_t argc, bool callingNew)
         a->exitState = exitState;
 
         JaegerSpew(JSpew_Inlining, "inlining call to script (file \"%s\") (line \"%d\")\n",
-                   script->filename, script->lineno);
+                   script->filename(), script->lineno);
 
         if (calleePrevious.isSet()) {
             calleePrevious.get().linkTo(masm.label(), &masm);
@@ -4627,7 +4817,7 @@ mjit::Compiler::inlineScriptedFunction(uint32_t argc, bool callingNew)
     frame.popn(argc + 2);
 
     if (entrySnapshot)
-        cx->array_delete(entrySnapshot);
+        js_free(entrySnapshot);
 
     if (exitState)
         frame.discardForJoin(exitState, analysis->getCode(PC).stackDepth - (argc + 2));
@@ -4645,7 +4835,7 @@ mjit::Compiler::inlineScriptedFunction(uint32_t argc, bool callingNew)
     }
 
     JaegerSpew(JSpew_Inlining, "finished inlining call to script (file \"%s\") (line \"%d\")\n",
-               script->filename, script->lineno);
+               script_->filename(), script_->lineno);
 
     if (sps.enabled()) {
         RegisterID reg = frame.allocReg();
@@ -4790,7 +4980,7 @@ mjit::Compiler::emitStubCmpOp(BoolStub stub, jsbytecode *target, JSOp fused)
 }
 
 void
-mjit::Compiler::jsop_setprop_slow(PropertyName *name)
+mjit::Compiler::jsop_setprop_slow(HandlePropertyName name)
 {
     JS_ASSERT(*PC == JSOP_SETPROP || *PC == JSOP_SETNAME);
 
@@ -4804,12 +4994,12 @@ mjit::Compiler::jsop_setprop_slow(PropertyName *name)
 
     JS_STATIC_ASSERT(JSOP_SETNAME_LENGTH == JSOP_SETPROP_LENGTH);
     frame.shimmy(1);
-    if (script->hasScriptCounts)
+    if (script_->hasScriptCounts)
         bumpPropCount(PC, PCCounts::PROP_OTHER);
 }
 
 void
-mjit::Compiler::jsop_getprop_slow(PropertyName *name, bool forPrototype)
+mjit::Compiler::jsop_getprop_slow(HandlePropertyName name, bool forPrototype)
 {
     /* See ::jsop_getprop */
     RejoinState rejoin = forPrototype ? REJOIN_THIS_PROTOTYPE : REJOIN_GETTER;
@@ -4824,7 +5014,7 @@ mjit::Compiler::jsop_getprop_slow(PropertyName *name, bool forPrototype)
     frame.pop();
     frame.pushSynced(JSVAL_TYPE_UNKNOWN);
 
-    if (script->hasScriptCounts)
+    if (script_->hasScriptCounts)
         bumpPropCount(PC, PCCounts::PROP_OTHER);
 }
 
@@ -4844,7 +5034,7 @@ mjit::Compiler::passICAddress(BaseICInfo *ic)
 }
 
 bool
-mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
+mjit::Compiler::jsop_getprop(HandlePropertyName name, JSValueType knownType,
                              bool doTypeCheck, bool forPrototype)
 {
     FrameEntry *top = frame.peek(-1);
@@ -4856,13 +5046,12 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
      */
     RejoinState rejoin = REJOIN_GETTER;
     if (forPrototype) {
-        JS_ASSERT(top->isType(JSVAL_TYPE_OBJECT) &&
-                  name == cx->runtime->atomState.classPrototypeAtom);
+        JS_ASSERT(top->isType(JSVAL_TYPE_OBJECT) && name == cx->names().classPrototype);
         rejoin = REJOIN_THIS_PROTOTYPE;
     }
 
     /* Handle length accesses on known strings without using a PIC. */
-    if (name == cx->runtime->atomState.lengthAtom &&
+    if (name == cx->names().length &&
         top->isType(JSVAL_TYPE_STRING) &&
         (!cx->typeInferenceEnabled() || knownPushedType(0) == JSVAL_TYPE_INT32)) {
         if (top->isConstant()) {
@@ -4882,7 +5071,7 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
     }
 
     /* Handle lenth accesses of optimize 'arguments'. */
-    if (name == cx->runtime->atomState.lengthAtom &&
+    if (name == cx->names().length &&
         cx->typeInferenceEnabled() &&
         analysis->poppedTypes(PC, 0)->isMagicArguments() &&
         knownPushedType(0) == JSVAL_TYPE_INT32)
@@ -4891,7 +5080,7 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
         RegisterID reg = frame.allocReg();
         masm.load32(Address(JSFrameReg, StackFrame::offsetOfNumActual()), reg);
         frame.pushTypedPayload(JSVAL_TYPE_INT32, reg);
-        if (script->hasScriptCounts)
+        if (script_->hasScriptCounts)
             bumpPropCount(PC, PCCounts::PROP_DEFINITE);
         return true;
     }
@@ -4907,7 +5096,7 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
                 frame.learnType(fe, JSVAL_TYPE_INT32, false);
                 frame.pop();
                 frame.pushCopyOf(fe);
-                if (script->hasScriptCounts)
+                if (script_->hasScriptCounts)
                     bumpPropCount(PC, PCCounts::PROP_STATIC);
                 return true;
             }
@@ -4916,11 +5105,13 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
         types::StackTypeSet *types = analysis->poppedTypes(PC, 0);
 
         /*
-         * Check if we are accessing the 'length' property of a known dense array.
-         * Note that if the types are known to indicate dense arrays, their lengths
-         * must fit in an int32.
+         * Check if we are accessing the 'length' property of an array whose
+         * length is known to fit in an int32_t.
          */
-        if (!types->hasObjectFlags(cx, types::OBJECT_FLAG_NON_DENSE_ARRAY)) {
+        if (types->getKnownClass() == &ArrayClass &&
+            !types->hasObjectFlags(cx, types::OBJECT_FLAG_LENGTH_OVERFLOW))
+        {
+            frame.forgetMismatchedObject(top);
             bool isObject = top->isTypeKnown();
             if (!isObject) {
                 Jump notObject = frame.testObject(Assembler::NotEqual, top);
@@ -4937,7 +5128,7 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
             masm.loadPtr(Address(reg, JSObject::offsetOfElements()), result);
             masm.load32(Address(result, ObjectElements::offsetOfLength()), result);
             frame.pushTypedPayload(JSVAL_TYPE_INT32, result);
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 bumpPropCount(PC, PCCounts::PROP_DEFINITE);
             if (!isObject)
                 stubcc.rejoin(Changes(1));
@@ -4946,9 +5137,9 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
 
         /*
          * Check if we're accessing the 'length' property of a typed array.
-         * The typed array length always fits in an int32.
+         * The typed array length always fits in an int32_t.
          */
-        if (!types->hasObjectFlags(cx, types::OBJECT_FLAG_NON_TYPED_ARRAY)) {
+        if (types->getTypedArrayType() != TypedArray::TYPE_MAX) {
             if (top->isConstant()) {
                 JSObject *obj = &top->getValue().toObject();
                 uint32_t length = TypedArray::length(obj);
@@ -4970,7 +5161,7 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
             frame.pop();
             masm.loadPayload(Address(reg, TypedArray::lengthOffset()), reg);
             frame.pushTypedPayload(JSVAL_TYPE_INT32, reg);
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 bumpPropCount(PC, PCCounts::PROP_DEFINITE);
             if (!isObject)
                 stubcc.rejoin(Changes(1));
@@ -4997,7 +5188,7 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
             frame.pop();
             frame.push(ObjectValue(*singleton));
 
-            if (script->hasScriptCounts && cx->typeInferenceEnabled())
+            if (script_->hasScriptCounts && cx->typeInferenceEnabled())
                 bumpPropCount(PC, PCCounts::PROP_STATIC);
 
             if (testObject)
@@ -5010,12 +5201,13 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
     /* Check if this is a property access we can make a loop invariant entry for. */
     if (loop && loop->generatingInvariants() && !hasTypeBarriers(PC)) {
         CrossSSAValue topv(a->inlineIndex, analysis->poppedValue(PC, 0));
-        if (FrameEntry *fe = loop->invariantProperty(topv, NameToId(name))) {
+        RootedId id(cx, NameToId(name));
+        if (FrameEntry *fe = loop->invariantProperty(topv, id)) {
             if (knownType != JSVAL_TYPE_UNKNOWN && knownType != JSVAL_TYPE_DOUBLE)
                 frame.learnType(fe, knownType, false);
             frame.pop();
             frame.pushCopyOf(fe);
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 bumpPropCount(PC, PCCounts::PROP_STATIC);
             return true;
         }
@@ -5034,13 +5226,14 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
      * in a particular inline slot. Get the property directly in this case,
      * without using an IC.
      */
-    jsid id = NameToId(name);
+    RootedId id(cx, NameToId(name));
     types::TypeSet *types = frame.extra(top).types;
     if (types && !types->unknownObject() &&
         types->getObjectCount() == 1 &&
         types->getTypeObject(0) != NULL &&
         !types->getTypeObject(0)->unknownProperties() &&
-        id == types::MakeTypeId(cx, id)) {
+        id == types::IdToTypeId(id))
+    {
         JS_ASSERT(!forPrototype);
         types::TypeObject *object = types->getTypeObject(0);
         types::HeapTypeSet *propertyTypes = object->getProperty(cx, id, false);
@@ -5062,7 +5255,7 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
             RegisterID reg = frame.tempRegForData(top);
             frame.pop();
 
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 bumpPropCount(PC, PCCounts::PROP_DEFINITE);
 
             Address address(reg, JSObject::getFixedSlotOffset(slot));
@@ -5081,7 +5274,7 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType,
             return true;
     }
 
-    if (script->hasScriptCounts)
+    if (script_->hasScriptCounts)
         bumpPropCount(PC, PCCounts::PROP_OTHER);
 
     /*
@@ -5302,7 +5495,7 @@ mjit::Compiler::testSingletonPropertyTypes(FrameEntry *top, HandleId id, bool *t
 }
 
 bool
-mjit::Compiler::jsop_getprop_dispatch(PropertyName *name)
+mjit::Compiler::jsop_getprop_dispatch(HandlePropertyName name)
 {
     /*
      * Check for a CALLPROP which is a dynamic dispatch: every value it can
@@ -5315,7 +5508,7 @@ mjit::Compiler::jsop_getprop_dispatch(PropertyName *name)
         return false;
 
     RootedId id(cx, NameToId(name));
-    if (id.get() != types::MakeTypeId(cx, id))
+    if (id.get() != types::IdToTypeId(id))
         return false;
 
     types::TypeSet *pushedTypes = pushedTypeSet(0);
@@ -5340,6 +5533,7 @@ mjit::Compiler::jsop_getprop_dispatch(PropertyName *name)
      * accessed id and that its prototype does have such a property.
      */
     uint32_t last = 0;
+    Rooted<JSObject*> proto(cx);
     for (unsigned i = 0; i < objTypes->getObjectCount(); i++) {
         if (objTypes->getSingleObject(i) != NULL)
             return false;
@@ -5354,11 +5548,14 @@ mjit::Compiler::jsop_getprop_dispatch(PropertyName *name)
         if (ownTypes->isOwnProperty(cx, object, false))
             return false;
 
-        Rooted<JSObject*> proto(cx, object->proto);
+        proto = object->proto;
         if (!testSingletonProperty(proto, id))
             return false;
 
-        if (proto->getType(cx)->unknownProperties())
+        types::TypeObject *protoType = proto->getType(cx);
+        if (!protoType)
+            return false;
+        if (protoType->unknownProperties())
             return false;
         types::HeapTypeSet *protoTypes = proto->type()->getProperty(cx, id, false);
         if (!protoTypes)
@@ -5440,7 +5637,7 @@ mjit::Compiler::jsop_getprop_dispatch(PropertyName *name)
     frame.pop();
     frame.pushTypedPayload(JSVAL_TYPE_OBJECT, pushreg);
 
-    if (script->hasScriptCounts)
+    if (script_->hasScriptCounts)
         bumpPropCount(PC, PCCounts::PROP_DEFINITE);
 
     stubcc.rejoin(Changes(2));
@@ -5448,7 +5645,7 @@ mjit::Compiler::jsop_getprop_dispatch(PropertyName *name)
 }
 
 bool
-mjit::Compiler::jsop_setprop(PropertyName *name, bool popGuaranteed)
+mjit::Compiler::jsop_setprop(HandlePropertyName name, bool popGuaranteed)
 {
     FrameEntry *lhs = frame.peek(-2);
     FrameEntry *rhs = frame.peek(-1);
@@ -5463,9 +5660,9 @@ mjit::Compiler::jsop_setprop(PropertyName *name, bool popGuaranteed)
      * Set the property directly if we are accessing a known object which
      * always has the property in a particular inline slot.
      */
-    jsid id = NameToId(name);
+    RootedId id(cx, NameToId(name));
     types::StackTypeSet *types = frame.extra(lhs).types;
-    if (JSOp(*PC) == JSOP_SETPROP && id == types::MakeTypeId(cx, id) &&
+    if (JSOp(*PC) == JSOP_SETPROP && id == types::IdToTypeId(id) &&
         types && !types->unknownObject() &&
         types->getObjectCount() == 1 &&
         types->getTypeObject(0) != NULL &&
@@ -5485,7 +5682,7 @@ mjit::Compiler::jsop_setprop(PropertyName *name, bool popGuaranteed)
             if (!isObject)
                 notObject = frame.testObject(Assembler::NotEqual, lhs);
 #ifdef JSGC_INCREMENTAL_MJ
-            if (cx->compartment->compileBarriers() && propertyTypes->needsBarrier(cx)) {
+            if (cx->zone()->compileBarriers() && propertyTypes->needsBarrier(cx)) {
                 /* Write barrier. */
                 Jump j = masm.testGCThing(Address(reg, JSObject::getFixedSlotOffset(slot)));
                 stubcc.linkExit(j, Uses(0));
@@ -5507,18 +5704,18 @@ mjit::Compiler::jsop_setprop(PropertyName *name, bool popGuaranteed)
             frame.shimmy(1);
             if (!isObject)
                 stubcc.rejoin(Changes(1));
-            if (script->hasScriptCounts)
+            if (script_->hasScriptCounts)
                 bumpPropCount(PC, PCCounts::PROP_DEFINITE);
             return true;
         }
     }
 
-    if (script->hasScriptCounts)
+    if (script_->hasScriptCounts)
         bumpPropCount(PC, PCCounts::PROP_OTHER);
 
 #ifdef JSGC_INCREMENTAL_MJ
     /* Write barrier. We don't have type information for JSOP_SETNAME. */
-    if (cx->compartment->compileBarriers() &&
+    if (cx->zone()->compileBarriers() &&
         (!types || JSOp(*PC) == JSOP_SETNAME || types->propertyNeedsBarrier(cx, id)))
     {
         jsop_setprop_slow(name);
@@ -5530,8 +5727,8 @@ mjit::Compiler::jsop_setprop(PropertyName *name, bool popGuaranteed)
     pic.name = name;
 
     if (monitored(PC)) {
-        if (script == outerScript)
-            monitoredBytecodes.append(PC - script->code);
+        if (script_ == outerScript)
+            monitoredBytecodes.append(PC - script_->code);
         pic.typeMonitored = true;
     } else {
         pic.typeMonitored = false;
@@ -5636,16 +5833,27 @@ mjit::Compiler::jsop_setprop(PropertyName *name, bool popGuaranteed)
     return true;
 }
 
-void
-mjit::Compiler::jsop_intrinsicname(PropertyName *name, JSValueType type)
+bool
+mjit::Compiler::jsop_intrinsic(HandlePropertyName name, JSValueType type)
 {
-    Value vp = NullValue();
-    cx->global().get()->getIntrinsicValue(cx, name, &vp);
+    if (type == JSVAL_TYPE_UNKNOWN) {
+        prepareStubCall(Uses(0));
+        masm.move(ImmPtr(name), Registers::ArgReg1);
+        INLINE_STUBCALL(stubs::IntrinsicName, REJOIN_FALLTHROUGH);
+        testPushedType(REJOIN_FALLTHROUGH, 0, /* ool = */ false);
+        frame.pushSynced(JSVAL_TYPE_UNKNOWN);
+        return true;
+    }
+
+    RootedValue vp(cx, NullValue());
+    if (!cx->global().get()->getIntrinsicValue(cx, name, &vp))
+        return false;
     frame.push(vp);
+    return true;
 }
 
 void
-mjit::Compiler::jsop_name(PropertyName *name, JSValueType type)
+mjit::Compiler::jsop_name(HandlePropertyName name, JSValueType type)
 {
     PICGenInfo pic(ic::PICInfo::NAME, PC);
 
@@ -5701,7 +5909,7 @@ mjit::Compiler::jsop_name(PropertyName *name, JSValueType type)
 }
 
 bool
-mjit::Compiler::jsop_xname(PropertyName *name)
+mjit::Compiler::jsop_xname(HandlePropertyName name)
 {
     PICGenInfo pic(ic::PICInfo::XNAME, PC);
 
@@ -5763,7 +5971,7 @@ mjit::Compiler::jsop_xname(PropertyName *name)
 }
 
 void
-mjit::Compiler::jsop_bindname(PropertyName *name)
+mjit::Compiler::jsop_bindname(HandlePropertyName name)
 {
     PICGenInfo pic(ic::PICInfo::BIND, PC);
 
@@ -5815,7 +6023,7 @@ mjit::Compiler::jsop_bindname(PropertyName *name)
 #else /* !JS_POLYIC */
 
 void
-mjit::Compiler::jsop_name(PropertyName *name, JSValueType type, bool isCall)
+mjit::Compiler::jsop_name(HandlePropertyName name, JSValueType type, bool isCall)
 {
     prepareStubCall(Uses(0));
     INLINE_STUBCALL(isCall ? stubs::CallName : stubs::Name, REJOIN_FALLTHROUGH);
@@ -5826,13 +6034,13 @@ mjit::Compiler::jsop_name(PropertyName *name, JSValueType type, bool isCall)
 }
 
 bool
-mjit::Compiler::jsop_xname(PropertyName *name)
+mjit::Compiler::jsop_xname(HandlePropertyName name)
 {
     return jsop_getprop(name, knownPushedType(0), pushedTypeSet(0));
 }
 
 bool
-mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType, types::TypeSet *typeSet,
+mjit::Compiler::jsop_getprop(HandlePropertyName name, JSValueType knownType, types::TypeSet *typeSet,
                              bool typecheck, bool forPrototype)
 {
     jsop_getprop_slow(name, forPrototype);
@@ -5840,14 +6048,14 @@ mjit::Compiler::jsop_getprop(PropertyName *name, JSValueType knownType, types::T
 }
 
 bool
-mjit::Compiler::jsop_setprop(PropertyName *name)
+mjit::Compiler::jsop_setprop(HandlePropertyName name)
 {
     jsop_setprop_slow(name);
     return true;
 }
 
 void
-mjit::Compiler::jsop_bindname(PropertyName *name)
+mjit::Compiler::jsop_bindname(HandlePropertyName name)
 {
     RegisterID reg = frame.allocReg();
     Address scopeChain(JSFrameReg, StackFrame::offsetOfScopeChain());
@@ -5883,7 +6091,7 @@ mjit::Compiler::jsop_aliasedArg(unsigned arg, bool get, bool poppedAfter)
         frame.push(Address(reg), type, true /* = reuseBase */);
     } else {
 #ifdef JSGC_INCREMENTAL_MJ
-        if (cx->compartment->compileBarriers()) {
+        if (cx->zone()->compileBarriers()) {
             /* Write barrier. */
             stubcc.linkExit(masm.testGCThing(Address(reg)), Uses(0));
             stubcc.leave();
@@ -5905,7 +6113,7 @@ mjit::Compiler::jsop_aliasedVar(ScopeCoordinate sc, bool get, bool poppedAfter)
     for (unsigned i = 0; i < sc.hops; i++)
         masm.loadPayload(Address(reg, ScopeObject::offsetOfEnclosingScope()), reg);
 
-    Shape *shape = ScopeCoordinateToStaticScope(script, PC).scopeShape();
+    Shape *shape = ScopeCoordinateToStaticScopeShape(cx, script_, PC);
     Address addr;
     if (shape->numFixedSlots() <= sc.slot) {
         masm.loadPtr(Address(reg, JSObject::offsetOfSlots()), reg);
@@ -5926,7 +6134,7 @@ mjit::Compiler::jsop_aliasedVar(ScopeCoordinate sc, bool get, bool poppedAfter)
         finishBarrier(barrier, REJOIN_FALLTHROUGH, 0);
     } else {
 #ifdef JSGC_INCREMENTAL_MJ
-        if (cx->compartment->compileBarriers()) {
+        if (cx->zone()->compileBarriers()) {
             /* Write barrier. */
             stubcc.linkExit(masm.testGCThing(addr), Uses(0));
             stubcc.leave();
@@ -5950,8 +6158,8 @@ mjit::Compiler::jsop_this()
      * In direct-call eval code, we wrapped 'this' before entering the eval.
      * In global code, 'this' is always an object.
      */
-    if (script->function() && !script->strictModeCode &&
-        !script->function()->isSelfHostedBuiltin())
+    if (script_->function() && !script_->strict &&
+        !script_->function()->isSelfHostedBuiltin())
     {
         FrameEntry *thisFe = frame.peek(-1);
 
@@ -5970,7 +6178,7 @@ mjit::Compiler::jsop_this()
             }
 
             JSValueType type = cx->typeInferenceEnabled()
-                ? types::TypeScript::ThisTypes(script)->getKnownTypeTag()
+                ? types::TypeScript::ThisTypes(script_)->getKnownTypeTag()
                 : JSVAL_TYPE_UNKNOWN;
             if (type != JSVAL_TYPE_OBJECT) {
                 Jump notObj = frame.testObject(Assembler::NotEqual, thisFe);
@@ -6070,12 +6278,18 @@ mjit::Compiler::iter(unsigned flags)
     Jump overlongChain = masm.branchPtr(Assembler::NonZero, T1, T1);
     stubcc.linkExit(overlongChain, Uses(1));
 
+    /* Compare object's elements() with emptyObjectElements. */
+    Address elementsAddress(reg, JSObject::offsetOfElements());
+    Jump hasElements = masm.branchPtr(Assembler::NotEqual, elementsAddress,
+                                      ImmPtr(js::emptyObjectElements));
+    stubcc.linkExit(hasElements, Uses(1));
+
 #ifdef JSGC_INCREMENTAL_MJ
     /*
      * Write barrier for stores to the iterator. We only need to take a write
      * barrier if NativeIterator::obj is actually going to change.
      */
-    if (cx->compartment->compileBarriers()) {
+    if (cx->zone()->compileBarriers()) {
         Jump j = masm.branchPtr(Assembler::NotEqual,
                                 Address(nireg, offsetof(NativeIterator, obj)), reg);
         stubcc.linkExit(j, Uses(1));
@@ -6091,10 +6305,21 @@ mjit::Compiler::iter(unsigned flags)
     masm.store32(T1, flagsAddr);
 
     /* Chain onto the active iterator stack. */
-    masm.loadPtr(FrameAddress(offsetof(VMFrame, cx)), T1);
-    masm.loadPtr(Address(T1, offsetof(JSContext, enumerators)), T2);
-    masm.storePtr(T2, Address(nireg, offsetof(NativeIterator, next)));
-    masm.storePtr(ioreg, Address(T1, offsetof(JSContext, enumerators)));
+    masm.move(ImmPtr(cx->compartment), T1);
+    masm.loadPtr(Address(T1, offsetof(JSCompartment, enumerators)), T1);
+
+    /* ni->next = list */
+    masm.storePtr(T1, Address(nireg, NativeIterator::offsetOfNext()));
+
+    /* ni->prev = list->prev */
+    masm.loadPtr(Address(T1, NativeIterator::offsetOfPrev()), T2);
+    masm.storePtr(T2, Address(nireg, NativeIterator::offsetOfPrev()));
+
+    /* list->prev->next = ni */
+    masm.storePtr(nireg, Address(T2, NativeIterator::offsetOfNext()));
+
+    /* list->prev = ni */
+    masm.storePtr(nireg, Address(T1, NativeIterator::offsetOfPrev()));
 
     frame.freeReg(nireg);
     frame.freeReg(T1);
@@ -6245,13 +6470,22 @@ mjit::Compiler::iterEnd()
     masm.loadPtr(Address(T1, offsetof(NativeIterator, props_array)), T2);
     masm.storePtr(T2, Address(T1, offsetof(NativeIterator, props_cursor)));
 
-    /* Advance enumerators list. */
-    masm.loadPtr(FrameAddress(offsetof(VMFrame, cx)), T2);
-    masm.loadPtr(Address(T1, offsetof(NativeIterator, next)), T1);
-    masm.storePtr(T1, Address(T2, offsetof(JSContext, enumerators)));
+    /* Unlink from the iterator list. */
+    RegisterID prev = T2;
+    RegisterID next = frame.allocReg();
+
+    masm.loadPtr(Address(T1, NativeIterator::offsetOfNext()), next);
+    masm.loadPtr(Address(T1, NativeIterator::offsetOfPrev()), prev);
+    masm.storePtr(prev, Address(next, NativeIterator::offsetOfPrev()));
+    masm.storePtr(next, Address(prev, NativeIterator::offsetOfNext()));
+#ifdef DEBUG
+    masm.storePtr(ImmPtr(NULL), Address(T1, NativeIterator::offsetOfNext()));
+    masm.storePtr(ImmPtr(NULL), Address(T1, NativeIterator::offsetOfPrev()));
+#endif
 
     frame.freeReg(T1);
     frame.freeReg(T2);
+    frame.freeReg(next);
 
     stubcc.leave();
     OOL_STUBCALL(stubs::EndIter, REJOIN_FALLTHROUGH);
@@ -6289,16 +6523,16 @@ bool
 mjit::Compiler::jsop_getgname(uint32_t index)
 {
     /* Optimize undefined, NaN and Infinity. */
-    PropertyName *name = script->getName(index);
-    if (name == cx->runtime->atomState.typeAtoms[JSTYPE_VOID]) {
+    PropertyName *name = script_->getName(index);
+    if (name == cx->names().undefined) {
         frame.push(UndefinedValue());
         return true;
     }
-    if (name == cx->runtime->atomState.NaNAtom) {
+    if (name == cx->names().NaN) {
         frame.push(cx->runtime->NaNValue);
         return true;
     }
-    if (name == cx->runtime->atomState.InfinityAtom) {
+    if (name == cx->names().Infinity) {
         frame.push(cx->runtime->positiveInfinityValue);
         return true;
     }
@@ -6313,11 +6547,18 @@ mjit::Compiler::jsop_getgname(uint32_t index)
         }
     }
 
-    jsid id = NameToId(name);
+    RootedId id(cx, NameToId(name));
     JSValueType type = knownPushedType(0);
-    if (cx->typeInferenceEnabled() && globalObj->isGlobal() && id == types::MakeTypeId(cx, id) &&
-        !globalObj->getType(cx)->unknownProperties()) {
-        types::HeapTypeSet *propertyTypes = globalObj->getType(cx)->getProperty(cx, id, false);
+
+    types::TypeObject *globalType = NULL;
+    if (cx->typeInferenceEnabled() && globalObj->isGlobal() && id == types::IdToTypeId(id)) {
+        globalType = globalObj->getType(cx);
+        if (globalType && globalType->unknownProperties())
+            globalType = NULL;
+    }
+
+    if (globalType) {
+        types::HeapTypeSet *propertyTypes = globalType->getProperty(cx, id, false);
         if (!propertyTypes)
             return false;
 
@@ -6326,12 +6567,13 @@ mjit::Compiler::jsop_getgname(uint32_t index)
          * then bake its address into the jitcode and guard against future
          * reallocation of the global object's slots.
          */
-        js::Shape *shape = globalObj->nativeLookup(cx, NameToId(name));
+        RootedId id(cx, NameToId(name));
+        Shape *shape = globalObj->nativeLookup(cx, id);
         if (shape && shape->hasDefaultGetter() && shape->hasSlot()) {
             HeapSlot *value = &globalObj->getSlotRef(shape->slot());
-            if (!value->isUndefined() &&
-                !propertyTypes->isOwnProperty(cx, globalObj->getType(cx), true)) {
-                watchGlobalReallocation();
+            if (!value->isUndefined() && !propertyTypes->isOwnProperty(cx, globalType, true)) {
+                if (!watchGlobalReallocation())
+                    return false;
                 RegisterID reg = frame.allocReg();
                 masm.move(ImmPtr(value), reg);
 
@@ -6419,7 +6661,7 @@ mjit::Compiler::jsop_getgname(uint32_t index)
 }
 
 void
-mjit::Compiler::jsop_setgname_slow(PropertyName *name)
+mjit::Compiler::jsop_setgname_slow(HandlePropertyName name)
 {
     prepareStubCall(Uses(2));
     masm.move(ImmPtr(name), Registers::ArgReg1);
@@ -6429,39 +6671,48 @@ mjit::Compiler::jsop_setgname_slow(PropertyName *name)
 }
 
 bool
-mjit::Compiler::jsop_setgname(PropertyName *name, bool popGuaranteed)
+mjit::Compiler::jsop_setgname(HandlePropertyName name, bool popGuaranteed)
 {
     if (monitored(PC)) {
-        if (script == outerScript)
-            monitoredBytecodes.append(PC - script->code);
+        if (script_ == outerScript)
+            monitoredBytecodes.append(PC - script_->code);
 
         /* Global accesses are monitored only for a few names like __proto__. */
         jsop_setgname_slow(name);
         return true;
     }
 
-    jsid id = NameToId(name);
-    if (cx->typeInferenceEnabled() && globalObj->isGlobal() && id == types::MakeTypeId(cx, id) &&
-        !globalObj->getType(cx)->unknownProperties()) {
+    RootedId id(cx, NameToId(name));
+    types::TypeObject *globalType = NULL;
+    if (cx->typeInferenceEnabled() && globalObj->isGlobal() && id == types::IdToTypeId(id)) {
+        globalType = globalObj->getType(cx);
+        if (globalType && globalType->unknownProperties())
+            globalType = NULL;
+    }
+
+    if (globalType) {
         /*
          * Note: object branding is disabled when inference is enabled. With
          * branding there is no way to ensure that a non-function property
          * can't get a function later and cause the global object to become
          * branded, requiring a shape change if it changes again.
          */
-        types::HeapTypeSet *types = globalObj->getType(cx)->getProperty(cx, id, false);
+        types::HeapTypeSet *types = globalType->getProperty(cx, id, false);
         if (!types)
             return false;
-        js::Shape *shape = globalObj->nativeLookup(cx, NameToId(name));
+        RootedId id(cx, NameToId(name));
+        RootedShape shape(cx, globalObj->nativeLookup(cx, id));
         if (shape && shape->hasDefaultSetter() &&
             shape->writable() && shape->hasSlot() &&
-            !types->isOwnProperty(cx, globalObj->getType(cx), true)) {
-            watchGlobalReallocation();
+            !types->isOwnProperty(cx, globalType, true))
+        {
+            if (!watchGlobalReallocation())
+                return false;
             HeapSlot *value = &globalObj->getSlotRef(shape->slot());
             RegisterID reg = frame.allocReg();
 #ifdef JSGC_INCREMENTAL_MJ
             /* Write barrier. */
-            if (cx->compartment->compileBarriers() && types->needsBarrier(cx)) {
+            if (cx->zone()->compileBarriers() && types->needsBarrier(cx)) {
                 stubcc.linkExit(masm.jump(), Uses(0));
                 stubcc.leave();
                 stubcc.masm.move(ImmPtr(value), Registers::ArgReg1);
@@ -6479,7 +6730,7 @@ mjit::Compiler::jsop_setgname(PropertyName *name, bool popGuaranteed)
 
 #ifdef JSGC_INCREMENTAL_MJ
     /* Write barrier. */
-    if (cx->compartment->compileBarriers()) {
+    if (cx->zone()->compileBarriers()) {
         jsop_setgname_slow(name);
         return true;
     }
@@ -6563,7 +6814,7 @@ void
 mjit::Compiler::jsop_setelem_slow()
 {
     prepareStubCall(Uses(3));
-    INLINE_STUBCALL(STRICT_VARIANT(script, stubs::SetElem), REJOIN_FALLTHROUGH);
+    INLINE_STUBCALL(STRICT_VARIANT(script_, stubs::SetElem), REJOIN_FALLTHROUGH);
     frame.popn(3);
     frame.pushSynced(JSVAL_TYPE_UNKNOWN);
 }
@@ -6603,14 +6854,15 @@ mjit::Compiler::jsop_instanceof()
     RegisterID tmp = frame.allocReg();
     RegisterID obj = frame.tempRegForData(rhs);
 
-    masm.loadBaseShape(obj, tmp);
+    masm.loadPtr(Address(obj, JSObject::offsetOfType()), tmp);
     Jump notFunction = masm.branchPtr(Assembler::NotEqual,
-                                      Address(tmp, BaseShape::offsetOfClass()),
+                                      Address(tmp, offsetof(types::TypeObject, clasp)),
                                       ImmPtr(&FunctionClass));
 
     stubcc.linkExit(notFunction, Uses(2));
 
     /* Test for bound functions. */
+    masm.loadBaseShape(obj, tmp);
     Jump isBound = masm.branchTest32(Assembler::NonZero,
                                      Address(tmp, BaseShape::offsetOfFlags()),
                                      Imm32(BaseShape::BOUND_FUNCTION));
@@ -6626,7 +6878,7 @@ mjit::Compiler::jsop_instanceof()
     /* This is sadly necessary because the error case needs the object. */
     frame.dup();
 
-    if (!jsop_getprop(cx->runtime->atomState.classPrototypeAtom, JSVAL_TYPE_UNKNOWN))
+    if (!jsop_getprop(cx->names().classPrototype, JSVAL_TYPE_UNKNOWN))
         return false;
 
     /* Primitive prototypes are invalid. */
@@ -6645,9 +6897,11 @@ mjit::Compiler::jsop_instanceof()
 
     Label loop = masm.label();
 
-    /* Walk prototype chain, break out on NULL or hit. */
+    /* Walk prototype chain, break out on NULL, a lazy proto (0x1), or a hit. */
     masm.loadPtr(Address(obj, JSObject::offsetOfType()), obj);
     masm.loadPtr(Address(obj, offsetof(types::TypeObject, proto)), obj);
+    Jump isLazy = masm.branch32(Assembler::Equal, obj, Imm32(1));
+    stubcc.linkExit(isLazy, Uses(2));
     Jump isFalse2 = masm.branchTestPtr(Assembler::Zero, obj, obj);
     Jump isTrue = masm.branchPtr(Assembler::NotEqual, obj, proto);
     isTrue.linkTo(loop, &masm);
@@ -6717,7 +6971,7 @@ mjit::Compiler::jsop_newinit()
          * actually a global object). This should only happen in chrome code.
          */
         isArray = false;
-        baseobj = globalObj ? script->getObject(GET_UINT32_INDEX(PC)) : NULL;
+        baseobj = globalObj ? script_->getObject(GET_UINT32_INDEX(PC)) : NULL;
         break;
       default:
         JS_NOT_REACHED("Bad op");
@@ -6739,6 +6993,7 @@ mjit::Compiler::jsop_newinit()
      * Don't bake in types for non-compileAndGo scripts, or at initializers
      * producing objects with singleton types.
      */
+    RootedScript script(cx, script_);
     RootedTypeObject type(cx);
     if (globalObj && !types::UseNewTypeForInitializer(cx, script, PC, key)) {
         type = types::TypeScript::InitObject(cx, script, PC, key);
@@ -6753,24 +7008,28 @@ mjit::Compiler::jsop_newinit()
         !type ||
         (isArray && count > maxArraySlots) ||
         (!isArray && !baseobj) ||
-        (!isArray && baseobj->hasDynamicSlots())) {
+        (!isArray && baseobj->hasDynamicSlots()))
+    {
         prepareStubCall(Uses(0));
         masm.storePtr(ImmPtr(type), FrameAddress(offsetof(VMFrame, scratch)));
         masm.move(ImmPtr(stubArg), Registers::ArgReg1);
         INLINE_STUBCALL(stub, REJOIN_FALLTHROUGH);
         frame.pushSynced(knownPushedType(0));
 
-        frame.extra(frame.peek(-1)).initArray = (*PC == JSOP_NEWARRAY);
         frame.extra(frame.peek(-1)).initObject = baseobj;
-
         return true;
     }
 
     JSObject *templateObject;
-    if (isArray)
+    if (isArray) {
         templateObject = NewDenseUnallocatedArray(cx, count);
-    else
+        types::StackTypeSet::DoubleConversion conversion =
+            script->analysis()->pushedTypes(PC, 0)->convertDoubleElements(cx);
+        if (templateObject && conversion == types::StackTypeSet::AlwaysConvertToDoubles)
+            templateObject->setShouldConvertDoubleElements();
+    } else {
         templateObject = CopyInitializerObject(cx, baseobj);
+    }
     if (!templateObject)
         return false;
     templateObject->setType(type);
@@ -6789,24 +7048,27 @@ mjit::Compiler::jsop_newinit()
 
     stubcc.rejoin(Changes(1));
 
-    frame.extra(frame.peek(-1)).initArray = (*PC == JSOP_NEWARRAY);
     frame.extra(frame.peek(-1)).initObject = baseobj;
-
     return true;
 }
 
 bool
 mjit::Compiler::jsop_regexp()
 {
-    JSObject *obj = script->getRegExp(GET_UINT32_INDEX(PC));
+    JSObject *obj = script_->getRegExp(GET_UINT32_INDEX(PC));
     RegExpStatics *res = globalObj ? globalObj->getRegExpStatics() : NULL;
 
+    types::TypeObject *globalType;
+    if (globalObj) {
+        globalType = globalObj->getType(cx);
+        if (!globalType)
+            return false;
+    }
     if (!globalObj ||
         &obj->global() != globalObj ||
         !cx->typeInferenceEnabled() ||
         analysis->localsAliasStack() ||
-        types::HeapTypeSet::HasObjectFlags(cx, globalObj->getType(cx),
-                                           types::OBJECT_FLAG_REGEXP_FLAGS_SET))
+        types::HeapTypeSet::HasObjectFlags(cx, globalType, types::OBJECT_FLAG_REGEXP_FLAGS_SET))
     {
         prepareStubCall(Uses(0));
         masm.move(ImmPtr(obj), Registers::ArgReg1);
@@ -6831,9 +7093,9 @@ mjit::Compiler::jsop_regexp()
      * these cases.
      */
     analyze::SSAUseChain *uses =
-        analysis->useChain(analyze::SSAValue::PushedValue(PC - script->code, 0));
+        analysis->useChain(analyze::SSAValue::PushedValue(PC - script_->code, 0));
     if (uses && uses->popped && !uses->next && !reobj->global() && !reobj->sticky()) {
-        jsbytecode *use = script->code + uses->offset;
+        jsbytecode *use = script_->code + uses->offset;
         uint32_t which = uses->u.which;
         if (JSOp(*use) == JSOP_CALLPROP) {
             JSObject *callee = analysis->pushedTypes(use, 0)->getSingleton();
@@ -6867,7 +7129,7 @@ mjit::Compiler::jsop_regexp()
      * between now and construction of that jitcode could purge the shared
      * info, but such activity will also abort compilation.
      */
-    RegExpGuard g;
+    RegExpGuard g(cx);
     if (!reobj->getShared(cx, &g))
         return false;
 
@@ -6891,7 +7153,7 @@ mjit::Compiler::jsop_regexp()
 bool
 mjit::Compiler::startLoop(jsbytecode *head, Jump entry, jsbytecode *entryTarget)
 {
-    JS_ASSERT(cx->typeInferenceEnabled() && script == outerScript);
+    JS_ASSERT(cx->typeInferenceEnabled() && script_ == outerScript);
     JS_ASSERT(shouldStartLoop(head));
 
     if (loop) {
@@ -6904,7 +7166,7 @@ mjit::Compiler::startLoop(jsbytecode *head, Jump entry, jsbytecode *entryTarget)
         loop->clearLoopRegisters();
     }
 
-    LoopState *nloop = OffTheBooks::new_<LoopState>(cx, &ssa, this, &frame);
+    LoopState *nloop = js_new<LoopState>(cx, &ssa, this, &frame);
     if (!nloop || !nloop->init(head, entry, entryTarget)) {
         js_ReportOutOfMemory(cx);
         return false;
@@ -6928,9 +7190,9 @@ mjit::Compiler::finishLoop(jsbytecode *head)
      * at the end ('continue' statements are forward jumps to the loop test),
      * and after jumpAndRun'ing on that edge we can pop it from the frame.
      */
-    JS_ASSERT(loop && loop->headOffset() == uint32_t(head - script->code));
+    JS_ASSERT(loop && loop->headOffset() == uint32_t(head - script_->code));
 
-    jsbytecode *entryTarget = script->code + loop->entryOffset();
+    jsbytecode *entryTarget = script_->code + loop->entryOffset();
 
     /*
      * Fix up the jump entering the loop. We are doing this after all code has
@@ -6942,7 +7204,7 @@ mjit::Compiler::finishLoop(jsbytecode *head)
 #ifdef DEBUG
     if (IsJaegerSpewChannelActive(JSpew_Regalloc)) {
         RegisterAllocation *alloc = analysis->getAllocation(head);
-        JaegerSpew(JSpew_Regalloc, "loop allocation at %u:", unsigned(head - script->code));
+        JaegerSpew(JSpew_Regalloc, "loop allocation at %u:", unsigned(head - script_->code));
         frame.dumpAllocation(alloc);
     }
 #endif
@@ -6981,7 +7243,7 @@ mjit::Compiler::finishLoop(jsbytecode *head)
          * and jumps to the loop head, for rejoining from the interpreter.
          */
         LoopEntry entry;
-        entry.pcOffset = head - script->code;
+        entry.pcOffset = head - script_->code;
 
         OOL_STUBCALL(stubs::MissedBoundsCheckHead, REJOIN_RESUME);
 
@@ -7000,7 +7262,7 @@ mjit::Compiler::finishLoop(jsbytecode *head)
          * from, i.e. from switch and try blocks, as we don't assume double
          * variables are coherent in such cases.
          */
-        for (uint32_t slot = ArgSlot(0); slot < TotalSlots(script); slot++) {
+        for (uint32_t slot = ArgSlot(0); slot < TotalSlots(script_); slot++) {
             if (a->varTypes[slot].getTypeTag() == JSVAL_TYPE_DOUBLE) {
                 FrameEntry *fe = frame.getSlotEntry(slot);
                 stubcc.masm.ensureInMemoryDouble(frame.addressOf(fe));
@@ -7015,10 +7277,10 @@ mjit::Compiler::finishLoop(jsbytecode *head)
         if (newv) {
             while (newv->slot) {
                 if (newv->value.kind() == SSAValue::PHI &&
-                    newv->value.phiOffset() == uint32_t(head - script->code) &&
+                    newv->value.phiOffset() == uint32_t(head - script_->code) &&
                     analysis->trackSlot(newv->slot))
                 {
-                    JS_ASSERT(newv->slot < TotalSlots(script));
+                    JS_ASSERT(newv->slot < TotalSlots(script_));
                     types::StackTypeSet *targetTypes = analysis->getValueTypes(newv->value);
                     if (targetTypes->getKnownTypeTag() == JSVAL_TYPE_DOUBLE) {
                         FrameEntry *fe = frame.getSlotEntry(newv->slot);
@@ -7041,7 +7303,7 @@ mjit::Compiler::finishLoop(jsbytecode *head)
     loop->flushLoop(stubcc);
 
     LoopState *nloop = loop->outer;
-    cx->delete_(loop);
+    js_delete(loop);
     loop = nloop;
     frame.setLoop(loop);
 
@@ -7142,7 +7404,7 @@ mjit::Compiler::jumpAndRun(Jump j, jsbytecode *target, Jump *slow, bool *trampol
                  * This is OOL code but will usually be executed, so track
                  * it in the CODE_LENGTH for the opcode.
                  */
-                uint32_t offset = ssa.frameLength(a->inlineIndex) + PC - script->code;
+                uint32_t offset = ssa.frameLength(a->inlineIndex) + PC - script_->code;
                 size_t length = stubcc.masm.size() - stubcc.masm.distanceOf(start);
                 pcLengths[offset].codeLengthAugment += length;
             }
@@ -7169,7 +7431,7 @@ mjit::Compiler::enterBlock(StaticBlockObject *block)
     masm.move(ImmPtr(block), Registers::ArgReg1);
     INLINE_STUBCALL(stubs::EnterBlock, REJOIN_FALLTHROUGH);
     if (*PC == JSOP_ENTERBLOCK)
-        frame.enterBlock(StackDefs(script, PC));
+        frame.enterBlock(StackDefs(script_, PC));
 }
 
 void
@@ -7179,7 +7441,7 @@ mjit::Compiler::leaveBlock()
      * Note: After bug 535912, we can pass the block obj directly, inline
      * PutBlockObject, and do away with the muckiness in PutBlockObject.
      */
-    uint32_t n = StackUses(script, PC);
+    uint32_t n = StackUses(script_, PC);
     prepareStubCall(Uses(n));
     INLINE_STUBCALL(stubs::LeaveBlock, REJOIN_NONE);
     frame.leaveBlock(n);
@@ -7191,25 +7453,30 @@ mjit::Compiler::leaveBlock()
 //   GETPROP "prototype"
 //   IFPRIMTOP:
 //       NULL
-//   call js_CreateThisFromFunctionWithProto(...)
+//   call CreateThisFromFunctionWithProto(...)
 //
 bool
 mjit::Compiler::constructThis()
 {
     JS_ASSERT(isConstructing);
 
-    RootedFunction fun(cx, script->function());
+    RootedFunction fun(cx, script_->function());
 
     do {
         if (!cx->typeInferenceEnabled() ||
-            !fun->hasSingletonType() ||
-            fun->getType(cx)->unknownProperties())
+            !fun->hasSingletonType())
         {
             break;
         }
 
-        jsid id = NameToId(cx->runtime->atomState.classPrototypeAtom);
-        types::HeapTypeSet *protoTypes = fun->getType(cx)->getProperty(cx, id, false);
+        types::TypeObject *funType = fun->getType(cx);
+        if (!funType)
+            return false;
+        if (funType->unknownProperties())
+            break;
+
+        Rooted<jsid> id(cx, NameToId(cx->names().classPrototype));
+        types::HeapTypeSet *protoTypes = funType->getProperty(cx, HandleId(id), false);
 
         JSObject *proto = protoTypes->getSingleton(cx);
         if (!proto)
@@ -7220,13 +7487,13 @@ mjit::Compiler::constructThis()
          * prototype. Only do this if the type is actually known as a possible
          * 'this' type of the script.
          */
-        types::TypeObject *type = proto->getNewType(cx, fun);
+        types::TypeObject *type = proto->getNewType(cx, &ObjectClass, fun);
         if (!type)
             return false;
-        if (!types::TypeScript::ThisTypes(script)->hasType(types::Type::ObjectType(type)))
+        if (!types::TypeScript::ThisTypes(script_)->hasType(types::Type::ObjectType(type)))
             break;
 
-        JSObject *templateObject = js_CreateThisForFunctionWithProto(cx, fun, proto);
+        JSObject *templateObject = CreateThisForFunctionWithProto(cx, fun, proto);
         if (!templateObject)
             return false;
 
@@ -7257,7 +7524,7 @@ mjit::Compiler::constructThis()
     frame.pushCallee();
 
     // Get callee.prototype.
-    if (!jsop_getprop(cx->runtime->atomState.classPrototypeAtom, JSVAL_TYPE_UNKNOWN, false, /* forPrototype = */ true))
+    if (!jsop_getprop(cx->names().classPrototype, JSVAL_TYPE_UNKNOWN, false, /* forPrototype = */ true))
         return false;
 
     // Reach into the proto Value and grab a register for its data.
@@ -7343,8 +7610,8 @@ mjit::Compiler::jsop_tableswitch(jsbytecode *pc)
         if (!target)
             target = defaultTarget;
         JumpTableEdge edge;
-        edge.source = originalPC - script->code;
-        edge.target = (originalPC + target) - script->code;
+        edge.source = originalPC - script_->code;
+        edge.target = (originalPC + target) - script_->code;
         jumpTableEdges.append(edge);
         pc += JUMP_OFFSET_LEN;
     }
@@ -7405,12 +7672,16 @@ mjit::Compiler::jsop_in()
 
     if (cx->typeInferenceEnabled() && id->isType(JSVAL_TYPE_INT32)) {
         types::StackTypeSet *types = analysis->poppedTypes(PC, 0);
+        bool isNegative = id->isConstant() && id->getValue().toInt32() < 0;
 
         if (obj->mightBeType(JSVAL_TYPE_OBJECT) &&
-            !types->hasObjectFlags(cx, types::OBJECT_FLAG_NON_DENSE_ARRAY) &&
+            types->getKnownClass() == &ArrayClass &&
+            !isNegative &&
+            !types->hasObjectFlags(cx, types::OBJECT_FLAG_SPARSE_INDEXES) &&
             !types::ArrayPrototypeHasIndexedProperty(cx, outerScript))
         {
-            bool isPacked = !types->hasObjectFlags(cx, types::OBJECT_FLAG_NON_PACKED_ARRAY);
+            frame.forgetMismatchedObject(obj);
+            bool isPacked = !types->hasObjectFlags(cx, types::OBJECT_FLAG_NON_PACKED);
 
             if (!obj->isTypeKnown()) {
                 Jump guard = frame.testObject(Assembler::NotEqual, obj);
@@ -7422,6 +7693,11 @@ mjit::Compiler::jsop_in()
             Int32Key key = id->isConstant()
                          ? Int32Key::FromConstant(id->getValue().toInt32())
                          : Int32Key::FromRegister(frame.tempRegForData(id));
+
+            if (!id->isConstant()) {
+                Jump isNegative = masm.branch32(Assembler::LessThan, key.reg(), Imm32(0));
+                stubcc.linkExit(isNegative, Uses(2));
+            }
 
             masm.loadPtr(Address(dataReg, JSObject::offsetOfElements()), dataReg);
 
@@ -7452,10 +7728,8 @@ mjit::Compiler::jsop_in()
             if (dataReg != Registers::ReturnReg)
                 stubcc.masm.move(Registers::ReturnReg, dataReg);
 
-            frame.pushTypedPayload(JSVAL_TYPE_BOOLEAN, dataReg);
-
             stubcc.rejoin(Changes(2));
-
+            frame.pushTypedPayload(JSVAL_TYPE_BOOLEAN, dataReg);
             return;
         }
     }
@@ -7500,12 +7774,12 @@ mjit::Compiler::fixDoubleTypes(jsbytecode *target)
     if (newv) {
         while (newv->slot) {
             if (newv->value.kind() != SSAValue::PHI ||
-                newv->value.phiOffset() != uint32_t(target - script->code) ||
+                newv->value.phiOffset() != uint32_t(target - script_->code) ||
                 !analysis->trackSlot(newv->slot)) {
                 newv++;
                 continue;
             }
-            JS_ASSERT(newv->slot < TotalSlots(script));
+            JS_ASSERT(newv->slot < TotalSlots(script_));
             types::StackTypeSet *targetTypes = analysis->getValueTypes(newv->value);
             FrameEntry *fe = frame.getSlotEntry(newv->slot);
             VarType &vt = a->varTypes[newv->slot];
@@ -7536,14 +7810,18 @@ mjit::Compiler::fixDoubleTypes(jsbytecode *target)
     }
 }
 
-void
+bool
 mjit::Compiler::watchGlobalReallocation()
 {
     JS_ASSERT(cx->typeInferenceEnabled());
     if (hasGlobalReallocation)
-        return;
-    types::HeapTypeSet::WatchObjectStateChange(cx, globalObj->getType(cx));
+        return true;
+    types::TypeObject *globalType = globalObj->getType(cx);
+    if (!globalType)
+        return false;
+    types::HeapTypeSet::WatchObjectStateChange(cx, globalType);
     hasGlobalReallocation = true;
+    return true;
 }
 
 void
@@ -7560,7 +7838,7 @@ mjit::Compiler::updateVarType()
      */
 
     types::StackTypeSet *types = pushedTypeSet(0);
-    uint32_t slot = GetBytecodeSlot(script, PC);
+    uint32_t slot = GetBytecodeSlot(script_, PC);
 
     if (analysis->trackSlot(slot)) {
         VarType &vt = a->varTypes[slot];
@@ -7586,7 +7864,7 @@ mjit::Compiler::updateJoinVarTypes()
     const SlotValue *newv = analysis->newValues(PC);
     if (newv) {
         while (newv->slot) {
-            if (newv->slot < TotalSlots(script)) {
+            if (newv->slot < TotalSlots(script_)) {
                 VarType &vt = a->varTypes[newv->slot];
                 JSValueType type = vt.getTypeTag();
                 vt.setTypes(analysis->getValueTypes(newv->value));
@@ -7611,9 +7889,9 @@ mjit::Compiler::restoreVarType()
     if (!cx->typeInferenceEnabled())
         return;
 
-    uint32_t slot = GetBytecodeSlot(script, PC);
+    uint32_t slot = GetBytecodeSlot(script_, PC);
 
-    if (slot >= analyze::TotalSlots(script))
+    if (slot >= analyze::TotalSlots(script_))
         return;
 
     /*
@@ -7850,7 +8128,7 @@ mjit::Compiler::testBarrier(RegisterID typeReg, RegisterID dataReg,
     if (!cx->typeInferenceEnabled() || !(js_CodeSpec[*PC].format & JOF_TYPESET))
         return state;
 
-    types::StackTypeSet *types = analysis->bytecodeTypes(PC);
+    types::StackTypeSet *types = types::TypeScript::BytecodeTypes(script_, PC);
     if (types->unknown()) {
         /*
          * If the result of this opcode is already unknown, there is no way for
@@ -7870,7 +8148,7 @@ mjit::Compiler::testBarrier(RegisterID typeReg, RegisterID dataReg,
     }
 
     if (hasTypeBarriers(PC))
-        typeBarrierBytecodes.append(PC - script->code);
+        typeBarrierBytecodes.append(PC - script_->code);
 
     /* Cannot have type barriers when the result of the operation is already unknown. */
     JS_ASSERT(!types->unknown());
@@ -7915,7 +8193,7 @@ mjit::Compiler::testPushedType(RejoinState rejoin, int which, bool ool)
     if (!cx->typeInferenceEnabled() || !(js_CodeSpec[*PC].format & JOF_TYPESET))
         return;
 
-    types::TypeSet *types = analysis->bytecodeTypes(PC);
+    types::TypeSet *types = types::TypeScript::BytecodeTypes(script_, PC);
     if (types->unknown())
         return;
 

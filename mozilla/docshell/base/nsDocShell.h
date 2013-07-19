@@ -23,10 +23,10 @@
 #include "nsITextScroll.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIContentViewerContainer.h"
+#include "nsIDOMStorageManager.h"
 
 #include "nsDocLoader.h"
 #include "nsIURILoader.h"
-#include "nsIEditorDocShell.h"
 
 #include "nsWeakReference.h"
 
@@ -51,7 +51,6 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIPrompt.h"
 #include "nsIRefreshURI.h"
-#include "nsIScriptGlobalObject.h"
 #include "nsIScriptGlobalObjectOwner.h"
 #include "nsISHistory.h"
 #include "nsILayoutHistoryState.h"
@@ -71,7 +70,6 @@
 #include "nsISecureBrowserUI.h"
 #include "nsIObserver.h"
 #include "nsDocShellLoadTypes.h"
-#include "nsIDOMEventTarget.h"
 #include "nsILoadContext.h"
 #include "nsIWidget.h"
 #include "nsIWebShellServices.h"
@@ -80,11 +78,18 @@
 #include "nsICommandManager.h"
 #include "nsCRT.h"
 
+namespace mozilla {
+namespace dom {
+class EventTarget;
+}
+}
+
 class nsDocShell;
-class nsIController;
-class OnLinkClickEvent;
-class nsIScrollableFrame;
 class nsDOMNavigationTiming;
+class nsGlobalWindow;
+class nsIController;
+class nsIScrollableFrame;
+class OnLinkClickEvent;
 
 /* load commands were moved to nsIDocShell.h */
 /* load types were moved to nsDocShellLoadTypes.h */
@@ -131,7 +136,6 @@ typedef enum {
 
 class nsDocShell : public nsDocLoader,
                    public nsIDocShell,
-                   public nsIDocShellTreeItem, 
                    public nsIDocShellHistory,
                    public nsIWebNavigation,
                    public nsIBaseWindow, 
@@ -142,14 +146,14 @@ class nsDocShell : public nsDocLoader,
                    public nsIScriptGlobalObjectOwner,
                    public nsIRefreshURI,
                    public nsIWebProgressListener,
-                   public nsIEditorDocShell,
                    public nsIWebPageDescriptor,
                    public nsIAuthPromptProvider,
                    public nsIObserver,
                    public nsILoadContext,
                    public nsIWebShellServices,
                    public nsILinkHandler,
-                   public nsIClipboardCommands
+                   public nsIClipboardCommands,
+                   public nsIDOMStorageManager
 {
     friend class nsDSURIContentListener;
 
@@ -176,12 +180,12 @@ public:
     NS_DECL_NSIWEBPROGRESSLISTENER
     NS_DECL_NSIREFRESHURI
     NS_DECL_NSICONTENTVIEWERCONTAINER
-    NS_DECL_NSIEDITORDOCSHELL
     NS_DECL_NSIWEBPAGEDESCRIPTOR
     NS_DECL_NSIAUTHPROMPTPROVIDER
     NS_DECL_NSIOBSERVER
     NS_DECL_NSICLIPBOARDCOMMANDS
     NS_DECL_NSIWEBSHELLSERVICES
+    NS_FORWARD_SAFE_NSIDOMSTORAGEMANAGER(TopSessionStorageManager())
 
     NS_IMETHOD Stop() {
         // Need this here because otherwise nsIWebNavigation::Stop
@@ -197,12 +201,14 @@ public:
     NS_IMETHOD OnLinkClick(nsIContent* aContent,
         nsIURI* aURI,
         const PRUnichar* aTargetSpec,
+        const nsAString& aFileName,
         nsIInputStream* aPostDataStream,
         nsIInputStream* aHeadersDataStream,
         bool aIsTrusted);
     NS_IMETHOD OnLinkClickSync(nsIContent* aContent,
         nsIURI* aURI,
         const PRUnichar* aTargetSpec,
+        const nsAString& aFileName,
         nsIInputStream* aPostDataStream = 0,
         nsIInputStream* aHeadersDataStream = 0,
         nsIDocShell** aDocShell = 0,
@@ -222,10 +228,12 @@ public:
     // are shared with nsIDocShell (appID, etc.) and can't be declared twice.
     NS_IMETHOD GetAssociatedWindow(nsIDOMWindow**);
     NS_IMETHOD GetTopWindow(nsIDOMWindow**);
+    NS_IMETHOD GetTopFrameElement(nsIDOMElement**);
     NS_IMETHOD IsAppOfType(uint32_t, bool*);
     NS_IMETHOD GetIsContent(bool*);
     NS_IMETHOD GetUsePrivateBrowsing(bool*);
     NS_IMETHOD SetUsePrivateBrowsing(bool);
+    NS_IMETHOD SetPrivateBrowsing(bool);
 
     // Restores a cached presentation from history (mLSHE).
     // This method swaps out the content viewer and simulates loads for
@@ -281,10 +289,6 @@ protected:
     // at the parent.
     nsIPrincipal* GetInheritedPrincipal(bool aConsiderCurrentDocument);
 
-    // True if when loading aURI into this docshell, the channel should look
-    // for an appropriate application cache.
-    bool ShouldCheckAppCache(nsIURI * aURI);
-
     // Actually open a channel and perform a URI load.  Note: whatever owner is
     // passed to this function will be set on the channel.  Callers who wish to
     // not have an owner on the channel should just pass null.
@@ -293,6 +297,7 @@ protected:
                                bool aSendReferrer,
                                nsISupports * aOwner,
                                const char * aTypeHint,
+                               const nsAString & aFileName,
                                nsIInputStream * aPostData,
                                nsIInputStream * aHeadersData,
                                bool firstParty,
@@ -531,12 +536,8 @@ protected:
     static  inline  uint32_t
     PRTimeToSeconds(PRTime t_usec)
     {
-      PRTime usec_per_sec;
-      uint32_t t_sec;
-      LL_I2L(usec_per_sec, PR_USEC_PER_SEC);
-      LL_DIV(t_usec, t_usec, usec_per_sec);
-      LL_L2I(t_sec, t_usec);
-      return t_sec;
+      PRTime usec_per_sec = PR_USEC_PER_SEC;
+      return  uint32_t(t_usec /= usec_per_sec);
     }
 
     bool IsFrame();
@@ -635,10 +636,8 @@ protected:
     
     void ReattachEditorToWindow(nsISHEntry *aSHEntry);
 
-    nsresult GetSessionStorageForURI(nsIURI* aURI,
-                                     const nsSubstring& aDocumentURI,
-                                     bool create,
-                                     nsIDOMStorage** aStorage);
+    nsCOMPtr<nsIDOMStorageManager> mSessionStorageManager;
+    nsIDOMStorageManager* TopSessionStorageManager();
 
     // helpers for executing commands
     nsresult GetControllerForCommand(const char *inCommand,
@@ -650,6 +649,9 @@ protected:
     nsIChannel* GetCurrentDocChannel();
 
     bool ShouldBlockLoadingForBackButton();
+
+    // Convenience method for getting our parent docshell.  Can return null
+    already_AddRefed<nsDocShell> GetParentDocshell();
 protected:
     // Override the parent setter from nsDocLoader
     virtual nsresult SetDocLoaderParent(nsDocLoader * aLoader);
@@ -671,18 +673,14 @@ protected:
     bool JustStartedNetworkLoad();
 
     enum FrameType {
-        eFrameTypeRegular  = 0x0, // 0000
-        eFrameTypeBrowser  = 0x1, // 0001
-        eFrameTypeApp      = 0x2  // 0010
+        eFrameTypeRegular,
+        eFrameTypeBrowser,
+        eFrameTypeApp
     };
 
     FrameType GetInheritedFrameType();
-    FrameType GetFrameType();
 
     bool HasUnloadedParent();
-
-    // hash of session storages, keyed by domain
-    nsInterfaceHashtable<nsCStringHashKey, nsIDOMStorage> mStorages;
 
     // Dimensions of the docshell
     nsIntRect                  mBounds;
@@ -705,7 +703,7 @@ protected:
     // mCurrentURI should be marked immutable on set if possible.
     nsCOMPtr<nsIURI>           mCurrentURI;
     nsCOMPtr<nsIURI>           mReferrerURI;
-    nsCOMPtr<nsIScriptGlobalObject> mScriptGlobal;
+    nsRefPtr<nsGlobalWindow>   mScriptGlobal;
     nsCOMPtr<nsISHistory>      mSessionHistory;
     nsCOMPtr<nsIGlobalHistory2> mGlobalHistory;
     nsCOMPtr<nsIWebBrowserFind> mFind;
@@ -749,12 +747,16 @@ protected:
     nsCOMPtr<nsIChannel>       mFailedChannel;
     uint32_t                   mFailedLoadType;
 
+    // Set in DoURILoad when the LOAD_RELOAD_ALLOW_MIXED_CONTENT flag is set.
+    // Checked in nsMixedContentBlocker, to see if the channels match.
+    nsCOMPtr<nsIChannel>       mMixedContentChannel;
+
     // WEAK REFERENCES BELOW HERE.
     // Note these are intentionally not addrefd.  Doing so will create a cycle.
     // For that reasons don't use nsCOMPtr.
 
     nsIDocShellTreeOwner *     mTreeOwner; // Weak Reference
-    nsIDOMEventTarget *       mChromeEventHandler; //Weak Reference
+    mozilla::dom::EventTarget* mChromeEventHandler; //Weak Reference
 
     eCharsetReloadState        mCharsetReloadState;
 
@@ -779,6 +781,25 @@ protected:
 
     uint32_t                   mSandboxFlags;
 
+    // mFullscreenAllowed stores how we determine whether fullscreen is allowed
+    // when GetFullscreenAllowed() is called. Fullscreen is allowed in a
+    // docshell when all containing iframes have the allowfullscreen
+    // attribute set to true. When mFullscreenAllowed is CHECK_ATTRIBUTES
+    // we check this docshell's containing frame for the allowfullscreen
+    // attribute, and recurse onto the parent docshell to ensure all containing
+    // frames also have the allowfullscreen attribute. If we find an ancestor
+    // docshell with mFullscreenAllowed not equal to CHECK_ATTRIBUTES, we've
+    // reached a content boundary, and mFullscreenAllowed denotes whether the
+    // parent across the content boundary has allowfullscreen=true in all its
+    // containing iframes. mFullscreenAllowed defaults to CHECK_ATTRIBUTES and
+    // is set otherwise when docshells which are content boundaries are created.
+    enum FullscreenAllowedState {
+        CHECK_ATTRIBUTES,
+        PARENT_ALLOWS,
+        PARENT_PROHIBITS
+    };
+    FullscreenAllowedState     mFullscreenAllowed;
+
     bool                       mCreated;
     bool                       mAllowSubframes;
     bool                       mAllowPlugins;
@@ -797,7 +818,6 @@ protected:
     bool                       mIsAppTab;
     bool                       mUseGlobalHistory;
     bool                       mInPrivateBrowsing;
-    bool                       mIsBrowserFrame;
 
     // This boolean is set to true right before we fire pagehide and generally
     // unset when we embed a new content viewer.  While it's true no navigation
@@ -828,13 +848,25 @@ protected:
 #ifdef DEBUG
     bool                       mInEnsureScriptEnv;
 #endif
+    bool                       mAffectPrivateSessionLifetime;
     uint64_t                   mHistoryID;
 
     static nsIURIFixup *sURIFixup;
 
     nsRefPtr<nsDOMNavigationTiming> mTiming;
 
-    uint32_t mAppId;
+    // Are we a regular frame, a browser frame, or an app frame?
+    FrameType mFrameType;
+
+    // We only expect mOwnOrContainingAppId to be something other than
+    // UNKNOWN_APP_ID if mFrameType != eFrameTypeRegular.  For vanilla iframes
+    // inside an app, we'll retrieve the containing app-id by walking up the
+    // docshell hierarchy.
+    //
+    // (This needs to be the docshell's own /or containing/ app id because the
+    // containing app frame might be in another process, in which case we won't
+    // find it by walking up the docshell hierarchy.)
+    uint32_t mOwnOrContainingAppId;
 
 private:
     nsCOMPtr<nsIAtom> mForcedCharset;

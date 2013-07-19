@@ -93,9 +93,7 @@ function add_email_to_address_book(aEmailAddr) {
                .createInstance(Ci.nsIAbCard);
   card.primaryEmail = aEmailAddr;
 
-  let enumerator = Cc["@mozilla.org/abmanager;1"]
-                     .getService(Ci.nsIAbManager)
-                     .directories;
+  let enumerator = MailServices.ab.directories;
   while (enumerator.hasMoreElements()) {
     let addrbook = enumerator.getNext();
     if (addrbook instanceof Components.interfaces.nsIAbMDBDirectory &&
@@ -110,7 +108,7 @@ function add_email_to_address_book(aEmailAddr) {
 
 function test_filter_in_address_book() {
   let bookSetDef = {
-    from: ["Qbert Q Qbington", "q@q.q"],
+    from: ["Qbert Q Qbington", "q@q.invalid"],
     count: 1
   };
   add_email_to_address_book(bookSetDef.from[1]);
@@ -167,7 +165,7 @@ function test_filter_tags() {
 
 function test_filter_text_single_word_and_predicates() {
   let folder = create_folder("QuickFilterBarTextSingleWord");
-  let whoFoo = ["zabba", "foo@madeup.nul"];
+  let whoFoo = ["zabba", "foo@madeup.invalid"];
   let [setInert, setSenderFoo, setRecipientsFoo, setSubjectFoo, setBodyFoo] =
     make_new_sets_in_folder(folder, [
       {count: 1}, {count:1, from: whoFoo}, {count: 1, to: [whoFoo]},
@@ -222,8 +220,8 @@ function test_filter_text_single_word_and_predicates() {
 function test_filter_text_multi_word() {
   let folder = create_folder("QuickFilterBarTextMultiWord");
 
-  let whoFoo = ["foo", "zabba@madeup.nul"];
-  let whoBar = ["zabba", "bar@madeup.nul"];
+  let whoFoo = ["foo", "zabba@madeup.invalid"];
+  let whoBar = ["zabba", "bar@madeup.invalid"];
   let [setInert, setPeepMatch, setSubjReverse, setSubjectJustFoo] =
     make_new_sets_in_folder(folder, [
       {count: 1}, {count:1, from: whoFoo, to: [whoBar]},
@@ -243,8 +241,8 @@ function test_filter_text_multi_word() {
  *  sender/recipients/subject/body toggle buttons.
  */
 function test_filter_text_constraints_propagate() {
-  let whoFoo = ["foo", "zabba@madeup.nul"];
-  let whoBar = ["zabba", "bar@madeup.nul"];
+  let whoFoo = ["foo", "zabba@madeup.invalid"];
+  let whoBar = ["zabba", "bar@madeup.invalid"];
 
   let folderOne = create_folder("QuickFilterBarTextPropagate1");
   let [setSubjFoo, setWhoFoo] = make_new_sets_in_folder(folderOne,

@@ -170,14 +170,13 @@ var RecommendedSearchResults = {
         addons: []
       };
 
-      // Avoid any NSS costs. Convert https to http.
-      addons.forEach(function(aAddon){
+      addons.forEach(function(aAddon) {
         json.addons.push({
           id: aAddon.id,
           name: aAddon.name,
           version: aAddon.version,
-          homepageURL: aAddon.homepageURL.replace(/^https/, "http"),
-          iconURL: aAddon.iconURL.replace(/^https/, "http")
+          learnmoreURL: aAddon.learnmoreURL,
+          iconURL: aAddon.iconURL
         })
       });
 
@@ -197,5 +196,5 @@ var RecommendedSearchResults = {
   }
 }
 
-const NSGetFactory = XPCOMUtils.generateNSGetFactory([AddonUpdateService]);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory([AddonUpdateService]);
 

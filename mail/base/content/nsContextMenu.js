@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/InlineSpellChecker.jsm");
+Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource:///modules/MailUtils.js");
 
 XPCOMUtils.defineLazyGetter(this, "PageMenu", function() {
@@ -575,10 +576,8 @@ nsContextMenu.prototype = {
     try {
       const nsIScriptSecurityManager =
         Components.interfaces.nsIScriptSecurityManager;
-      var secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
-                             .getService(nsIScriptSecurityManager);
-      secMan.checkLoadURIWithPrincipal(this.target.nodePrincipal, this.linkURI,
-                                       nsIScriptSecurityManager.STANDARD);
+      Services.scriptSecurityManager.checkLoadURIWithPrincipal(this.target.nodePrincipal,
+          this.linkURI, nsIScriptSecurityManager.STANDARD);
     } catch (e) {
       // Don't save things we can't link to.
       return false;
@@ -597,14 +596,14 @@ nsContextMenu.prototype = {
    * Save URL of clicked-on link.
    */
   saveLink : function CM_saveLink() {
-    saveURL(this.linkURL, this.linkText(), null, true);
+    saveURL(this.linkURL, this.linkText(), null, true, null, null, document);
   },
 
   /**
    * Save a clicked-on image.
    */
   saveImage : function CM_saveImage() {
-    saveURL(this.imageURL, null, "SaveImageTitle", false);
+    saveURL(this.imageURL, null, "SaveImageTitle", false, null, null, document);
   },
 
   /**
@@ -724,7 +723,7 @@ nsContextMenu.prototype = {
       return this.link.href;
     }
     var href = this.link.getAttributeNS("http://www.w3.org/1999/xlink","href");
-    if (!href || !href.match(/\S/)) {
+    if (!href || (href.trim() == "")) {
        // Without this we try to save as the current doc,
        // for example, HTML case also throws if empty.
       throw "Empty href";
@@ -738,10 +737,8 @@ nsContextMenu.prototype = {
    * @return an nsIURI if possible, or null if not
    */
   getLinkURI: function CM_getLinkURI() {
-    var ioService = Components.classes["@mozilla.org/network/io-service;1"]
-                              .getService(Components.interfaces.nsIIOService);
     try {
-      return ioService.newURI(this.linkURL, null, null);
+      return Services.io.newURI(this.linkURL, null, null);
     } catch (ex) {
       // e.g. empty URL string
     }
@@ -765,16 +762,16 @@ nsContextMenu.prototype = {
    */
   linkText : function CM_linkText() {
     var text = gatherTextUnder(this.link);
-    if (!text || !text.match(/\S/)) {
+    if (!text || (text.trim() == "")) {
       text = this.link.getAttribute("title");
-      if (!text || !text.match(/\S/)) {
+      if (!text || (text.trim() == "")) {
         text = this.link.getAttribute("alt");
-        if (!text || !text.match(/\S/)) {
+        if (!text || (text.trim() == "")) {
           if (this.link.href) {
             text = this.link.href;
           } else {
             text = getAttributeNS("http://www.w3.org/1999/xlink", "href");
-            if (text && text.match(/\S/)) {
+            if (text && !(text.trim() == "")) {
               text = this.makeURLAbsolute(this.link.baseURI, text);
             }
           }
@@ -820,11 +817,9 @@ nsContextMenu.prototype = {
    */
   makeURLAbsolute : function CM_makeURLAbsolute(aBase, aUrl) {
     // Construct nsIURL.
-    var ioService = Components.classes["@mozilla.org/network/io-service;1"]
-                              .getService(Components.interfaces.nsIIOService);
-    var baseURI  = ioService.newURI(aBase, null, null);
+    var baseURI  = Services.io.newURI(aBase, null, null);
 
-    return ioService.newURI(baseURI.resolve(aUrl), null, null).spec;
+    return Services.io.newURI(baseURI.resolve(aUrl), null, null).spec;
   },
 
   /**
@@ -893,10 +888,8 @@ nsContextMenu.prototype = {
   },
 
   openInBrowser: function CM_openInBrowser() {
-    let uri = Components.classes["@mozilla.org/network/io-service;1"]
-                        .getService(Components.interfaces.nsIIOService)
-                        .newURI(this.target.ownerDocument.defaultView.
-                                top.location.href, null, null);
+    let uri = Services.io.newURI(this.target.ownerDocument.defaultView.
+                                 top.location.href, null, null);
 
     Components.classes["@mozilla.org/uriloader/external-protocol-service;1"]
               .getService(Components.interfaces.nsIExternalProtocolService)

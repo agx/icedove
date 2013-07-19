@@ -10,17 +10,11 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= widget
 LIBRARY_NAME	= xpwidgets_s
 LIBXUL_LIBRARY  = 1
 
-EXPORTS = \
-		GfxInfoCollector.h \
-		$(NULL)
-
 DEFINES += \
   -D_IMPL_NS_WIDGET \
-  -DNO_NSPR_10_SUPPORT=1 \
   $(NULL)
 
 CPPSRCS		= \
@@ -44,6 +38,7 @@ CPPSRCS		= \
 		PuppetWidget.cpp \
 		nsFilePickerProxy.cpp \
 		WidgetUtils.cpp \
+		InputData.cpp \
 		$(NULL)
 
 ifdef MOZ_X11
@@ -75,6 +70,7 @@ endif
 LOCAL_INCLUDES	+= \
 		-I$(srcdir)/../$(MOZ_WIDGET_TOOLKIT) \
 		-I$(srcdir)/../shared \
+		-I$(topsrcdir)/layout/base \
 		-I$(topsrcdir)/layout/forms \
 		-I$(topsrcdir)/layout/generic \
 		-I$(topsrcdir)/layout/xul/base/src \

@@ -7,8 +7,9 @@
 
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/net/FTPChannelChild.h"
+#include "mozilla/dom/TabChild.h"
 #include "nsFtpProtocolHandler.h"
-
+#include "nsITabChild.h"
 #include "nsStringStream.h"
 #include "nsMimeTypes.h"
 #include "nsNetUtil.h"
@@ -117,7 +118,7 @@ FTPChannelChild::GetProxyInfo(nsIProxyInfo** aProxyInfo)
 NS_IMETHODIMP
 FTPChannelChild::SetUploadStream(nsIInputStream* stream,
                                  const nsACString& contentType,
-                                 int32_t contentLength)
+                                 int64_t contentLength)
 {
   NS_ENSURE_TRUE(!mIsPending, NS_ERROR_IN_PROGRESS);
   mUploadStream = stream;
@@ -155,8 +156,21 @@ FTPChannelChild::AsyncOpen(::nsIStreamListener* listener, nsISupports* aContext)
   if (NS_FAILED(rv))
     return rv;
 
+  mozilla::dom::TabChild* tabChild = nullptr;
+  nsCOMPtr<nsITabChild> iTabChild;
+  NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup,
+                                NS_GET_IID(nsITabChild),
+                                getter_AddRefs(iTabChild));
+  GetCallback(iTabChild);
+  if (iTabChild) {
+    tabChild = static_cast<mozilla::dom::TabChild*>(iTabChild.get());
+  }
+  if (MissingRequiredTabChild(tabChild, "ftp")) {
+    return NS_ERROR_ILLEGAL_VALUE;
+  }
+
   // FIXME: like bug 558623, merge constructor+SendAsyncOpen into 1 IPC msg
-  gNeckoChild->SendPFTPChannelConstructor(this);
+  gNeckoChild->SendPFTPChannelConstructor(this, tabChild, IPC::SerializedLoadContext(this));
   mListener = listener;
   mListenerContext = aContext;
 
@@ -170,8 +184,7 @@ FTPChannelChild::AsyncOpen(::nsIStreamListener* listener, nsISupports* aContext)
   OptionalInputStreamParams uploadStream;
   SerializeInputStream(mUploadStream, uploadStream);
 
-  SendAsyncOpen(uri, mStartPos, mEntityID, uploadStream,
-                IPC::SerializedLoadContext(this));
+  SendAsyncOpen(uri, mStartPos, mEntityID, uploadStream);
 
   // The socket transport layer in the chrome process now has a logical ref to
   // us until OnStopRequest is called.
@@ -206,7 +219,7 @@ FTPChannelChild::OpenContentStream(bool async,
 class FTPStartRequestEvent : public ChannelEvent
 {
  public:
-  FTPStartRequestEvent(FTPChannelChild* aChild, const int32_t& aContentLength,
+  FTPStartRequestEvent(FTPChannelChild* aChild, const int64_t& aContentLength,
                        const nsCString& aContentType, const PRTime& aLastModified,
                        const nsCString& aEntityID, const URIParams& aURI)
   : mChild(aChild), mContentLength(aContentLength), mContentType(aContentType),
@@ -215,7 +228,7 @@ class FTPStartRequestEvent : public ChannelEvent
                                        mLastModified, mEntityID, mURI); }
  private:
   FTPChannelChild* mChild;
-  int32_t mContentLength;
+  int64_t mContentLength;
   nsCString mContentType;
   PRTime mLastModified;
   nsCString mEntityID;
@@ -223,7 +236,7 @@ class FTPStartRequestEvent : public ChannelEvent
 };
 
 bool
-FTPChannelChild::RecvOnStartRequest(const int32_t& aContentLength,
+FTPChannelChild::RecvOnStartRequest(const int64_t& aContentLength,
                                     const nsCString& aContentType,
                                     const PRTime& aLastModified,
                                     const nsCString& aEntityID,
@@ -240,7 +253,7 @@ FTPChannelChild::RecvOnStartRequest(const int32_t& aContentLength,
 }
 
 void
-FTPChannelChild::DoOnStartRequest(const int32_t& aContentLength,
+FTPChannelChild::DoOnStartRequest(const int64_t& aContentLength,
                                   const nsCString& aContentType,
                                   const PRTime& aLastModified,
                                   const nsCString& aEntityID,
@@ -248,7 +261,7 @@ FTPChannelChild::DoOnStartRequest(const int32_t& aContentLength,
 {
   LOG(("FTPChannelChild::RecvOnStartRequest [this=%x]\n", this));
 
-  SetContentLength(aContentLength);
+  mContentLength = aContentLength;
   SetContentType(aContentType);
   mLastModifiedTime = aLastModified;
   mEntityID = aEntityID;
@@ -268,18 +281,19 @@ class FTPDataAvailableEvent : public ChannelEvent
 {
  public:
   FTPDataAvailableEvent(FTPChannelChild* aChild, const nsCString& aData,
-                        const uint32_t& aOffset, const uint32_t& aCount)
+                        const uint64_t& aOffset, const uint32_t& aCount)
   : mChild(aChild), mData(aData), mOffset(aOffset), mCount(aCount) {}
   void Run() { mChild->DoOnDataAvailable(mData, mOffset, mCount); }
  private:
   FTPChannelChild* mChild;
   nsCString mData;
-  uint32_t mOffset, mCount;
+  uint64_t mOffset;
+  uint32_t mCount;
 };
 
 bool
 FTPChannelChild::RecvOnDataAvailable(const nsCString& data,
-                                     const uint32_t& offset,
+                                     const uint64_t& offset,
                                      const uint32_t& count)
 {
   if (mEventQ.ShouldEnqueue()) {
@@ -292,7 +306,7 @@ FTPChannelChild::RecvOnDataAvailable(const nsCString& data,
 
 void
 FTPChannelChild::DoOnDataAvailable(const nsCString& data,
-                                   const uint32_t& offset,
+                                   const uint64_t& offset,
                                    const uint32_t& count)
 {
   LOG(("FTPChannelChild::RecvOnDataAvailable [this=%x]\n", this));
@@ -508,11 +522,22 @@ FTPChannelChild::Resume()
 NS_IMETHODIMP
 FTPChannelChild::ConnectParent(uint32_t id)
 {
+  mozilla::dom::TabChild* tabChild = nullptr;
+  nsCOMPtr<nsITabChild> iTabChild;
+  NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup,
+                                NS_GET_IID(nsITabChild),
+                                getter_AddRefs(iTabChild));
+  GetCallback(iTabChild);
+  if (iTabChild) {
+    tabChild = static_cast<mozilla::dom::TabChild*>(iTabChild.get());
+  }
+
   // The socket transport in the chrome process now holds a logical ref to us
   // until OnStopRequest, or we do a redirect, or we hit an IPDL error.
   AddIPDLReference();
 
-  if (!gNeckoChild->SendPFTPChannelConstructor(this))
+  if (!gNeckoChild->SendPFTPChannelConstructor(this, tabChild,
+                                               IPC::SerializedLoadContext(this)))
     return NS_ERROR_FAILURE;
 
   if (!SendConnectChannel(id))

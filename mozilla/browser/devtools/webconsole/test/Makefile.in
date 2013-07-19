@@ -42,11 +42,9 @@ MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_jsterm.js \
 	browser_webconsole_null_and_undefined_output.js \
 	browser_webconsole_output_order.js \
-	browser_webconsole_property_panel.js \
 	browser_webconsole_property_provider.js \
 	browser_webconsole_bug_587617_output_copy.js \
 	browser_webconsole_bug_585237_line_limit.js \
-	browser_webconsole_bug_581231_close_button.js \
 	browser_webconsole_bug_582201_duplicate_errors.js \
 	browser_webconsole_bug_580454_timestamp_l10n.js \
 	browser_webconsole_netlogging.js \
@@ -61,7 +59,6 @@ MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_bug_601352_scroll.js \
 	browser_webconsole_bug_592442_closing_brackets.js \
 	browser_webconsole_bug_593003_iframe_wrong_hud.js \
-	browser_webconsole_bug_601909_remember_height.js \
 	browser_webconsole_bug_613013_console_api_iframe.js \
 	browser_webconsole_bug_597756_reopen_closed_tab.js \
 	browser_webconsole_bug_600183_charset.js \
@@ -84,7 +81,6 @@ MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_bug_632817.js \
 	browser_webconsole_bug_611795.js \
 	browser_webconsole_bug_618311_close_panels.js \
-	browser_webconsole_bug_618311_private_browsing.js \
 	browser_webconsole_bug_626484_output_copy_order.js \
 	browser_webconsole_bug_632347_iterators_generators.js \
 	browser_webconsole_bug_642108_pruneTest.js \
@@ -93,11 +89,9 @@ MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_bug_632275_getters_document_width.js \
 	browser_webconsole_bug_644419_log_limits.js \
 	browser_webconsole_bug_646025_console_file_location.js \
-	browser_webconsole_position_ui.js \
 	browser_webconsole_bug_642615_autocomplete.js \
 	browser_webconsole_bug_585991_autocomplete_popup.js \
 	browser_webconsole_bug_585991_autocomplete_keys.js \
-	browser_webconsole_bug_663443_panel_title.js \
 	browser_webconsole_bug_660806_history_nav.js \
 	browser_webconsole_bug_651501_document_body_autocomplete.js \
 	browser_webconsole_bug_653531_highlighter_console_helper.js \
@@ -105,17 +99,53 @@ MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_bug_664131_console_group.js \
 	browser_webconsole_bug_704295.js \
 	browser_webconsole_bug_658368_time_methods.js \
+	browser_webconsole_bug_764572_output_open_url.js \
 	browser_webconsole_bug_622303_persistent_filters.js \
-	browser_webconsole_window_zombie.js \
+	browser_webconsole_bug_770099_bad_policyuri.js \
+	browser_webconsole_bug_770099_violation.js \
+	browser_webconsole_bug_766001_JS_Console_in_Debugger.js \
+	browser_webconsole_bug_782653_CSS_links_in_Style_Editor.js \
 	browser_cached_messages.js \
 	browser_bug664688_sandbox_update_after_navigation.js \
-	browser_webconsole_menustatus.js \
 	browser_result_format_as_string.js \
 	browser_webconsole_bug_737873_mixedcontent.js \
 	browser_output_breaks_after_console_dir_uninspectable.js \
 	browser_console_log_inspectable_object.js \
+	browser_bug_638949_copy_link_location.js \
+	browser_output_longstring_expand.js \
+	browser_netpanel_longstring_expand.js \
+	browser_repeated_messages_accuracy.js \
+	browser_eval_in_debugger_stackframe.js \
+	browser_console_variables_view.js \
+	browser_console_variables_view_while_debugging.js \
+	browser_console.js \
+	browser_longstring_hang.js \
+	browser_console_consolejsm_output.js \
+	browser_webconsole_bug_837351_securityerrors.js \
+	browser_bug_865871_variables_view_close_on_esc_key.js \
+	browser_bug_865288_repeat_different_objects.js \
+	browser_jsterm_inspect.js \
+	browser_bug_869003_inspect_cross_domain_object.js \
+	browser_bug_862916_console_dir_and_filter_off.js \
+	browser_console_native_getters.js \
+	browser_bug_871156_ctrlw_close_tab.js \
+	browser_webconsole_bug_821877_csp_errors.js \
+	test-bug-821877-csperrors.html \
+	test-bug-821877-csperrors.html^headers^ \
 	head.js \
 	$(NULL)
+
+ifeq ($(OS_ARCH), Darwin)
+MOCHITEST_BROWSER_FILES += \
+	browser_webconsole_bug_804845_ctrl_key_nav.js \
+        $(NULL)
+endif
+
+ifeq ($(OS_ARCH),WINNT)
+MOCHITEST_BROWSER_FILES += \
+	browser_webconsole_bug_623749_ctrl_a_select_all_winnt.js \
+	$(NULL)
+endif
 
 MOCHITEST_BROWSER_FILES += \
 	test-console.html \
@@ -126,6 +156,7 @@ MOCHITEST_BROWSER_FILES += \
 	test-filter.html \
 	test-observe-http-ajax.html \
 	test-data.json \
+	test-data.json^headers^ \
 	test-property-provider.html \
 	test-error.html \
 	test-duplicate-error.html \
@@ -182,12 +213,28 @@ MOCHITEST_BROWSER_FILES += \
 	test-bug-644419-log-limits.html \
 	test-bug-632275-getters.html \
 	test-bug-646025-console-file-location.html \
+	test-bug-782653-css-errors.html \
+	test-bug-782653-css-errors-1.css \
+	test-bug-782653-css-errors-2.css \
 	test-file-location.js \
 	test-bug-658368-time-methods.html \
 	test-webconsole-error-observer.html \
 	test-for-of.html \
+	test_bug_770099_violation.html \
+	test_bug_770099_violation.html^headers^ \
+	test_bug_770099_bad_policy_uri.html \
+	test_bug_770099_bad_policy_uri.html^headers^ \
 	test-result-format-as-string.html \
 	test-bug-737873-mixedcontent.html \
+	test-repeated-messages.html \
+	test-bug-766001-console-log.js \
+	test-bug-766001-js-console-links.html \
+	test-bug-766001-js-errors.js \
+	test-eval-in-stackframe.html \
+	test-bug-859170-longstring-hang.html \
+	test-bug-837351-security-errors.html \
+	test-bug-869003-top-window.html \
+	test-bug-869003-iframe.html \
 	$(NULL)
 
 include $(topsrcdir)/config/rules.mk

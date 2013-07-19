@@ -10,8 +10,6 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = toolkitShared
-
 EXTRA_PP_JS_MODULES = \
   CertUtils.jsm \
   $(NULL)
@@ -20,10 +18,8 @@ EXTRA_JS_MODULES = \
   FileUtils.jsm \
   $(NULL)
 
-TEST_DIRS += test/chrome
-
 ifdef ENABLE_TESTS
-XPCSHELL_TESTS = test/unit
+DISABLED_XPCSHELL_TESTS = test/unit
 endif
 
 include $(topsrcdir)/config/rules.mk

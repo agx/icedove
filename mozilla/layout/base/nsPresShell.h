@@ -33,7 +33,7 @@
 #include "nsPresArena.h"
 #include "nsFrameSelection.h"
 #include "nsGUIEvent.h"
-#include "nsContentUtils.h"
+#include "nsContentUtils.h" // For AddScriptBlocker().
 #include "nsRefreshDriver.h"
 #include "mozilla/Attributes.h"
 
@@ -67,18 +67,16 @@ public:
   // nsISupports
   NS_DECL_ISUPPORTS
 
-  // nsIPresShell
-  virtual NS_HIDDEN_(nsresult) Init(nsIDocument* aDocument,
-                                   nsPresContext* aPresContext,
-                                   nsIViewManager* aViewManager,
-                                   nsStyleSet* aStyleSet,
-                                   nsCompatibility aCompatMode);
+  void Init(nsIDocument* aDocument, nsPresContext* aPresContext,
+            nsViewManager* aViewManager, nsStyleSet* aStyleSet,
+            nsCompatibility aCompatMode);
   virtual NS_HIDDEN_(void) Destroy();
+  virtual NS_HIDDEN_(void) MakeZombie();
 
   virtual NS_HIDDEN_(nsresult) SetPreferenceStyleRules(bool aForceReflow);
 
   NS_IMETHOD GetSelection(SelectionType aType, nsISelection** aSelection);
-  virtual nsISelection* GetCurrentSelection(SelectionType aType);
+  virtual mozilla::Selection* GetCurrentSelection(SelectionType aType);
 
   NS_IMETHOD SetDisplaySelection(int16_t aToggle);
   NS_IMETHOD GetDisplaySelection(int16_t *aToggle);
@@ -88,10 +86,9 @@ public:
 
   virtual NS_HIDDEN_(void) BeginObservingDocument();
   virtual NS_HIDDEN_(void) EndObservingDocument();
-  virtual NS_HIDDEN_(nsresult) InitialReflow(nscoord aWidth, nscoord aHeight);
+  virtual NS_HIDDEN_(nsresult) Initialize(nscoord aWidth, nscoord aHeight);
   virtual NS_HIDDEN_(nsresult) ResizeReflow(nscoord aWidth, nscoord aHeight);
   virtual NS_HIDDEN_(nsresult) ResizeReflowOverride(nscoord aWidth, nscoord aHeight);
-  virtual NS_HIDDEN_(void) StyleChangeReflow();
   virtual NS_HIDDEN_(nsIPageSequenceFrame*) GetPageSequenceFrame() const;
   virtual NS_HIDDEN_(nsIFrame*) GetRealPrimaryFrameFor(nsIContent* aContent) const;
 
@@ -102,6 +99,7 @@ public:
   virtual NS_HIDDEN_(void) CancelAllPendingReflows();
   virtual NS_HIDDEN_(bool) IsSafeToFlush() const;
   virtual NS_HIDDEN_(void) FlushPendingNotifications(mozFlushType aType);
+  virtual NS_HIDDEN_(void) FlushPendingNotifications(mozilla::ChangesToFlush aType);
 
   /**
    * Recreates the frames for a node
@@ -135,7 +133,7 @@ public:
   virtual NS_HIDDEN_(void) SetIgnoreFrameDestruction(bool aIgnore);
   virtual NS_HIDDEN_(void) NotifyDestroyingFrame(nsIFrame* aFrame);
 
-  virtual NS_HIDDEN_(nsresult) CaptureHistoryState(nsILayoutHistoryState** aLayoutHistoryState, bool aLeavingPage);
+  virtual NS_HIDDEN_(nsresult) CaptureHistoryState(nsILayoutHistoryState** aLayoutHistoryState);
 
   virtual NS_HIDDEN_(void) UnsuppressPainting();
 
@@ -182,8 +180,8 @@ public:
 
   //nsIViewObserver interface
 
-  virtual void Paint(nsIView* aViewToPaint, const nsRegion& aDirtyRegion,
-                     PaintType aType, bool aWillSendDidPaint);
+  virtual void Paint(nsView* aViewToPaint, const nsRegion& aDirtyRegion,
+                     uint32_t aFlags);
   virtual nsresult HandleEvent(nsIFrame*       aFrame,
                                nsGUIEvent*     aEvent,
                                bool            aDontRetargetEvents,
@@ -195,11 +193,12 @@ public:
                                                         nsIDOMEvent* aEvent,
                                                         nsEventStatus* aStatus);
   virtual bool ShouldIgnoreInvalidation();
-  virtual void WillPaint(bool aWillSendDidPaint);
-  virtual void DidPaint();
+  virtual void WillPaint();
+  virtual void WillPaintWindow();
+  virtual void DidPaintWindow();
   virtual void ScheduleViewManagerFlush();
   virtual void DispatchSynthMouseMove(nsGUIEvent *aEvent, bool aFlushOnHoverChange);
-  virtual void ClearMouseCaptureOnView(nsIView* aView);
+  virtual void ClearMouseCaptureOnView(nsView* aView);
   virtual bool IsVisible();
 
   // caret handling
@@ -289,19 +288,19 @@ public:
 
   virtual void UpdateCanvasBackground();
 
-  virtual nsresult AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
-                                                nsDisplayList& aList,
-                                                nsIFrame* aFrame,
-                                                const nsRect& aBounds,
-                                                nscolor aBackstopColor,
-                                                uint32_t aFlags);
+  virtual void AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
+                                            nsDisplayList& aList,
+                                            nsIFrame* aFrame,
+                                            const nsRect& aBounds,
+                                            nscolor aBackstopColor,
+                                            uint32_t aFlags);
 
-  virtual nsresult AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
-                                                 nsDisplayList& aList,
-                                                 nsIFrame* aFrame,
-                                                 const nsRect& aBounds);
+  virtual void AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
+                                             nsDisplayList& aList,
+                                             nsIFrame* aFrame,
+                                             const nsRect& aBounds);
 
-  virtual nscolor ComputeBackstopColor(nsIView* aDisplayRoot);
+  virtual nscolor ComputeBackstopColor(nsView* aDisplayRoot);
 
   virtual NS_HIDDEN_(nsresult) SetIsActive(bool aIsActive);
 
@@ -321,6 +320,9 @@ public:
                            size_t *aPresContextSize);
   size_t SizeOfTextRuns(nsMallocSizeOfFun aMallocSizeOf) const;
 
+  virtual void AddInvalidateHiddenPresShellObserver(nsRefreshDriver *aDriver);
+
+
   // This data is stored as a content property (nsGkAtoms::scrolling) on
   // mContentToScrollTo when we have a pending ScrollIntoView.
   struct ScrollIntoViewData {
@@ -328,6 +330,12 @@ public:
     ScrollAxis mContentScrollHAxis;
     uint32_t   mContentToScrollToFlags;
   };
+
+  virtual void ScheduleImageVisibilityUpdate();
+
+  virtual void RebuildImageVisibility(const nsDisplayList& aList);
+
+  virtual void EnsureImageInVisibleList(nsIImageLoadingContent* aImage);
 
 protected:
   virtual ~PresShell();
@@ -435,6 +443,8 @@ protected:
   void ShowEventTargetDebug();
 #endif
 
+  void RecordStyleSheetChange(nsIStyleSheet* aStyleSheet);
+
     /**
     * methods that manage rules that are used to implement the associated preferences
     *  - initially created for bugs 31816, 20760, 22963
@@ -484,10 +494,11 @@ protected:
    */
   void AddUserSheet(nsISupports* aSheet);
   void AddAgentSheet(nsISupports* aSheet);
+  void AddAuthorSheet(nsISupports* aSheet);
   void RemoveSheet(nsStyleSet::sheetType aType, nsISupports* aSheet);
 
   // Hide a view if it is a popup
-  void HideViewIfPopup(nsIView* aView);
+  void HideViewIfPopup(nsView* aView);
 
   // Utility method to restore the root scrollframe state
   void RestoreRootScrollPosition();
@@ -554,7 +565,7 @@ protected:
   public:
     nsDelayedMouseEvent(nsMouseEvent* aEvent) : nsDelayedInputEvent()
     {
-      mEvent = new nsMouseEvent(NS_IS_TRUSTED_EVENT(aEvent),
+      mEvent = new nsMouseEvent(aEvent->mFlags.mIsTrusted,
                                 aEvent->message,
                                 aEvent->widget,
                                 aEvent->reason,
@@ -574,7 +585,7 @@ protected:
   public:
     nsDelayedKeyEvent(nsKeyEvent* aEvent) : nsDelayedInputEvent()
     {
-      mEvent = new nsKeyEvent(NS_IS_TRUSTED_EVENT(aEvent),
+      mEvent = new nsKeyEvent(aEvent->mFlags.mIsTrusted,
                               aEvent->message,
                               aEvent->widget);
       Init(aEvent);
@@ -613,7 +624,7 @@ protected:
         mPresShell = nullptr;
       }
     }
-    virtual void WillRefresh(mozilla::TimeStamp aTime) {
+    virtual void WillRefresh(mozilla::TimeStamp aTime) MOZ_OVERRIDE {
       if (mPresShell)
         mPresShell->ProcessSynthMouseMoveEvent(mFromScroll);
     }
@@ -693,6 +704,18 @@ protected:
   virtual void WindowSizeMoveDone();
   virtual void SysColorChanged() { mPresContext->SysColorChanged(); }
   virtual void ThemeChanged() { mPresContext->ThemeChanged(); }
+  virtual void BackingScaleFactorChanged() { mPresContext->UIResolutionChanged(); }
+
+  void UpdateImageVisibility();
+
+  nsRevocableEventPtr<nsRunnableMethod<PresShell> > mUpdateImageVisibilityEvent;
+
+  void ClearVisibleImagesList();
+  static void ClearImageVisibilityVisited(nsView* aView, bool aClear);
+  static void MarkImagesInListVisible(const nsDisplayList& aList);
+
+  // A list of images that are visible or almost visible.
+  nsTArray< nsCOMPtr<nsIImageLoadingContent > > mVisibleImages;
 
 #ifdef DEBUG
   // The reflow root under which we're currently reflowing.  Null when
@@ -784,6 +807,8 @@ protected:
 
   bool                      mAsyncResizeTimerIsActive : 1;
   bool                      mInResize : 1;
+
+  bool                      mImageVisibilityVisited : 1;
 
   static bool               sDisableNonTestMouseEvents;
 };

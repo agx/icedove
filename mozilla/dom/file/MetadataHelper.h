@@ -30,7 +30,7 @@ public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(MetadataParameters)
 
   nsresult
-  Init(JSContext* aCx, const jsval* aVal)
+  Init(JSContext* aCx, const JS::Value* aVal)
   {
     return mConfig.Init(aCx, aVal);
   }
@@ -73,7 +73,7 @@ public:
   }
 
 private:
-  DOMFileMetadataParameters mConfig;
+  mozilla::idl::DOMFileMetadataParameters mConfig;
 
   uint64_t mSize;
   int64_t mLastModified;
@@ -93,7 +93,7 @@ public:
   DoAsyncRun(nsISupports* aStream);
 
   nsresult
-  GetSuccessResult(JSContext* aCx, jsval* aVal);
+  GetSuccessResult(JSContext* aCx, JS::Value* aVal);
 
 protected:
   class AsyncMetadataGetter : public AsyncHelper

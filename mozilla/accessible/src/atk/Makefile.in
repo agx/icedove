@@ -9,7 +9,6 @@ VPATH = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = accessibility
 LIBRARY_NAME = accessibility_toolkit_s
 EXPORT_LIBRARY = ..
 LIBXUL_LIBRARY = 1
@@ -20,7 +19,6 @@ CPPSRCS = \
   ApplicationAccessibleWrap.cpp \
   AtkSocketAccessible.cpp \
   DocAccessibleWrap.cpp \
-  nsAccessNodeWrap.cpp \
   nsMaiInterfaceComponent.cpp \
   nsMaiInterfaceAction.cpp \
   nsMaiInterfaceText.cpp \
@@ -33,19 +31,10 @@ CPPSRCS = \
   nsMaiInterfaceTable.cpp \
   nsMaiInterfaceDocument.cpp \
   nsMaiInterfaceImage.cpp \
+  Platform.cpp \
   RootAccessibleWrap.cpp \
+  UtilInterface.cpp \
   $(NULL)
-
-EXPORTS = \
-  nsAccessNodeWrap.h \
-  $(NULL)
-
-EXPORTS_NAMESPACES = mozilla/a11y
-
-EXPORTS_mozilla/a11y = \
-  AccessibleWrap.h \
-  HyperTextAccessibleWrap.h \
-  $(null)
 
 # we want to force the creation of a static lib.
 FORCE_STATIC_LIB = 1
@@ -68,3 +57,7 @@ LOCAL_INCLUDES += \
   -I$(srcdir)/../xul \
   -I$(topsrcdir)/other-licenses/atk-1.0 \
   $(NULL)
+
+ifneq ($(A11Y_LOG),0)
+  DEFINES += -DA11Y_LOG
+endif

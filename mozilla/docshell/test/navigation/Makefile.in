@@ -8,12 +8,11 @@ srcdir		= @srcdir@
 VPATH		= @srcdir@
 relativesrcdir  = @relativesrcdir@
 
-MODULE = test_docshell
-
 include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_FILES = \
 		test_bug13871.html \
+		test_bug344861.html \
 		test_bug278916.html \
 		test_bug279495.html \
 		test_bug386782.html \
@@ -54,15 +53,20 @@ MOCHITEST_FILES += \
 		$(NULL)
 endif
 
-ifneq (mobile,$(MOZ_BUILD_APP))
 MOCHITEST_BROWSER_FILES = \
-		browser_bug343515.js \
 		bug343515_pg1.html \
 		bug343515_pg2.html \
 		bug343515_pg3.html \
 		bug343515_pg3_1.html \
 		bug343515_pg3_2.html \
 		bug343515_pg3_1_1.html \
+		$(NULL)
+
+# browser_bug343515.js disabled on Windows & OS X for intermittent failures
+# (see bug 765192 and bug 813242)
+ifneq (,$(filter-out WINNT Darwin,$(OS_ARCH)))
+MOCHITEST_BROWSER_FILES += \
+		browser_bug343515.js \
 		$(NULL)
 endif
 

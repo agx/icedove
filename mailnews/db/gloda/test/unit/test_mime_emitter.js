@@ -99,7 +99,7 @@ var partTachImage = new SyntheticPartLeaf(tachImage.body, tachImage);
 
 var relImage = {contentType: 'image/png',
                 encoding: 'base64', charset: null, format: null,
-                contentId: 'part1.foo@bar.com',
+                contentId: 'part1.foo@bar.invalid',
                 body: 'YWJj\n'};
 var partRelImage = new SyntheticPartLeaf(relImage.body, relImage);
 
@@ -340,7 +340,7 @@ function verify_body_part_equivalence(aSynBodyPart, aMimePart) {
 
   // XXX body part checking will get brittle if we ever actually encode things!
   if (aSynBodyPart.body && !aSynBodyPart._filename &&
-      aSynBodyPart._contentType.indexOf("text/") == 0)
+      aSynBodyPart._contentType.startsWith("text/"))
     do_check_eq(synTransformBody(aSynBodyPart),
                 aMimePart.body.trim().replace("\r", "", "g"));
   if (aSynBodyPart.parts) {
@@ -539,7 +539,7 @@ function test_attachments_correctness () {
             GlodaFundAttr.glodaAttFromMimeAtt({ folderMessageURI: uri }, att);
           // The GlodaAttachment appends the filename, which is not always
           // present
-          do_check_eq(glodaAttachment.url.indexOf(att.url), 0);
+          do_check_true(glodaAttachment.url.startsWith(att.url));
         }
 
       } catch (e) {

@@ -89,6 +89,20 @@ public:
     RST_FRAME_TOO_LARGE = 11
   };
 
+  enum goawayReason
+  {
+    OK = 0,
+    PROTOCOL_ERROR = 1,
+    INTERNAL_ERROR = 2,    // sometimes misdocumented as 11
+    NUM_STATUS_CODES = 3   // reserved by chromium but undocumented
+  };
+
+  enum settingsFlags
+  {
+    PERSIST_VALUE = 1,
+    PERSISTED_VALUE = 2
+  };
+
   enum
   {
     SETTINGS_TYPE_UPLOAD_BW = 1, // kb/s
@@ -97,19 +111,19 @@ public:
     SETTINGS_TYPE_MAX_CONCURRENT = 4, // streams
     SETTINGS_TYPE_CWND = 5, // packets
     SETTINGS_TYPE_DOWNLOAD_RETRANS_RATE = 6, // percentage
-    SETTINGS_TYPE_INITIAL_WINDOW = 7,  // bytes
+    SETTINGS_TYPE_INITIAL_WINDOW = 7,  // bytes for flow control
     SETTINGS_CLIENT_CERTIFICATE_VECTOR_SIZE = 8
   };
 
   // This should be big enough to hold all of your control packets,
   // but if it needs to grow for huge headers it can do so dynamically.
-  // About 1% of requests to SPDY google services seem to be > 1000
-  // with all less than 2000.
+  // About 1% of responses from SPDY google services seem to be > 1000
+  // with all less than 2000 when compression is enabled.
   const static uint32_t kDefaultBufferSize = 2048;
 
   // kDefaultQueueSize must be >= other queue size constants
-  const static uint32_t kDefaultQueueSize =  16384;
-  const static uint32_t kQueueMinimumCleanup = 8192;
+  const static uint32_t kDefaultQueueSize =  32768;
+  const static uint32_t kQueueMinimumCleanup = 24576;
   const static uint32_t kQueueTailRoom    =  4096;
   const static uint32_t kQueueReserved    =  1024;
 
@@ -140,7 +154,8 @@ public:
   static nsresult HandleHeaders(SpdySession3 *);
   static nsresult HandleWindowUpdate(SpdySession3 *);
 
-  static void EnsureBuffer(nsAutoArrayPtr<char> &,
+  template<typename T>
+  static void EnsureBuffer(nsAutoArrayPtr<T> &,
                            uint32_t, uint32_t, uint32_t &);
 
   // For writing the SPDY data stream to LOG4
@@ -154,7 +169,7 @@ public:
   void TransactionHasDataToWrite(SpdyStream3 *);
 
   // an overload of nsAHttpSegementReader
-  virtual nsresult CommitToSegmentSize(uint32_t size);
+  virtual nsresult CommitToSegmentSize(uint32_t size, bool forceCommitment);
   
   uint32_t GetServerInitialWindow() { return mServerInitialWindow; }
 
@@ -171,7 +186,6 @@ private:
     PROCESSING_CONTROL_RST_STREAM
   };
 
-  void        DeterminePingThreshold();
   nsresult    ResponseHeadersComplete();
   uint32_t    GetWriteQueueSize();
   void        ChangeDownstreamState(enum stateType);
@@ -179,15 +193,15 @@ private:
   nsresult    UncompressAndDiscard(uint32_t, uint32_t);
   void        zlibInit();
   void        GeneratePing(uint32_t);
-  void        ClearPing(bool);
   void        GenerateRstStream(uint32_t, uint32_t);
-  void        GenerateGoAway();
+  void        GenerateGoAway(uint32_t);
   void        CleanupStream(SpdyStream3 *, nsresult, rstReason);
   void        CloseStream(SpdyStream3 *, nsresult);
   void        GenerateSettings();
 
   void        SetWriteCallbacks();
   void        FlushOutputQueue();
+  void        RealignOutputQueue();
 
   bool        RoomForMoreConcurrent();
   void        ActivateStream(SpdyStream3 *);
@@ -205,6 +219,10 @@ private:
   static PLDHashOperator ShutdownEnumerator(nsAHttpTransaction *,
                                             nsAutoPtr<SpdyStream3> &,
                                             void *);
+
+  static PLDHashOperator GoAwayEnumerator(nsAHttpTransaction *,
+                                          nsAutoPtr<SpdyStream3> &,
+                                          void *);
 
   static PLDHashOperator UpdateServerRwinEnumerator(nsAHttpTransaction *,
                                                     nsAutoPtr<SpdyStream3> &,
@@ -339,7 +357,9 @@ private:
   PRIntervalTime       mLastDataReadEpoch; // used for IdleTime()
   PRIntervalTime       mPingSentEpoch;
   uint32_t             mNextPingID;
-  bool                 mPingThresholdExperiment;
+
+  // used as a temporary buffer while enumerating the stream hash during GoAway
+  nsDeque  mGoAwayStreamsToRestart;
 };
 
 }} // namespace mozilla::net

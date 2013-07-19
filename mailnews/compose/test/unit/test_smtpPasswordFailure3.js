@@ -8,6 +8,8 @@
  *
  */
 
+Components.utils.import("resource:///modules/mailServices.js");
+Components.utils.import("resource://gre/modules/Services.jsm");
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 
 load("../../../resources/alertTestUtils.js");
@@ -15,8 +17,8 @@ load("../../../resources/alertTestUtils.js");
 var server;
 var attempt = 0;
 
-const kSender = "from@invalid.com";
-const kTo = "to@invalid.com";
+const kSender = "from@foo.invalid";
+const kTo = "to@foo.invalid";
 const kUsername = "testsmtp";
 // This is the same as in the signons file.
 const kInvalidPassword = "smtptest";
@@ -104,9 +106,9 @@ function run_test() {
 
   do_test_pending();
 
-  smtpService.sendMailMessage(testFile, kTo, identity,
-                              null, URLListener, null, null,
-                              false, {}, {});
+  MailServices.smtp.sendMailMessage(testFile, kTo, identity,
+                                    null, URLListener, null, null,
+                                    false, {}, {});
 
   server.performTest();
 }
@@ -118,11 +120,10 @@ var URLListener = {
     // Check for ok status.
     do_check_eq(rc, 0);
     // Now check the new password has been saved.
-    let loginMgr = Cc["@mozilla.org/login-manager;1"].getService(Ci.nsILoginManager);
-
     let count = {};
-    let logins = loginMgr.findLogins(count, "smtp://localhost", null,
-                                   "smtp://localhost");
+    let logins = Services.logins
+                         .findLogins(count, "smtp://localhost", null,
+                                     "smtp://localhost");
 
     do_check_eq(count.value, 1);
     do_check_eq(logins[0].username, kUsername);

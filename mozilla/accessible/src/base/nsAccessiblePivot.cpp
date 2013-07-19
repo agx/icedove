@@ -54,22 +54,7 @@ nsAccessiblePivot::nsAccessiblePivot(Accessible* aRoot) :
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsAccessiblePivot)
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsAccessiblePivot)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mRoot, nsIAccessible)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mPosition, nsIAccessible)
-  uint32_t i, length = tmp->mObservers.Length();                               \
-  for (i = 0; i < length; ++i) {
-    cb.NoteXPCOMChild(tmp->mObservers.ElementAt(i).get());
-  }
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsAccessiblePivot)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mRoot)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mPosition)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSTARRAY(mObservers)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_3(nsAccessiblePivot, mRoot, mPosition, mObservers)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsAccessiblePivot)
   NS_INTERFACE_MAP_ENTRY(nsIAccessiblePivot)

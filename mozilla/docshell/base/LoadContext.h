@@ -9,6 +9,10 @@
 
 #include "SerializedLoadContext.h"
 #include "mozilla/Attributes.h"
+#include "nsWeakReference.h"
+#include "nsIDOMElement.h"
+
+class mozIApplication;
 
 namespace mozilla {
 
@@ -28,12 +32,17 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSILOADCONTEXT
 
-  LoadContext(const IPC::SerializedLoadContext& toCopy)
-    : mIsNotNull(toCopy.mIsNotNull)
-    , mIsContent(toCopy.mIsContent)
-    , mUsePrivateBrowsing(toCopy.mUsePrivateBrowsing)
-    , mIsInBrowserElement(toCopy.mIsInBrowserElement)
-    , mAppId(toCopy.mAppId)
+  // AppId/inBrowser arguments override those in SerializedLoadContext provided
+  // by child process.
+  LoadContext(const IPC::SerializedLoadContext& aToCopy,
+              nsIDOMElement* aTopFrameElement,
+              uint32_t aAppId, bool aInBrowser)
+    : mIsNotNull(aToCopy.mIsNotNull)
+    , mIsContent(aToCopy.mIsContent)
+    , mUsePrivateBrowsing(aToCopy.mUsePrivateBrowsing)
+    , mIsInBrowserElement(aInBrowser)
+    , mAppId(aAppId)
+    , mTopFrameElement(do_GetWeakReference(aTopFrameElement))
   {}
 
 private:
@@ -42,6 +51,7 @@ private:
   bool          mUsePrivateBrowsing;
   bool          mIsInBrowserElement;
   uint32_t      mAppId;
+  nsWeakPtr     mTopFrameElement;
 };
 
 } // namespace mozilla

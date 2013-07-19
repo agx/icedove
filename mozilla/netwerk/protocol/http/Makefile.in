@@ -10,48 +10,10 @@ VPATH     = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE         = necko
 LIBRARY_NAME   = nkhttp_s
 LIBXUL_LIBRARY = 1
-XPIDL_MODULE   = necko_http
-GRE_MODULE     = 1
 FORCE_STATIC_LIB = 1
-
-EXPORTS_NAMESPACES = mozilla/net
-
-SDK_XPIDLSRCS = \
-  nsIHttpChannel.idl \
-  nsIHttpHeaderVisitor.idl \
-  $(NULL)
-
-XPIDLSRCS = \
-  nsIHttpActivityObserver.idl \
-  nsIHttpAuthManager.idl \
-  nsIHttpAuthenticator.idl \
-  nsIHttpChannelInternal.idl \
-  nsIHttpEventSink.idl \
-  nsIHttpProtocolHandler.idl \
-  nsIHttpChannelAuthProvider.idl \
-  nsIHttpAuthenticableChannel.idl \
-  nsIHttpChannelChild.idl \
-  $(NULL)
-
-EXPORTS_mozilla/net = \
-  HttpBaseChannel.h \
-  $(NULL)
-
-EXPORTS_mozilla/net += \
-  HttpChannelParent.h \
-  HttpChannelChild.h  \
-  PHttpChannelParams.h \
-  $(NULL)
-
-EXPORTS = \
-  nsHttpResponseHead.h \
-  nsHttpHeaderArray.h \
-  nsHttp.h \
-  nsHttpAtomList.h \
-  $(NULL)
+FAIL_ON_WARNINGS := 1
 
 CPPSRCS = \
   nsHttp.cpp \
@@ -77,6 +39,7 @@ CPPSRCS = \
   HttpChannelParent.cpp \
   HttpChannelChild.cpp \
   HttpChannelParentListener.cpp \
+  HttpInfo.cpp \
   NullHttpTransaction.cpp \
   ASpdySession.cpp \
   SpdySession2.cpp \
@@ -103,4 +66,3 @@ include $(topsrcdir)/config/rules.mk
 
 DEFINES += -DIMPL_NS_NET
 
-XPIDL_FLAGS += -I$(topsrcdir)/netwerk/base/public

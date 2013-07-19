@@ -22,7 +22,7 @@ class nsIURI;
 class nsIContent;
 class nsINodeInfo;
 class nsIParser;
-class nsIViewManager;
+class nsViewManager;
 
 typedef enum {
   eXMLContentSinkState_InProlog,
@@ -163,7 +163,7 @@ protected:
   nsresult HandleCharacterData(const PRUnichar *aData, uint32_t aLength,
                                bool aInterruptable);
 
-  nsIContent*      mDocElement;
+  nsCOMPtr<nsIContent> mDocElement;
   nsCOMPtr<nsIContent> mCurrentHead;  // When set, we're in an XHTML <haed>
   PRUnichar*       mText;
 

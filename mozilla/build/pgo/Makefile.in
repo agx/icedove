@@ -11,11 +11,6 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-DIRS = \
-  blueprint \
-  js-input \
-  $(NULL)
-
 include $(topsrcdir)/config/rules.mk
 
 # We install to _profile/pgo
@@ -35,6 +30,7 @@ endif
 _PGO_FILES = 	\
   automation.py \
   $(topsrcdir)/build/automationutils.py \
+  $(topsrcdir)/testing/profiles/prefs_general.js \
   profileserver.py \
   genpgocert.py \
   index.html \

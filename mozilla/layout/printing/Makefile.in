@@ -9,18 +9,9 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE		= layout
-XPIDL_MODULE	= layout_printing
-GRE_MODULE	= 1
 LIBRARY_NAME	= gkprinting_s
 LIBXUL_LIBRARY	= 1
-
-
-XPIDLSRCS	= \
-		nsIPrintProgress.idl  \
-		nsIPrintProgressParams.idl  \
-		nsIPrintStatusFeedback.idl  \
-		$(NULL)
+FAIL_ON_WARNINGS = 1
 
 CPPSRCS		= \
 		nsPrintEngine.cpp \

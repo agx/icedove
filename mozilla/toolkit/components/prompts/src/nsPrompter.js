@@ -172,12 +172,12 @@ let PromptUtils = {
 
     // Fire a dialog open/close event. Used by tabbrowser to focus the
     // tab which is triggering a prompt.
-    //
-    // Bug 611553 - should make these notifications instead of events.
     fireDialogEvent : function (domWin, eventName) {
         let event = domWin.document.createEvent("Events");
         event.initEvent(eventName, true, true);
-        domWin.dispatchEvent(event);
+        let winUtils = domWin.QueryInterface(Ci.nsIInterfaceRequestor)
+                             .getInterface(Ci.nsIDOMWindowUtils);
+        winUtils.dispatchEventToChromeOnly(domWin, event);
     },
 
     getAuthInfo : function (authInfo) {
@@ -855,4 +855,4 @@ EmbedPrompter.prototype = new Prompter();
 EmbedPrompter.prototype.classID          = Components.ID("{7ad1b327-6dfa-46ec-9234-f2a620ea7e00}");
 
 var component = [Prompter, EmbedPrompter, AuthPromptAdapterFactory];
-var NSGetFactory = XPCOMUtils.generateNSGetFactory(component);
+this.NSGetFactory = XPCOMUtils.generateNSGetFactory(component);

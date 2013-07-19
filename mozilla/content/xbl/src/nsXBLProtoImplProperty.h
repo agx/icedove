@@ -9,7 +9,6 @@
 #include "nsIAtom.h"
 #include "nsString.h"
 #include "jsapi.h"
-#include "nsIContent.h"
 #include "nsString.h"
 #include "nsXBLSerialize.h"
 #include "nsXBLProtoImplMember.h"
@@ -20,7 +19,8 @@ public:
   nsXBLProtoImplProperty(const PRUnichar* aName,
                          const PRUnichar* aGetter, 
                          const PRUnichar* aSetter,
-                         const PRUnichar* aReadOnly);
+                         const PRUnichar* aReadOnly,
+                         uint32_t aLineNumber);
 
   nsXBLProtoImplProperty(const PRUnichar* aName, const bool aIsReadOnly);
  
@@ -32,14 +32,11 @@ public:
   void SetGetterLineNumber(uint32_t aLineNumber);
   void SetSetterLineNumber(uint32_t aLineNumber);
 
-  virtual nsresult InstallMember(nsIScriptContext* aContext,
-                                 nsIContent* aBoundElement, 
-                                 JSObject* aScriptObject,
-                                 JSObject* aTargetClassObject,
-                                 const nsCString& aClassStr);
+  virtual nsresult InstallMember(JSContext* aCx,
+                                 JS::Handle<JSObject*> aTargetClassObject);
   virtual nsresult CompileMember(nsIScriptContext* aContext,
                                  const nsCString& aClassStr,
-                                 JSObject* aClassObject);
+                                 JS::Handle<JSObject*> aClassObject);
 
   virtual void Trace(TraceCallback aCallback, void *aClosure) const;
 

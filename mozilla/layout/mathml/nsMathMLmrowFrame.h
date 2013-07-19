@@ -6,6 +6,7 @@
 #ifndef nsMathMLmrowFrame_h___
 #define nsMathMLmrowFrame_h___
 
+#include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
 #include "nsMathMLContainerFrame.h"
 
@@ -28,15 +29,13 @@ public:
   InheritAutomaticData(nsIFrame* aParent);
 
   NS_IMETHOD
-  TransmitAutomaticData() {
+  TransmitAutomaticData() MOZ_OVERRIDE {
     return TransmitAutomaticDataForMrowLikeElement();
   }
 
 protected:
   nsMathMLmrowFrame(nsStyleContext* aContext) : nsMathMLContainerFrame(aContext) {}
   virtual ~nsMathMLmrowFrame();
-
-  virtual int GetSkipSides() const { return 0; }
 };
 
 #endif /* nsMathMLmrowFrame_h___ */

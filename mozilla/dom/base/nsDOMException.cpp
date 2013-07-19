@@ -39,6 +39,7 @@ enum DOM4ErrorTypeCodeMap {
   TimeoutError               = nsIDOMDOMException::TIMEOUT_ERR,
   InvalidNodeTypeError       = nsIDOMDOMException::INVALID_NODE_TYPE_ERR,
   DataCloneError             = nsIDOMDOMException::DATA_CLONE_ERR,
+  EncodingError              = 0,
 
   /* XXX Should be JavaScript native errors */
   TypeError                  = 0,
@@ -182,8 +183,7 @@ nsDOMException::GetCode(uint16_t* aCode)
   // Warn only when the code was changed (other than DOM Core)
   // or the code is useless (zero)
   if (NS_ERROR_GET_MODULE(mResult) != NS_ERROR_MODULE_DOM || !mCode) {
-    nsCOMPtr<nsIDocument> doc =
-      do_QueryInterface(nsContentUtils::GetDocumentFromCaller());
+    nsCOMPtr<nsIDocument> doc = nsContentUtils::GetDocumentFromCaller();
     if (doc) {
       doc->WarnOnceAbout(nsIDocument::eDOMExceptionCode);
     }
@@ -319,7 +319,7 @@ nsDOMException::ToString(char **aReturn)
   static const char format[] =
     "[Exception... \"%s\"  code: \"%d\" nsresult: \"0x%x (%s)\"  location: \"%s\"]";
 
-  nsCAutoString location;
+  nsAutoCString location;
 
   if (mInner) {
     nsXPIDLCString filename;

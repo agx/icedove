@@ -15,8 +15,13 @@
 #include "nsSVGElement.h"
 #include "mozilla/Attributes.h"
 
-class nsISMILAnimationElement;
 class nsSMILValue;
+
+namespace mozilla {
+namespace dom {
+class SVGAnimationElement;
+}
+}
 
 class nsSVGNumber2
 {
@@ -48,6 +53,8 @@ public:
   bool IsExplicitlySet() const
     { return mIsAnimated || mIsBaseSet; }
 
+  already_AddRefed<nsIDOMSVGAnimatedNumber>
+  ToDOMAnimatedNumber(nsSVGElement* aSVGElement);
   nsresult ToDOMAnimatedNumber(nsIDOMSVGAnimatedNumber **aResult,
                                nsSVGElement* aSVGElement);
   // Returns a new nsISMILAttr object that the caller must delete
@@ -69,6 +76,7 @@ public:
 
     DOMAnimatedNumber(nsSVGNumber2* aVal, nsSVGElement *aSVGElement)
       : mVal(aVal), mSVGElement(aSVGElement) {}
+    virtual ~DOMAnimatedNumber();
 
     nsSVGNumber2* mVal; // kept alive because it belongs to content
     nsRefPtr<nsSVGElement> mSVGElement;
@@ -108,7 +116,7 @@ public:
 
     // nsISMILAttr methods
     virtual nsresult ValueFromString(const nsAString& aStr,
-                                     const nsISMILAnimationElement* aSrcElement,
+                                     const mozilla::dom::SVGAnimationElement* aSrcElement,
                                      nsSMILValue& aValue,
                                      bool& aPreventCachingOfSandwich) const;
     virtual nsSMILValue GetBaseValue() const;

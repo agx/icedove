@@ -35,8 +35,11 @@ MOCHITEST_FILES = \
   test_index_update_delete.js \
   test_indexes.js \
   test_indexes_bad_values.js \
+  test_indexes_funny_things.js \
+  test_invalid_version.js \
   test_key_requirements.js \
   test_keys.js \
+  test_lowDiskSpace.js \
   test_multientry.js \
   test_names_sorted.js \
   test_object_identity.js \
@@ -45,6 +48,7 @@ MOCHITEST_FILES = \
   test_objectStore_remove_values.js \
   test_odd_result_order.js \
   test_open_empty_db.js \
+  test_open_for_principal.js \
   test_open_objectStore.js \
   test_optionalArguments.js \
   test_overlapping_transactions.js \
@@ -60,6 +64,7 @@ MOCHITEST_FILES = \
   test_success_events_after_abort.js \
   test_traffic_jam.js \
   test_transaction_abort.js \
+  test_transaction_abort_hang.js \
   test_transaction_lifetimes.js \
   test_transaction_lifetimes_nested.js \
   test_transaction_ordering.js \

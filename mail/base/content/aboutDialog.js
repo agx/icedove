@@ -37,7 +37,7 @@ function init(aEvent)
   if (/a\d+(pre)?$/.test(version)) {
     let buildID = Services.appinfo.appBuildID;
     let buildDate = buildID.slice(0,4) + "-" + buildID.slice(4,6) + "-" + buildID.slice(6,8);
-    document.getElementById("version").value += " (" + buildDate + ")";
+    document.getElementById("version").textContent += " (" + buildDate + ")";
   }
 
 #ifdef MOZ_UPDATER
@@ -61,9 +61,7 @@ function openAboutTab(url)
 {
   let tabmail;
   // Check existing windows
-  let mailWindow = Components.classes["@mozilla.org/appshell/window-mediator;1"]
-                             .getService(Components.interfaces.nsIWindowMediator)
-                             .getMostRecentWindow("mail:3pane");
+  let mailWindow = Services.wm.getMostRecentWindow("mail:3pane");
   if (mailWindow) {
     mailWindow.focus();
     mailWindow.document.getElementById("tabmail")
@@ -291,10 +289,8 @@ appUpdater.prototype =
         env.set("MOZ_SAFE_MODE_RESTART", "1");
       }
 
-      Components.classes["@mozilla.org/toolkit/app-startup;1"].
-      getService(Components.interfaces.nsIAppStartup).
-      quit(Components.interfaces.nsIAppStartup.eAttemptQuit |
-           Components.interfaces.nsIAppStartup.eRestart);
+      Services.startup.quit(Components.interfaces.nsIAppStartup.eAttemptQuit |
+                            Components.interfaces.nsIAppStartup.eRestart);
       return;
     }
 
@@ -318,17 +314,10 @@ appUpdater.prototype =
 
   /**
    * Implements nsIUpdateCheckListener. The methods implemented by
-   * nsIUpdateCheckListener have to be in a different scope from
-   * nsIIncrementalDownload because both nsIUpdateCheckListener and
-   * nsIIncrementalDownload implement onProgress.
+   * nsIUpdateCheckListener are in a different scope from nsIIncrementalDownload
+   * to make it clear which are used by each interface.
    */
   updateCheckListener: {
-    /**
-     * See nsIUpdateService.idl
-     */
-    onProgress: function(aRequest, aPosition, aTotalSize) {
-    },
-
     /**
      * See nsIUpdateService.idl
      */

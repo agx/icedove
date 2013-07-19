@@ -11,7 +11,7 @@
 #include "nsCOMPtr.h"
 #include "nsDebug.h"
 #include "nsIObserverService.h"
-#include "nsIJSContextStack.h"
+#include "nsContentUtils.h"
 #include "nsISettingsService.h"
 #include "nsServiceManagerUtils.h"
 #include "nsString.h"
@@ -35,7 +35,7 @@ public:
 
   SettingsServiceCallback() {}
 
-  NS_IMETHOD Handle(const nsAString &aName, const JS::Value &aResult, JSContext *aContext) {
+  NS_IMETHOD Handle(const nsAString& aName, const JS::Value& aResult) {
     if (JSVAL_IS_INT(aResult)) {
       int32_t mode = JSVAL_TO_INT(aResult);
       SetAutoMounterMode(mode);
@@ -43,7 +43,7 @@ public:
     return NS_OK;
   }
 
-  NS_IMETHOD HandleError(const nsAString &aName, JSContext *aContext) {
+  NS_IMETHOD HandleError(const nsAString& aName) {
     ERR("SettingsCallback::HandleError: %s\n", NS_LossyConvertUTF16toASCII(aName).get());
     return NS_OK;
   }
@@ -78,9 +78,9 @@ AutoMounterSetting::AutoMounterSetting()
     return;
   }
   nsCOMPtr<nsISettingsServiceLock> lock;
-  settingsService->GetLock(getter_AddRefs(lock));
+  settingsService->CreateLock(getter_AddRefs(lock));
   nsCOMPtr<nsISettingsServiceCallback> callback = new SettingsServiceCallback();
-  lock->Set(UMS_MODE, INT_TO_JSVAL(AUTOMOUNTER_DISABLE), callback);
+  lock->Set(UMS_MODE, INT_TO_JSVAL(AUTOMOUNTER_DISABLE), callback, nullptr);
 }
 
 AutoMounterSetting::~AutoMounterSetting()
@@ -95,9 +95,9 @@ AutoMounterSetting::~AutoMounterSetting()
 NS_IMPL_ISUPPORTS1(AutoMounterSetting, nsIObserver)
 
 NS_IMETHODIMP
-AutoMounterSetting::Observe(nsISupports *aSubject,
-                            const char *aTopic,
-                            const PRUnichar *aData)
+AutoMounterSetting::Observe(nsISupports* aSubject,
+                            const char* aTopic,
+                            const PRUnichar* aData)
 {
   if (strcmp(aTopic, MOZSETTINGS_CHANGED) != 0) {
     return NS_OK;
@@ -109,24 +109,14 @@ AutoMounterSetting::Observe(nsISupports *aSubject,
   // The string that we're interested in will be a JSON string that looks like:
   //  {"key":"ums.autoMount","value":true}
 
-  nsCOMPtr<nsIThreadJSContextStack> stack =
-    do_GetService("@mozilla.org/js/xpc/ContextStack;1");
-  if (!stack) {
-    ERR("Failed to get JSContextStack");
-    return NS_OK;
-  }
-  JSContext *cx = stack->GetSafeJSContext();
-  if (!cx) {
-    ERR("Failed to GetSafeJSContext");
-    return NS_OK;
-  }
+  mozilla::AutoSafeJSContext cx;
   nsDependentString dataStr(aData);
   JS::Value val;
   if (!JS_ParseJSON(cx, dataStr.get(), dataStr.Length(), &val) ||
       !val.isObject()) {
     return NS_OK;
   }
-  JSObject &obj(val.toObject());
+  JSObject& obj(val.toObject());
   JS::Value key;
   if (!JS_GetProperty(cx, &obj, "key", &key) ||
       !key.isString()) {

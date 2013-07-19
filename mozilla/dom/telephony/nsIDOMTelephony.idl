@@ -9,7 +9,7 @@
 interface nsIDOMEventListener;
 interface nsIDOMTelephonyCall;
 
-[scriptable, builtinclass, uuid(b3875982-7327-478f-98a2-54cc2de36d7d)]
+[scriptable, builtinclass, uuid(0e7bc85e-7e88-43fa-b349-6ea348bda2df)]
 interface nsIDOMTelephony : nsIDOMEventTarget
 {
   nsIDOMTelephonyCall dial(in DOMString number);
@@ -28,6 +28,6 @@ interface nsIDOMTelephony : nsIDOMEventTarget
   void startTone(in DOMString tone);
   void stopTone();
 
-  attribute nsIDOMEventListener onincoming;
-  attribute nsIDOMEventListener oncallschanged;
+  [implicit_jscontext] attribute jsval onincoming;
+  [implicit_jscontext] attribute jsval oncallschanged;
 };

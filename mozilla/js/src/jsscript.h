@@ -1,48 +1,63 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=79 ft=cpp:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/* JS script descriptor. */
+
 #ifndef jsscript_h___
 #define jsscript_h___
-/*
- * JS script descriptor.
- */
-#include "jsprvtd.h"
+
+#include "mozilla/PodOperations.h"
+
 #include "jsdbgapi.h"
-#include "jsclist.h"
 #include "jsinfer.h"
 #include "jsopcode.h"
-#include "jsscope.h"
 
 #include "gc/Barrier.h"
+#include "js/RootingAPI.h"
+#include "vm/Shape.h"
 
 namespace js {
 
-struct Shape;
+namespace ion {
+    struct IonScript;
+    struct BaselineScript;
+    struct IonScriptCounts;
+}
+
+# define ION_DISABLED_SCRIPT ((js::ion::IonScript *)0x1)
+# define ION_COMPILING_SCRIPT ((js::ion::IonScript *)0x2)
+
+# define BASELINE_DISABLED_SCRIPT ((js::ion::BaselineScript *)0x1)
+
+class Shape;
+
 class BindingIter;
 
 namespace mjit {
-struct JITScript;
-class CallCompiler;
+    struct JITScript;
+    class CallCompiler;
 }
 
 namespace analyze {
-class ScriptAnalysis;
+    class ScriptAnalysis;
 }
 
 }
 
 /*
  * Type of try note associated with each catch or finally block, and also with
- * for-in loops.
+ * for-in and other kinds of loops. Non-for-in loops do not need these notes
+ * for exception unwinding, but storing their boundaries here is helpful for
+ * heuristics that need to know whether a given op is inside a loop.
  */
 typedef enum JSTryNoteKind {
     JSTRY_CATCH,
     JSTRY_FINALLY,
-    JSTRY_ITER
+    JSTRY_ITER,
+    JSTRY_LOOP
 } JSTryNoteKind;
 
 /*
@@ -52,9 +67,9 @@ struct JSTryNote {
     uint8_t         kind;       /* one of JSTryNoteKind */
     uint8_t         padding;    /* explicit padding on uint16_t boundary */
     uint16_t        stackDepth; /* stack depth upon exception handler entry */
-    uint32_t        start;      /* start of the try statement or for-in loop
+    uint32_t        start;      /* start of the try statement or loop
                                    relative to script->main */
-    uint32_t        length;     /* length of the try statement or for-in loop */
+    uint32_t        length;     /* length of the try statement or loop */
 };
 
 namespace js {
@@ -118,6 +133,9 @@ class Binding
 
 JS_STATIC_ASSERT(sizeof(Binding) == sizeof(uintptr_t));
 
+class Bindings;
+typedef InternalHandle<Bindings *> InternalBindingsHandle;
+
 /*
  * Formal parameters and local variables are stored in a shape tree
  * path encapsulated within this class.  This class represents bindings for
@@ -160,14 +178,18 @@ class Bindings
      * storage is release, switchToScriptStorage must be called, providing a
      * pointer into the Binding array stored in script->data.
      */
-    bool initWithTemporaryStorage(JSContext *cx, unsigned numArgs, unsigned numVars, Binding *bindingArray);
+    static bool initWithTemporaryStorage(JSContext *cx, InternalBindingsHandle self,
+                                         unsigned numArgs, unsigned numVars,
+                                         Binding *bindingArray);
+
     uint8_t *switchToScriptStorage(Binding *newStorage);
 
     /*
      * Clone srcScript's bindings (as part of js::CloneScript). dstScriptData
      * is the pointer to what will eventually be dstScript->data.
      */
-    bool clone(JSContext *cx, uint8_t *dstScriptData, HandleScript srcScript);
+    static bool clone(JSContext *cx, InternalBindingsHandle self, uint8_t *dstScriptData,
+                      HandleScript srcScript);
 
     unsigned numArgs() const { return numArgs_; }
     unsigned numVars() const { return numVars_; }
@@ -177,7 +199,7 @@ class Bindings
     Shape *callObjShape() const { return callObjShape_; }
 
     /* Convenience method to get the var index of 'arguments'. */
-    unsigned argumentsVarIndex(JSContext *cx) const;
+    static unsigned argumentsVarIndex(JSContext *cx, InternalBindingsHandle);
 
     /* Return whether the binding at bindingIndex is aliased. */
     bool bindingIsAliased(unsigned bindingIndex);
@@ -186,32 +208,22 @@ class Bindings
     bool hasAnyAliasedBindings() const { return !callObjShape_->isEmptyShape(); }
 
     void trace(JSTracer *trc);
-    class AutoRooter;
 };
 
-class Bindings::AutoRooter : private AutoGCRooter
-{
-  public:
-    explicit AutoRooter(JSContext *cx, Bindings *bindings_
-                        JS_GUARD_OBJECT_NOTIFIER_PARAM)
-      : AutoGCRooter(cx, BINDINGS), bindings(bindings_), skip(cx, bindings_)
-    {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+template <>
+struct RootMethods<Bindings> {
+    static Bindings initial();
+    static ThingRootKind kind() { return THING_ROOT_BINDINGS; }
+    static bool poisoned(const Bindings &bindings) {
+        return IsPoisonedPtr(static_cast<Shape *>(bindings.callObjShape()));
     }
-
-    friend void AutoGCRooter::trace(JSTracer *trc);
-    void trace(JSTracer *trc);
-
-  private:
-    Bindings *bindings;
-    SkipRoot skip;
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 class ScriptCounts
 {
-    friend struct ::JSScript;
+    friend class ::JSScript;
     friend struct ScriptAndCounts;
+
     /*
      * This points to a single block that holds an array of PCCounts followed
      * by an array of doubles.  Each element in the PCCounts array has a
@@ -219,13 +231,17 @@ class ScriptCounts
      */
     PCCounts *pcCountsVector;
 
+    /* Information about any Ion compilations for the script. */
+    ion::IonScriptCounts *ionCounts;
+
  public:
-    ScriptCounts() : pcCountsVector(NULL) { }
+    ScriptCounts() : pcCountsVector(NULL), ionCounts(NULL) { }
 
     inline void destroy(FreeOp *fop);
 
     void set(js::ScriptCounts counts) {
         pcCountsVector = counts.pcCountsVector;
+        ionCounts = counts.ionCounts;
     }
 };
 
@@ -236,7 +252,7 @@ typedef HashMap<JSScript *,
 
 class DebugScript
 {
-    friend struct ::JSScript;
+    friend class ::JSScript;
 
     /*
      * When non-zero, compile script in single-step mode. The top bit is set and
@@ -266,9 +282,8 @@ struct ScriptSource;
 
 } /* namespace js */
 
-struct JSScript : public js::gc::Cell
+class JSScript : public js::gc::Cell
 {
-  private:
     static const uint32_t stepFlagMask = 0x80000000U;
     static const uint32_t stepCountMask = 0x7fffffffU;
 
@@ -355,10 +370,9 @@ struct JSScript : public js::gc::Cell
     uint8_t         *data;      /* pointer to variable-length data array (see
                                    comment above Create() for details) */
 
-    const char      *filename;  /* source filename or null */
     js::HeapPtrAtom *atoms;     /* maps immediate index to literal struct */
 
-    JSPrincipals    *principals;/* principals for this script */
+    JSCompartment   *compartment_;
     JSPrincipals    *originPrincipals; /* see jsapi.h 'originPrincipals' comment */
 
     /* Persistent type information retained across GCs. */
@@ -368,14 +382,21 @@ struct JSScript : public js::gc::Cell
     js::ScriptSource *scriptSource_; /* source code */
 #ifdef JS_METHODJIT
     JITScriptSet *mJITInfo;
+#else
+    void         *mJITInfoPad;
 #endif
     js::HeapPtrFunction function_;
-    js::HeapPtrObject   enclosingScope_;
+
+    // For callsite clones, which cannot have enclosing scopes, the original
+    // function; otherwise the enclosing scope
+    js::HeapPtrObject   enclosingScopeOrOriginalFunction_;
 
     // 32-bit fields.
 
   public:
     uint32_t        length;     /* length of code vector */
+
+    uint32_t        dataSize;   /* size of the used part of the data array */
 
     uint32_t        lineno;     /* base line number of script */
 
@@ -387,15 +408,11 @@ struct JSScript : public js::gc::Cell
     uint32_t        sourceStart;
     uint32_t        sourceEnd;
 
-
   private:
     uint32_t        useCount;   /* Number of times the script has been called
                                  * or has had backedges taken. Reset if the
                                  * script's JIT code is forcibly discarded. */
-
-#if !defined(JS_METHODJIT) && JS_BITS_PER_WORD == 32
-    uint32_t        pad32;
-#endif
+    uint32_t        PADDING32;
 
 #ifdef DEBUG
     // Unique identifier within the compartment for this script, used for
@@ -405,14 +422,15 @@ struct JSScript : public js::gc::Cell
     uint32_t        idpad;
 #endif
 
-    uint32_t        PADDING;
-
     // 16-bit fields.
 
   private:
+    uint16_t        PADDING16;
     uint16_t        version;    /* JS version under which script was compiled */
 
   public:
+    uint16_t        ndefaults;  /* number of defaults the function has */
+
     uint16_t        nfixed;     /* number of slots besides stack operands in
                                    slot array */
 
@@ -447,9 +465,10 @@ struct JSScript : public js::gc::Cell
     bool            noScriptRval:1; /* no need for result value of last
                                        expression statement */
     bool            savedCallerFun:1; /* can call getCallerFunction() */
-    bool            strictModeCode:1; /* code is in strict mode */
+    bool            strict:1; /* code is in strict mode */
     bool            explicitUseStrict:1; /* code has "use strict"; explicitly */
     bool            compileAndGo:1;   /* see Parser::compileAndGo */
+    bool            selfHosted:1;     /* see Parser::selfHostingMode */
     bool            bindingsAccessedDynamically:1; /* see ContextFlags' field of the same name */
     bool            funHasExtensibleScope:1;       /* see ContextFlags' field of the same name */
     bool            funHasAnyAliasedFormal:1;      /* true if any formalIsAliased(i) */
@@ -460,13 +479,34 @@ struct JSScript : public js::gc::Cell
                                                    undefined properties in this
                                                    script */
     bool            hasSingletons:1;  /* script has singleton objects */
+    bool            treatAsRunOnce:1; /* script is a lambda to treat as running once. */
+    bool            hasBeenCloned:1;  /* script has been reused for a clone. */
     bool            isActiveEval:1;   /* script came from eval(), and is still active */
     bool            isCachedEval:1;   /* script came from eval(), and is in eval cache */
     bool            uninlineable:1;   /* script is considered uninlineable by analysis */
+
+    /* script is attempted to be cloned anew at each callsite. This is
+       temporarily needed for ParallelArray selfhosted code until type
+       information can be made context sensitive. See discussion in
+       bug 826148. */
+    bool            shouldCloneAtCallsite:1;
+
+    bool            isCallsiteClone:1; /* is a callsite clone; has a link to the original function */
 #ifdef JS_METHODJIT
     bool            debugMode:1;      /* script was compiled in debug mode */
     bool            failedBoundsCheck:1; /* script has had hoisted bounds checks fail */
+#else
+    bool            debugModePad:1;
+    bool            failedBoundsCheckPad:1;
 #endif
+#ifdef JS_ION
+    bool            failedShapeGuard:1; /* script has had hoisted shape guard fail */
+    bool            hadFrequentBailouts:1;
+#else
+    bool            failedShapeGuardPad:1;
+    bool            hadFrequentBailoutsPad:1;
+#endif
+    bool            invalidatedIdempotentCache:1; /* idempotent cache has triggered invalidation */
     bool            isGenerator:1;    /* is a generator */
     bool            isGeneratorExp:1; /* is a generator expression */
     bool            hasScriptCounts:1;/* script has an entry in
@@ -489,20 +529,23 @@ struct JSScript : public js::gc::Cell
 
   public:
     static JSScript *Create(JSContext *cx, js::HandleObject enclosingScope, bool savedCallerFun,
-                            const JS::CompileOptions &options, unsigned staticLevel,
-                            js::ScriptSource *ss, uint32_t sourceStart, uint32_t sourceEnd);
+                                const JS::CompileOptions &options, unsigned staticLevel,
+                                js::ScriptSource *ss, uint32_t sourceStart, uint32_t sourceEnd);
 
-    // Three ways ways to initialize a JSScript.  Callers of partiallyInit()
+    // Three ways ways to initialize a JSScript. Callers of partiallyInit()
     // and fullyInitTrivial() are responsible for notifying the debugger after
     // successfully creating any kind (function or other) of new JSScript.
     // However, callers of fullyInitFromEmitter() do not need to do this.
     static bool partiallyInit(JSContext *cx, JS::Handle<JSScript*> script,
-                              uint32_t length, uint32_t nsrcnotes, uint32_t natoms,
-                              uint32_t nobjects, uint32_t nregexps, uint32_t ntrynotes, uint32_t nconsts,
-                              uint32_t nTypeSets);
+                              uint32_t nobjects, uint32_t nregexps,
+                              uint32_t ntrynotes, uint32_t nconsts, uint32_t nTypeSets);
     static bool fullyInitTrivial(JSContext *cx, JS::Handle<JSScript*> script);  // inits a JSOP_STOP-only script
     static bool fullyInitFromEmitter(JSContext *cx, JS::Handle<JSScript*> script,
                                      js::frontend::BytecodeEmitter *bce);
+
+    inline JSPrincipals *principals();
+
+    JSCompartment *compartment() const { return compartment_; }
 
     void setVersion(JSVersion v) { version = v; }
 
@@ -524,7 +567,7 @@ struct JSScript : public js::gc::Cell
     bool analyzedArgsUsage() const { return !needsArgsAnalysis_; }
     bool needsArgsObj() const { JS_ASSERT(analyzedArgsUsage()); return needsArgsObj_; }
     void setNeedsArgsObj(bool needsArgsObj);
-    static bool argumentsOptimizationFailed(JSContext *cx, JSScript *script);
+    static bool argumentsOptimizationFailed(JSContext *cx, js::HandleScript script);
 
     /*
      * Arguments access (via JSOP_*ARG* opcodes) must access the canonical
@@ -536,7 +579,109 @@ struct JSScript : public js::gc::Cell
      * opcodes won't be emitted at all.
      */
     bool argsObjAliasesFormals() const {
-        return needsArgsObj() && !strictModeCode;
+        return needsArgsObj() && !strict;
+    }
+
+    bool hasAnyIonScript() const {
+        return hasIonScript() || hasParallelIonScript();
+    }
+
+  private:
+    /* Information attached by Baseline/Ion for sequential mode execution. */
+    js::ion::IonScript *ion;
+    js::ion::BaselineScript *baseline;
+
+    /* Information attached by Ion for parallel mode execution */
+    js::ion::IonScript *parallelIon;
+
+    /*
+     * Pointer to either baseline->method()->raw() or ion->method()->raw(), or NULL
+     * if there's no Baseline or Ion script.
+     */
+    uint8_t *baselineOrIonRaw;
+    uint8_t *baselineOrIonSkipArgCheck;
+
+  public:
+    bool hasIonScript() const {
+        return ion && ion != ION_DISABLED_SCRIPT && ion != ION_COMPILING_SCRIPT;
+    }
+    bool canIonCompile() const {
+        return ion != ION_DISABLED_SCRIPT;
+    }
+
+    bool isIonCompilingOffThread() const {
+        return ion == ION_COMPILING_SCRIPT;
+    }
+
+    js::ion::IonScript *ionScript() const {
+        JS_ASSERT(hasIonScript());
+        return ion;
+    }
+    js::ion::IonScript *maybeIonScript() const {
+        return ion;
+    }
+    js::ion::IonScript *const *addressOfIonScript() const {
+        return &ion;
+    }
+    void setIonScript(js::ion::IonScript *ionScript) {
+        ion = ionScript;
+        updateBaselineOrIonRaw();
+    }
+
+    bool hasBaselineScript() const {
+        return baseline && baseline != BASELINE_DISABLED_SCRIPT;
+    }
+    bool canBaselineCompile() const {
+        return baseline != BASELINE_DISABLED_SCRIPT;
+    }
+    js::ion::BaselineScript *baselineScript() const {
+        JS_ASSERT(hasBaselineScript());
+        return baseline;
+    }
+    void setBaselineScript(js::ion::BaselineScript *baselineScript) {
+        baseline = baselineScript;
+        updateBaselineOrIonRaw();
+    }
+
+    void updateBaselineOrIonRaw();
+
+    bool hasParallelIonScript() const {
+        return parallelIon && parallelIon != ION_DISABLED_SCRIPT && parallelIon != ION_COMPILING_SCRIPT;
+    }
+
+    bool canParallelIonCompile() const {
+        return parallelIon != ION_DISABLED_SCRIPT;
+    }
+
+    bool isParallelIonCompilingOffThread() const {
+        return parallelIon == ION_COMPILING_SCRIPT;
+    }
+
+    js::ion::IonScript *parallelIonScript() const {
+        JS_ASSERT(hasParallelIonScript());
+        return parallelIon;
+    }
+    js::ion::IonScript *maybeParallelIonScript() const {
+        return parallelIon;
+    }
+    void setParallelIonScript(js::ion::IonScript *ionScript) {
+        parallelIon = ionScript;
+    }
+
+    static size_t offsetOfBaselineScript() {
+        return offsetof(JSScript, baseline);
+    }
+    static size_t offsetOfIonScript() {
+        return offsetof(JSScript, ion);
+    }
+    static size_t offsetOfParallelIonScript() {
+        return offsetof(JSScript, parallelIon);
+    }
+    static size_t offsetOfBaselineOrIonRaw() {
+        return offsetof(JSScript, baselineOrIonRaw);
+    }
+    static size_t offsetOfBaselineOrIonSkipArgCheck() {
+        return offsetof(JSScript, baselineOrIonSkipArgCheck);
     }
 
     /*
@@ -546,15 +691,20 @@ struct JSScript : public js::gc::Cell
     JSFunction *function() const { return function_; }
     void setFunction(JSFunction *fun);
 
-    JSFixedString *sourceData(JSContext *cx);
+    JSFunction *originalFunction() const;
+    void setOriginalFunctionObject(JSObject *fun);
 
-    bool loadSource(JSContext *cx, bool *worked);
+    JSFlatString *sourceData(JSContext *cx);
 
-    js::ScriptSource *scriptSource() {
+    static bool loadSource(JSContext *cx, js::HandleScript scr, bool *worked);
+
+    js::ScriptSource *scriptSource() const {
         return scriptSource_;
     }
 
-    void setScriptSource(JSContext *cx, js::ScriptSource *ss);
+    void setScriptSource(js::ScriptSource *ss);
+
+    inline const char *filename() const;
 
   public:
 
@@ -570,6 +720,9 @@ struct JSScript : public js::gc::Cell
     /* Ensure the script has a TypeScript. */
     inline bool ensureHasTypes(JSContext *cx);
 
+    /* Ensure the script has a TypeScript and map for computing BytecodeTypes. */
+    inline bool ensureHasBytecodeTypeMap(JSContext *cx);
+
     /*
      * Ensure the script has bytecode analysis information. Performed when the
      * script first runs, or first runs after a TypeScript GC purge.
@@ -583,17 +736,18 @@ struct JSScript : public js::gc::Cell
     inline void clearAnalysis();
     inline js::analyze::ScriptAnalysis *analysis();
 
-    inline void clearPropertyReadTypes();
+    /* Heuristic to check if the function is expected to be "short running". */
+    bool isShortRunning();
 
-    inline bool hasGlobal() const;
-    inline bool hasClearedGlobal() const;
+    inline void clearPropertyReadTypes();
 
     inline js::GlobalObject &global() const;
 
     /* See StaticScopeIter comment. */
     JSObject *enclosingStaticScope() const {
-        JS_ASSERT(enclosingScriptsCompiledSuccessfully());
-        return enclosingScope_;
+        if (isCallsiteClone)
+            return NULL;
+        return enclosingScopeOrOriginalFunction_;
     }
 
     /*
@@ -610,6 +764,7 @@ struct JSScript : public js::gc::Cell
 
   private:
     bool makeTypes(JSContext *cx);
+    bool makeBytecodeTypeMap(JSContext *cx);
     bool makeAnalysis(JSContext *cx);
 
 #ifdef JS_METHODJIT
@@ -649,8 +804,9 @@ struct JSScript : public js::gc::Cell
     inline void *nativeCodeForPC(bool constructing, jsbytecode *pc);
 
     uint32_t getUseCount() const  { return useCount; }
-    uint32_t incUseCount() { return ++useCount; }
+    uint32_t incUseCount(uint32_t amount = 1) { return useCount += amount; }
     uint32_t *addressOfUseCount() { return &useCount; }
+    static size_t offsetOfUseCount() { return offsetof(JSScript, useCount); }
     void resetUseCount() { useCount = 0; }
 
     /*
@@ -664,6 +820,8 @@ struct JSScript : public js::gc::Cell
   public:
     bool initScriptCounts(JSContext *cx);
     js::PCCounts getPCCounts(jsbytecode *pc);
+    void addIonCounts(js::ion::IonScriptCounts *ionCounts);
+    js::ion::IonScriptCounts *getIonCounts();
     js::ScriptCounts releaseScriptCounts();
     void destroyScriptCounts(js::FreeOp *fop);
 
@@ -686,7 +844,7 @@ struct JSScript : public js::gc::Cell
 
     bool hasArray(ArrayKind kind)           { return (hasArrayBits & (1 << kind)); }
     void setHasArray(ArrayKind kind)        { hasArrayBits |= (1 << kind); }
-    void cloneHasArray(JSScript *script)    { hasArrayBits = script->hasArrayBits; }
+    void cloneHasArray(JSScript *script) { hasArrayBits = script->hasArrayBits; }
 
     bool hasConsts()        { return hasArray(CONSTS);      }
     bool hasObjects()       { return hasArray(OBJECTS);     }
@@ -756,8 +914,9 @@ struct JSScript : public js::gc::Cell
 
     inline JSFunction *getFunction(size_t index);
     inline JSFunction *getCallerFunction();
+    inline JSFunction *functionOrCallerFunction();
 
-    inline JSObject *getRegExp(size_t index);
+    inline js::RegExpObject *getRegExp(size_t index);
 
     const js::Value &getConst(size_t index) {
         js::ConstArray *arr = consts();
@@ -792,7 +951,7 @@ struct JSScript : public js::gc::Cell
     void destroyDebugScript(js::FreeOp *fop);
 
   public:
-    bool hasBreakpointsAt(jsbytecode *pc) { return !!getBreakpointSite(pc); }
+    bool hasBreakpointsAt(jsbytecode *pc);
     bool hasAnyBreakpointsOrStepMode() { return hasDebugScript; }
 
     js::BreakpointSite *getBreakpointSite(jsbytecode *pc)
@@ -834,6 +993,8 @@ struct JSScript : public js::gc::Cell
 
     void finalize(js::FreeOp *fop);
 
+    JS::Zone *zone() const { return tenuredZone(); }
+
     static inline void writeBarrierPre(JSScript *script);
     static inline void writeBarrierPost(JSScript *script, void *addr);
 
@@ -850,7 +1011,7 @@ struct JSScript : public js::gc::Cell
 JS_STATIC_ASSERT(sizeof(JSScript::ArrayBitsT) * 8 >= JSScript::LIMIT);
 
 /* If this fails, add/remove padding within JSScript. */
-JS_STATIC_ASSERT(sizeof(JSScript) % js::gc::Cell::CellSize == 0);
+JS_STATIC_ASSERT(sizeof(JSScript) % js::gc::CellSize == 0);
 
 namespace js {
 
@@ -862,14 +1023,14 @@ namespace js {
  */
 class BindingIter
 {
-    const Bindings *bindings_;
+    const InternalBindingsHandle bindings_;
     unsigned i_;
 
     friend class Bindings;
-    BindingIter(const Bindings &bindings, unsigned i) : bindings_(&bindings), i_(i) {}
 
   public:
-    explicit BindingIter(const Bindings &bindings) : bindings_(&bindings), i_(0) {}
+    explicit BindingIter(const InternalBindingsHandle &bindings) : bindings_(bindings), i_(0) {}
+    explicit BindingIter(const HandleScript &script) : bindings_(script, &script->bindings), i_(0) {}
 
     bool done() const { return i_ == bindings_->count(); }
     operator bool() const { return !done(); }
@@ -893,7 +1054,7 @@ class BindingIter
 typedef Vector<Binding, 32> BindingVector;
 
 extern bool
-FillBindingVector(Bindings &bindings, BindingVector *vec);
+FillBindingVector(HandleScript fromScript, BindingVector *vec);
 
 /*
  * Iterator over the aliased formal bindings in ascending index order. This can
@@ -923,20 +1084,6 @@ class AliasedFormalIter
     unsigned scopeSlot() const { JS_ASSERT(!done()); return slot_; }
 };
 
-}  /* namespace js */
-
-/*
- * New-script-hook calling is factored from JSScript::fullyInitFromEmitter() so
- * that it and callers of XDRScript() can share this code.  In the case of
- * callers of XDRScript(), the hook should be invoked only after successful
- * decode of any owning function (the fun parameter) or script object (null
- * fun).
- */
-extern JS_FRIEND_API(void)
-js_CallNewScriptHook(JSContext *cx, JSScript *script, JSFunction *fun);
-
-namespace js {
-
 struct SourceCompressionToken;
 
 struct ScriptSource
@@ -944,15 +1091,21 @@ struct ScriptSource
     friend class SourceCompressorThread;
   private:
     union {
-        // When the script source is ready, compressedLength_ != 0 implies
-        // compressed holds the compressed data; otherwise, source holds the
-        // uncompressed source.
+        // Before setSourceCopy or setSource are successfully called, this union
+        // has a NULL pointer. When the script source is ready,
+        // compressedLength_ != 0 implies compressed holds the compressed data;
+        // otherwise, source holds the uncompressed source. There is a special
+        // pointer |emptySource| for source code for length 0.
+        //
+        // The only function allowed to malloc, realloc, or free the pointers in
+        // this union is adjustDataSize(). Don't do it elsewhere.
         jschar *source;
         unsigned char *compressed;
     } data;
     uint32_t refs;
     uint32_t length_;
     uint32_t compressedLength_;
+    char *filename_;
     jschar *sourceMap_;
 
     // True if we can call JSRuntime::sourceHook to load the source on
@@ -960,29 +1113,26 @@ struct ScriptSource
     // possible to get source at all.
     bool sourceRetrievable_:1;
     bool argumentsNotIncluded_:1;
-#ifdef DEBUG
     bool ready_:1;
-#endif
 
   public:
     ScriptSource()
       : refs(0),
         length_(0),
         compressedLength_(0),
+        filename_(NULL),
         sourceMap_(NULL),
         sourceRetrievable_(false),
-        argumentsNotIncluded_(false)
-#ifdef DEBUG
-       ,ready_(true)
-#endif
+        argumentsNotIncluded_(false),
+        ready_(true)
     {
         data.source = NULL;
     }
     void incref() { refs++; }
-    void decref(JSRuntime *rt) {
+    void decref() {
         JS_ASSERT(refs != 0);
         if (--refs == 0)
-            destroy(rt);
+            destroy();
     }
     bool setSourceCopy(JSContext *cx,
                        const jschar *src,
@@ -990,12 +1140,10 @@ struct ScriptSource
                        bool argumentsNotIncluded,
                        SourceCompressionToken *tok);
     void setSource(const jschar *src, uint32_t length);
-#ifdef DEBUG
     bool ready() const { return ready_; }
-#endif
     void setSourceRetrievable() { sourceRetrievable_ = true; }
     bool sourceRetrievable() const { return sourceRetrievable_; }
-    bool hasSourceData() const { return !!data.source; }
+    bool hasSourceData() const { return !!data.source || !ready(); }
     uint32_t length() const {
         JS_ASSERT(hasSourceData());
         return length_;
@@ -1004,12 +1152,17 @@ struct ScriptSource
         JS_ASSERT(hasSourceData());
         return argumentsNotIncluded_;
     }
-    JSFixedString *substring(JSContext *cx, uint32_t start, uint32_t stop);
+    JSStableString *substring(JSContext *cx, uint32_t start, uint32_t stop);
     size_t sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf);
 
     // XDR handling
     template <XDRMode mode>
     bool performXDR(XDRState<mode> *xdr);
+
+    bool setFilename(JSContext *cx, const char *filename);
+    const char *filename() const {
+        return filename_;
+    }
 
     // Source maps
     bool setSourceMap(JSContext *cx, jschar *sourceMapURL, const char *filename);
@@ -1017,24 +1170,26 @@ struct ScriptSource
     bool hasSourceMap() const { return sourceMap_ != NULL; }
 
   private:
-    void destroy(JSRuntime *rt);
-    bool compressed() { return compressedLength_ != 0; }
+    void destroy();
+    bool compressed() const { return compressedLength_ != 0; }
+    size_t computedSizeOfData() const {
+        return compressed() ? compressedLength_ : sizeof(jschar) * length_;
+    }
+    bool adjustDataSize(size_t nbytes);
 };
 
 class ScriptSourceHolder
 {
-    JSRuntime *rt;
     ScriptSource *ss;
   public:
-    ScriptSourceHolder(JSRuntime *rt, ScriptSource *ss)
-      : rt(rt),
-        ss(ss)
+    explicit ScriptSourceHolder(ScriptSource *ss)
+      : ss(ss)
     {
         ss->incref();
     }
     ~ScriptSourceHolder()
     {
-        ss->decref(rt);
+        ss->decref();
     }
 };
 
@@ -1046,8 +1201,10 @@ class ScriptSourceHolder
  *
  * To use it, you have to have a SourceCompressionToken, tok, with tok.ss and
  * tok.chars set to the proper values. When the SourceCompressionToken is
- * destroyed, it makes sure the compression is complete. At this point tok.ss is
- * ready to be attached to the runtime.
+ * destroyed, it makes sure the compression is complete. If you are about to
+ * successfully exit the scope of tok, you should call and check the return
+ * value of SourceCompressionToken::complete(). It returns false if allocation
+ * errors occurred in the thread.
  */
 class SourceCompressorThread
 {
@@ -1074,11 +1231,12 @@ class SourceCompressorThread
     // Flag which can be set by the main thread to ask compression to abort.
     volatile bool stop;
 
+    bool internalCompress();
     void threadLoop();
     static void compressorThread(void *arg);
 
   public:
-    explicit SourceCompressorThread(JSRuntime *rt)
+    explicit SourceCompressorThread()
     : state(IDLE),
       tok(NULL),
       thread(NULL),
@@ -1090,6 +1248,7 @@ class SourceCompressorThread
     void compress(SourceCompressionToken *tok);
     void waitOnCompression(SourceCompressionToken *userTok);
     void abort(SourceCompressionToken *userTok);
+    const jschar *currentChars() const;
 };
 #endif
 
@@ -1101,61 +1260,95 @@ struct SourceCompressionToken
     JSContext *cx;
     ScriptSource *ss;
     const jschar *chars;
+    bool oom;
   public:
-    SourceCompressionToken(JSContext *cx)
-      : cx(cx), ss(NULL), chars(NULL) {}
+    explicit SourceCompressionToken(JSContext *cx)
+       : cx(cx), ss(NULL), chars(NULL), oom(false) {}
     ~SourceCompressionToken()
     {
-        JS_ASSERT_IF(!ss, !chars);
-        if (ss)
-            ensureReady();
+        complete();
     }
 
-    void ensureReady();
+    bool complete();
     void abort();
     bool active() const { return !!ss; }
 };
 
+/*
+ * New-script-hook calling is factored from JSScript::fullyInitFromEmitter() so
+ * that it and callers of XDRScript() can share this code.  In the case of
+ * callers of XDRScript(), the hook should be invoked only after successful
+ * decode of any owning function (the fun parameter) or script object (null
+ * fun).
+ */
+extern void
+CallNewScriptHook(JSContext *cx, JS::HandleScript script, JS::HandleFunction fun);
+
 extern void
 CallDestroyScriptHook(FreeOp *fop, JSScript *script);
 
-extern const char *
-SaveScriptFilename(JSContext *cx, const char *filename);
-
-struct ScriptFilenameEntry
+struct SharedScriptData
 {
     bool marked;
-    char filename[1];
+    uint32_t length;
+    jsbytecode data[1];
 
-    static ScriptFilenameEntry *fromFilename(const char *filename) {
-        return (ScriptFilenameEntry *)(filename - offsetof(ScriptFilenameEntry, filename));
+    static SharedScriptData *new_(JSContext *cx, uint32_t codeLength,
+                                             uint32_t srcnotesLength, uint32_t natoms);
+
+    HeapPtrAtom *atoms(uint32_t codeLength, uint32_t srcnotesLength) {
+        uint32_t length = codeLength + srcnotesLength;
+        return reinterpret_cast<HeapPtrAtom *>(data + length + sizeof(JSAtom *) -
+                                               length % sizeof(JSAtom *));
+    }
+
+    static SharedScriptData *fromBytecode(const jsbytecode *bytecode) {
+        return (SharedScriptData *)(bytecode - offsetof(SharedScriptData, data));
     }
 };
 
-struct ScriptFilenameHasher
+/*
+ * Takes ownership of its *ssd parameter and either adds it into the runtime's
+ * ScriptBytecodeTable or frees it if a matching entry already exists.
+ *
+ * Sets the |code| and |atoms| fields on the given JSScript.
+ */
+extern bool
+SaveSharedScriptData(JSContext *cx, Handle<JSScript *> script, SharedScriptData *ssd);
+
+struct ScriptBytecodeHasher
 {
-    typedef const char *Lookup;
-    static HashNumber hash(const char *l) { return mozilla::HashString(l); }
-    static bool match(const ScriptFilenameEntry *e, const char *l) {
-        return strcmp(e->filename, l) == 0;
+    struct Lookup
+    {
+        jsbytecode          *code;
+        uint32_t            length;
+
+        Lookup(SharedScriptData *ssd) : code(ssd->data), length(ssd->length) {}
+    };
+    static HashNumber hash(const Lookup &l) { return mozilla::HashBytes(l.code, l.length); }
+    static bool match(SharedScriptData *entry, const Lookup &lookup) {
+        if (entry->length != lookup.length)
+            return false;
+        return mozilla::PodEqual<jsbytecode>(entry->data, lookup.code, lookup.length);
     }
 };
 
-typedef HashSet<ScriptFilenameEntry *,
-                ScriptFilenameHasher,
-                SystemAllocPolicy> ScriptFilenameTable;
+typedef HashSet<SharedScriptData*,
+                ScriptBytecodeHasher,
+                SystemAllocPolicy> ScriptDataTable;
 
 inline void
-MarkScriptFilename(JSRuntime *rt, const char *filename);
+MarkScriptBytecode(JSRuntime *rt, const jsbytecode *bytecode);
 
 extern void
-SweepScriptFilenames(JSRuntime *rt);
+SweepScriptData(JSRuntime *rt);
 
 extern void
-FreeScriptFilenames(JSRuntime *rt);
+FreeScriptData(JSRuntime *rt);
 
 struct ScriptAndCounts
 {
+    /* This structure is stored and marked from the JSRuntime. */
     JSScript *script;
     ScriptCounts scriptCounts;
 
@@ -1163,19 +1356,16 @@ struct ScriptAndCounts
         JS_ASSERT(unsigned(pc - script->code) < script->length);
         return scriptCounts.pcCountsVector[pc - script->code];
     }
+
+    ion::IonScriptCounts *getIonCounts() const {
+        return scriptCounts.ionCounts;
+    }
 };
 
 } /* namespace js */
 
-/*
- * To perturb as little code as possible, we introduce a js_GetSrcNote lookup
- * cache without adding an explicit cx parameter.  Thus js_GetSrcNote becomes
- * a macro that uses cx from its calls' lexical environments.
- */
-#define js_GetSrcNote(script,pc) js_GetSrcNoteCached(cx, script, pc)
-
 extern jssrcnote *
-js_GetSrcNoteCached(JSContext *cx, JSScript *script, jsbytecode *pc);
+js_GetSrcNote(JSContext *cx, JSScript *script, jsbytecode *pc);
 
 extern jsbytecode *
 js_LineNumberToPC(JSScript *script, unsigned lineno);
@@ -1215,6 +1405,9 @@ CurrentScriptFileLineOrigin(JSContext *cx, unsigned *linenop, LineOption = NOT_C
 extern JSScript *
 CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, HandleScript script);
 
+bool
+CloneFunctionScript(JSContext *cx, HandleFunction original, HandleFunction clone);
+
 /*
  * NB: after a successful XDR_DECODE, XDRScript callers must do any required
  * subsequent set-up of owning function or script object and then call
@@ -1223,7 +1416,7 @@ CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, Hand
 template<XDRMode mode>
 bool
 XDRScript(XDRState<mode> *xdr, HandleObject enclosingScope, HandleScript enclosingScript,
-          HandleFunction fun, JSScript **scriptp);
+          HandleFunction fun, MutableHandleScript scriptp);
 
 } /* namespace js */
 

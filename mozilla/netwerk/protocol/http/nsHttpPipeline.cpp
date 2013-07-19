@@ -14,6 +14,7 @@
 #include "nsIPipe.h"
 #include "nsCOMPtr.h"
 #include "nsComponentManagerUtils.h"
+#include <algorithm>
 
 #ifdef DEBUG
 #include "prthread.h"
@@ -422,8 +423,7 @@ nsHttpPipeline::Connection()
 }
 
 void
-nsHttpPipeline::GetSecurityCallbacks(nsIInterfaceRequestor **result,
-                                     nsIEventTarget        **target)
+nsHttpPipeline::GetSecurityCallbacks(nsIInterfaceRequestor **result)
 {
     NS_ASSERTION(PR_GetCurrentThread() == gSocketThread, "wrong thread");
 
@@ -435,11 +435,9 @@ nsHttpPipeline::GetSecurityCallbacks(nsIInterfaceRequestor **result,
     if (!trans)
         trans = Response(0);
     if (trans)
-        trans->GetSecurityCallbacks(result, target);
+        trans->GetSecurityCallbacks(result);
     else {
         *result = nullptr;
-        if (target)
-            *target = nullptr;
     }
 }
 
@@ -553,7 +551,7 @@ nsHttpPipeline::Status()
     return mStatus;
 }
 
-uint8_t
+uint32_t
 nsHttpPipeline::Caps()
 {
     nsAHttpTransaction *trans = Request(0);
@@ -855,7 +853,7 @@ nsHttpPipeline::FillSendBuf()
             nsAHttpTransaction *response = Response(0);
             if (response && !response->PipelinePosition())
                 response->SetPipelinePosition(1);
-            rv = trans->ReadSegments(this, (uint32_t)NS_MIN(avail, (uint64_t)PR_UINT32_MAX), &n);
+            rv = trans->ReadSegments(this, (uint32_t)std::min(avail, (uint64_t)UINT32_MAX), &n);
             if (NS_FAILED(rv)) return rv;
             
             if (n == 0) {

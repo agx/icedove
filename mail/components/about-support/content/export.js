@@ -56,9 +56,7 @@ function getClipboardTransferable() {
 function copyToClipboard() {
   let transferable = getClipboardTransferable();
   // Store the data into the clipboard.
-  let clipboard = Cc["@mozilla.org/widget/clipboard;1"]
-                    .getService(Ci.nsIClipboard);
-  clipboard.setData(transferable, null, clipboard.kGlobalClipboard);
+  Services.clipboard.setData(transferable, null, Services.clipboard.kGlobalClipboard);
 }
 
 function sendViaEmail() {
@@ -108,9 +106,9 @@ function createCleanedUpContents(aHidePrivateData) {
 function cleanUpText(aElem, aHidePrivateData) {
   let node = aElem.firstChild;
   while (node) {
-    let className = ("className" in node && node.className) || "";
+    let classList = "classList" in node && node.classList;
     // Delete uionly nodes.
-    if (className.indexOf(CLASS_DATA_UIONLY) != -1) {
+    if (classList && classList.contains(CLASS_DATA_UIONLY)) {
       // Advance to the next node before removing the current node, since
       // node.nextSibling is null after removeChild
       let nextNode = node.nextSibling;
@@ -119,11 +117,11 @@ function cleanUpText(aElem, aHidePrivateData) {
       continue;
     }
     // Replace private data with a blank string
-    else if (aHidePrivateData && className.indexOf(CLASS_DATA_PRIVATE) != -1) {
+    else if (aHidePrivateData && classList && classList.contains(CLASS_DATA_PRIVATE)) {
       node.textContent = "";
     }
     // Replace public data with a blank string
-    else if (!aHidePrivateData && className.indexOf(CLASS_DATA_PUBLIC) != -1) {
+    else if (!aHidePrivateData && classList && classList.contains(CLASS_DATA_PUBLIC)) {
       node.textContent = "";
     }
     else {

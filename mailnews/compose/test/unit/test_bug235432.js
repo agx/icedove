@@ -2,11 +2,15 @@
 /**
  * Test for bug 235432
  */
+
+Components.utils.import("resource:///modules/mailServices.js");
+Components.utils.import("resource://gre/modules/Services.jsm");
+
 var testmail = do_get_file("data/message1.eml");
 var expectedTemporaryFile;
 
-const kSender = "from@invalid.com";
-const kTo = "to@invalid.com";
+const kSender = "from@foo.invalid";
+const kTo = "to@foo.invalid";
 
 var msgSend = Cc["@mozilla.org/messengercompose/send;1"]
                 .createInstance(Ci.nsIMsgSend);
@@ -58,24 +62,20 @@ function copyFileMessageInLocalFolder(aMessageFile,
 
   gCopyListener.callbackFunction = aCallback;
   // Copy a message into the local folder
-  Cc["@mozilla.org/messenger/messagecopyservice;1"]
-    .getService(Ci.nsIMsgCopyService)
-    .CopyFileMessage(aMessageFile,
-                     gLocalInboxFolder,
-                     null, false,
-                     aMessageFlags,
-                     aMessageKeywords,
-                     gCopyListener,
-                     aMessageWindow);
+  MailServices.copy.CopyFileMessage(aMessageFile,
+                                    gLocalInboxFolder,
+                                    null, false,
+                                    aMessageFlags,
+                                    aMessageKeywords,
+                                    gCopyListener,
+                                    aMessageWindow);
 }
 
 // The attatchment file can not be obtained from js test,
 // so we have to generate the file name here.
 function createExpectedTemporaryFile() {
   function createTemporaryFile() {
-    let file = Cc["@mozilla.org/file/directory_service;1"]
-                 .getService(Ci.nsIProperties)
-                 .get("TmpD", Ci.nsIFile);
+    let file = Services.dirsvc.get("TmpD", Ci.nsIFile);
     file.append("nsmail.tmp");
     file.createUnique(Ci.nsIFile.NORMAL_FILE_TYPE, 0600);
     return file;
@@ -142,7 +142,6 @@ function send_message_later(aMessageHeaderKeys, aStatus) {
                                null,
                                'text/plain',
                                'bodyText\n',
-                               9,
                                null,
                                null,
                                null,

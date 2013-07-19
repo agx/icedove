@@ -108,6 +108,10 @@ function run_test() {
   do_test_pending();
   do_register_cleanup(end_test);
 
+  if (IS_WIN) {
+    Services.prefs.setBoolPref(PREF_APP_UPDATE_SERVICE_ENABLED, true);
+  }
+
   removeUpdateDirsAndFiles();
 
   symlinkUpdateFilesIntoBundleDirectory();
@@ -164,8 +168,8 @@ function run_test() {
 
   setEnvironment();
 
-  // Backup the updater.ini if it exists by moving it. This prevents the post
-  // update executable from being launched if it is specified.
+  // Backup the updater.ini file if it exists by moving it. This prevents the
+  // post update executable from being launched if it is specified.
 //XXX disabled until bug 820933 and bug 820934 are fixed
 if (0) {
   let updaterIni = processDir.clone();
@@ -175,8 +179,14 @@ if (0) {
   }
 }
 
+  // Backup the updater-settings.ini file if it exists by moving it.
   let updateSettingsIni = processDir.clone();
-  updateSettingsIni.append(UPDATE_SETTINGS_INI_FILE);
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
+  if (updateSettingsIni.exists()) {
+    updateSettingsIni.moveTo(processDir, FILE_UPDATE_SETTINGS_INI_BAK);
+  }
+  updateSettingsIni = processDir.clone();
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI);
   writeFile(updateSettingsIni, UPDATE_SETTINGS_CONTENTS);
 
   // Initiate a background update.
@@ -224,11 +234,18 @@ function end_test() {
   resetEnvironment();
 
   let processDir = getAppDir();
-  // Restore the backup of the updater.ini if it exists
+  // Restore the backup of the updater.ini if it exists.
   let updaterIni = processDir.clone();
   updaterIni.append(FILE_UPDATER_INI_BAK);
   if (updaterIni.exists()) {
     updaterIni.moveTo(processDir, FILE_UPDATER_INI);
+  }
+
+  // Restore the backed up updater-settings.ini if it exists.
+  let updateSettingsIni = processDir.clone();
+  updateSettingsIni.append(FILE_UPDATE_SETTINGS_INI_BAK);
+  if (updateSettingsIni.exists()) {
+    updateSettingsIni.moveTo(processDir, FILE_UPDATE_SETTINGS_INI);
   }
 
   // Remove the files added by the update.

@@ -7,6 +7,7 @@
 
 USING_WORKERS_NAMESPACE
 using mozilla::ErrorResult;
+using namespace mozilla::dom;
 
 void
 EventTarget::_trace(JSTracer* aTrc)
@@ -38,10 +39,11 @@ EventTarget::GetEventListener(const nsAString& aType, ErrorResult& aRv) const
 }
 
 void
-EventTarget::SetEventListener(const nsAString& aType, JSObject* aListener,
+EventTarget::SetEventListener(const nsAString& aType, JSObject* aListener_,
                               ErrorResult& aRv)
 {
   JSContext* cx = GetJSContext();
+  JS::Rooted<JSObject*> aListener(cx, aListener_);
 
   JSString* type =
     JS_NewUCStringCopyN(cx, aType.BeginReading(), aType.Length());
@@ -55,15 +57,16 @@ EventTarget::SetEventListener(const nsAString& aType, JSObject* aListener,
 }
 
 void
-EventTarget::AddEventListener(const nsAString& aType, JSObject* aListener,
+EventTarget::AddEventListener(const nsAString& aType, JSObject* aListener_,
                               bool aCapturing, Nullable<bool> aWantsUntrusted,
                               ErrorResult& aRv)
 {
-  if (!aListener) {
+  if (!aListener_) {
     return;
   }
 
   JSContext* cx = GetJSContext();
+  JS::Rooted<JSObject*> aListener(cx, aListener_);
 
   JSString* type =
     JS_NewUCStringCopyN(cx, aType.BeginReading(), aType.Length());
@@ -79,14 +82,15 @@ EventTarget::AddEventListener(const nsAString& aType, JSObject* aListener,
 }
 
 void
-EventTarget::RemoveEventListener(const nsAString& aType, JSObject* aListener,
+EventTarget::RemoveEventListener(const nsAString& aType, JSObject* aListener_,
                                  bool aCapturing, ErrorResult& aRv)
 {
-  if (!aListener) {
+  if (!aListener_) {
     return;
   }
 
   JSContext* cx = GetJSContext();
+  JS::Rooted<JSObject*> aListener(cx, aListener_);
 
   JSString* type =
     JS_NewUCStringCopyN(cx, aType.BeginReading(), aType.Length());

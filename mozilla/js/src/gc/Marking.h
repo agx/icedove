@@ -1,8 +1,8 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this file,
- * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #ifndef gc_marking_h___
 #define gc_marking_h___
@@ -12,13 +12,15 @@
 #include "jslock.h"
 
 #include "gc/Barrier.h"
+#include "gc/Nursery.h"
 #include "js/TemplateLib.h"
+#include "ion/IonCode.h"
 
 extern "C" {
 struct JSContext;
-struct JSFunction;
-struct JSObject;
-struct JSScript;
+class JSFunction;
+class JSObject;
+class JSScript;
 }
 
 class JSAtom;
@@ -27,10 +29,11 @@ class JSLinearString;
 namespace js {
 
 class ArgumentsObject;
+class ArrayBufferObject;
 class BaseShape;
 class GlobalObject;
 class UnownedBaseShape;
-struct Shape;
+class Shape;
 
 template<class, typename> class HeapPtr;
 
@@ -61,6 +64,20 @@ namespace gc {
  *
  * Additionally, the functions MarkObjectRange and MarkObjectRootRange are
  * defined for marking arrays of object pointers.
+ *
+ * The following functions are provided to test whether a GC thing is marked
+ * under different circumstances:
+ *
+ * IsObjectAboutToBeFinalized(JSObject **thing);
+ *     This function is indended to be used in code used to sweep GC things.  It
+ *     indicates whether the object will will be finialized in the current group
+ *     of compartments being swept.  Note that this will return false for any
+ *     object not in the group of compartments currently being swept, as even if
+ *     it is unmarked it may still become marked before it is swept.
+ *
+ * IsObjectMarked(JSObject **thing);
+ *     This function is indended to be used in rare cases in code used to mark
+ *     GC things.  It indicates whether the object is currently marked.
  */
 #define DeclMarker(base, type)                                                                    \
 void Mark##base(JSTracer *trc, EncapsulatedPtr<type> *thing, const char *name);                   \
@@ -69,11 +86,15 @@ void Mark##base##Unbarriered(JSTracer *trc, type **thingp, const char *name);   
 void Mark##base##Range(JSTracer *trc, size_t len, HeapPtr<type> *thing, const char *name);        \
 void Mark##base##RootRange(JSTracer *trc, size_t len, type **thing, const char *name);            \
 bool Is##base##Marked(type **thingp);                                                             \
-bool Is##base##Marked(EncapsulatedPtr<type> *thingp);
+bool Is##base##Marked(EncapsulatedPtr<type> *thingp);                                             \
+bool Is##base##AboutToBeFinalized(type **thingp);                                                 \
+bool Is##base##AboutToBeFinalized(EncapsulatedPtr<type> *thingp);
 
 DeclMarker(BaseShape, BaseShape)
 DeclMarker(BaseShape, UnownedBaseShape)
+DeclMarker(IonCode, ion::IonCode)
 DeclMarker(Object, ArgumentsObject)
+DeclMarker(Object, ArrayBufferObject)
 DeclMarker(Object, DebugScopeObject)
 DeclMarker(Object, GlobalObject)
 DeclMarker(Object, JSObject)
@@ -87,11 +108,15 @@ DeclMarker(String, JSFlatString)
 DeclMarker(String, JSLinearString)
 DeclMarker(String, PropertyName)
 DeclMarker(TypeObject, types::TypeObject)
-#if JS_HAS_XML_SUPPORT
-DeclMarker(XML, JSXML)
-#endif
 
 #undef DeclMarker
+
+/* Return true if the pointer is NULL, or if it is a tagged pointer to NULL. */
+JS_ALWAYS_INLINE bool
+IsNullTaggedPointer(void *p)
+{
+    return uintptr_t(p) < 32;
+}
 
 /*** Externally Typed Marking ***/
 
@@ -105,6 +130,9 @@ MarkKind(JSTracer *trc, void **thingp, JSGCTraceKind kind);
 
 void
 MarkGCThingRoot(JSTracer *trc, void **thingp, const char *name);
+
+void
+MarkGCThingUnbarriered(JSTracer *trc, void **thingp, const char *name);
 
 /*** ID Marking ***/
 
@@ -141,6 +169,9 @@ void
 MarkValueRoot(JSTracer *trc, Value *v, const char *name);
 
 void
+MarkThingOrValueUnbarriered(JSTracer *trc, uintptr_t *word, const char *name);
+
+void
 MarkValueRootRange(JSTracer *trc, size_t len, Value *vec, const char *name);
 
 inline void
@@ -150,10 +181,16 @@ MarkValueRootRange(JSTracer *trc, Value *begin, Value *end, const char *name)
 }
 
 void
+MarkValueRootRangeMaybeNullPayload(JSTracer *trc, size_t len, Value *vec, const char *name);
+
+void
 MarkTypeRoot(JSTracer *trc, types::Type *v, const char *name);
 
 bool
 IsValueMarked(Value *v);
+
+bool
+IsValueAboutToBeFinalized(Value *v);
 
 /*** Slot Marking ***/
 
@@ -167,17 +204,19 @@ void
 MarkObjectSlots(JSTracer *trc, JSObject *obj, uint32_t start, uint32_t nslots);
 
 void
-MarkCrossCompartmentObjectUnbarriered(JSTracer *trc, JSObject **obj, const char *name);
+MarkCrossCompartmentObjectUnbarriered(JSTracer *trc, JSObject *src, JSObject **dst_obj,
+                                      const char *name);
 
 void
-MarkCrossCompartmentScriptUnbarriered(JSTracer *trc, JSScript **script, const char *name);
+MarkCrossCompartmentScriptUnbarriered(JSTracer *trc, JSObject *src, JSScript **dst_script,
+                                      const char *name);
 
 /*
  * Mark a value that may be in a different compartment from the compartment
  * being GC'd. (Although it won't be marked if it's in the wrong compartment.)
  */
 void
-MarkCrossCompartmentSlot(JSTracer *trc, HeapSlot *s, const char *name);
+MarkCrossCompartmentSlot(JSTracer *trc, JSObject *src, HeapSlot *dst_slot, const char *name);
 
 
 /*** Special Cases ***/
@@ -236,16 +275,31 @@ Mark(JSTracer *trc, EncapsulatedPtrScript *o, const char *name)
     MarkScript(trc, o, name);
 }
 
-#if JS_HAS_XML_SUPPORT
 inline void
-Mark(JSTracer *trc, HeapPtr<JSXML> *xml, const char *name)
+Mark(JSTracer *trc, HeapPtr<ion::IonCode> *code, const char *name)
 {
-    MarkXML(trc, xml, name);
+    MarkIonCode(trc, code, name);
 }
-#endif
+
+/* For use by WeakMap's HashKeyRef instantiation. */
+inline void
+Mark(JSTracer *trc, JSObject **objp, const char *name)
+{
+    MarkObjectUnbarriered(trc, objp, name);
+}
+
+/* For use by Debugger::WeakMap's proxiedScopes HashKeyRef instantiation. */
+inline void
+Mark(JSTracer *trc, ScopeObject **obj, const char *name)
+{
+    MarkObjectUnbarriered(trc, obj, name);
+}
 
 bool
 IsCellMarked(Cell **thingp);
+
+bool
+IsCellAboutToBeFinalized(Cell **thing);
 
 inline bool
 IsMarked(EncapsulatedValue *v)
@@ -266,6 +320,46 @@ IsMarked(EncapsulatedPtrScript *scriptp)
 {
     return IsScriptMarked(scriptp);
 }
+
+inline bool
+IsAboutToBeFinalized(EncapsulatedValue *v)
+{
+    if (!v->isMarkable())
+        return false;
+    return IsValueAboutToBeFinalized(v->unsafeGet());
+}
+
+inline bool
+IsAboutToBeFinalized(EncapsulatedPtrObject *objp)
+{
+    return IsObjectAboutToBeFinalized(objp);
+}
+
+inline bool
+IsAboutToBeFinalized(EncapsulatedPtrScript *scriptp)
+{
+    return IsScriptAboutToBeFinalized(scriptp);
+}
+
+#ifdef JS_ION
+/* Nonsense to get WeakCache to work with new Marking semantics. */
+
+inline bool
+IsAboutToBeFinalized(const js::ion::VMFunction **vmfunc)
+{
+    /*
+     * Preserves entries in the WeakCache<VMFunction, IonCode>
+     * iff the IonCode has been marked.
+     */
+    return true;
+}
+
+inline bool
+IsAboutToBeFinalized(ReadBarriered<js::ion::IonCode> code)
+{
+    return IsIonCodeAboutToBeFinalized(code.unsafeGet());
+}
+#endif
 
 inline Cell *
 ToMarkable(const Value &v)
@@ -306,9 +400,6 @@ TraceKind(JSScript *script)
 
 void
 TraceChildren(JSTracer *trc, void *thing, JSGCTraceKind kind);
-
-void
-CallTracer(JSTracer *trc, void *thing, JSGCTraceKind kind);
 
 } /* namespace js */
 

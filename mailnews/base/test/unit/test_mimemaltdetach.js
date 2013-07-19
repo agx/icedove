@@ -14,9 +14,7 @@ load("../../../resources/asyncTestUtils.js");
 // javascript mime emitter functions
 mimeMsg = {};
 Components.utils.import("resource:///modules/gloda/mimemsg.js", mimeMsg);
-
-const copyService = Cc["@mozilla.org/messenger/messagecopyservice;1"]
-                      .getService(Ci.nsIMsgCopyService);
+Components.utils.import("resource:///modules/mailServices.js");
 
 var tests = [
   startCopy,
@@ -28,9 +26,9 @@ var tests = [
 function startCopy()
 {
   // Get a message into the local filestore.
-  var mailFile = do_get_file("../../../data/multipartmalt-detach");
-  copyService.CopyFileMessage(mailFile, gLocalInboxFolder, null, false, 0,
-                              "", asyncCopyListener, null);
+  let mailFile = do_get_file("../../../data/multipartmalt-detach");
+  MailServices.copy.CopyFileMessage(mailFile, gLocalInboxFolder, null, false, 0,
+                                    "", asyncCopyListener, null);
   yield false;
 }
 
@@ -79,9 +77,9 @@ function testDetach()
   let msgHdr = firstMsgHdr(gLocalInboxFolder);
 
   let messageContent = getContentFromMessage(msgHdr);
-  do_check_true(messageContent.indexOf("AttachmentDetached") != -1);
+  do_check_true(messageContent.contains("AttachmentDetached"));
   // Make sure the body survived the detach.
-  do_check_true(messageContent.indexOf("body hello") != -1);
+  do_check_true(messageContent.contains("body hello"));
 }
 
 function SaveAttachmentCallback() {

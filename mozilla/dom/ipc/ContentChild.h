@@ -9,6 +9,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/dom/PContentChild.h"
+#include "mozilla/dom/TabContext.h"
 #include "mozilla/dom/ipc/Blob.h"
 
 #include "nsTArray.h"
@@ -41,7 +42,6 @@ class ClonedMessageData;
 
 class ContentChild : public PContentChild
 {
-    typedef layers::PCompositorChild PCompositorChild;
     typedef mozilla::dom::ClonedMessageData ClonedMessageData;
     typedef mozilla::ipc::OptionalURIParams OptionalURIParams;
     typedef mozilla::ipc::URIParams URIParams;
@@ -62,7 +62,6 @@ public:
     void InitXPCOM();
 
     static ContentChild* GetSingleton() {
-        NS_ASSERTION(sSingleton, "not initialized");
         return sSingleton;
     }
 
@@ -70,12 +69,20 @@ public:
         return mAppInfo;
     }
 
-    PCompositorChild* AllocPCompositor(mozilla::ipc::Transport* aTransport,
-                                       base::ProcessId aOtherProcess) MOZ_OVERRIDE;
+    void SetProcessName(const nsAString& aName);
+    const void GetProcessName(nsAString& aName);
 
-    virtual PBrowserChild* AllocPBrowser(const uint32_t& aChromeFlags,
-                                         const bool& aIsBrowserElement,
-                                         const AppId& aAppId);
+    PCompositorChild*
+    AllocPCompositor(mozilla::ipc::Transport* aTransport,
+                     base::ProcessId aOtherProcess) MOZ_OVERRIDE;
+    PImageBridgeChild*
+    AllocPImageBridge(mozilla::ipc::Transport* aTransport,
+                      base::ProcessId aOtherProcess) MOZ_OVERRIDE;
+
+    virtual bool RecvSetProcessPrivileges(const ChildPrivileges& aPrivs);
+
+    virtual PBrowserChild* AllocPBrowser(const IPCTabContext &aContext,
+                                         const uint32_t &chromeFlags);
     virtual bool DeallocPBrowser(PBrowserChild*);
 
     virtual PDeviceStorageRequestChild* AllocPDeviceStorageRequest(const DeviceStorageParams&);
@@ -105,14 +112,20 @@ public:
     virtual bool
     RecvPMemoryReportRequestConstructor(PMemoryReportRequestChild* child);
 
+    virtual bool
+    RecvAudioChannelNotify();
+
+    virtual bool
+    RecvDumpMemoryInfoToTempDir(const nsString& aIdentifier,
+                                const bool& aMinimizeMemoryUsage,
+                                const bool& aDumpChildProcesses);
+    virtual bool
+    RecvDumpGCAndCCLogsToFile(const nsString& aIdentifier,
+                              const bool& aDumpChildProcesses);
+
     virtual PTestShellChild* AllocPTestShell();
     virtual bool DeallocPTestShell(PTestShellChild*);
     virtual bool RecvPTestShellConstructor(PTestShellChild*);
-
-    virtual PAudioChild* AllocPAudio(const int32_t&,
-                                     const int32_t&,
-                                     const int32_t&);
-    virtual bool DeallocPAudio(PAudioChild*);
 
     virtual PNeckoChild* AllocPNecko();
     virtual bool DeallocPNecko(PNeckoChild*);
@@ -129,8 +142,14 @@ public:
     virtual PSmsChild* AllocPSms();
     virtual bool DeallocPSms(PSmsChild*);
 
-    virtual PStorageChild* AllocPStorage(const StorageConstructData& aData);
+    virtual PStorageChild* AllocPStorage();
     virtual bool DeallocPStorage(PStorageChild* aActor);
+
+    virtual PBluetoothChild* AllocPBluetooth();
+    virtual bool DeallocPBluetooth(PBluetoothChild* aActor);
+
+    virtual PSpeechSynthesisChild* AllocPSpeechSynthesis();
+    virtual bool DeallocPSpeechSynthesis(PSpeechSynthesisChild* aActor);
 
     virtual bool RecvRegisterChrome(const InfallibleTArray<ChromePackage>& packages,
                                     const InfallibleTArray<ResourceMapping>& resources,
@@ -164,14 +183,21 @@ public:
     virtual bool RecvCycleCollect();
 
     virtual bool RecvAppInfo(const nsCString& version, const nsCString& buildID);
-    virtual bool RecvSetProcessAttributes(const uint64_t& id,
-                                          const bool& aIsForApp,
-                                          const bool& aIsForBrowser);
 
     virtual bool RecvLastPrivateDocShellDestroyed();
 
-    virtual bool RecvFilePathUpdate(const nsString& path, const nsCString& reason);
-    virtual bool RecvFileSystemUpdate(const nsString& aFsName, const nsString& aName, const int32_t& aState);
+    virtual bool RecvFilePathUpdate(const nsString& aStorageType,
+                                    const nsString& aStorageName,
+                                    const nsString& aPath,
+                                    const nsCString& aReason);
+    virtual bool RecvFileSystemUpdate(const nsString& aFsName,
+                                      const nsString& aVolumeName,
+                                      const int32_t& aState,
+                                      const int32_t& aMountGeneration);
+
+    virtual bool RecvNotifyProcessPriorityChanged(const hal::ProcessPriority& aPriority);
+    virtual bool RecvMinimizeMemoryUsage();
+    virtual bool RecvCancelMinimizeMemoryUsage();
 
 #ifdef ANDROID
     gfxIntSize GetScreenSize() { return mScreenSize; }
@@ -187,6 +213,11 @@ public:
     bool IsForBrowser() { return mIsForBrowser; }
 
     BlobChild* GetOrCreateActorForBlob(nsIDOMBlob* aBlob);
+
+protected:
+    virtual bool RecvPBrowserConstructor(PBrowserChild* actor,
+                                         const IPCTabContext& context,
+                                         const uint32_t& chromeFlags);
 
 private:
     virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;
@@ -219,6 +250,8 @@ private:
 
     bool mIsForApp;
     bool mIsForBrowser;
+    nsString mProcessName;
+    nsWeakPtr mMemoryMinimizerRunnable;
 
     static ContentChild* sSingleton;
 

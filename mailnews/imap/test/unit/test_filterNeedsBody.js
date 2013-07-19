@@ -11,6 +11,8 @@ load("../../../resources/mailTestUtils.js");
 load("../../../resources/asyncTestUtils.js");
 load("../../../resources/IMAPpump.js");
 
+Components.utils.import("resource:///modules/mailServices.js");
+
 // Globals
 var gFilter; // a message filter with a subject search
 var gAction; // current message action (reused)
@@ -52,9 +54,7 @@ function setup() {
   gAction = gFilter.createAction();
 
   // add the custom actions
-  var filterService = Cc["@mozilla.org/messenger/services/filters;1"]
-                        .getService(Ci.nsIMsgFilterService);
-  filterService.addCustomAction(actionTestOffline);
+  MailServices.filters.addCustomAction(actionTestOffline);
 }
 
 // basic preparation done for each test
@@ -93,8 +93,8 @@ actionTestOffline =
     for (var i = 0; i < aMsgHdrs.length; i++)
     {
       var msgHdr = aMsgHdrs.queryElementAt(i, Ci.nsIMsgDBHdr);
-      let isOffline = msgHdr.flags & Ci.nsMsgMessageFlags.Offline ? true : false;
-      do_check_eq(isOffline, aActionValue == 'true' ? true : false);
+      let isOffline = msgHdr.flags & Ci.nsMsgMessageFlags.Offline;
+      do_check_eq(isOffline, aActionValue == 'true');
     }
   },
   isValidForType: function(type, scope) {return true;},
@@ -114,9 +114,6 @@ actionTestOffline =
 function specForFileName(aFileName)
 {
   let file = do_get_file("../../../data/" + aFileName);
-  let msgfileuri = Cc["@mozilla.org/network/io-service;1"]
-                     .getService(Ci.nsIIOService)
-                     .newFileURI(file)
-                     .QueryInterface(Ci.nsIFileURL);
+  let msgfileuri = Services.io.newFileURI(file).QueryInterface(Ci.nsIFileURL);
   return msgfileuri.spec;
 }

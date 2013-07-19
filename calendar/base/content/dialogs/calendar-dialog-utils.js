@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/PluralForm.jsm");
+Components.utils.import("resource://gre/modules/Services.jsm");
 
 Components.utils.import("resource://calendar/modules/calAlarmUtils.jsm");
 Components.utils.import("resource://calendar/modules/calIteratorUtils.jsm");
@@ -161,7 +162,6 @@ function updateReminderDetails() {
 
 var gLastAlarmSelection = 0;
 
-
 function matchCustomReminderToMenuitem(reminder) {
     let defaultAlarmType = getDefaultAlarmType();
     let reminderList = document.getElementById("item-alarm");
@@ -172,7 +172,14 @@ function matchCustomReminderToMenuitem(reminder) {
         // Exactly one reminder thats not absolute, we may be able to match up
         // popup items.
         let relation = (reminder.related == reminder.ALARM_RELATED_START ? "START" : "END");
-        let origin = (reminder.offset.isNegative ? "before" : "after");
+        let origin;
+
+        // If the time duration for offset is 0, means the reminder is '0 minutes before'
+        if (reminder.offset.inSeconds == 0 || reminder.offset.isNegative) {
+            origin = "before";
+        } else {
+            origin = "after";
+        }
 
         let unitMap = {
           days: 86400,
@@ -430,7 +437,7 @@ function updateLink() {
         var handler, uri;
         try {
             uri = makeURL(itemUrlString);
-            handler = getIOService().getProtocolHandler(uri.scheme);
+            handler = Services.io.getProtocolHandler(uri.scheme);
         } catch (e) {
             // No protocol handler for the given protocol, or invalid uri
             hideOrShow(false);

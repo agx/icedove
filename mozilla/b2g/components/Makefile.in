@@ -9,24 +9,31 @@ VPATH      = @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-MODULE = B2GComponents
-XPIDL_MODULE = B2GComponents
-
-XPIDLSRCS = \
-        b2g.idl \
-        $(NULL)
-
 EXTRA_PP_COMPONENTS = \
         ActivitiesGlue.js \
         AlertsService.js \
+        B2GAboutRedirector.js \
         B2GComponents.manifest \
-        CameraContent.js \
         ContentHandler.js \
         ContentPermissionPrompt.js \
         DirectoryProvider.js \
+        FilePicker.js \
+        MailtoProtocolHandler.js \
         MozKeyboard.js \
         ProcessGlobal.js \
+        PaymentGlue.js \
+        SmsProtocolHandler.js \
+        TelProtocolHandler.js \
+        YoutubeProtocolHandler.js \
+        RecoveryService.js \
         $(NULL)
+
+EXTRA_JS_MODULES = \
+	Keyboard.jsm \
+	TelURIParser.jsm \
+	SignInToWebsite.jsm \
+	ErrorPage.jsm \
+	$(NULL)
 
 ifdef MOZ_UPDATER
 EXTRA_PP_COMPONENTS += UpdatePrompt.js

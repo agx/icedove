@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=99:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,7 +9,8 @@
 
 #include "jslock.h"
 #include "jspropertycache.h"
-#include "jsscope.h"
+
+#include "vm/Shape.h"
 
 /*
  * This method is designed to inline the fast path in js_Interpret, so it makes
@@ -28,35 +28,33 @@
  * caches (on all threads) by re-generating JSObject::shape().
  */
 JS_ALWAYS_INLINE void
-js::PropertyCache::test(JSContext *cx, jsbytecode *pc, JSObject *&obj,
-                        JSObject *&pobj, PropertyCacheEntry *&entry, PropertyName *&name)
+js::PropertyCache::test(JSContext *cx, jsbytecode *pc, JSObject **obj,
+                        JSObject **pobj, PropertyCacheEntry **entry, PropertyName **name)
 {
-    AssertRootingUnnecessary assert(cx);
+    JS_ASSERT(this == &cx->propertyCache());
 
-    JS_ASSERT(this == &JS_PROPERTY_CACHE(cx));
-
-    Shape *kshape = obj->lastProperty();
-    entry = &table[hash(pc, kshape)];
-    PCMETER(pctestentry = entry);
+    Shape *kshape = (*obj)->lastProperty();
+    *entry = &table[hash(pc, kshape)];
+    PCMETER(pctestentry = *entry);
     PCMETER(tests++);
-    JS_ASSERT(&obj != &pobj);
-    if (entry->kpc == pc && entry->kshape == kshape) {
+    JS_ASSERT(obj != pobj);
+    if ((*entry)->kpc == pc && (*entry)->kshape == kshape) {
         JSObject *tmp;
-        pobj = obj;
-        if (entry->isPrototypePropertyHit() &&
-            (tmp = pobj->getProto()) != NULL) {
-            pobj = tmp;
+        *pobj = *obj;
+        if ((*entry)->isPrototypePropertyHit() &&
+            (tmp = (*pobj)->getProto()) != NULL) {
+            *pobj = tmp;
         }
 
-        if (pobj->lastProperty() == entry->pshape) {
+        if ((*pobj)->lastProperty() == (*entry)->pshape) {
             PCMETER(pchits++);
-            PCMETER(entry->isOwnPropertyHit() || protopchits++);
-            name = NULL;
+            PCMETER((*entry)->isOwnPropertyHit() || protopchits++);
+            *name = NULL;
             return;
         }
     }
-    name = fullTest(cx, pc, &obj, &pobj, entry);
-    if (name)
+    *name = fullTest(cx, pc, obj, pobj, *entry);
+    if (!*name)
         PCMETER(misses++);
 }
 
@@ -64,7 +62,7 @@ JS_ALWAYS_INLINE bool
 js::PropertyCache::testForSet(JSContext *cx, jsbytecode *pc, JSObject *obj,
                               PropertyCacheEntry **entryp, JSObject **obj2p, PropertyName **namep)
 {
-    JS_ASSERT(this == &JS_PROPERTY_CACHE(cx));
+    JS_ASSERT(this == &cx->propertyCache());
 
     Shape *kshape = obj->lastProperty();
     PropertyCacheEntry *entry = &table[hash(pc, kshape)];

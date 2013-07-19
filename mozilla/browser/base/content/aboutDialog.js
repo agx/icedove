@@ -45,9 +45,11 @@ function init(aEvent)
 #ifdef MOZ_UPDATER
   gAppUpdater = new appUpdater();
 
+#if MOZ_UPDATE_CHANNEL != release
   let defaults = Services.prefs.getDefaultBranch("");
   let channelLabel = document.getElementById("currentChannel");
   channelLabel.value = defaults.getCharPref("app.update.channel");
+#endif
 #endif
 
 #ifdef XP_MACOSX
@@ -93,9 +95,6 @@ function appUpdater()
   XPCOMUtils.defineLazyServiceGetter(this, "um",
                                      "@mozilla.org/updates/update-manager;1",
                                      "nsIUpdateManager");
-  XPCOMUtils.defineLazyServiceGetter(this, "bs",
-                                     "@mozilla.org/extensions/blocklist;1",
-                                     "nsIBlocklistService");
 
   this.bundle = Services.strings.
                 createBundle("chrome://browser/locale/browser.properties");
@@ -282,17 +281,10 @@ appUpdater.prototype =
 
   /**
    * Implements nsIUpdateCheckListener. The methods implemented by
-   * nsIUpdateCheckListener have to be in a different scope from
-   * nsIIncrementalDownload because both nsIUpdateCheckListener and
-   * nsIIncrementalDownload implement onProgress.
+   * nsIUpdateCheckListener are in a different scope from nsIIncrementalDownload
+   * to make it clear which are used by each interface.
    */
   updateCheckListener: {
-    /**
-     * See nsIUpdateService.idl
-     */
-    onProgress: function(aRequest, aPosition, aTotalSize) {
-    },
-
     /**
      * See nsIUpdateService.idl
      */
@@ -438,9 +430,9 @@ appUpdater.prototype =
    * See XPIProvider.jsm
    */
   onUpdateAvailable: function(aAddon, aInstall) {
-    if (!this.bs.isAddonBlocklisted(aAddon.id, aInstall.version,
-                                    this.update.appVersion,
-                                    this.update.platformVersion)) {
+    if (!Services.blocklist.isAddonBlocklisted(aAddon.id, aInstall.version,
+                                               this.update.appVersion,
+                                               this.update.platformVersion)) {
       // Compatibility or new version updates mean the same thing here.
       this.onCompatibilityUpdateAvailable(aAddon);
     }
@@ -497,7 +489,9 @@ appUpdater.prototype =
   },
 
   removeDownloadListener: function() {
-    this.aus.removeDownloadListener(this);
+    if (this.aus) {
+      this.aus.removeDownloadListener(this);
+    }
   },
 
   /**

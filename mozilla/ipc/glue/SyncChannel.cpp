@@ -5,6 +5,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/DebugOnly.h"
+
 #include "mozilla/ipc/SyncChannel.h"
 
 #include "nsDebug.h"
@@ -22,18 +24,18 @@ struct RunnableMethodTraits<mozilla::ipc::SyncChannel>
 namespace mozilla {
 namespace ipc {
 
-const int32 SyncChannel::kNoTimeout = PR_INT32_MIN;
+const int32_t SyncChannel::kNoTimeout = INT32_MIN;
 
 SyncChannel::SyncChannel(SyncListener* aListener)
   : AsyncChannel(aListener)
+#ifdef OS_WIN
+  , mTopFrame(NULL)
+#endif
   , mPendingReply(0)
   , mProcessingSyncMessage(false)
   , mNextSeqno(0)
   , mInTimeoutSecondHalf(false)
   , mTimeoutMs(kNoTimeout)
-#ifdef OS_WIN
-  , mTopFrame(NULL)
-#endif
 {
     MOZ_COUNT_CTOR(SyncChannel);
 #ifdef OS_WIN
@@ -88,7 +90,7 @@ SyncChannel::Send(Message* _msg, Message* reply)
     }
 
     mPendingReply = msg->type() + 1;
-    int32 msgSeqno = msg->seqno();
+    DebugOnly<int32_t> msgSeqno = msg->seqno();
     mLink->SendMessage(msg.forget());
 
     while (1) {
@@ -140,7 +142,7 @@ SyncChannel::OnDispatchMessage(const Message& msg)
 
     mProcessingSyncMessage = true;
     Result rv =
-        static_cast<SyncListener*>(mListener)->OnMessageReceived(msg, reply);
+        static_cast<SyncListener*>(mListener.get())->OnMessageReceived(msg, reply);
     mProcessingSyncMessage = false;
 
     if (!MaybeHandleError(rv, "SyncChannel")) {
@@ -229,7 +231,7 @@ SyncChannel::ShouldContinueFromTimeout()
     bool cont;
     {
         MonitorAutoUnlock unlock(*mMonitor);
-        cont = static_cast<SyncListener*>(mListener)->OnReplyTimeout();
+        cont = static_cast<SyncListener*>(mListener.get())->OnReplyTimeout();
     }
 
     if (!cont) {

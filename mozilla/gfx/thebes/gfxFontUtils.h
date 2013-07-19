@@ -9,7 +9,6 @@
 #include "gfxTypes.h"
 #include "gfxPlatform.h"
 
-#include "prtypes.h"
 #include "nsAlgorithm.h"
 #include "prcpucfg.h"
 
@@ -22,9 +21,11 @@
 #include "nsComponentManagerUtils.h"
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
-#include "nsIStreamBufferAccess.h"
+#include "mozilla/Likely.h"
+#include "mozilla/Endian.h"
 
 #include "zlib.h"
+#include <algorithm>
 
 /* Bug 341128 - w32api defines min/max which causes problems with <bitset> */
 #ifdef __MINGW32__
@@ -119,7 +120,7 @@ public:
         // first block, check bits
         if ((block = mBlocks[startBlock])) {
             start = aStart;
-            end = NS_MIN(aEnd, ((startBlock+1) << BLOCK_INDEX_SHIFT) - 1);
+            end = std::min(aEnd, ((startBlock+1) << BLOCK_INDEX_SHIFT) - 1);
             for (i = start; i <= end; i++) {
                 if ((block->mBits[(i>>3) & (BLOCK_SIZE - 1)]) & (1 << (i & 0x7)))
                     return true;
@@ -155,7 +156,7 @@ public:
         uint32_t blockIndex = aIndex/BLOCK_SIZE_BITS;
         if (blockIndex >= mBlocks.Length()) {
             nsAutoPtr<Block> *blocks = mBlocks.AppendElements(blockIndex + 1 - mBlocks.Length());
-            if (NS_UNLIKELY(!blocks)) // OOM
+            if (MOZ_UNLIKELY(!blocks)) // OOM
                 return;
         }
         Block *block = mBlocks[blockIndex];
@@ -180,7 +181,7 @@ public:
         if (endIndex >= mBlocks.Length()) {
             uint32_t numNewBlocks = endIndex + 1 - mBlocks.Length();
             nsAutoPtr<Block> *blocks = mBlocks.AppendElements(numNewBlocks);
-            if (NS_UNLIKELY(!blocks)) // OOM
+            if (MOZ_UNLIKELY(!blocks)) // OOM
                 return;
         }
 
@@ -202,7 +203,7 @@ public:
             }
 
             const uint32_t start = aStart > blockFirstBit ? aStart - blockFirstBit : 0;
-            const uint32_t end = NS_MIN<uint32_t>(aEnd - blockFirstBit, BLOCK_SIZE_BITS - 1);
+            const uint32_t end = std::min<uint32_t>(aEnd - blockFirstBit, BLOCK_SIZE_BITS - 1);
 
             for (uint32_t bit = start; bit <= end; ++bit) {
                 block->mBits[bit>>3] |= 1 << (bit & 0x7);
@@ -214,7 +215,7 @@ public:
         uint32_t blockIndex = aIndex/BLOCK_SIZE_BITS;
         if (blockIndex >= mBlocks.Length()) {
             nsAutoPtr<Block> *blocks = mBlocks.AppendElements(blockIndex + 1 - mBlocks.Length());
-            if (NS_UNLIKELY(!blocks)) // OOM
+            if (MOZ_UNLIKELY(!blocks)) // OOM
                 return;
         }
         Block *block = mBlocks[blockIndex];
@@ -231,7 +232,7 @@ public:
         if (endIndex >= mBlocks.Length()) {
             uint32_t numNewBlocks = endIndex + 1 - mBlocks.Length();
             nsAutoPtr<Block> *blocks = mBlocks.AppendElements(numNewBlocks);
-            if (NS_UNLIKELY(!blocks)) // OOM
+            if (MOZ_UNLIKELY(!blocks)) // OOM
                 return;
         }
 
@@ -246,7 +247,7 @@ public:
             }
 
             const uint32_t start = aStart > blockFirstBit ? aStart - blockFirstBit : 0;
-            const uint32_t end = NS_MIN<uint32_t>(aEnd - blockFirstBit, BLOCK_SIZE_BITS - 1);
+            const uint32_t end = std::min<uint32_t>(aEnd - blockFirstBit, BLOCK_SIZE_BITS - 1);
 
             for (uint32_t bit = start; bit <= end; ++bit) {
                 block->mBits[bit>>3] &= ~(1 << (bit & 0x7));
@@ -282,7 +283,7 @@ public:
         if (blockCount > mBlocks.Length()) {
             uint32_t needed = blockCount - mBlocks.Length();
             nsAutoPtr<Block> *blocks = mBlocks.AppendElements(needed);
-            if (NS_UNLIKELY(!blocks)) { // OOM
+            if (MOZ_UNLIKELY(!blocks)) { // OOM
                 return;
             }
         }
@@ -338,58 +339,125 @@ namespace mozilla {
 struct AutoSwap_PRUint16 {
 #ifdef __SUNPRO_CC
     AutoSwap_PRUint16& operator = (const uint16_t aValue)
-      { this->value = NS_SWAP16(aValue); return *this; }
+    {
+        this->value = mozilla::NativeEndian::swapToBigEndian(aValue);
+        return *this;
+    }
 #else
-    AutoSwap_PRUint16(uint16_t aValue) { value = NS_SWAP16(aValue); }
+    AutoSwap_PRUint16(uint16_t aValue)
+    {
+        value = mozilla::NativeEndian::swapToBigEndian(aValue);
+    }
 #endif
-    operator uint16_t() const { return NS_SWAP16(value); }
-    operator uint32_t() const { return NS_SWAP16(value); }
-    operator uint64_t() const { return NS_SWAP16(value); }
+    operator uint16_t() const
+    {
+        return mozilla::NativeEndian::swapFromBigEndian(value);
+    }
+
+    operator uint32_t() const
+    {
+        return mozilla::NativeEndian::swapFromBigEndian(value);
+    }
+
+    operator uint64_t() const
+    {
+        return mozilla::NativeEndian::swapFromBigEndian(value);
+    }
+
+private:
     uint16_t value;
 };
 
 struct AutoSwap_PRInt16 {
 #ifdef __SUNPRO_CC
     AutoSwap_PRInt16& operator = (const int16_t aValue)
-      { this->value = NS_SWAP16(aValue); return *this; }
+    {
+        this->value = mozilla::NativeEndian::swapToBigEndian(aValue);
+        return *this;
+    }
 #else
-    AutoSwap_PRInt16(int16_t aValue) { value = NS_SWAP16(aValue); }
+    AutoSwap_PRInt16(int16_t aValue)
+    {
+        value = mozilla::NativeEndian::swapToBigEndian(aValue);
+    }
 #endif
-    operator int16_t() const { return NS_SWAP16(value); }
-    operator uint32_t() const { return NS_SWAP16(value); }
+    operator int16_t() const
+    {
+        return mozilla::NativeEndian::swapFromBigEndian(value);
+    }
+
+    operator uint32_t() const
+    {
+        return mozilla::NativeEndian::swapFromBigEndian(value);
+    }
+
+private:
     int16_t  value;
 };
 
 struct AutoSwap_PRUint32 {
 #ifdef __SUNPRO_CC
     AutoSwap_PRUint32& operator = (const uint32_t aValue)
-      { this->value = NS_SWAP32(aValue); return *this; }
+    {
+        this->value = mozilla::NativeEndian::swapToBigEndian(aValue);
+        return *this;
+    }
 #else
-    AutoSwap_PRUint32(uint32_t aValue) { value = NS_SWAP32(aValue); }
+    AutoSwap_PRUint32(uint32_t aValue)
+    {
+        value = mozilla::NativeEndian::swapToBigEndian(aValue);
+    }
 #endif
-    operator uint32_t() const { return NS_SWAP32(value); }
+    operator uint32_t() const
+    {
+        return mozilla::NativeEndian::swapFromBigEndian(value);
+    }
+
+private:
     uint32_t  value;
 };
 
 struct AutoSwap_PRInt32 {
 #ifdef __SUNPRO_CC
     AutoSwap_PRInt32& operator = (const int32_t aValue)
-      { this->value = NS_SWAP32(aValue); return *this; }
+    {
+        this->value = mozilla::NativeEndian::swapToBigEndian(aValue);
+        return *this;
+    }
 #else
-    AutoSwap_PRInt32(int32_t aValue) { value = NS_SWAP32(aValue); }
+    AutoSwap_PRInt32(int32_t aValue)
+    {
+        value = mozilla::NativeEndian::swapToBigEndian(aValue);
+    }
 #endif
-    operator int32_t() const { return NS_SWAP32(value); }
+    operator int32_t() const
+    {
+        return mozilla::NativeEndian::swapFromBigEndian(value);
+    }
+
+private:
     int32_t  value;
 };
 
 struct AutoSwap_PRUint64 {
 #ifdef __SUNPRO_CC
     AutoSwap_PRUint64& operator = (const uint64_t aValue)
-      { this->value = NS_SWAP64(aValue); return *this; }
+    {
+        this->value = mozilla::NativeEndian::swapToBigEndian(aValue);
+        return *this;
+    }
 #else
-    AutoSwap_PRUint64(uint64_t aValue) { value = NS_SWAP64(aValue); }
+    AutoSwap_PRUint64(uint64_t aValue)
+    {
+        value = mozilla::NativeEndian::swapToBigEndian(aValue);
+    }
 #endif
-    operator uint64_t() const { return NS_SWAP64(value); }
+    operator uint64_t() const
+    {
+        return mozilla::NativeEndian::swapFromBigEndian(value);
+    }
+
+private:
     uint64_t  value;
 };
 
@@ -725,7 +793,8 @@ public:
     MapUVSToGlyphFormat14(const uint8_t *aBuf, uint32_t aCh, uint32_t aVS);
 
     static uint32_t
-    MapCharToGlyph(const uint8_t *aBuf, uint32_t aBufLength, uint32_t aCh);
+    MapCharToGlyph(const uint8_t *aCmapBuf, uint32_t aBufLength,
+                   uint32_t aUnicode, uint32_t aVarSelector = 0);
 
 #ifdef XP_WIN
 
@@ -738,8 +807,8 @@ public:
     MakeEOTHeader(const uint8_t *aFontData, uint32_t aFontDataLength,
                   FallibleTArray<uint8_t> *aHeader, FontDataOverlay *aOverlay);
 
-    // determine whether a font (which has already passed ValidateSFNTHeaders)
-    // is CFF format rather than TrueType
+    // determine whether a font (which has already been sanitized, so is known
+    // to be a valid sfnt) is CFF format rather than TrueType
     static bool
     IsCffFont(const uint8_t* aFontData, bool& hasVertical);
 
@@ -749,14 +818,6 @@ public:
     static gfxUserFontType
     DetermineFontDataType(const uint8_t *aFontData, uint32_t aFontDataLength);
 
-    // checks for valid SFNT table structure, returns true if valid
-    // does *not* guarantee that all font data is valid, though it does
-    // check that key tables such as 'name' are present and readable.
-    // XXX to be removed if/when we eliminate the option to disable OTS,
-    // which does more thorough validation.
-    static bool
-    ValidateSFNTHeaders(const uint8_t *aFontData, uint32_t aFontDataLength);
-    
     // Read the fullname from the sfnt data (used to save the original name
     // prior to renaming the font for installation).
     // This is called with sfnt data that has already been validated,
@@ -765,10 +826,16 @@ public:
     GetFullNameFromSFNT(const uint8_t* aFontData, uint32_t aLength,
                         nsAString& aFullName);
 
-    // helper to get fullname from name table
+    // helper to get fullname from name table, constructing from family+style
+    // if no explicit fullname is present
     static nsresult
     GetFullNameFromTable(FallibleTArray<uint8_t>& aNameTable,
                          nsAString& aFullName);
+
+    // helper to get family name from name table
+    static nsresult
+    GetFamilyNameFromTable(FallibleTArray<uint8_t>& aNameTable,
+                           nsAString& aFamilyName);
 
     // create a new name table and build a new font with that name table
     // appended on the end, returns true on success

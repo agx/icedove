@@ -23,8 +23,10 @@ using namespace mozilla::ipc;
 namespace mozilla {
 namespace net {
 
-FTPChannelParent::FTPChannelParent()
+FTPChannelParent::FTPChannelParent(nsILoadContext* aLoadContext, PBOverrideStatus aOverrideStatus)
   : mIPCClosed(false)
+  , mLoadContext(aLoadContext)
+  , mPBOverride(aOverrideStatus)
 {
   nsIProtocolHandler* handler;
   CallGetService(NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "ftp", &handler);
@@ -62,8 +64,7 @@ bool
 FTPChannelParent::RecvAsyncOpen(const URIParams& aURI,
                                 const uint64_t& aStartPos,
                                 const nsCString& aEntityID,
-                                const OptionalInputStreamParams& aUploadStream,
-                                const IPC::SerializedLoadContext& loadContext)
+                                const OptionalInputStreamParams& aUploadStream)
 {
   nsCOMPtr<nsIURI> uri = DeserializeURI(aURI);
   if (!uri)
@@ -87,7 +88,15 @@ FTPChannelParent::RecvAsyncOpen(const URIParams& aURI,
     return SendFailedAsyncOpen(rv);
 
   mChannel = static_cast<nsFtpChannel*>(chan.get());
-  
+
+  if (mPBOverride != kPBOverride_Unset) {
+    mChannel->SetPrivate(mPBOverride == kPBOverride_Private ? true : false);
+  }
+
+  rv = mChannel->SetNotificationCallbacks(this);
+  if (NS_FAILED(rv))
+    return SendFailedAsyncOpen(rv);
+
   nsCOMPtr<nsIInputStream> upload = DeserializeInputStream(aUploadStream);
   if (upload) {
     // contentType and contentLength are ignored
@@ -99,9 +108,6 @@ FTPChannelParent::RecvAsyncOpen(const URIParams& aURI,
   rv = mChannel->ResumeAt(aStartPos, aEntityID);
   if (NS_FAILED(rv))
     return SendFailedAsyncOpen(rv);
-
-  if (loadContext.IsNotNull())
-    mLoadContext = new LoadContext(loadContext);
 
   rv = mChannel->AsyncOpen(this, nullptr);
   if (NS_FAILED(rv))
@@ -161,8 +167,8 @@ FTPChannelParent::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
   LOG(("FTPChannelParent::OnStartRequest [this=%x]\n", this));
 
   nsFtpChannel* chan = static_cast<nsFtpChannel*>(aRequest);
-  int32_t aContentLength;
-  chan->GetContentLength(&aContentLength);
+  int64_t contentLength;
+  chan->GetContentLength(&contentLength);
   nsCString contentType;
   chan->GetContentType(contentType);
   nsCString entityID;
@@ -173,7 +179,7 @@ FTPChannelParent::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
   URIParams uri;
   SerializeURI(chan->URI(), uri);
 
-  if (mIPCClosed || !SendOnStartRequest(aContentLength, contentType,
+  if (mIPCClosed || !SendOnStartRequest(contentLength, contentType,
                                        lastModified, entityID, uri)) {
     return NS_ERROR_UNEXPECTED;
   }
@@ -204,7 +210,7 @@ NS_IMETHODIMP
 FTPChannelParent::OnDataAvailable(nsIRequest* aRequest,
                                   nsISupports* aContext,
                                   nsIInputStream* aInputStream,
-                                  uint32_t aOffset,
+                                  uint64_t aOffset,
                                   uint32_t aCount)
 {
   LOG(("FTPChannelParent::OnDataAvailable [this=%x]\n", this));

@@ -5,8 +5,9 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.util.GeckoEventResponder;
+import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.widget.DateTimePicker;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -20,41 +21,57 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.text.Html;
 import android.text.InputType;
+import android.text.TextUtils;
+import android.text.format.DateFormat;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemClickListener;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.CheckedTextView;
+import android.widget.DatePicker;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.TimePicker;
 
-import java.util.concurrent.SynchronousQueue;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.GregorianCalendar;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
 public class PromptService implements OnClickListener, OnCancelListener, OnItemClickListener, GeckoEventResponder {
     private static final String LOGTAG = "GeckoPromptService";
 
+    private String[] mButtons;
     private PromptInput[] mInputs;
-    private AlertDialog mDialog = null;
-    private static LayoutInflater mInflater;
+    private boolean[] mSelected;
+    private AlertDialog mDialog;
 
-    private int mGroupPaddingSize;
-    private int mLeftRightTextWithIconPadding;
-    private int mTopBottomTextWithIconPadding;
-    private int mIconTextPadding;
-    private int mIconSize;
+    private final LayoutInflater mInflater;
+    private final ConcurrentLinkedQueue<String> mPromptQueue;
+    private final int mGroupPaddingSize;
+    private final int mLeftRightTextWithIconPadding;
+    private final int mTopBottomTextWithIconPadding;
+    private final int mIconTextPadding;
+    private final int mIconSize;
+    private final int mInputPaddingSize;
+    private final int mMinRowSize;
 
     PromptService() {
         mInflater = LayoutInflater.from(GeckoApp.mAppContext);
+        mPromptQueue = new ConcurrentLinkedQueue<String>();
 
         Resources res = GeckoApp.mAppContext.getResources();
         mGroupPaddingSize = (int) (res.getDimension(R.dimen.prompt_service_group_padding_size));
@@ -62,6 +79,8 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
         mTopBottomTextWithIconPadding = (int) (res.getDimension(R.dimen.prompt_service_top_bottom_text_with_icon_padding));
         mIconTextPadding = (int) (res.getDimension(R.dimen.prompt_service_icon_text_padding));
         mIconSize = (int) (res.getDimension(R.dimen.prompt_service_icon_size));
+        mInputPaddingSize = (int) (res.getDimension(R.dimen.prompt_service_inputs_padding));
+        mMinRowSize = (int) (res.getDimension(R.dimen.prompt_service_min_list_item_height));
 
         GeckoAppShell.getEventDispatcher().registerEventListener("Prompt:Show", this);
     }
@@ -70,99 +89,192 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
         GeckoAppShell.getEventDispatcher().unregisterEventListener("Prompt:Show", this);
     }
 
-    private class PromptButton {
-        public String label = "";
-        PromptButton(JSONObject aJSONButton) {
-            try {
-                label = aJSONButton.getString("label");
-            } catch(Exception ex) { }
-        }
+    private static String formatDateString(String dateFormat, Calendar calendar) {
+        return new SimpleDateFormat(dateFormat).format(calendar.getTime());
     }
 
     private class PromptInput {
-        private String label = "";
-        private String type  = "";
-        private String hint  = "";
-        private JSONObject mJSONInput = null;
-        private View view = null;
+        private final JSONObject mJSONInput;
+
+        private final String mLabel;
+        private final String mType;
+        private final String mId;
+        private final String mHint;
+        private final boolean mAutofocus;
+        private final String mValue;
+
+        private View mView;
 
         public PromptInput(JSONObject aJSONInput) {
             mJSONInput = aJSONInput;
-            try {
-                label = aJSONInput.getString("label");
-            } catch(Exception ex) { }
-            try {
-                type  = aJSONInput.getString("type");
-            } catch(Exception ex) { }
-            try {
-                hint  = aJSONInput.getString("hint");
-            } catch(Exception ex) { }
+            mLabel = getSafeString(aJSONInput, "label");
+            mType = getSafeString(aJSONInput, "type");
+            String id = getSafeString(aJSONInput, "id");
+            mId = TextUtils.isEmpty(id) ? mType : id;
+            mHint = getSafeString(aJSONInput, "hint");
+            mValue = getSafeString(aJSONInput, "value");
+            mAutofocus = getSafeBool(aJSONInput, "autofocus");
         }
 
-        public View getView() {
-            if (type.equals("checkbox")) {
+        public View getView() throws UnsupportedOperationException {
+            if (mType.equals("checkbox")) {
                 CheckBox checkbox = new CheckBox(GeckoApp.mAppContext);
                 checkbox.setLayoutParams(new LayoutParams(LayoutParams.FILL_PARENT, LayoutParams.WRAP_CONTENT));
-                checkbox.setText(label);
+                checkbox.setText(mLabel);
+                checkbox.setChecked(getSafeBool(mJSONInput, "checked"));
+                mView = (View)checkbox;
+            } else if (mType.equals("date")) {
                 try {
-                    Boolean value = mJSONInput.getBoolean("checked");
-                    checkbox.setChecked(value);
-                } catch(Exception ex) { }
-                view = (View)checkbox;
-            } else if (type.equals("textbox") || this.type.equals("password")) {
+                    DateTimePicker input = new DateTimePicker(GeckoApp.mAppContext, "yyyy-MM-dd", mValue,
+                                                              DateTimePicker.PickersState.DATE);
+                    input.toggleCalendar(true);
+                    mView = (View)input;
+                } catch (UnsupportedOperationException ex) {
+                    // We can't use our custom version of the DatePicker widget because the sdk is too old.
+                    // But we can fallback on the native one.
+                    DatePicker input = new DatePicker(GeckoApp.mAppContext);
+                    try {
+                        if (!TextUtils.isEmpty(mValue)) {
+                            GregorianCalendar calendar = new GregorianCalendar();
+                            calendar.setTime(new SimpleDateFormat("yyyy-MM-dd").parse(mValue));
+                            input.updateDate(calendar.get(Calendar.YEAR),
+                                             calendar.get(Calendar.MONTH),
+                                             calendar.get(Calendar.DAY_OF_MONTH));
+                        }
+                    } catch (Exception e) {
+                        Log.e(LOGTAG, "error parsing format string: " + e);
+                    }
+                    mView = (View)input;
+                }
+            } else if (mType.equals("week")) {
+                DateTimePicker input = new DateTimePicker(GeckoApp.mAppContext, "yyyy-'W'ww", mValue,
+                                                          DateTimePicker.PickersState.WEEK);
+                mView = (View)input;
+            } else if (mType.equals("time")) {
+                TimePicker input = new TimePicker(GeckoApp.mAppContext);
+                input.setIs24HourView(DateFormat.is24HourFormat(GeckoApp.mAppContext));
+
+                GregorianCalendar calendar = new GregorianCalendar();
+                if (!TextUtils.isEmpty(mValue)) {
+                    try {
+                        calendar.setTime(new SimpleDateFormat("kk:mm").parse(mValue));
+                    } catch (Exception e) { }
+                }
+                input.setCurrentHour(calendar.get(GregorianCalendar.HOUR_OF_DAY));
+                input.setCurrentMinute(calendar.get(GregorianCalendar.MINUTE));
+                mView = (View)input;
+            } else if (mType.equals("datetime-local") || mType.equals("datetime")) {
+                DateTimePicker input = new DateTimePicker(GeckoApp.mAppContext, "yyyy-MM-dd kk:mm", mValue,
+                                                          DateTimePicker.PickersState.DATETIME);
+                input.toggleCalendar(true);
+                mView = (View)input;
+            } else if (mType.equals("month")) {
+                DateTimePicker input = new DateTimePicker(GeckoApp.mAppContext, "yyyy-MM", mValue,
+                                                          DateTimePicker.PickersState.MONTH);
+                mView = (View)input;
+            } else if (mType.equals("textbox") || mType.equals("password")) {
                 EditText input = new EditText(GeckoApp.mAppContext);
                 int inputtype = InputType.TYPE_CLASS_TEXT;
-                if (type.equals("password")) {
+                if (mType.equals("password")) {
                     inputtype |= InputType.TYPE_TEXT_VARIATION_PASSWORD | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
                 }
                 input.setInputType(inputtype);
+                input.setText(mValue);
 
-                try {
-                    String value = mJSONInput.getString("value");
-                    input.setText(value);
-                } catch(Exception ex) { }
-
-                if (!hint.equals("")) {
-                    input.setHint(hint);
+                if (!TextUtils.isEmpty(mHint)) {
+                    input.setHint(mHint);
                 }
-                view = (View)input;
-            } else if (type.equals("menulist")) {
+
+                if (mAutofocus) {
+                    input.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+                        @Override
+                        public void onFocusChange(View v, boolean hasFocus) {
+                            if (hasFocus) {
+                                ((InputMethodManager) GeckoApp.mAppContext.getSystemService(Context.INPUT_METHOD_SERVICE)).showSoftInput(v, 0);
+                            }
+                        }
+                    });
+                    input.requestFocus();
+                }
+
+                mView = (View)input;
+            } else if (mType.equals("menulist")) {
                 Spinner spinner = new Spinner(GeckoApp.mAppContext);
                 try {
                     String[] listitems = getStringArray(mJSONInput, "values");
                     if (listitems.length > 0) {
-                        ArrayAdapter<String> adapter = new ArrayAdapter<String>(GeckoApp.mAppContext, android.R.layout.simple_dropdown_item_1line, listitems);
+                        ArrayAdapter<String> adapter = new ArrayAdapter<String>(GeckoApp.mAppContext, R.layout.simple_dropdown_item_1line, listitems);
                         spinner.setAdapter(adapter);
+                        int selectedIndex = getSafeInt(mJSONInput, "selected");
+                        spinner.setSelection(selectedIndex);
                     }
                 } catch(Exception ex) { }
-                view = (View)spinner;
+                mView = (View)spinner;
+            } else if (mType.equals("label")) {
+                // not really an input, but a way to add labels and such to the dialog
+                TextView view = new TextView(GeckoApp.mAppContext);
+                view.setText(Html.fromHtml(mLabel));
+                mView = view;
             }
-            return view;
+            return mView;
         }
 
-        public String getName() {
-            return type;
+        public String getId() {
+            return mId;
         }
-    
+
         public String getValue() {
-            if (this.type.equals("checkbox")) {
-                CheckBox checkbox = (CheckBox)view;
+            if (mType.equals("checkbox")) {
+                CheckBox checkbox = (CheckBox)mView;
                 return checkbox.isChecked() ? "true" : "false";
-            } else if (type.equals("textbox") || type.equals("password")) {
-                EditText edit = (EditText)view;
+            } else if (mType.equals("textbox") || mType.equals("password")) {
+                EditText edit = (EditText)mView;
                 return edit.getText().toString();
-            } else if (type.equals("menulist")) {
-                Spinner spinner = (Spinner)view;
+            } else if (mType.equals("menulist")) {
+                Spinner spinner = (Spinner)mView;
                 return Integer.toString(spinner.getSelectedItemPosition());
+            } else if (mType.equals("time")) {
+                TimePicker tp = (TimePicker)mView;
+                GregorianCalendar calendar =
+                    new GregorianCalendar(0,0,0,tp.getCurrentHour(),tp.getCurrentMinute());
+                return formatDateString("kk:mm",calendar);
+            } else if (mType.equals("label")) {
+                return "";
+            } else if (android.os.Build.VERSION.SDK_INT < 11 && mType.equals("date")) {
+                // We can't use the custom DateTimePicker with a sdk older than 11.
+                // Fallback on the native DatePicker.
+                DatePicker dp = (DatePicker)mView;
+                GregorianCalendar calendar =
+                    new GregorianCalendar(dp.getYear(),dp.getMonth(),dp.getDayOfMonth());
+                return formatDateString("yyyy-MM-dd",calendar);
+            } else {
+                DateTimePicker dp = (DateTimePicker)mView;
+                GregorianCalendar calendar = new GregorianCalendar();
+                calendar.setTimeInMillis(dp.getTimeInMillis());
+                if (mType.equals("date")) {
+                    return formatDateString("yyyy-MM-dd",calendar);
+                } else if (mType.equals("week")) {
+                    return formatDateString("yyyy-'W'ww",calendar);
+                } else if (mType.equals("datetime-local")) {
+                    return formatDateString("yyyy-MM-dd kk:mm",calendar);
+                } else if (mType.equals("datetime")) {
+                    calendar.set(GregorianCalendar.ZONE_OFFSET,0);
+                    calendar.setTimeInMillis(dp.getTimeInMillis());
+                    return formatDateString("yyyy-MM-dd kk:mm",calendar);
+                } else if (mType.equals("month")) {
+                    return formatDateString("yyyy-MM",calendar);
+                }
             }
             return "";
         }
     }
 
     // GeckoEventListener implementation
+    @Override
     public void handleMessage(String event, final JSONObject message) {
         // The dialog must be created on the UI thread.
-        GeckoAppShell.getMainHandler().post(new Runnable() {
+        ThreadUtils.postToUiThread(new Runnable() {
+            @Override
             public void run() {
                 processMessage(message);
             }
@@ -170,40 +282,45 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
     }
 
     // GeckoEventResponder implementation
+    @Override
     public String getResponse() {
         // we only handle one kind of message in handleMessage, and this is the
         // response we provide for that message
-        String promptServiceResult = "";
-        try {
-            promptServiceResult = waitForReturn();
-        } catch (InterruptedException e) {
-            Log.i(LOGTAG, "showing prompt ",  e);
+        String result;
+        while (null == (result = mPromptQueue.poll())) {
+            GeckoAppShell.processNextNativeEvent(true);
         }
-        return promptServiceResult;
+        return result;
     }
 
-    public void show(String aTitle, String aText, PromptButton[] aButtons, PromptListItem[] aMenuList, boolean aMultipleSelection) {
-        final LayerView layerView = GeckoApp.mAppContext.getLayerView();
-        // treat actions that show a dialog as if preventDefault by content to prevent panning
-        layerView.abortPanning();
+    private View applyInputStyle(View view) {
+        view.setPadding(mInputPaddingSize, 0, mInputPaddingSize, 0);
+        return view;
+    }
 
-        final AlertDialog.Builder builder = new AlertDialog.Builder(GeckoApp.mAppContext);
-        if (!aTitle.equals("")) {
+    public void show(String aTitle, String aText, PromptListItem[] aMenuList, boolean aMultipleSelection) {
+        ThreadUtils.assertOnUiThread();
+
+        // treat actions that show a dialog as if preventDefault by content to prevent panning
+        GeckoApp.mAppContext.getLayerView().abortPanning();
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(GeckoApp.mAppContext);
+        if (!TextUtils.isEmpty(aTitle)) {
             builder.setTitle(aTitle);
         }
 
-        if (!aText.equals("")) {
+        if (!TextUtils.isEmpty(aText)) {
             builder.setMessage(aText);
         }
 
         int length = mInputs == null ? 0 : mInputs.length;
         if (aMenuList != null && aMenuList.length > 0) {
-            int resourceId = android.R.layout.select_dialog_item;
+            int resourceId = android.R.layout.simple_list_item_1;
             if (mSelected != null && mSelected.length > 0) {
                 if (aMultipleSelection) {
-                    resourceId = android.R.layout.select_dialog_multichoice;
+                    resourceId = R.layout.select_dialog_multichoice;
                 } else {
-                    resourceId = android.R.layout.select_dialog_singlechoice;
+                    resourceId = R.layout.select_dialog_singlechoice;
                 }
             }
             PromptListAdapter adapter = new PromptListAdapter(GeckoApp.mAppContext, resourceId, aMenuList);
@@ -231,26 +348,44 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
                 mSelected = null;
             }
         } else if (length == 1) {
-            builder.setView(mInputs[0].getView());
-        } else if (length > 1) {
-            LinearLayout linearLayout = new LinearLayout(GeckoApp.mAppContext);
-            linearLayout.setOrientation(LinearLayout.VERTICAL);
-            for (int i = 0; i < length; i++) {
-                View content = mInputs[i].getView();
-                linearLayout.addView(content);
+            try {
+                ScrollView view = new ScrollView(GeckoApp.mAppContext);
+                view.addView(mInputs[0].getView());
+                builder.setView(applyInputStyle(view));
+            } catch(UnsupportedOperationException ex) {
+                // We cannot display these input widgets with this sdk version,
+                // do not display any dialog and finish the prompt now.
+                finishDialog("{\"button\": -1}");
+                return;
             }
-            builder.setView((View)linearLayout);
+        } else if (length > 1) {
+            try {
+                LinearLayout linearLayout = new LinearLayout(GeckoApp.mAppContext);
+                linearLayout.setOrientation(LinearLayout.VERTICAL);
+                for (int i = 0; i < length; i++) {
+                    View content = mInputs[i].getView();
+                    linearLayout.addView(content);
+                }
+                ScrollView view = new ScrollView(GeckoApp.mAppContext);
+                view.addView(linearLayout);
+                builder.setView(applyInputStyle(view));
+            } catch(UnsupportedOperationException ex) {
+                // We cannot display these input widgets with this sdk version,
+                // do not display any dialog and finish the prompt now.
+                finishDialog("{\"button\": -1}");
+                return;
+            }
         }
 
-        length = aButtons == null ? 0 : aButtons.length;
+        length = mButtons == null ? 0 : mButtons.length;
         if (length > 0) {
-            builder.setPositiveButton(aButtons[0].label, this);
-        }
-        if (length > 1) {
-            builder.setNeutralButton(aButtons[1].label, this);
-        }
-        if (length > 2) {
-            builder.setNegativeButton(aButtons[2].label, this);
+            builder.setPositiveButton(mButtons[0], this);
+            if (length > 1) {
+                builder.setNeutralButton(mButtons[1], this);
+                if (length > 2) {
+                    builder.setNegativeButton(mButtons[2], this);
+                }
+            }
         }
 
         mDialog = builder.create();
@@ -258,7 +393,9 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
         mDialog.show();
     }
 
+    @Override
     public void onClick(DialogInterface aDialog, int aWhich) {
+        ThreadUtils.assertOnUiThread();
         JSONObject ret = new JSONObject();
         try {
             int button = -1;
@@ -284,7 +421,7 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
             }
             if (mInputs != null) {
                 for (int i = 0; i < mInputs.length; i++) {
-                    ret.put(mInputs[i].getName(), mInputs[i].getValue());
+                    ret.put(mInputs[i].getId(), mInputs[i].getValue());
                 }
             }
         } catch(Exception ex) {
@@ -298,12 +435,15 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
         finishDialog(ret.toString());
     }
 
-    private boolean[] mSelected = null;
+    @Override
     public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+        ThreadUtils.assertOnUiThread();
         mSelected[position] = !mSelected[position];
     }
 
+    @Override
     public void onCancel(DialogInterface aDialog) {
+        ThreadUtils.assertOnUiThread();
         JSONObject ret = new JSONObject();
         try {
             ret.put("button", -1);
@@ -311,56 +451,25 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
         finishDialog(ret.toString());
     }
 
-    static SynchronousQueue<String> mPromptQueue = new SynchronousQueue<String>();
-
-    static public String waitForReturn() throws InterruptedException {
-        String value;
-
-        while (null == (value = mPromptQueue.poll(1, TimeUnit.MILLISECONDS))) {
-            GeckoAppShell.processNextNativeEvent();
-        }
-
-        return value;
-    }
-
     public void finishDialog(String aReturn) {
         mInputs = null;
+        mButtons = null;
         mDialog = null;
         mSelected = null;
-        try {
-            mPromptQueue.put(aReturn);
-        } catch(Exception ex) { }
+        mPromptQueue.offer(aReturn);
+        // poke the Gecko thread in case it's waiting for new events
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createNoOpEvent());
     }
 
     private void processMessage(JSONObject geckoObject) {
-        String title = "";
-        try {
-            title = geckoObject.getString("title");
-        } catch(Exception ex) { }
-        String text = "";
-        try {
-            text = geckoObject.getString("text");
-        } catch(Exception ex) { }
+        String title = getSafeString(geckoObject, "title");
+        String text = getSafeString(geckoObject, "text");
 
-        JSONArray buttons = new JSONArray();
-        try {
-            buttons = geckoObject.getJSONArray("buttons");
-        } catch(Exception ex) { }
-        int length = buttons.length();
-        PromptButton[] promptbuttons = new PromptButton[length];
-        for (int i = 0; i < length; i++) {
-            try {
-                promptbuttons[i] = new PromptButton(buttons.getJSONObject(i));
-            } catch(Exception ex) { }
-        }
+        mButtons = getStringArray(geckoObject, "buttons");
 
-        JSONArray inputs = new JSONArray();
-        try {
-            inputs = geckoObject.getJSONArray("inputs");
-        } catch(Exception ex) { }
-        length = inputs.length();
-        mInputs = new PromptInput[length];
-        for (int i = 0; i < length; i++) {
+        JSONArray inputs = getSafeArray(geckoObject, "inputs");
+        mInputs = new PromptInput[inputs.length()];
+        for (int i = 0; i < mInputs.length; i++) {
             try {
                 mInputs[i] = new PromptInput(inputs.getJSONObject(i));
             } catch(Exception ex) { }
@@ -368,18 +477,44 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
 
         PromptListItem[] menuitems = getListItemArray(geckoObject, "listitems");
         mSelected = getBooleanArray(geckoObject, "selected");
-        boolean multiple = false;
+        boolean multiple = getSafeBool(geckoObject, "multiple");
+        show(title, text, menuitems, multiple);
+    }
+
+    private static String getSafeString(JSONObject json, String key) {
         try {
-            multiple = geckoObject.getBoolean("multiple");
-        } catch(Exception ex) { }
-        show(title, text, promptbuttons, menuitems, multiple);
+            return json.getString(key);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static JSONArray getSafeArray(JSONObject json, String key) {
+        try {
+            return json.getJSONArray(key);
+        } catch (Exception e) {
+            return new JSONArray();
+        }
+    }
+
+    private static boolean getSafeBool(JSONObject json, String key) {
+        try {
+            return json.getBoolean(key);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static int getSafeInt(JSONObject json, String key ) {
+        try {
+            return json.getInt(key);
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private String[] getStringArray(JSONObject aObject, String aName) {
-        JSONArray items = new JSONArray();
-        try {
-            items = aObject.getJSONArray(aName);
-        } catch(Exception ex) { }
+        JSONArray items = getSafeArray(aObject, aName);
         int length = items.length();
         String[] list = new String[length];
         for (int i = 0; i < length; i++) {
@@ -406,10 +541,7 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
     }
 
     private PromptListItem[] getListItemArray(JSONObject aObject, String aName) {
-        JSONArray items = new JSONArray();
-        try {
-            items = aObject.getJSONArray(aName);
-        } catch(Exception ex) { }
+        JSONArray items = getSafeArray(aObject, aName);
         int length = items.length();
         PromptListItem[] list = new PromptListItem[length];
         for (int i = 0; i < length; i++) {
@@ -420,26 +552,33 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
         return list;
     }
 
-    static public class PromptListItem {
-        public String label = "";
-        public boolean isGroup = false;
-        public boolean inGroup = false;
-        public boolean disabled = false;
-        public int id = 0;
+    public static class PromptListItem {
+        public final String label;
+        public final boolean isGroup;
+        public final boolean inGroup;
+        public final boolean disabled;
+        public final int id;
+        public final boolean isParent;
 
         // This member can't be accessible from JS, see bug 733749.
-        public Drawable icon = null;
+        public Drawable icon;
 
         PromptListItem(JSONObject aObject) {
-            try { label = aObject.getString("label"); } catch(Exception ex) { }
-            try { isGroup = aObject.getBoolean("isGroup"); } catch(Exception ex) { }
-            try { inGroup = aObject.getBoolean("inGroup"); } catch(Exception ex) { }
-            try { disabled = aObject.getBoolean("disabled"); } catch(Exception ex) { }
-            try { id = aObject.getInt("id"); } catch(Exception ex) { }
+            label = getSafeString(aObject, "label");
+            isGroup = getSafeBool(aObject, "isGroup");
+            inGroup = getSafeBool(aObject, "inGroup");
+            disabled = getSafeBool(aObject, "disabled");
+            id = getSafeInt(aObject, "id");
+            isParent = getSafeBool(aObject, "isParent");
         }
 
         public PromptListItem(String aLabel) {
             label = aLabel;
+            isGroup = false;
+            inGroup = false;
+            disabled = false;
+            id = 0;
+            isParent = false;
         }
     }
 
@@ -448,12 +587,15 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
         private static final int VIEW_TYPE_GROUP = 1;
         private static final int VIEW_TYPE_COUNT = 2;
 
-        public ListView listView = null;
-    	private int mResourceId = -1;
-    	PromptListAdapter(Context context, int textViewResourceId, PromptListItem[] objects) {
+        public ListView listView;
+        private int mResourceId = -1;
+        private Drawable mBlankDrawable = null;
+        private Drawable mMoreDrawable = null;
+
+        PromptListAdapter(Context context, int textViewResourceId, PromptListItem[] objects) {
             super(context, textViewResourceId, objects);
             mResourceId = textViewResourceId;
-    	}
+        }
 
         @Override
         public int getItemViewType(int position) {
@@ -466,54 +608,69 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
             return VIEW_TYPE_COUNT;
         }
 
+        private Drawable getMoreDrawable(Resources res) {
+            if (mMoreDrawable == null) {
+                mMoreDrawable = res.getDrawable(android.R.drawable.ic_menu_more);
+            }
+            return mMoreDrawable;
+        }
+
+        private Drawable getBlankDrawable(Resources res) {
+            if (mBlankDrawable == null) {
+                mBlankDrawable = res.getDrawable(R.drawable.blank);
+            }
+            return mBlankDrawable;
+        }
+
         private void maybeUpdateIcon(PromptListItem item, TextView t) {
-            if (item.icon == null)
+            if (item.icon == null && !item.inGroup && !item.isParent) {
+                t.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null);
                 return;
+            }
 
+            Drawable d = null;
             Resources res = GeckoApp.mAppContext.getResources();
-
-            // Set padding inside the item.
-            t.setPadding(item.inGroup ? mLeftRightTextWithIconPadding + mGroupPaddingSize :
-                                        mLeftRightTextWithIconPadding,
-                         mTopBottomTextWithIconPadding,
-                         mLeftRightTextWithIconPadding,
-                         mTopBottomTextWithIconPadding);
-
             // Set the padding between the icon and the text.
             t.setCompoundDrawablePadding(mIconTextPadding);
+            if (item.icon != null) {
+                // We want the icon to be of a specific size. Some do not
+                // follow this rule so we have to resize them.
+                Bitmap bitmap = ((BitmapDrawable) item.icon).getBitmap();
+                d = new BitmapDrawable(Bitmap.createScaledBitmap(bitmap, mIconSize, mIconSize, true));
+            } else if (item.inGroup) {
+                // We don't currently support "indenting" items with icons
+                d = getBlankDrawable(res);
+            }
 
-            // We want the icon to be of a specific size. Some do not
-            // follow this rule so we have to resize them.
-            Bitmap bitmap = ((BitmapDrawable) item.icon).getBitmap();
-            Drawable d = new BitmapDrawable(Bitmap.createScaledBitmap(bitmap, mIconSize, mIconSize, true));
+            Drawable moreDrawable = null;
+            if (item.isParent) {
+                moreDrawable = getMoreDrawable(res);
+            }
 
-            t.setCompoundDrawablesWithIntrinsicBounds(d, null, null, null);
+            if (d != null || moreDrawable != null) {
+                t.setCompoundDrawablesWithIntrinsicBounds(d, null, moreDrawable, null);
+            }
         }
 
         private void maybeUpdateCheckedState(int position, PromptListItem item, ViewHolder viewHolder) {
-            if (item.isGroup || mSelected == null)
+            viewHolder.textView.setEnabled(!item.disabled && !item.isGroup);
+            viewHolder.textView.setClickable(item.isGroup || item.disabled);
+
+            if (mSelected == null)
                 return;
 
             CheckedTextView ct;
             try {
                 ct = (CheckedTextView) viewHolder.textView;
+                // Apparently just using ct.setChecked(true) doesn't work, so this
+                // is stolen from the android source code as a way to set the checked
+                // state of these items
+                if (listView != null)
+                    listView.setItemChecked(position, mSelected[position]);
             } catch (Exception e) {
                 return;
             }
 
-            ct.setEnabled(!item.disabled);
-            ct.setClickable(item.disabled);
-
-            // Apparently just using ct.setChecked(true) doesn't work, so this
-            // is stolen from the android source code as a way to set the checked
-            // state of these items
-            if (listView != null)
-                listView.setItemChecked(position, mSelected[position]);
-
-            ct.setPadding((item.inGroup ? mGroupPaddingSize : viewHolder.paddingLeft),
-                          viewHolder.paddingTop,
-                          viewHolder.paddingRight,
-                          viewHolder.paddingBottom);
         }
 
         @Override
@@ -528,14 +685,11 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
                 }
 
                 convertView = mInflater.inflate(resourceId, null);
+                convertView.setMinimumHeight(mMinRowSize);
 
-                viewHolder = new ViewHolder();
-                viewHolder.textView = (TextView) convertView.findViewById(android.R.id.text1);
-
-                viewHolder.paddingLeft = viewHolder.textView.getPaddingLeft();
-                viewHolder.paddingRight = viewHolder.textView.getPaddingRight();
-                viewHolder.paddingTop = viewHolder.textView.getPaddingTop();
-                viewHolder.paddingBottom = viewHolder.textView.getPaddingBottom();
+                TextView tv = (TextView) convertView.findViewById(android.R.id.text1);
+                viewHolder = new ViewHolder(tv, tv.getPaddingLeft(), tv.getPaddingRight(),
+                                            tv.getPaddingTop(), tv.getPaddingBottom());
 
                 convertView.setTag(viewHolder);
             } else {
@@ -550,11 +704,19 @@ public class PromptService implements OnClickListener, OnCancelListener, OnItemC
         }
 
         private class ViewHolder {
-            public TextView textView;
-            public int paddingLeft;
-            public int paddingRight;
-            public int paddingTop;
-            public int paddingBottom;
+            public final TextView textView;
+            public final int paddingLeft;
+            public final int paddingRight;
+            public final int paddingTop;
+            public final int paddingBottom;
+
+            ViewHolder(TextView aTextView, int aLeft, int aRight, int aTop, int aBottom) {
+                textView = aTextView;
+                paddingLeft = aLeft;
+                paddingRight = aRight;
+                paddingTop = aTop;
+                paddingBottom = aBottom;
+            }
         }
     }
 }

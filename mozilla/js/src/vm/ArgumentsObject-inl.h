@@ -1,6 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=78:
- *
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -73,7 +72,7 @@ ArgumentsObject::element(uint32_t i) const
     const Value &v = data()->args[i];
     if (v.isMagic(JS_FORWARD_TO_CALL_OBJECT)) {
         CallObject &callobj = getFixedSlot(MAYBE_CALL_SLOT).toObject().asCall();
-        for (AliasedFormalIter fi(callobj.callee().script()); ; fi++) {
+        for (AliasedFormalIter fi(callobj.callee().nonLazyScript()); ; fi++) {
             if (fi.frameIndex() == i)
                 return callobj.aliasedVar(fi);
         }
@@ -88,7 +87,7 @@ ArgumentsObject::setElement(uint32_t i, const Value &v)
     HeapValue &lhs = data()->args[i];
     if (lhs.isMagic(JS_FORWARD_TO_CALL_OBJECT)) {
         CallObject &callobj = getFixedSlot(MAYBE_CALL_SLOT).toObject().asCall();
-        for (AliasedFormalIter fi(callobj.callee().script()); ; fi++) {
+        for (AliasedFormalIter fi(callobj.callee().nonLazyScript()); ; fi++) {
             if (fi.frameIndex() == i) {
                 callobj.setAliasedVar(fi, v);
                 return;
@@ -157,7 +156,7 @@ NormalArgumentsObject::callee() const
 inline void
 NormalArgumentsObject::clearCallee()
 {
-    data()->callee.set(compartment(), MagicValue(JS_OVERWRITTEN_CALLEE));
+    data()->callee.set(zone(), MagicValue(JS_OVERWRITTEN_CALLEE));
 }
 
 } /* namespace js */

@@ -234,11 +234,13 @@ imIncomingServer.prototype = {
       get abbreviatedName() this.server.prettyName + "abbreviatedName",
       AddFolderListener: function() {},
       RemoveFolderListener: function() {},
-      ListDescendents: function(descendents) {},
+      descendants: Components.classes["@mozilla.org/array;1"]
+                  .createInstance(Components.interfaces.nsIArray),
+      ListDescendants: function(descendants) {},
       getFolderWithFlags: function(aFlags) null,
       getFoldersWithFlags: function(aFlags)
         Components.classes["@mozilla.org/array;1"]
-                  .createInstance(Components.interfaces.nsIMutableArray),
+                  .createInstance(Components.interfaces.nsIArray),
       get subFolders() EmptyEnumerator,
       getStringProperty: function(aPropertyName) "",
       getNumUnread: function(aDeep) 0,
@@ -246,6 +248,8 @@ imIncomingServer.prototype = {
       QueryInterface: XPCOMUtils.generateQI([Ci.nsIMsgFolder])
     });
   },
+
+  get sortOrder() 300000000,
 
   classDescription: "IM Msg Incoming Server implementation",
   classID: Components.ID("{9dd7f36b-5960-4f0a-8789-f5f516bd083d}"),

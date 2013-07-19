@@ -107,7 +107,7 @@ private:
 
   nsresult
   WriteOrAppend(const jsval& aValue, JSContext* aCx,
-                nsIDOMFileRequest** _retval, bool aAppend);
+                nsISupports** _retval, bool aAppend);
 
   nsresult
   Finish();
@@ -118,10 +118,6 @@ private:
   RequestMode mRequestMode;
   uint64_t mLocation;
   uint32_t mPendingRequests;
-
-  NS_DECL_EVENT_HANDLER(complete)
-  NS_DECL_EVENT_HANDLER(abort)
-  NS_DECL_EVENT_HANDLER(error)
 
   nsTArray<nsCOMPtr<nsISupports> > mParallelStreams;
   nsCOMPtr<nsISupports> mStream;

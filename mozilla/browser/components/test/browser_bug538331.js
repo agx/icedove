@@ -107,7 +107,7 @@ const BCH_TESTS = [
 var gOriginalMStone;
 var gOriginalOverrideURL;
 
-__defineGetter__("gBG", function() {
+this.__defineGetter__("gBG", function() {
   delete this.gBG;
   return this.gBG = Cc["@mozilla.org/browser/browserglue;1"].
                     getService(Ci.nsIBrowserGlue).
@@ -412,10 +412,9 @@ function writeUpdatesToXMLFile(aText)
   const MODE_CREATE   = 0x08;
   const MODE_TRUNCATE = 0x20;
 
-  const kIsWin = (navigator.platform.indexOf("Win") == 0);
   let file = Cc["@mozilla.org/file/directory_service;1"].
              getService(Ci.nsIProperties).
-             get(kIsWin ? "UpdRootD" : "XCurProcD", Ci.nsIFile);
+             get("UpdRootD", Ci.nsIFile);
   file.append("updates.xml");
   let fos = Cc["@mozilla.org/network/file-output-stream;1"].
             createInstance(Ci.nsIFileOutputStream);

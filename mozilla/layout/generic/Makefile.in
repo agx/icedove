@@ -9,46 +9,11 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-TEST_DIRS += test
-
-MODULE		= layout
 LIBRARY_NAME	= gkgeneric_s
 LIBXUL_LIBRARY	= 1
-
-
-
-EXPORTS		= \
-		nsQueryFrame.h \
-		nsFrameIdList.h \
-		nsFrameList.h \
-		nsCanvasFrame.h \
-		nsHTMLParts.h \
-		nsHTMLReflowMetrics.h \
-		nsHTMLReflowState.h \
-		nsIAnonymousContentCreator.h \
-		nsIFrame.h \
-		nsIFrameUtil.h \
-		nsILineIterator.h \
-		nsIObjectFrame.h \
-		nsIPageSequenceFrame.h \
-		nsIScrollableFrame.h \
-		ScrollbarActivity.h \
-		nsIStatefulFrame.h \
-		nsFrameSelection.h \
-		nsSubDocumentFrame.h \
-		Selection.h \
-		nsObjectFrame.h \
-		$(NULL)
-
-EXPORTS_NAMESPACES = mozilla/layout mozilla
-
-EXPORTS_mozilla/layout = \
-		FrameChildList.h \
-		$(NULL)
-
-EXPORTS_mozilla = \
-		Selection.h \
-		$(NULL)
+ifndef _MSC_VER
+FAIL_ON_WARNINGS = 1
+endif # !_MSC_VER
 
 CPPSRCS		= \
 		FrameChildList.cpp \
@@ -93,17 +58,12 @@ CPPSRCS		= \
 		TextOverflow.cpp \
 		nsTextRunTransformations.cpp \
 		nsViewportFrame.cpp \
+		nsVideoFrame.cpp \
 		$(NULL)
 
 ifdef MOZ_FLEXBOX
 CPPSRCS		+= \
 		nsFlexContainerFrame.cpp \
-		$(NULL)
-endif
-
-ifdef MOZ_MEDIA
-CPPSRCS		+= \
-		nsVideoFrame.cpp \
 		$(NULL)
 endif
 
@@ -135,7 +95,7 @@ LOCAL_INCLUDES += \
 		-I$(srcdir)/../../content/html/content/src \
 		-I$(srcdir)/../../dom/base \
 		-I$(srcdir)/../../dom/plugins/base \
-		-I$(srcdir)/../svg/base/src \
+		-I$(srcdir)/../svg \
 		$(MOZ_CAIRO_CFLAGS) \
 		$(MOZ_PIXMAN_CFLAGS) \
 		$(NULL)

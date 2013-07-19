@@ -7,7 +7,6 @@
 #ifndef mozilla_dom_file_domarchiverequest_h__
 #define mozilla_dom_file_domarchiverequest_h__
 
-#include "nsIDOMArchiveRequest.h"
 #include "ArchiveReader.h"
 #include "DOMRequest.h"
 
@@ -16,15 +15,25 @@
 
 BEGIN_FILE_NAMESPACE
 
-class ArchiveRequest : public mozilla::dom::DOMRequest,
-                       public nsIDOMArchiveRequest
+/**
+ * This is the ArchiveRequest that handles any operation
+ * related to ArchiveReader
+ */
+class ArchiveRequest : public mozilla::dom::DOMRequest
 {
 public:
-  NS_DECL_ISUPPORTS
-  NS_DECL_NSIDOMARCHIVEREQUEST
+  static bool PrefEnabled()
+  {
+    return ArchiveReader::PrefEnabled();
+  }
 
-  NS_FORWARD_NSIDOMDOMREQUEST(DOMRequest::)
-  NS_FORWARD_NSIDOMEVENTTARGET_NOPREHANDLEEVENT(DOMRequest::)
+  virtual JSObject* WrapObject(JSContext* aCx,
+                               JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
+
+  ArchiveReader* Reader() const;
+
+  NS_DECL_ISUPPORTS_INHERITED
+
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(ArchiveRequest, DOMRequest)
 
   ArchiveRequest(nsIDOMWindow* aWindow,
@@ -40,6 +49,7 @@ public:
   // Set the types for this request
   void OpGetFilenames();
   void OpGetFile(const nsAString& aFilename);
+  void OpGetFiles();
 
   nsresult ReaderReady(nsTArray<nsCOMPtr<nsIDOMFile> >& aFileList,
                        nsresult aStatus);
@@ -52,11 +62,14 @@ private:
   ~ArchiveRequest();
 
   nsresult GetFilenamesResult(JSContext* aCx,
-                              jsval* aValue,
+                              JS::Value* aValue,
                               nsTArray<nsCOMPtr<nsIDOMFile> >& aFileList);
   nsresult GetFileResult(JSContext* aCx,
-                         jsval* aValue,
+                         JS::Value* aValue,
                          nsTArray<nsCOMPtr<nsIDOMFile> >& aFileList);
+  nsresult GetFilesResult(JSContext* aCx,
+                          JS::Value* aValue,
+                          nsTArray<nsCOMPtr<nsIDOMFile> >& aFileList);
 
 protected:
   // The reader:
@@ -65,7 +78,8 @@ protected:
   // The operation:
   enum {
     GetFilenames,
-    GetFile
+    GetFile,
+    GetFiles
   } mOperation;
 
   // The filename (needed by GetFile):

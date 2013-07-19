@@ -13,12 +13,29 @@ const INCLUDE_DESC = 0x01;
 const INCLUDE_NAME = 0x02;
 const INCLUDE_CUSTOM = 0x04;
 
+const UTTERANCE_DESC_FIRST = 0;
+
+// Read and observe changes to a setting for utterance order.
+let gUtteranceOrder;
+let prefsBranch = Cc['@mozilla.org/preferences-service;1']
+  .getService(Ci.nsIPrefService).getBranch('accessibility.accessfu.');
+let observeUtterance = function observeUtterance(aSubject, aTopic, aData) {
+  try {
+    gUtteranceOrder = prefsBranch.getIntPref('utterance');
+  } catch (x) {
+    gUtteranceOrder = UTTERANCE_DESC_FIRST;
+  }
+};
+// Set initial gUtteranceOrder.
+observeUtterance();
+prefsBranch.addObserver('utterance', observeUtterance, false);
+
 var gStringBundle = Cc['@mozilla.org/intl/stringbundle;1'].
   getService(Ci.nsIStringBundleService).
   createBundle('chrome://global/locale/AccessFu.properties');
 
 
-var EXPORTED_SYMBOLS = ['UtteranceGenerator'];
+this.EXPORTED_SYMBOLS = ['UtteranceGenerator'];
 
 Cu.import('resource://gre/modules/accessibility/Utils.jsm');
 
@@ -38,7 +55,7 @@ Cu.import('resource://gre/modules/accessibility/Utils.jsm');
  * clicked event. Speaking only 'clicked' makes sense. Speaking 'button' does
  * not.
  */
-var UtteranceGenerator = {
+this.UtteranceGenerator = {
   gActionMap: {
     jump: 'jumpAction',
     press: 'pressAction',
@@ -53,6 +70,35 @@ var UtteranceGenerator = {
     expand: 'expandAction',
     activate: 'activateAction',
     cycle: 'cycleAction'
+  },
+
+  /**
+   * Generates an utterance for a PivotContext.
+   * @param {PivotContext} aContext object that generates and caches
+   *    context information for a given accessible and its relationship with
+   *    another accessible.
+   * @return {Array} An array of strings. Depending on the utterance order,
+   *    the strings describe the context for an accessible object either
+   *    starting from the accessible's ancestry or accessible's subtree.
+   */
+  genForContext: function genForContext(aContext) {
+    let utterance = [];
+    let addUtterance = function addUtterance(aAccessible) {
+      utterance.push.apply(utterance,
+        UtteranceGenerator.genForObject(aAccessible));
+    };
+
+    if (gUtteranceOrder === UTTERANCE_DESC_FIRST) {
+      aContext.newAncestry.forEach(addUtterance);
+      addUtterance(aContext.accessible);
+      aContext.subtreePreorder.forEach(addUtterance);
+    } else {
+      aContext.subtreePostorder.forEach(addUtterance);
+      addUtterance(aContext.accessible);
+      aContext.newAncestry.reverse().forEach(addUtterance);
+    }
+
+    return utterance;
   },
 
 
@@ -95,6 +141,20 @@ var UtteranceGenerator = {
    */
   genForAction: function genForAction(aObject, aActionName) {
     return [gStringBundle.GetStringFromName(this.gActionMap[aActionName])];
+  },
+
+  /**
+   * Generates an utterance for an announcement. Basically attempts to localize
+   * the announcement string.
+   * @param {string} aAnnouncement unlocalized announcement.
+   * @return {Array} A one string array with the announcement.
+   */
+  genForAnnouncement: function genForAnnouncement(aAnnouncement) {
+    try {
+      return [gStringBundle.GetStringFromName(aAnnouncement)];
+    } catch (x) {
+      return [aAnnouncement];
+    }
   },
 
   /**
@@ -147,6 +207,7 @@ var UtteranceGenerator = {
     'toolbar': INCLUDE_DESC,
     'table': INCLUDE_DESC | INCLUDE_NAME,
     'link': INCLUDE_DESC,
+    'list': INCLUDE_DESC | INCLUDE_NAME,
     'listitem': INCLUDE_DESC,
     'outline': INCLUDE_DESC,
     'outlineitem': INCLUDE_DESC,
@@ -183,7 +244,8 @@ var UtteranceGenerator = {
     'combobox option': INCLUDE_DESC,
     'image map': INCLUDE_DESC,
     'option': INCLUDE_DESC,
-    'listbox': INCLUDE_DESC},
+    'listbox': INCLUDE_DESC,
+    'definitionlist': INCLUDE_DESC | INCLUDE_NAME},
 
   objectUtteranceFunctions: {
     defaultFunc: function defaultFunc(aAccessible, aRoleStr, aStates, aFlags) {
@@ -197,9 +259,7 @@ var UtteranceGenerator = {
         utterance.push(desc.join(' '));
       }
 
-      let name = (aFlags & INCLUDE_NAME) ? (aAccessible.name || '') : '';
-      if (name)
-        utterance.push(name);
+      this._addName(utterance, aAccessible, aFlags);
 
       return utterance;
     },
@@ -213,40 +273,62 @@ var UtteranceGenerator = {
 
       utterance.push(desc.join(' '));
 
-      let name = (aFlags & INCLUDE_NAME) ? (aAccessible.name || '') : '';
-      if (name)
-        utterance.push(name);
+      this._addName(utterance, aAccessible, aFlags);
 
       return utterance;
     },
 
     heading: function heading(aAccessible, aRoleStr, aStates, aFlags) {
-      let name = (aFlags & INCLUDE_NAME) ? (aAccessible.name || '') : '';
       let level = {};
       aAccessible.groupPosition(level, {}, {});
       let utterance =
         [gStringBundle.formatStringFromName('headingLevel', [level.value], 1)];
 
-      if (name)
-        utterance.push(name);
+      this._addName(utterance, aAccessible, aFlags);
 
       return utterance;
     },
 
     listitem: function listitem(aAccessible, aRoleStr, aStates, aFlags) {
-      let name = (aFlags & INCLUDE_NAME) ? (aAccessible.name || '') : '';
-      let localizedRole = this._getLocalizedRole(aRoleStr);
       let itemno = {};
       let itemof = {};
       aAccessible.groupPosition({}, itemof, itemno);
-      let utterance =
-        [gStringBundle.formatStringFromName(
-           'objItemOf', [localizedRole, itemno.value, itemof.value], 3)];
+      let utterance = [];
+      if (itemno.value == 1) // Start of list
+        utterance.push(gStringBundle.GetStringFromName('listStart'));
+      else if (itemno.value == itemof.value) // last item
+        utterance.push(gStringBundle.GetStringFromName('listEnd'));
 
-      if (name)
-        utterance.push(name);
+      this._addName(utterance, aAccessible, aFlags);
 
       return utterance;
+    },
+
+    list: function list(aAccessible, aRoleStr, aStates, aFlags) {
+      return this._getListUtterance
+        (aAccessible, aRoleStr, aFlags, aAccessible.childCount);
+    },
+
+    definitionlist: function definitionlist(aAccessible, aRoleStr, aStates, aFlags) {
+      return this._getListUtterance
+        (aAccessible, aRoleStr, aFlags, aAccessible.childCount / 2);
+    },
+
+    application: function application(aAccessible, aRoleStr, aStates, aFlags) {
+      // Don't utter location of applications, it gets tiring.
+      if (aAccessible.name != aAccessible.DOMNode.location)
+        return this.objectUtteranceFunctions.defaultFunc.apply(this,
+          [aAccessible, aRoleStr, aStates, aFlags]);
+
+      return [];
+    }
+  },
+
+  _addName: function _addName(utterance, aAccessible, aFlags) {
+    let name = (aFlags & INCLUDE_NAME) ? (aAccessible.name || '') : '';
+    if (name) {
+      utterance[gUtteranceOrder === UTTERANCE_DESC_FIRST ?
+        "push" : "unshift"](name);
     }
   },
 
@@ -286,5 +368,19 @@ var UtteranceGenerator = {
     }
 
     return stateUtterances;
+  },
+
+  _getListUtterance: function _getListUtterance(aAccessible, aRoleStr, aFlags, aItemCount) {
+    let desc = [];
+    let roleStr = this._getLocalizedRole(aRoleStr);
+    if (roleStr)
+      desc.push(roleStr);
+    desc.push
+      (gStringBundle.formatStringFromName('listItemCount', [aItemCount], 1));
+    let utterance = [desc.join(' ')];
+
+    this._addName(utterance, aAccessible, aFlags);
+
+    return utterance;
   }
 };

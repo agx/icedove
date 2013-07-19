@@ -15,18 +15,24 @@
 #include "nsISMILAttr.h"
 #include "nsMathUtils.h"
 #include "nsSVGElement.h"
-#include "nsSVGUtils.h"
+#include "SVGContentUtils.h"
 
 class nsIFrame;
-class nsISMILAnimationElement;
 class nsSMILValue;
-class nsSVGSVGElement;
+
+namespace mozilla {
+namespace dom {
+class SVGAnimatedLength;
+class SVGAnimationElement;
+class SVGSVGElement;
+}
+}
 
 class nsSVGLength2
 {
-
+  friend class mozilla::dom::SVGAnimatedLength;
 public:
-  void Init(uint8_t aCtxType = nsSVGUtils::XY,
+  void Init(uint8_t aCtxType = SVGContentUtils::XY,
             uint8_t aAttrEnum = 0xff,
             float aValue = 0,
             uint8_t aUnitType = nsIDOMSVGLength::SVG_LENGTHTYPE_NUMBER) {
@@ -67,9 +73,9 @@ public:
   float GetAnimValInSpecifiedUnits() const { return mAnimVal; }
   float GetBaseValInSpecifiedUnits() const { return mBaseVal; }
 
-  float GetBaseValue(nsSVGSVGElement* aCtx) const
+  float GetBaseValue(mozilla::dom::SVGSVGElement* aCtx) const
     { return mBaseVal / GetUnitScaleFactor(aCtx, mSpecifiedUnitType); }
-  float GetAnimValue(nsSVGSVGElement* aCtx) const
+  float GetAnimValue(mozilla::dom::SVGSVGElement* aCtx) const
     { return mAnimVal / GetUnitScaleFactor(aCtx, mSpecifiedUnitType); }
 
   bool HasBaseVal() const {
@@ -85,6 +91,10 @@ public:
   
   nsresult ToDOMAnimatedLength(nsIDOMSVGAnimatedLength **aResult,
                                nsSVGElement* aSVGElement);
+
+  already_AddRefed<mozilla::dom::SVGAnimatedLength>
+  ToDOMAnimatedLength(nsSVGElement* aSVGElement);
+
   // Returns a new nsISMILAttr object that the caller must delete
   nsISMILAttr* ToSMILAttr(nsSVGElement* aSVGElement);
 
@@ -101,19 +111,19 @@ private:
   static float GetMMPerPixel() { return MM_PER_INCH_FLOAT / 96; }
   float GetAxisLength(nsIFrame *aNonSVGFrame) const;
   static float GetEmLength(nsIFrame *aFrame)
-    { return nsSVGUtils::GetFontSize(aFrame); }
+    { return SVGContentUtils::GetFontSize(aFrame); }
   static float GetExLength(nsIFrame *aFrame)
-    { return nsSVGUtils::GetFontXHeight(aFrame); }
+    { return SVGContentUtils::GetFontXHeight(aFrame); }
   float GetUnitScaleFactor(nsIFrame *aFrame, uint8_t aUnitType) const;
 
-  float GetMMPerPixel(nsSVGSVGElement *aCtx) const;
-  float GetAxisLength(nsSVGSVGElement *aCtx) const;
+  float GetMMPerPixel(mozilla::dom::SVGSVGElement *aCtx) const;
+  float GetAxisLength(mozilla::dom::SVGSVGElement *aCtx) const;
   static float GetEmLength(nsSVGElement *aSVGElement)
-    { return nsSVGUtils::GetFontSize(aSVGElement); }
+    { return SVGContentUtils::GetFontSize(aSVGElement); }
   static float GetExLength(nsSVGElement *aSVGElement)
-    { return nsSVGUtils::GetFontXHeight(aSVGElement); }
+    { return SVGContentUtils::GetFontXHeight(aSVGElement); }
   float GetUnitScaleFactor(nsSVGElement *aSVGElement, uint8_t aUnitType) const;
-  float GetUnitScaleFactor(nsSVGSVGElement *aCtx, uint8_t aUnitType) const;
+  float GetUnitScaleFactor(mozilla::dom::SVGSVGElement *aCtx, uint8_t aUnitType) const;
 
   // SetBaseValue and SetAnimValue set the value in user units
   void SetBaseValue(float aValue, nsSVGElement *aSVGElement, bool aDoSetAttr);
@@ -236,25 +246,6 @@ public:
       { return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR; }
   };
 
-  struct DOMAnimatedLength : public nsIDOMSVGAnimatedLength
-  {
-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-    NS_DECL_CYCLE_COLLECTION_CLASS(DOMAnimatedLength)
-
-    DOMAnimatedLength(nsSVGLength2* aVal, nsSVGElement *aSVGElement)
-      : mVal(aVal), mSVGElement(aSVGElement) {}
-    virtual ~DOMAnimatedLength();
-    
-    nsSVGLength2* mVal; // kept alive because it belongs to content
-    nsRefPtr<nsSVGElement> mSVGElement;
-
-    NS_IMETHOD GetBaseVal(nsIDOMSVGLength **aBaseVal)
-      { return mVal->ToDOMBaseVal(aBaseVal, mSVGElement); }
-
-    NS_IMETHOD GetAnimVal(nsIDOMSVGLength **aAnimVal)
-      { return mVal->ToDOMAnimVal(aAnimVal, mSVGElement); }
-  };
-
   struct SMILLength : public nsISMILAttr
   {
   public:
@@ -269,7 +260,7 @@ public:
 
     // nsISMILAttr methods
     virtual nsresult ValueFromString(const nsAString& aStr,
-                                     const nsISMILAnimationElement* aSrcElement,
+                                     const mozilla::dom::SVGAnimationElement* aSrcElement,
                                      nsSMILValue &aValue,
                                      bool& aPreventCachingOfSandwich) const;
     virtual nsSMILValue GetBaseValue() const;

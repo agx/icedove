@@ -16,13 +16,6 @@ interface nsIPrompt;
 interface nsISelection;
 interface nsIVariant;
 
-[scriptable, uuid(8fc58f56-f769-4368-a098-edd08550cf1a)]
-interface nsIDOMMozURLProperty : nsISupports
-{
-  DOMString createObjectURL(in nsIDOMBlob blob);
-  void revokeObjectURL(in DOMString URL);
-};
-
 /**
  * The nsIDOMWindow interface is the primary interface for a DOM
  * window object. It represents a single window object that may
@@ -32,7 +25,7 @@ interface nsIDOMMozURLProperty : nsISupports
  * @see <http://www.whatwg.org/html/#window>
  */
 
-[scriptable, uuid(A1AF6CD9-C6E7-4037-99F8-DBCA1B03E345)]
+[scriptable, uuid(b4cf7214-5385-4f72-aa83-f8d1ff17252b)]
 interface nsIDOMWindow : nsISupports
 {
   // the current browsing context
@@ -192,8 +185,8 @@ interface nsIDOMWindow : nsISupports
 
 
   // user prompts
-  void                      alert(in DOMString text);
-  boolean                   confirm(in DOMString text);
+  void                      alert([optional, Null(Stringify)] in DOMString text);
+  boolean                   confirm([optional] in DOMString text);
 
   // prompt() should return a null string if cancel is pressed
   DOMString                 prompt([optional] in DOMString aMessage,
@@ -225,7 +218,8 @@ interface nsIDOMWindow : nsISupports
    * @see <http://www.whatwg.org/html/#dom-window-postmessage>
    */
   [implicit_jscontext, binaryname(PostMessageMoz)]
-    void postMessage(in jsval message, in DOMString targetOrigin);
+    void postMessage(in jsval message, in DOMString targetOrigin,
+                     [optional] in jsval transfer);
 
 
   // WindowBase64
@@ -316,6 +310,8 @@ interface nsIDOMWindow : nsISupports
    */
   nsIDOMCSSStyleDeclaration getComputedStyle(in nsIDOMElement elt, 
                                              [optional] in DOMString pseudoElt);
+  nsIDOMCSSStyleDeclaration getDefaultComputedStyle(in nsIDOMElement elt,
+                                                    [optional] in DOMString pseudoElt);
 
 
   // Mozilla extensions
@@ -363,7 +359,7 @@ interface nsIDOMWindow : nsISupports
   [noscript] readonly attribute nsIPrompt               prompter;
 
   readonly attribute boolean                            closed;
-  // http://wiki.whatwg.org/wiki/Crypto
+
   readonly attribute nsIDOMCrypto                       crypto;
   readonly attribute nsIDOMPkcs11                       pkcs11;
 
@@ -371,10 +367,9 @@ interface nsIDOMWindow : nsISupports
   /* [replaceable] controllers */
   readonly attribute nsIControllers                     controllers;
 
-           attribute DOMString                          defaultStatus;
-
   readonly attribute float                              mozInnerScreenX;
   readonly attribute float                              mozInnerScreenY;
+  readonly attribute float                              devicePixelRatio;
 
   /* The maximum offset that the window can be scrolled to
      (i.e., the document width/height minus the scrollport width/height) */
@@ -448,6 +443,9 @@ interface nsIDOMWindow : nsISupports
   // Argument is optional only so we can warn when it's null
   long
     mozRequestAnimationFrame([optional] in nsIFrameRequestCallback aCallback);
+  // jsval because we want a WebIDL callback here
+  [implicit_jscontext]
+  long requestAnimationFrame(in jsval aCallback);
 
   /**
    * Cancel a refresh callback.
@@ -460,11 +458,6 @@ interface nsIDOMWindow : nsISupports
    * The current animation start time in milliseconds since the epoch.
    */
   readonly attribute long long mozAnimationStartTime;
-
-  /**
-   * @see <http://dev.w3.org/2006/webapi/FileAPI/#creating-revoking>
-   */
-  readonly attribute nsIDOMMozURLProperty URL;
 
   /**
    * HTML5 event attributes that only apply to windows and <body>/<frameset>
@@ -514,5 +507,12 @@ interface nsIDOMWindowPerformance : nsISupports
  * Empty interface for compatibility with older versions.
  * @deprecated Use nsIDOMWindow instead
  */
-[scriptable, uuid(8da641ab-906a-456e-97f2-b77df4ca2d95)]
+[scriptable, uuid(36aeaa8e-3126-49de-9581-276dd7117826)]
 interface nsIDOMWindowInternal : nsIDOMWindow {};
+
+[scriptable, uuid(660ae025-7eec-4308-b5ce-79cf67ee7e00)]
+interface nsIWindowCancelAnimationFrame : nsISupports
+{
+  void cancelAnimationFrame(in long aHandle);
+};
+

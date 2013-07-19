@@ -16,9 +16,16 @@
 using namespace mozilla;
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo *sLog = PR_NewLogModule("nsThreadPool");
+static PRLogModuleInfo *
+GetThreadPoolLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("nsThreadPool");
+  return sLog;
+}
 #endif
-#define LOG(args) PR_LOG(sLog, PR_LOG_DEBUG, args)
+#define LOG(args) PR_LOG(GetThreadPoolLog(), PR_LOG_DEBUG, args)
 
 // DESIGN:
 //  o  Allocate anonymous threads.
@@ -63,7 +70,7 @@ nsThreadPool::PutEvent(nsIRunnable *event)
 
     LOG(("THRD-P(%p) put [%d %d %d]\n", this, mIdleCount, mThreads.Count(),
          mThreadLimit));
-    NS_ASSERTION(mIdleCount <= (uint32_t) mThreads.Count(), "oops");
+    MOZ_ASSERT(mIdleCount <= (uint32_t) mThreads.Count(), "oops");
 
     // Make sure we have a thread to service this event.
     if (mIdleCount == 0 && mThreads.Count() < (int32_t) mThreadLimit)
@@ -109,7 +116,7 @@ nsThreadPool::ShutdownThread(nsIThread *thread)
   // This method is responsible for calling Shutdown on |thread|.  This must be
   // done from some other thread, so we use the main thread of the application.
 
-  NS_ASSERTION(!NS_IsMainThread(), "wrong thread");
+  MOZ_ASSERT(!NS_IsMainThread(), "wrong thread");
 
   nsRefPtr<nsIRunnable> r = NS_NewRunnableMethod(thread, &nsIThread::Shutdown);
   NS_DispatchToMainThread(r);

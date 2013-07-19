@@ -1,12 +1,13 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=4 sw=4 et tw=99:
- *
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #if !defined jsjaeger_baseassembler_h__ && defined JS_METHODJIT
 #define jsjaeger_baseassembler_h__
+
+#include "mozilla/DebugOnly.h"
 
 #include "jscntxt.h"
 #include "assembler/assembler/MacroAssemblerCodeRef.h"
@@ -17,8 +18,11 @@
 #include "methodjit/MachineRegs.h"
 #include "CodeGenIncludes.h"
 #include "jsobjinlines.h"
-#include "jsscopeinlines.h"
 #include "jstypedarrayinlines.h"
+
+#include "vm/Shape-inl.h"
+
+using mozilla::DebugOnly;
 
 namespace js {
 namespace mjit {
@@ -78,131 +82,8 @@ struct StackMarker {
     { }
 };
 
-/*
- * SPS is the profiling backend used by the JS engine to enable time profiling.
- * More information can be found in vm/SPSProfiler.{h,cpp}. This class manages
- * the instrumentation portion of the profiling for JIT code.
- *
- * The instrumentation tracks entry into functions, leaving those functions via
- * a function call, reentering the functions from a function call, and exiting
- * the functions from returning. This class also handles inline frames and
- * manages the instrumentation which needs to be attached to them as well.
- *
- * The basic methods which emit instrumentation are at the end of this class,
- * and the management functions are all described in the middle.
- */
-class SPSInstrumentation {
-    typedef JSC::MacroAssembler::RegisterID RegisterID;
-
-    /* Because of inline frames, this is a nested structure in a vector */
-    struct FrameState {
-        bool pushed;    // has sps pushed a frame yet?
-        bool skipNext;  // should the next call to reenter be skipped?
-        int  left;      // number of leave() calls made without a matching reenter()
-    };
-
-    SPSProfiler *profiler_;   // Instrumentation location management
-    JSScript **script_;       // Used from Compiler.cpp
-    jsbytecode **pc_;         // same purpose as script_
-    VMFrame *vmframe;         // Used in PolyIC/MonoIC compilations
-
-    Vector<FrameState, 1, SystemAllocPolicy> frames;
-    FrameState *frame;
-
-    /*
-     * When the instrumentation pushes some information, it needs to know about
-     * the script/pc current in play. When originally compiling via
-     * Compiler.cpp, the script and pc change rapidly, hence the **. During a
-     * recompilation or some form of IC, the script/pc don't change, hence using
-     * the VMFrame as the source of this information.
-     */
-    JSScript *script() { return script_ ? *script_ : vmframe->script(); }
-    jsbytecode *pc() { return pc_ ? *pc_ : vmframe->pc(); }
-
-  public:
-    /* Constructor meant to be used from the compilers */
-    SPSInstrumentation(SPSProfiler *profiler, JSScript **script, jsbytecode **pc)
-      : profiler_(profiler),
-        script_(script),
-        pc_(pc),
-        vmframe(NULL),
-        frame(NULL)
-    {
-        enterInlineFrame();
-    }
-
-    /* Constructor used for recompilations and ICs */
-    SPSInstrumentation(VMFrame *f)
-      : profiler_(&f->cx->runtime->spsProfiler),
-        script_(NULL),
-        pc_(NULL),
-        vmframe(f),
-        frame(NULL)
-    {
-        enterInlineFrame();
-        setPushed();
-    }
-
-    /* Small proxies around SPSProfiler */
-    bool enabled() { return profiler_ && profiler_->enabled(); }
-    SPSProfiler *profiler() { JS_ASSERT(enabled()); return profiler_; }
-    bool slowAssertions() { return enabled() && profiler_->slowAssertionsEnabled(); }
-
-    /* Signals an inline function returned, reverting to the previous state */
-    void leaveInlineFrame() {
-        if (!enabled())
-            return;
-        frames.shrinkBy(1);
-        JS_ASSERT(frames.length() > 0);
-        frame = &frames[frames.length() - 1];
-    }
-
-    /* Saves the current state and assumes a fresh one for the inline function */
-    bool enterInlineFrame() {
-        if (!enabled())
-            return true;
-        if (!frames.growBy(1))
-            return false;
-        frame = &frames[frames.length() - 1];
-        frame->pushed = frame->skipNext = false;
-        frame->left = 0;
-        return true;
-    }
-
-    /*
-     * When debugging or with slow assertions, sometimes a C++ method will be
-     * invoked to perform the pop operation from the SPS stack. When we leave
-     * JIT code, we need to record the current PC, but upon reentering JIT code,
-     * no update back to NULL should happen. This method exists to flag this
-     * behavior. The next leave() will emit instrumentation, but the following
-     * reenter() will be a no-op.
-     */
-    void skipNextReenter() {
-        if (!enabled())
-            return;
-        JS_ASSERT(!frame->skipNext && frame->left == 0);
-        frame->skipNext = true;
-    }
-
-    /*
-     * In some cases, a frame needs to be flagged as having been pushed, but no
-     * instrumentation should be emitted. This updates internal state to flag
-     * that further instrumentation should actually be emitted.
-     */
-    void setPushed() {
-        if (!enabled())
-            return;
-        JS_ASSERT(!frame->pushed);
-        frame->pushed = true;
-    }
-
-    /* Actual instrumentation emitters, for more information see below */
-    bool push(JSContext *cx, Assembler &masm, RegisterID scratch);
-    void pushManual(Assembler &masm, RegisterID scratch);
-    void leave(Assembler &masm, RegisterID scratch);
-    void reenter(Assembler &masm, RegisterID scratch);
-    void pop(Assembler &masm);
-};
+typedef SPSInstrumentation<Assembler, JSC::MacroAssembler::RegisterID>
+        MJITInstrumentation;
 
 class Assembler : public ValueAssembler
 {
@@ -245,11 +126,16 @@ class Assembler : public ValueAssembler
 #endif
 
     // When instrumentation is enabled, these fields are used to manage the
-    // instrumentation which occurs at call() locations
-    SPSInstrumentation *sps;
+    // instrumentation which occurs at call() locations. Each call() has to know
+    // the pc of where the call was invoked from, and this can be changing all
+    // the time in the case of masm from Compiler, or never changing in the case
+    // of ICs.
+    MJITInstrumentation *sps;
+    VMFrame *vmframe; // pc tracker from ICs
+    jsbytecode **pc;  // pc tracker for compilers
 
   public:
-    Assembler(SPSInstrumentation *sps = NULL)
+    Assembler(MJITInstrumentation *sps = NULL, VMFrame *vmframe = NULL)
       : callPatches(SystemAllocPolicy()),
         availInCall(0),
         extraStackSpace(0),
@@ -257,7 +143,26 @@ class Assembler : public ValueAssembler
 #ifdef DEBUG
         callIsAligned(false),
 #endif
-        sps(sps)
+        sps(sps),
+        vmframe(vmframe),
+        pc(NULL)
+    {
+        startLabel = label();
+        if (vmframe)
+            sps->setPushed(vmframe->script());
+    }
+
+    Assembler(MJITInstrumentation *sps, jsbytecode **pc)
+      : callPatches(SystemAllocPolicy()),
+        availInCall(0),
+        extraStackSpace(0),
+        stackAdjust(0),
+#ifdef DEBUG
+        callIsAligned(false),
+#endif
+        sps(sps),
+        vmframe(NULL),
+        pc(pc)
     {
         startLabel = label();
     }
@@ -687,13 +592,14 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
     // every call. These two functions manage this code generation and are
     // called from callWithABI below.
     void leaveBeforeCall() {
+        jsbytecode *pc = vmframe == NULL ? *this->pc : vmframe->pc();
         if (availInCall.empty()) {
             RegisterID reg = Registers(Registers::TempRegs).peekReg().reg();
             saveReg(reg);
-            sps->leave(*this, reg);
+            sps->leave(pc, *this, reg);
             restoreReg(reg);
         } else {
-            sps->leave(*this, availInCall.peekReg().reg());
+            sps->leave(pc, *this, availInCall.peekReg().reg());
         }
     }
 
@@ -737,9 +643,7 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
 
         JS_ASSERT(callIsAligned);
 
-        Call cl = call();
-
-        callPatches.append(CallPatch(cl, fun));
+        Call cl = callAddress(fun);
 
 #ifdef JS_CPU_ARM
         JS_ASSERT(initFlushCount == flushCount());
@@ -754,6 +658,12 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
 #ifdef DEBUG
         callIsAligned = false;
 #endif
+        return cl;
+    }
+
+    Call callAddress(void *ptr) {
+        Call cl = call();
+        callPatches.append(CallPatch(cl, ptr));
         return cl;
     }
 
@@ -812,14 +722,16 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
                               DataLabelPtr *pinlined, int32_t frameDepth) {
         setupInfallibleVMFrame(frameDepth);
 
-        /* regs->fp = fp */
+        // regs->fp = fp
         storePtr(JSFrameReg, FrameAddress(VMFrame::offsetOfFp));
 
-        /* PC -> regs->pc :( */
-        storePtr(ImmPtr(pc), FrameAddress(VMFrame::offsetOfRegsPc()));
+        // PC -> regs->pc :(  Note: If pc is null, we are emitting a trampoline,
+        // so regs->pc is already correct.
+        if (pc)
+            storePtr(ImmPtr(pc), FrameAddress(VMFrame::offsetOfRegsPc()));
 
         if (inlining) {
-            /* inlined -> regs->inlined :( */
+            // inlined -> regs->inlined :(
             DataLabelPtr ptr = storePtrWithPatch(ImmPtr(NULL),
                                                  FrameAddress(VMFrame::offsetOfInlined));
             if (pinlined)
@@ -866,6 +778,10 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
     // A fallible VM call is a stub call (taking a VMFrame & and one optional
     // parameter) that needs the entire VMFrame to be coherent, meaning that
     // |pc|, |inlined| and |fp| are guaranteed to be up-to-date.
+    //
+    // If |pc| is null, the caller guarantees that the current regs->pc may be
+    // trusted. This is the case for a single debug-only path; see
+    // generateForceReturn.
     Call fallibleVMCall(bool inlining, void *ptr, jsbytecode *pc,
                         DataLabelPtr *pinlined, int32_t frameDepth) {
         setupFallibleVMFrame(inlining, pc, pinlined, frameDepth);
@@ -1007,8 +923,8 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
     }
 
     void loadObjClass(RegisterID obj, RegisterID dest) {
-        loadBaseShape(obj, dest);
-        loadPtr(Address(dest, BaseShape::offsetOfClass()), dest);
+        loadPtr(Address(obj, JSObject::offsetOfType()), dest);
+        loadPtr(Address(dest, offsetof(types::TypeObject, clasp)), dest);
     }
 
     Jump testClass(Condition cond, RegisterID claspReg, js::Class *clasp) {
@@ -1016,8 +932,8 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
     }
 
     Jump testObjClass(Condition cond, RegisterID obj, RegisterID temp, js::Class *clasp) {
-        loadBaseShape(obj, temp);
-        return branchPtr(cond, Address(temp, BaseShape::offsetOfClass()), ImmPtr(clasp));
+        loadPtr(Address(obj, JSObject::offsetOfType()), temp);
+        return branchPtr(cond, Address(temp, offsetof(types::TypeObject, clasp)), ImmPtr(clasp));
     }
 
     Jump testFunction(Condition cond, RegisterID fun, RegisterID temp) {
@@ -1230,6 +1146,9 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
     }
 
     template <typename T>
+#if defined(__GNUC__) && __GNUC__ == 4 && __GNUC_MINOR__ == 7 && defined(JS_CPU_ARM)
+    __attribute__((optimize("-O1")))
+#endif
     void storeToTypedArray(int atype, ValueRemat vr, T address)
     {
         if (atype == js::TypedArray::TYPE_FLOAT32 || atype == js::TypedArray::TYPE_FLOAT64) {
@@ -1427,7 +1346,7 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
      */
     Jump getNewObject(JSContext *cx, RegisterID result, JSObject *templateObject)
     {
-        gc::AllocKind allocKind = templateObject->getAllocKind();
+        gc::AllocKind allocKind = templateObject->tenuredGetAllocKind();
 
         JS_ASSERT(allocKind >= gc::FINALIZE_OBJECT0 && allocKind <= gc::FINALIZE_OBJECT_LAST);
         int thingSize = (int)gc::Arena::thingSize(allocKind);
@@ -1446,7 +1365,7 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
          * span is not empty is handled.
          */
         gc::FreeSpan *list = const_cast<gc::FreeSpan *>
-                             (cx->compartment->arenas.getFreeList(allocKind));
+                             (cx->zone()->allocator.arenas.getFreeList(allocKind));
         loadPtr(&list->first, result);
 
         Jump jump = branchPtr(Assembler::BelowOrEqual, AbsoluteAddress(&list->last), result);
@@ -1471,8 +1390,8 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
          * as for dense arrays we will need to get the address of the fixed
          * elements first.
          */
-        if (templateObject->isDenseArray()) {
-            JS_ASSERT(!templateObject->getDenseArrayInitializedLength());
+        if (templateObject->isArray()) {
+            JS_ASSERT(!templateObject->getDenseInitializedLength());
             addPtr(Imm32(-thingSize + elementsOffset), result);
             storePtr(result, Address(result, -elementsOffset + JSObject::offsetOfElements()));
             addPtr(Imm32(-elementsOffset), result);
@@ -1485,14 +1404,18 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
         storePtr(ImmPtr(templateObject->type()), Address(result, JSObject::offsetOfType()));
         storePtr(ImmPtr(NULL), Address(result, JSObject::offsetOfSlots()));
 
-        if (templateObject->isDenseArray()) {
+        if (templateObject->isArray()) {
             /* Fill in the elements header. */
-            store32(Imm32(templateObject->getDenseArrayCapacity()),
+            store32(Imm32(templateObject->getDenseCapacity()),
                     Address(result, elementsOffset + ObjectElements::offsetOfCapacity()));
-            store32(Imm32(templateObject->getDenseArrayInitializedLength()),
+            store32(Imm32(templateObject->getDenseInitializedLength()),
                     Address(result, elementsOffset + ObjectElements::offsetOfInitializedLength()));
             store32(Imm32(templateObject->getArrayLength()),
                     Address(result, elementsOffset + ObjectElements::offsetOfLength()));
+            store32(Imm32(templateObject->shouldConvertDoubleElements()
+                          ? ObjectElements::CONVERT_DOUBLE_ELEMENTS
+                          : 0),
+                    Address(result, elementsOffset + ObjectElements::offsetOfFlags()));
         } else {
             /*
              * Fixed slots of non-array objects are required to be initialized;
@@ -1546,7 +1469,7 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
      */
     Jump spsProfileEntryAddress(SPSProfiler *p, int offset, RegisterID reg)
     {
-        load32(p->size(), reg);
+        load32(p->sizePointer(), reg);
         if (offset != 0)
             add32(Imm32(offset), reg);
         Jump j = branch32(Assembler::GreaterThanOrEqual, reg, Imm32(p->maxSize()));
@@ -1575,11 +1498,12 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
 
         /* Always increment the stack size, regardless if we actually pushed */
         j.linkTo(label(), this);
-        add32(Imm32(1), AbsoluteAddress(p->size()));
+        add32(Imm32(1), AbsoluteAddress(p->sizePointer()));
     }
 
-    void spsPopFrame(SPSProfiler *p) {
-        sub32(Imm32(1), AbsoluteAddress(p->size()));
+    void spsPopFrame(SPSProfiler *p, RegisterID reg) {
+        move(ImmPtr(p->sizePointer()), reg);
+        sub32(Imm32(1), Address(reg, 0));
     }
 
     static const double oneDouble;
@@ -1587,7 +1511,7 @@ static const JSC::MacroAssembler::RegisterID JSParamReg_Argc  = JSC::MIPSRegiste
 
 /* Return f<true> if the script is strict mode code, f<false> otherwise. */
 #define STRICT_VARIANT(script, f)                                             \
-    (FunctionTemplateConditional(script->strictModeCode,                      \
+    (FunctionTemplateConditional(script->strict,                              \
                                  f<true>, f<false>))
 
 /* Save some typing. */
@@ -1628,86 +1552,6 @@ class PreserveRegisters {
             masm.restoreReg(regs[--count]);
     }
 };
-
-/*
- * Flags entry into a JS function for the first time. Before this is called, no
- * instrumentation is emitted, but after this instrumentation is emitted.
- */
-inline bool
-SPSInstrumentation::push(JSContext *cx, Assembler &masm, RegisterID scratch)
-{
-    JS_ASSERT(!frame->pushed);
-    JS_ASSERT(frame->left == 0);
-    if (!enabled())
-        return true;
-    JSScript *s = script();
-    const char *string = profiler_->profileString(cx, s, s->function());
-    if (string == NULL)
-        return false;
-    masm.spsPushFrame(profiler_, string, script(), scratch);
-    frame->pushed = true;
-    return true;
-}
-
-/*
- * Signifies that C++ performed the push() for this function. C++ always sets
- * the current PC to something non-null, however, so as soon as JIT code is
- * reentered this updates the current pc to NULL.
- */
-inline void
-SPSInstrumentation::pushManual(Assembler &masm, RegisterID scratch)
-{
-    JS_ASSERT(!frame->pushed);
-    JS_ASSERT(frame->left == 0);
-    if (!enabled())
-        return;
-    masm.spsUpdatePCIdx(profiler_, ProfileEntry::NullPCIndex, scratch);
-    frame->pushed = true;
-}
-
-/*
- * Signals that the current function is leaving for a function call. This can
- * happen both on JS function calls and also calls to C++. This internally
- * manages how many leave() calls have been seen, and only the first leave()
- * emits instrumentation. Similarly, only the last corresponding reenter()
- * actually emits instrumentation.
- */
-inline void
-SPSInstrumentation::leave(Assembler &masm, RegisterID scratch)
-{
-    if (enabled() && frame->pushed && frame->left++ == 0)
-        masm.spsUpdatePCIdx(profiler_, pc() - script()->code, scratch);
-}
-
-/*
- * Flags that the leaving of the current function has returned. This tracks
- * state with leave() to only emit instrumentation at proper times.
- */
-inline void
-SPSInstrumentation::reenter(Assembler &masm, RegisterID scratch)
-{
-    if (!enabled() || !frame->pushed || frame->left-- != 1)
-        return;
-    if (frame->skipNext)
-        frame->skipNext = false;
-    else
-        masm.spsUpdatePCIdx(profiler_, ProfileEntry::NullPCIndex, scratch);
-}
-
-/*
- * Signifies exiting a JS frame, popping the SPS entry. Because there can be
- * multiple return sites of a function, this does not cease instrumentation
- * emission.
- */
-inline void
-SPSInstrumentation::pop(Assembler &masm)
-{
-    if (enabled()) {
-        JS_ASSERT(frame->left == 0);
-        JS_ASSERT(frame->pushed);
-        masm.spsPopFrame(profiler_);
-    }
-}
 
 } /* namespace mjit */
 } /* namespace js */

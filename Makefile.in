@@ -54,6 +54,8 @@ mochitest-% :: $(SUBMAKEFILES)
 check-sync-dirs::
 	@$(PYTHON) $(topsrcdir)/mozilla/js/src/config/check-sync-dirs.py \
 	   $(topsrcdir)/build $(topsrcdir)/mozilla/build
+	@$(PYTHON) $(topsrcdir)/mozilla/js/src/config/check-sync-dirs.py \
+	   $(topsrcdir)/config/makefiles $(topsrcdir)/mozilla/config/makefiles
 
 check:: check-sync-dirs
 
@@ -86,9 +88,9 @@ include $(topsrcdir)/config/rules.mk
 # defined in (mozilla/.../)package-name.mk
 export MOZ_SOURCE_STAMP
 
-DIST_GARBAGE = config.cache config.log config.status config-defs.h \
-   dependencies.beos config/autoconf.mk \
-   unallmakefiles comm-config.h \
+DIST_GARBAGE = config.cache config.log config.status* config-defs.h \
+   config/autoconf.mk \
+   unallmakefiles \
    $(topsrcdir)/.mozconfig.mk $(topsrcdir)/.mozconfig.out
 
 distclean::

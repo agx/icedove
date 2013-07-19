@@ -6,10 +6,12 @@
 #ifndef InputData_h__
 #define InputData_h__
 
-#include "nsGUIEvent.h"
-#include "nsDOMTouchEvent.h"
 #include "nsDebug.h"
+#include "nsPoint.h"
+#include "nsTArray.h"
 
+class nsTouchEvent;
+class nsMouseEvent;
 namespace mozilla {
 
 
@@ -50,6 +52,10 @@ public:
   INPUTDATA_AS_CHILD_TYPE(PinchGestureInput, PINCHGESTURE_INPUT)
   INPUTDATA_AS_CHILD_TYPE(TapGestureInput, TAPGESTURE_INPUT)
 
+  InputData()
+  {
+  }
+
 protected:
   InputData(InputType aInputType, uint32_t aTime)
     : mInputType(aInputType),
@@ -61,19 +67,19 @@ protected:
 };
 
 /**
- * Data container for a single touch input. Similar to nsDOMTouch, but used in
+ * Data container for a single touch input. Similar to dom::Touch, but used in
  * off-main-thread situations. This is more for just storing touch data, whereas
- * nsDOMTouch derives from nsIDOMTouch so it is more useful for dispatching
- * through the DOM (which can only happen on the main thread). nsDOMTouch also
+ * dom::Touch derives from nsIDOMTouch so it is more useful for dispatching
+ * through the DOM (which can only happen on the main thread). dom::Touch also
  * bears the problem of storing pointers to nsIWidget instances which can only
- * be used on the main thread, so if instead we used nsDOMTouch and ever set
+ * be used on the main thread, so if instead we used dom::Touch and ever set
  * these pointers off-main-thread, Bad Things Can Happen(tm).
  *
  * Note that this doesn't inherit from InputData because this itself is not an
  * event. It is only a container/struct that should have any number of instances
  * within a MultiTouchInput.
  *
- * fixme/bug 775746: Make nsDOMTouch inherit from this class.
+ * fixme/bug 775746: Make dom::Touch inherit from this class.
  */
 class SingleTouchData
 {
@@ -91,6 +97,10 @@ public:
   {
 
 
+  }
+
+  SingleTouchData()
+  {
   }
 
   // A unique number assigned to each SingleTouchData within a MultiTouchInput so
@@ -144,57 +154,11 @@ public:
 
   }
 
-  MultiTouchInput(const nsTouchEvent& aTouchEvent)
-    : InputData(MULTITOUCH_INPUT, aTouchEvent.time)
+  MultiTouchInput()
   {
-    NS_ABORT_IF_FALSE(NS_IsMainThread(),
-                      "Can only copy from nsTouchEvent on main thread");
-
-    switch (aTouchEvent.message) {
-      case NS_TOUCH_START:
-        mType = MULTITOUCH_START;
-        break;
-      case NS_TOUCH_MOVE:
-        mType = MULTITOUCH_MOVE;
-        break;
-      case NS_TOUCH_END:
-        mType = MULTITOUCH_END;
-        break;
-      case NS_TOUCH_ENTER:
-        mType = MULTITOUCH_ENTER;
-        break;
-      case NS_TOUCH_LEAVE:
-        mType = MULTITOUCH_LEAVE;
-        break;
-      case NS_TOUCH_CANCEL:
-        mType = MULTITOUCH_CANCEL;
-        break;
-      default:
-        NS_WARNING("Did not assign a type to a MultiTouchInput");
-        break;
-    }
-
-    for (size_t i = 0; i < aTouchEvent.touches.Length(); i++) {
-      nsDOMTouch* domTouch = (nsDOMTouch*)(aTouchEvent.touches[i].get());
-
-      // Extract data from weird interfaces.
-      int32_t identifier, radiusX, radiusY;
-      float rotationAngle, force;
-      domTouch->GetIdentifier(&identifier);
-      domTouch->GetRadiusX(&radiusX);
-      domTouch->GetRadiusY(&radiusY);
-      domTouch->GetRotationAngle(&rotationAngle);
-      domTouch->GetForce(&force);
-
-      SingleTouchData data(identifier,
-                           domTouch->mRefPoint,
-                           nsIntPoint(radiusX, radiusY),
-                           rotationAngle,
-                           force);
-
-      mTouches.AppendElement(data);
-    }
   }
+
+  MultiTouchInput(const nsTouchEvent& aTouchEvent);
 
   // This conversion from nsMouseEvent to MultiTouchInput is needed because on
   // the B2G emulator we can only receive mouse events, but we need to be able
@@ -202,39 +166,7 @@ public:
   // panning code can handle. This code is very limited and only supports
   // SingleTouchData. It also sends garbage for the identifier, radius, force
   // and rotation angle.
-  MultiTouchInput(const nsMouseEvent& aMouseEvent)
-    : InputData(MULTITOUCH_INPUT, aMouseEvent.time)
-  {
-    NS_ABORT_IF_FALSE(NS_IsMainThread(),
-                      "Can only copy from nsMouseEvent on main thread");
-    switch (aMouseEvent.message) {
-    case NS_MOUSE_BUTTON_DOWN:
-      mType = MULTITOUCH_START;
-      break;
-    case NS_MOUSE_MOVE:
-      mType = MULTITOUCH_MOVE;
-      break;
-    case NS_MOUSE_BUTTON_UP:
-      mType = MULTITOUCH_END;
-      break;
-    // The mouse pointer has been interrupted in an implementation-specific
-    // manner, such as a synchronous event or action cancelling the touch, or a
-    // touch point leaving the document window and going into a non-document
-    // area capable of handling user interactions.
-    case NS_MOUSE_EXIT:
-      mType = MULTITOUCH_CANCEL;
-      break;
-    default:
-      NS_WARNING("Did not assign a type to a MultiTouchInput");
-      break;
-    }
-
-    mTouches.AppendElement(SingleTouchData(0,
-                                           aMouseEvent.refPoint,
-                                           nsIntPoint(1, 1),
-                                           180.0f,
-                                           1.0f));
-  }
+  MultiTouchInput(const nsMouseEvent& aMouseEvent);
 
   MultiTouchType mType;
   nsTArray<SingleTouchData> mTouches;

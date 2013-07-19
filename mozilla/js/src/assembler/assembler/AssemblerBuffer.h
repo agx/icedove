@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
- * vim: set ts=8 sw=4 et tw=79:
+ * vim: set ts=8 sts=4 et sw=4 tw=99:
  *
  * ***** BEGIN LICENSE BLOCK *****
  * Copyright (C) 2008 Apple Inc. All rights reserved.
@@ -35,8 +35,25 @@
 #if ENABLE_ASSEMBLER
 
 #include <string.h>
+#include <limits.h>
 #include "assembler/jit/ExecutableAllocator.h"
 #include "assembler/wtf/Assertions.h"
+
+#include <stdarg.h>
+#include "jsfriendapi.h"
+#include "jsopcode.h"
+
+#include "ion/IonSpewer.h"
+#include "js/RootingAPI.h"
+#include "methodjit/Logging.h"
+
+#define PRETTY_PRINT_OFFSET(os) (((os)<0)?"-":""), (((os)<0)?-(os):(os))
+
+#define FIXME_INSN_PRINTING                                 \
+    do {                                                    \
+        spew("FIXME insn printing %s:%d",                   \
+             __FILE__, __LINE__);                           \
+    } while (0)
 
 namespace JSC {
 
@@ -48,6 +65,9 @@ namespace JSC {
             , m_capacity(inlineCapacity)
             , m_size(0)
             , m_oom(false)
+#if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
+            , m_skipInline(js::TlsPerThreadData.get(), &m_inlineBuffer)
+#endif
         {
         }
 
@@ -197,6 +217,14 @@ namespace JSC {
             int newCapacity = m_capacity + m_capacity + extraCapacity;
             char* newBuffer;
 
+            // Do not allow offsets to grow beyond INT_MAX / 2. This mirrors
+            // Assembler-shared.h.
+            if (newCapacity >= INT_MAX / 2) {
+                m_size = 0;
+                m_oom = true;
+                return;
+            }
+
             if (m_buffer == m_inlineBuffer) {
                 newBuffer = static_cast<char*>(malloc(newCapacity));
                 if (!newBuffer) {
@@ -223,6 +251,102 @@ namespace JSC {
         int m_capacity;
         int m_size;
         bool m_oom;
+
+#if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
+        /*
+         * GC Pointers baked into the code can get stored on the stack here
+         * through the inline assembler buffer. We need to protect these from
+         * being poisoned by the rooting analysis, however, they do not need to
+         * actually be traced: the compiler is only allowed to bake in
+         * non-nursery-allocated pointers, such as Shapes.
+         */
+        js::SkipRoot m_skipInline;
+#endif
+    };
+
+    class GenericAssembler
+    {
+        js::Sprinter *printer;
+
+      public:
+
+        bool isOOLPath;
+
+        GenericAssembler()
+          : printer(NULL)
+          , isOOLPath(false)
+        {}
+
+        void setPrinter(js::Sprinter *sp) {
+            printer = sp;
+        }
+
+        void spew(const char *fmt, ...)
+#ifdef __GNUC__
+            __attribute__ ((format (printf, 2, 3)))
+#endif
+        {
+            if (printer ||
+                js::IsJaegerSpewChannelActive(js::JSpew_Insns)
+#ifdef JS_ION
+                || js::ion::IonSpewEnabled(js::ion::IonSpew_Codegen)
+#endif
+                )
+            {
+                // Buffer to hold the formatted string. Note that this may contain
+                // '%' characters, so do not pass it directly to printf functions.
+                char buf[200];
+
+                va_list va;
+                va_start(va, fmt);
+                int i = vsnprintf(buf, sizeof(buf), fmt, va);
+                va_end(va);
+
+                if (i > -1) {
+                    if (printer)
+                        printer->printf("%s\n", buf);
+
+                    // The assembler doesn't know which compiler it is for, so if
+                    // both JM and Ion spew are on, just print via one channel
+                    // (Use JM to pick up isOOLPath).
+                    if (js::IsJaegerSpewChannelActive(js::JSpew_Insns))
+                        js::JaegerSpew(js::JSpew_Insns, "%s       %s\n", isOOLPath ? ">" : " ", buf);
+#ifdef JS_ION
+                    else
+                        js::ion::IonSpew(js::ion::IonSpew_Codegen, "%s", buf);
+#endif
+                }
+            }
+        }
+
+        static void staticSpew(const char *fmt, ...)
+#ifdef __GNUC__
+            __attribute__ ((format (printf, 1, 2)))
+#endif
+        {
+            if (js::IsJaegerSpewChannelActive(js::JSpew_Insns)
+#ifdef JS_ION
+                || js::ion::IonSpewEnabled(js::ion::IonSpew_Codegen)
+#endif
+                )
+            {
+                char buf[200];
+
+                va_list va;
+                va_start(va, fmt);
+                int i = vsnprintf(buf, sizeof(buf), fmt, va);
+                va_end(va);
+
+                if (i > -1) {
+                    if (js::IsJaegerSpewChannelActive(js::JSpew_Insns))
+                        js::JaegerSpew(js::JSpew_Insns, "        %s\n", buf);
+#ifdef JS_ION
+                    else
+                        js::ion::IonSpew(js::ion::IonSpew_Codegen, "%s", buf);
+#endif
+                }
+            }
+        }
     };
 
 } // namespace JSC
