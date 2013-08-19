@@ -17,22 +17,16 @@ var FullZoom = {
   // Identifies the setting in the content prefs database.
   name: "browser.content.full-zoom",
 
-  // The global value (if any) for the setting.  Lazily loaded from the service
-  // when first requested, then updated by the pref change listener as it changes.
-  // If there is no global value, then this should be undefined.
-  get globalValue() {
-    var globalValue = Services.contentPrefs.getPref(null, this.name);
-    if (typeof globalValue != "undefined")
-      globalValue = this._ensureValid(globalValue);
-    delete this.globalValue;
-    return this.globalValue = globalValue;
-  },
-
   // browser.zoom.siteSpecific preference cache
   _siteSpecificPref: undefined,
 
   // browser.zoom.updateBackgroundTabs preference cache
   updateBackgroundTabs: undefined,
+
+  // Incremented each time the zoom is changed so that operations that change
+  // the zoom asynchronously don't clobber more recent zoom changes.  See
+  // _getState below.
+  _zoomChangeToken: 0,
 
   get siteSpecific() {
     return this._siteSpecificPref;
@@ -51,11 +45,17 @@ var FullZoom = {
   // Initialization & Destruction
 
   init: function FullZoom_init() {
+    // Bug 691614 - zooming support for electrolysis
+    if (gMultiProcessBrowser)
+      return;
+
     // Listen for scrollwheel events so we can save scrollwheel-based changes.
     window.addEventListener("DOMMouseScroll", this, false);
 
     // Register ourselves with the service so we know when our pref changes.
-    Services.contentPrefs.addObserver(this.name, this);
+    this._cps2 = Cc["@mozilla.org/content-pref/service;1"].
+                 getService(Ci.nsIContentPrefService2);
+    this._cps2.addObserverForName(this.name, this);
 
     this._siteSpecificPref =
       gPrefService.getBoolPref("browser.zoom.siteSpecific");
@@ -67,8 +67,12 @@ var FullZoom = {
   },
 
   destroy: function FullZoom_destroy() {
+    // Bug 691614 - zooming support for electrolysis
+    if (gMultiProcessBrowser)
+      return;
+
     gPrefService.removeObserver("browser.zoom.", this);
-    Services.contentPrefs.removeObserver(this.name, this);
+    this._cps2.removeObserverForName(this.name, this);
     window.removeEventListener("DOMMouseScroll", this, false);
   },
 
@@ -121,10 +125,14 @@ var FullZoom = {
     // them anew from the pref service for every scroll event?  We'd have to
     // make sure to observe them so we can update the cache when they change.
 
-    // We have to call _applySettingToPref in a timeout because we handle
-    // the event before the event state manager has a chance to apply the zoom
+    // We have to call _applyZoomToPref in a timeout because we handle the
+    // event before the event state manager has a chance to apply the zoom
     // during nsEventStateManager::PostHandleEvent.
-    window.setTimeout(function (self) { self._applySettingToPref() }, 0, this);
+    let state = this._getState();
+    window.setTimeout(function () {
+      if (this._isStateCurrent(state))
+        this._applyZoomToPref();
+    }.bind(this), 0);
   },
 
   // nsIObserver
@@ -149,31 +157,56 @@ var FullZoom = {
   // nsIContentPrefObserver
 
   onContentPrefSet: function FullZoom_onContentPrefSet(aGroup, aName, aValue) {
-    if (aGroup == Services.contentPrefs.grouper.group(gBrowser.currentURI))
-      this._applyPrefToSetting(aValue);
-    else if (aGroup == null) {
-      this.globalValue = this._ensureValid(aValue);
-
-      // If the current page doesn't have a site-specific preference,
-      // then its zoom should be set to the new global preference now that
-      // the global preference has changed.
-      if (!Services.contentPrefs.hasPref(gBrowser.currentURI, this.name))
-        this._applyPrefToSetting();
-    }
+    this._onContentPrefChanged(aGroup, aValue);
   },
 
   onContentPrefRemoved: function FullZoom_onContentPrefRemoved(aGroup, aName) {
-    if (aGroup == Services.contentPrefs.grouper.group(gBrowser.currentURI))
-      this._applyPrefToSetting();
-    else if (aGroup == null) {
-      this.globalValue = undefined;
+    this._onContentPrefChanged(aGroup, undefined);
+  },
 
-      // If the current page doesn't have a site-specific preference,
-      // then its zoom should be set to the default preference now that
-      // the global preference has changed.
-      if (!Services.contentPrefs.hasPref(gBrowser.currentURI, this.name))
-        this._applyPrefToSetting();
+  /**
+   * Appropriately updates the zoom level after a content preference has
+   * changed.
+   *
+   * @param aGroup  The group of the changed preference.
+   * @param aValue  The new value of the changed preference.  Pass undefined to
+   *                indicate the preference's removal.
+   */
+  _onContentPrefChanged: function FullZoom__onContentPrefChanged(aGroup, aValue) {
+    if (this._isNextContentPrefChangeInternal) {
+      // Ignore changes that FullZoom itself makes.  This works because the
+      // content pref service calls callbacks before notifying observers, and it
+      // does both in the same turn of the event loop.
+      delete this._isNextContentPrefChangeInternal;
+      return;
     }
+
+    if (!gBrowser.currentURI)
+      return;
+
+    let domain = this._cps2.extractDomain(gBrowser.currentURI.spec);
+    if (aGroup) {
+      if (aGroup == domain)
+        this._applyPrefToZoom(aValue);
+      return;
+    }
+
+    this._globalValue = aValue === undefined ? aValue :
+                          this._ensureValid(aValue);
+
+    // If the current page doesn't have a site-specific preference, then its
+    // zoom should be set to the new global preference now that the global
+    // preference has changed.
+    let state = this._getState();
+    let hasPref = false;
+    let ctxt = this._loadContextFromWindow(gBrowser.contentWindow);
+    this._cps2.getByDomainAndName(gBrowser.currentURI.spec, this.name, ctxt, {
+      handleResult: function () hasPref = true,
+      handleCompletion: function () {
+        if (!hasPref && this._isStateCurrent(state))
+          this._applyPrefToZoom(undefined, { state: state });
+      }.bind(this)
+    });
   },
 
   // location change observer
@@ -190,12 +223,21 @@ var FullZoom = {
    *        (optional) browser object displaying the document
    */
   onLocationChange: function FullZoom_onLocationChange(aURI, aIsTabSwitch, aBrowser) {
-    if (!aURI || (aIsTabSwitch && !this.siteSpecific))
+    // Bug 691614 - zooming support for electrolysis
+    if (gMultiProcessBrowser)
       return;
+
+    if (!aURI || (aIsTabSwitch && !this.siteSpecific)) {
+      this._notifyOnLocationChange();
+      return;
+    }
 
     // Avoid the cps roundtrip and apply the default/global pref.
     if (aURI.spec == "about:blank") {
-      this._applyPrefToSetting(undefined, aBrowser);
+      this._applyPrefToZoom(undefined, {
+        browser: aBrowser,
+        onDone: this._notifyOnLocationChange.bind(this),
+      });
       return;
     }
 
@@ -204,23 +246,37 @@ var FullZoom = {
     // Media documents should always start at 1, and are not affected by prefs.
     if (!aIsTabSwitch && browser.contentDocument.mozSyntheticDocument) {
       ZoomManager.setZoomForBrowser(browser, 1);
+      this._zoomChangeToken++;
+      this._notifyOnLocationChange();
       return;
     }
 
-    if (Services.contentPrefs.hasCachedPref(aURI, this.name)) {
-      let zoomValue = Services.contentPrefs.getPref(aURI, this.name);
-      this._applyPrefToSetting(zoomValue, browser);
-    } else {
-      var self = this;
-      Services.contentPrefs.getPref(aURI, this.name, function (aResult) {
-        // Check that we're still where we expect to be in case this took a while.
-        // Null check currentURI, since the window may have been destroyed before
-        // we were called.
-        if (browser.currentURI && aURI.equals(browser.currentURI)) {
-          self._applyPrefToSetting(aResult, browser);
-        }
+    // See if the zoom pref is cached.
+    let ctxt = this._loadContextFromWindow(browser.contentWindow);
+    let pref = this._cps2.getCachedByDomainAndName(aURI.spec, this.name, ctxt);
+    if (pref) {
+      this._applyPrefToZoom(pref.value, {
+        browser: browser,
+        onDone: this._notifyOnLocationChange.bind(this),
       });
+      return;
     }
+
+    // It's not cached, so have to asynchronously fetch it.
+    let state = this._getState(browser);
+    let value = undefined;
+    this._cps2.getByDomainAndName(aURI.spec, this.name, ctxt, {
+      handleResult: function (resultPref) value = resultPref.value,
+      handleCompletion: function () {
+        if (this._isStateCurrent(state)) {
+          this._applyPrefToZoom(value, {
+            browser: browser,
+            state: state,
+            onDone: this._notifyOnLocationChange.bind(this),
+          });
+        }
+      }.bind(this)
+    });
   },
 
   // update state of zoom type menu item
@@ -234,22 +290,39 @@ var FullZoom = {
   //**************************************************************************//
   // Setting & Pref Manipulation
 
+  /**
+   * Reduces the zoom level of the page in the current browser.
+   */
   reduce: function FullZoom_reduce() {
     ZoomManager.reduce();
-    this._applySettingToPref();
+    this._zoomChangeToken++;
+    this._applyZoomToPref();
   },
 
+  /**
+   * Enlarges the zoom level of the page in the current browser.
+   */
   enlarge: function FullZoom_enlarge() {
     ZoomManager.enlarge();
-    this._applySettingToPref();
+    this._zoomChangeToken++;
+    this._applyZoomToPref();
   },
 
+  /**
+   * Sets the zoom level of the page in the current browser to the global zoom
+   * level.
+   */
   reset: function FullZoom_reset() {
-    if (typeof this.globalValue != "undefined")
-      ZoomManager.zoom = this.globalValue;
-    else
-      ZoomManager.reset();
-
+    let state = this._getState();
+    this._getGlobalValue(gBrowser.contentWindow, function (value) {
+      if (this._isStateCurrent(state)) {
+        if (value === undefined)
+          ZoomManager.reset();
+        else
+          ZoomManager.zoom = value;
+        this._zoomChangeToken++;
+      }
+    });
     this._removePref();
   },
 
@@ -262,54 +335,129 @@ var FullZoom = {
    * checking ourselves if it differs costs more.
    * 
    * And perhaps we should always set the zoom even if it was more expensive,
-   * since DocumentViewerImpl::SetTextZoom claims that child documents can have
+   * since nsDocumentViewer::SetTextZoom claims that child documents can have
    * a different text zoom (although it would be unusual), and it implies that
    * those child text zooms should get updated when the parent zoom gets set,
    * and perhaps the same is true for full zoom
-   * (although DocumentViewerImpl::SetFullZoom doesn't mention it).
+   * (although nsDocumentViewer::SetFullZoom doesn't mention it).
    *
    * So when we apply new zoom values to the browser, we simply set the zoom.
    * We don't check first to see if the new value is the same as the current
    * one.
-   **/
-  _applyPrefToSetting: function FullZoom__applyPrefToSetting(aValue, aBrowser) {
-    if ((!this.siteSpecific) || gInPrintPreviewMode)
+   *
+   * @param aValue    The zoom level value.
+   * @param aOptions  An object with the following optional propeties:
+   * @prop browser    The browser containing the page whose zoom level is to be
+   *                  set.  If falsey, the currently selected browser is used.
+   * @prop state      This method may need to update the zoom asynchronously.
+   *                  If the caller is itself asynchronous, then it should have
+   *                  access to a FullZoom state (see _getState); pass that
+   *                  state here.  If not given, the state is automatically
+   *                  captured.
+   * @prop onDone     If given, it's asynchronously called when complete.
+   */
+  _applyPrefToZoom: function FullZoom__applyPrefToZoom(aValue, aOptions={}) {
+    if (!this.siteSpecific || gInPrintPreviewMode) {
+      this._executeSoon(aOptions.onDone);
       return;
-
-    var browser = aBrowser || (gBrowser && gBrowser.selectedBrowser);
-    try {
-      if (browser.contentDocument.mozSyntheticDocument)
-        return;
-
-      if (typeof aValue != "undefined")
-        ZoomManager.setZoomForBrowser(browser, this._ensureValid(aValue));
-      else if (typeof this.globalValue != "undefined")
-        ZoomManager.setZoomForBrowser(browser, this.globalValue);
-      else
-        ZoomManager.setZoomForBrowser(browser, 1);
     }
-    catch(ex) {}
+
+    var browser = aOptions.browser || (gBrowser && gBrowser.selectedBrowser);
+    if (browser.contentDocument.mozSyntheticDocument) {
+      this._executeSoon(aOptions.onDone);
+      return;
+    }
+
+    if (aValue !== undefined) {
+      ZoomManager.setZoomForBrowser(browser, this._ensureValid(aValue));
+      this._zoomChangeToken++;
+      this._executeSoon(aOptions.onDone);
+      return;
+    }
+
+    let state = aOptions.state || this._getState(browser);
+    this._getGlobalValue(browser.contentWindow, function (value) {
+      if (this._isStateCurrent(state)) {
+        ZoomManager.setZoomForBrowser(browser, value === undefined ? 1 : value);
+        this._zoomChangeToken++;
+      }
+      this._executeSoon(aOptions.onDone);
+    });
   },
 
-  _applySettingToPref: function FullZoom__applySettingToPref() {
-    if (!this.siteSpecific || gInPrintPreviewMode ||
+  /**
+   * Saves the zoom level of the page in the current browser to the content
+   * prefs store.
+   */
+  _applyZoomToPref: function FullZoom__applyZoomToPref() {
+    if (!this.siteSpecific ||
+        gInPrintPreviewMode ||
         content.document.mozSyntheticDocument)
       return;
 
-    var zoomLevel = ZoomManager.zoom;
-    Services.contentPrefs.setPref(gBrowser.currentURI, this.name, zoomLevel);
+    this._cps2.set(gBrowser.currentURI.spec, this.name, ZoomManager.zoom,
+                   this._loadContextFromWindow(gBrowser.contentWindow), {
+      handleCompletion: function () {
+        this._isNextContentPrefChangeInternal = true;
+      }.bind(this),
+    });
   },
 
+  /**
+   * Removes from the content prefs store the zoom level of the current browser.
+   */
   _removePref: function FullZoom__removePref() {
-    if (!(content.document.mozSyntheticDocument))
-      Services.contentPrefs.removePref(gBrowser.currentURI, this.name);
+    if (content.document.mozSyntheticDocument)
+      return;
+    let ctxt = this._loadContextFromWindow(gBrowser.contentWindow);
+    this._cps2.removeByDomainAndName(gBrowser.currentURI.spec, this.name, ctxt, {
+      handleCompletion: function () {
+        this._isNextContentPrefChangeInternal = true;
+      }.bind(this),
+    });
   },
-
 
   //**************************************************************************//
   // Utilities
 
+  /**
+   * Returns the current FullZoom "state".  Asynchronous operations that change
+   * the zoom should use this method to capture the state before starting and
+   * use _isStateCurrent to determine if it's still current when done.  If the
+   * captured state is no longer current, then the zoom should not be changed.
+   * Doing so would either change the zoom of the wrong tab or clobber an
+   * earlier zoom change that occurred after the operation started.
+   *
+   * @param browser  The browser associated with the state.  If not given, the
+   *                 currently selected browser is used.
+   */
+  _getState: function FullZoom__getState(browser) {
+    browser = browser || gBrowser.selectedBrowser;
+    return {
+      // Due to async content pref service callbacks, this method can get called
+      // after the window has closed, so gBrowser.selectedBrowser may be null.
+      uri: browser ? browser.currentURI : null,
+      token: this._zoomChangeToken,
+     };
+  },
+
+  /**
+   * Returns true if the given state is current.
+   */
+  _isStateCurrent: function FullZoom__isStateCurrent(state) {
+    // If either state has no URI, then the given state can't be current.
+    // currState.uri will be null when this method is called after the window
+    // has closed, which can happen due to async content pref service callbacks.
+    let currState = this._getState();
+    return currState.token === state.token &&
+           currState.uri && state.uri &&
+           this._cps2.extractDomain(currState.uri.spec) ==
+             this._cps2.extractDomain(state.uri.spec);
+  },
+
   _ensureValid: function FullZoom__ensureValid(aValue) {
+    // Note that undefined is a valid value for aValue that indicates a known-
+    // not-to-exist value.
     if (isNaN(aValue))
       return 1;
 
@@ -320,5 +468,68 @@ var FullZoom = {
       return ZoomManager.MAX;
 
     return aValue;
-  }
+  },
+
+  /**
+   * Gets the global browser.content.full-zoom content preference.
+   *
+   * WARNING: callback may be called synchronously or asynchronously.  The
+   * reason is that it's usually desirable to avoid turns of the event loop
+   * where possible, since they can lead to visible, jarring jumps in zoom
+   * level.  It's not always possible to avoid them, though.  As a convenience,
+   * then, this method takes a callback and returns nothing.
+   *
+   * @param window    The content window pertaining to the zoom.
+   * @param callback  Synchronously or asynchronously called when done.  It's
+   *                  bound to this object (FullZoom) and passed the preference
+   *                  value.
+   */
+  _getGlobalValue: function FullZoom__getGlobalValue(window, callback) {
+    // * !("_globalValue" in this) => global value not yet cached.
+    // * this._globalValue === undefined => global value known not to exist.
+    // * Otherwise, this._globalValue is a number, the global value.
+    if ("_globalValue" in this) {
+      callback.call(this, this._globalValue);
+      return;
+    }
+    let value = undefined;
+    this._cps2.getGlobal(this.name, this._loadContextFromWindow(window), {
+      handleResult: function (pref) value = pref.value,
+      handleCompletion: function () {
+        this._globalValue = this._ensureValid(value);
+        callback.call(this, this._globalValue);
+      }.bind(this)
+    });
+  },
+
+  /**
+   * Gets the load context from the given window.
+   *
+   * @param window  The window whose load context will be returned.
+   * @return        The nsILoadContext of the given window.
+   */
+  _loadContextFromWindow: function FullZoom__loadContextFromWindow(window) {
+    return window.
+           QueryInterface(Ci.nsIInterfaceRequestor).
+           getInterface(Ci.nsIWebNavigation).
+           QueryInterface(Ci.nsILoadContext);
+  },
+
+  /**
+   * Asynchronously broadcasts a "browser-fullZoom:locationChange" notification
+   * so that tests can select tabs, load pages, etc. and be notified when the
+   * zoom levels on those pages change.  The notification is always asynchronous
+   * so that observers are guaranteed a consistent behavior.
+   */
+  _notifyOnLocationChange: function FullZoom__notifyOnLocationChange() {
+    this._executeSoon(function () {
+      Services.obs.notifyObservers(null, "browser-fullZoom:locationChange", "");
+    });
+  },
+
+  _executeSoon: function FullZoom__executeSoon(callback) {
+    if (!callback)
+      return;
+    Services.tm.mainThread.dispatch(callback, Ci.nsIThread.DISPATCH_NORMAL);
+  },
 };
