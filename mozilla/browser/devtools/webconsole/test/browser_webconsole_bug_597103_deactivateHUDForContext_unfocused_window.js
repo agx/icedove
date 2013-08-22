@@ -14,70 +14,104 @@ let tab1, tab2, win1, win2;
 let noErrors = true;
 
 function tab1Loaded(aEvent) {
-  browser.removeEventListener(aEvent.type, arguments.callee, true);
+  browser.removeEventListener(aEvent.type, tab1Loaded, true);
 
   win2 = OpenBrowserWindow();
   win2.addEventListener("load", win2Loaded, true);
 }
 
 function win2Loaded(aEvent) {
-  win2.removeEventListener(aEvent.type, arguments.callee, true);
+  win2.removeEventListener(aEvent.type, win2Loaded, true);
 
-  tab2 = win2.gBrowser.addTab();
+  tab2 = win2.gBrowser.addTab(TEST_URI);
   win2.gBrowser.selectedTab = tab2;
   tab2.linkedBrowser.addEventListener("load", tab2Loaded, true);
-  tab2.linkedBrowser.contentWindow.location = TEST_URI;
 }
 
 function tab2Loaded(aEvent) {
-  tab2.linkedBrowser.removeEventListener(aEvent.type, arguments.callee, true);
+  tab2.linkedBrowser.removeEventListener(aEvent.type, tab2Loaded, true);
 
-  waitForFocus(function() {
+  let consolesOpened = 0;
+  function onWebConsoleOpen() {
+    consolesOpened++;
+    if (consolesOpened == 2) {
+      Services.obs.removeObserver(onWebConsoleOpen, "web-console-created");
+      executeSoon(closeConsoles);
+    }
+  }
+
+  Services.obs.addObserver(onWebConsoleOpen, "web-console-created", false);
+
+  function openConsoles() {
     try {
-      HUDService.activateHUDForContext(tab1);
+      let target1 = TargetFactory.forTab(tab1);
+      gDevTools.showToolbox(target1, "webconsole");
     }
     catch (ex) {
-      ok(false, "HUDService.activateHUDForContext(tab1) exception: " + ex);
+      ok(false, "gDevTools.showToolbox(target1) exception: " + ex);
       noErrors = false;
     }
 
     try {
-      HUDService.activateHUDForContext(tab2);
+      let target2 = TargetFactory.forTab(tab2);
+      gDevTools.showToolbox(target2, "webconsole");
     }
     catch (ex) {
-      ok(false, "HUDService.activateHUDForContext(tab2) exception: " + ex);
+      ok(false, "gDevTools.showToolbox(target2) exception: " + ex);
       noErrors = false;
     }
+  }
+
+  let consolesClosed = 0;
+  function onWebConsoleClose()
+  {
+    consolesClosed++;
+    if (consolesClosed == 2) {
+      Services.obs.removeObserver(onWebConsoleClose, "web-console-destroyed");
+      executeSoon(testEnd);
+    }
+  }
+
+  function closeConsoles() {
+    Services.obs.addObserver(onWebConsoleClose, "web-console-destroyed", false);
 
     try {
-      HUDService.deactivateHUDForContext(tab1);
+      let target1 = TargetFactory.forTab(tab1);
+      gDevTools.closeToolbox(target1).then(function() {
+        try {
+          let target2 = TargetFactory.forTab(tab2);
+          gDevTools.closeToolbox(target2);
+        }
+        catch (ex) {
+          ok(false, "gDevTools.closeToolbox(target2) exception: " + ex);
+          noErrors = false;
+        }
+      });
     }
     catch (ex) {
-      ok(false, "HUDService.deactivateHUDForContext(tab1) exception: " + ex);
+      ok(false, "gDevTools.closeToolbox(target1) exception: " + ex);
       noErrors = false;
     }
+  }
 
-    try {
-      HUDService.deactivateHUDForContext(tab2);
-    }
-    catch (ex) {
-      ok(false, "HUDService.deactivateHUDForContext(tab2) exception: " + ex);
-      noErrors = false;
-    }
+  function testEnd() {
+    ok(noErrors, "there were no errors");
 
-    if (noErrors) {
-      ok(true, "there were no errors");
-    }
-
-    win2.gBrowser.removeTab(tab2);
+    Array.forEach(win1.gBrowser.tabs, function(aTab) {
+      win1.gBrowser.removeTab(aTab);
+    });
+    Array.forEach(win2.gBrowser.tabs, function(aTab) {
+      win2.gBrowser.removeTab(aTab);
+    });
 
     executeSoon(function() {
       win2.close();
       tab1 = tab2 = win1 = win2 = null;
       finishTest();
     });
+  }
 
-  }, tab2.linkedBrowser.contentWindow);
+  waitForFocus(openConsoles, tab2.linkedBrowser.contentWindow);
 }
 
 function test() {

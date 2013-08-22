@@ -36,6 +36,7 @@
 #include "prlog.h"
 #include "prmem.h"
 #include "prnetdb.h"
+#include "mozilla/Likely.h"
 
 //-----------------------------------------------------------------------------
 
@@ -95,7 +96,7 @@ nsHttpNegotiateAuth::ChallengeReceived(nsIHttpAuthenticableChannel *authChannel,
         return rv;
 
     uint32_t req_flags = nsIAuthModule::REQ_DEFAULT;
-    nsCAutoString service;
+    nsAutoCString service;
 
     if (isProxyAuth) {
         if (!TestBoolPref(kNegotiateAuthAllowProxies)) {
@@ -236,7 +237,7 @@ nsHttpNegotiateAuth::GenerateCredentials(nsIHttpAuthenticableChannel *authChanne
         //
         // Decode the response that followed the "Negotiate" token
         //
-        if (PL_Base64Decode(challenge, len, (char *) inToken) == NULL) {
+        if (PL_Base64Decode(challenge, len, (char *) inToken) == nullptr) {
             free(inToken);
             return(NS_ERROR_UNEXPECTED);
         }
@@ -275,7 +276,7 @@ nsHttpNegotiateAuth::GenerateCredentials(nsIHttpAuthenticableChannel *authChanne
 
     // allocate a buffer sizeof("Negotiate" + " " + b64output_token + "\0")
     *creds = (char *) nsMemory::Alloc(kNegotiateLen + 1 + strlen(encoded_token) + 1);
-    if (NS_UNLIKELY(!*creds))
+    if (MOZ_UNLIKELY(!*creds))
         rv = NS_ERROR_OUT_OF_MEMORY;
     else
         sprintf(*creds, "%s %s", kNegotiate, encoded_token);
@@ -302,7 +303,7 @@ nsHttpNegotiateAuth::TestBoolPref(const char *pref)
 bool
 nsHttpNegotiateAuth::TestNonFqdn(nsIURI *uri)
 {
-    nsCAutoString host;
+    nsAutoCString host;
     PRNetAddr addr;
 
     if (!TestBoolPref(kNegotiateAuthAllowNonFqdn))
@@ -323,7 +324,7 @@ nsHttpNegotiateAuth::TestPref(nsIURI *uri, const char *pref)
     if (!prefs)
         return false;
 
-    nsCAutoString scheme, host;
+    nsAutoCString scheme, host;
     int32_t port;
 
     if (NS_FAILED(uri->GetScheme(scheme)))
