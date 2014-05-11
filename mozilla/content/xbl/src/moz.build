@@ -4,21 +4,22 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'content'
-
 EXPORTS += [
     'nsBindingManager.h',
     'nsXBLBinding.h',
     'nsXBLService.h',
 ]
 
-CPP_SOURCES += [
+EXPORTS.mozilla.dom += [
+    'XBLChildrenElement.h',
+]
+
+UNIFIED_SOURCES += [
     'nsBindingManager.cpp',
     'nsXBLBinding.cpp',
     'nsXBLContentSink.cpp',
     'nsXBLDocumentInfo.cpp',
     'nsXBLEventHandler.cpp',
-    'nsXBLInsertionPoint.cpp',
     'nsXBLProtoImpl.cpp',
     'nsXBLProtoImplField.cpp',
     'nsXBLProtoImplMethod.cpp',
@@ -30,5 +31,23 @@ CPP_SOURCES += [
     'nsXBLSerialize.cpp',
     'nsXBLService.cpp',
     'nsXBLWindowKeyHandler.cpp',
+    'XBLChildrenElement.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
+MSVC_ENABLE_PGO = True
+
+LOCAL_INCLUDES += [
+    '/content/base/src',
+    '/content/events/src',
+    '/content/html/document/src',
+    '/content/xml/document/src',
+    '/content/xul/content/src',
+    '/content/xul/document/src',
+    '/dom/base',
+    '/layout/style',
+    '/xpcom/ds',
+]
+
+FINAL_LIBRARY = 'gklayout'

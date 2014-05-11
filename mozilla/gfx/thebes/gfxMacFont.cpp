@@ -4,6 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "gfxMacFont.h"
+
+#include "mozilla/MemoryReporting.h"
+
 #include "gfxCoreTextShaper.h"
 #include "gfxHarfBuzzShaper.h"
 #include <algorithm>
@@ -11,6 +14,8 @@
 #include "gfxPlatformMac.h"
 #include "gfxContext.h"
 #include "gfxFontUtils.h"
+#include "gfxMacPlatformFontList.h"
+#include "gfxFontConstants.h"
 
 #include "cairo-quartz.h"
 
@@ -57,7 +62,7 @@ gfxMacFont::gfxMacFont(MacOSFontEntry *aFontEntry, const gfxFontStyle *aFontStyl
 
     // synthetic oblique by skewing via the font matrix
     bool needsOblique =
-        (mFontEntry != NULL) &&
+        (mFontEntry != nullptr) &&
         (!mFontEntry->IsItalic() &&
          (mStyle.style & (NS_FONT_STYLE_ITALIC | NS_FONT_STYLE_OBLIQUE)));
 
@@ -81,6 +86,10 @@ gfxMacFont::gfxMacFont(MacOSFontEntry *aFontEntry, const gfxFontStyle *aFontStyl
     if (mAdjustedSize <=
         (gfxFloat)gfxPlatformMac::GetPlatform()->GetAntiAliasingThreshold()) {
         cairo_font_options_set_antialias(fontOptions, CAIRO_ANTIALIAS_NONE);
+        mAntialiasOption = kAntialiasNone;
+    } else if (mStyle.useGrayscaleAntialiasing) {
+        cairo_font_options_set_antialias(fontOptions, CAIRO_ANTIALIAS_GRAY);
+        mAntialiasOption = kAntialiasGrayscale;
     }
 
     mScaledFont = cairo_scaled_font_create(mFontFace, &sizeMatrix, &ctm,
@@ -362,7 +371,7 @@ gfxMacFont::InitMetricsFromPlatform()
 {
     CTFontRef ctFont = ::CTFontCreateWithGraphicsFont(mCGFont,
                                                       mAdjustedSize,
-                                                      NULL, NULL);
+                                                      nullptr, nullptr);
     if (!ctFont) {
         return;
     }
@@ -410,18 +419,18 @@ gfxMacFont::GetScaledFont(DrawTarget *aTarget)
 }
 
 void
-gfxMacFont::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                FontCacheSizes*   aSizes) const
+gfxMacFont::AddSizeOfExcludingThis(MallocSizeOf aMallocSizeOf,
+                                   FontCacheSizes* aSizes) const
 {
-    gfxFont::SizeOfExcludingThis(aMallocSizeOf, aSizes);
+    gfxFont::AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
     // mCGFont is shared with the font entry, so not counted here;
     // and we don't have APIs to measure the cairo mFontFace object
 }
 
 void
-gfxMacFont::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                FontCacheSizes*   aSizes) const
+gfxMacFont::AddSizeOfIncludingThis(MallocSizeOf aMallocSizeOf,
+                                   FontCacheSizes* aSizes) const
 {
     aSizes->mFontInstances += aMallocSizeOf(this);
-    SizeOfExcludingThis(aMallocSizeOf, aSizes);
+    AddSizeOfExcludingThis(aMallocSizeOf, aSizes);
 }

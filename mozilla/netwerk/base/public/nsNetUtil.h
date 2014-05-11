@@ -81,10 +81,19 @@
 #include "nsIOfflineCacheUpdate.h"
 #include "nsIContentSniffer.h"
 #include "nsCategoryCache.h"
+#include "nsStringStream.h"
+#include "nsIViewSourceChannel.h"
 
 #include <limits>
 
+#ifdef MOZ_WIDGET_GONK
+#include "nsINetworkManager.h"
+#include "nsThreadUtils.h" // for NS_IsMainThread
+#endif
+
 #ifdef MOZILLA_INTERNAL_API
+
+#include "nsReadableUtils.h"
 
 inline already_AddRefed<nsIIOService>
 do_GetIOService(nsresult* error = 0)
@@ -460,6 +469,47 @@ NS_NewInputStreamChannel(nsIChannel      **result,
 {
     return NS_NewInputStreamChannel(result, uri, stream, contentType,
                                     &contentCharset);
+}
+
+inline nsresult
+NS_NewInputStreamChannel(nsIChannel      **result,
+                         nsIURI           *uri,
+                         const nsAString  &data,
+                         const nsACString &contentType,
+                         bool              isSrcdocChannel = false)
+{
+
+    nsresult rv;
+
+    nsCOMPtr<nsIStringInputStream> stream;
+    stream = do_CreateInstance(NS_STRINGINPUTSTREAM_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+#ifdef MOZILLA_INTERNAL_API
+    uint32_t len;
+    char* utf8Bytes = ToNewUTF8String(data, &len);
+    rv = stream->AdoptData(utf8Bytes, len);
+#else
+    char* utf8Bytes = ToNewUTF8String(data);
+    rv = stream->AdoptData(utf8Bytes, strlen(utf8Bytes));
+#endif
+
+    nsCOMPtr<nsIChannel> chan;
+
+    rv = NS_NewInputStreamChannel(getter_AddRefs(chan), uri, stream,
+                                  contentType, NS_LITERAL_CSTRING("UTF-8"));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (isSrcdocChannel) {
+        nsCOMPtr<nsIInputStreamChannel> inStrmChan = do_QueryInterface(chan);
+        NS_ENSURE_TRUE(inStrmChan, NS_ERROR_FAILURE);
+        inStrmChan->SetSrcdocData(data);
+    }
+
+    *result = nullptr;
+    chan.swap(*result);
+
+    return NS_OK;
 }
 
 inline nsresult
@@ -949,6 +999,25 @@ NS_NewLocalFileOutputStream(nsIOutputStream **result,
 
 // returns a file output stream which can be QI'ed to nsISafeOutputStream.
 inline nsresult
+NS_NewAtomicFileOutputStream(nsIOutputStream **result,
+                                nsIFile          *file,
+                                int32_t           ioFlags       = -1,
+                                int32_t           perm          = -1,
+                                int32_t           behaviorFlags = 0)
+{
+    nsresult rv;
+    nsCOMPtr<nsIFileOutputStream> out =
+        do_CreateInstance(NS_ATOMICLOCALFILEOUTPUTSTREAM_CONTRACTID, &rv);
+    if (NS_SUCCEEDED(rv)) {
+        rv = out->Init(file, ioFlags, perm, behaviorFlags);
+        if (NS_SUCCEEDED(rv))
+            out.forget(result);
+    }
+    return rv;
+}
+
+// returns a file output stream which can be QI'ed to nsISafeOutputStream.
+inline nsresult
 NS_NewSafeLocalFileOutputStream(nsIOutputStream **result,
                                 nsIFile          *file,
                                 int32_t           ioFlags       = -1,
@@ -1309,6 +1378,8 @@ NS_UsePrivateBrowsing(nsIChannel *channel)
 // know about script security manager.
 #define NECKO_NO_APP_ID 0
 #define NECKO_UNKNOWN_APP_ID UINT32_MAX
+// special app id reserved for separating the safebrowsing cookie
+#define NECKO_SAFEBROWSING_APP_ID UINT32_MAX - 1
 
 /**
  * Gets AppId and isInBrowserElement from channel's nsILoadContext.
@@ -2279,7 +2350,8 @@ NS_SniffContent(const char* aSnifferType, nsIRequest* aRequest,
     return;
   }
 
-  const nsCOMArray<nsIContentSniffer>& sniffers = cache->GetEntries();
+  nsCOMArray<nsIContentSniffer> sniffers;
+  cache->GetEntries(sniffers);
   for (int32_t i = 0; i < sniffers.Count(); ++i) {
     nsresult rv = sniffers[i]->GetMIMETypeFromContent(aRequest, aData, aLength, aSniffedType);
     if (NS_SUCCEEDED(rv) && !aSniffedType.IsEmpty()) {
@@ -2289,5 +2361,51 @@ NS_SniffContent(const char* aSnifferType, nsIRequest* aRequest,
 
   aSniffedType.Truncate();
 }
+
+/**
+ * Whether the channel was created to load a srcdoc document.
+ * Note that view-source:about:srcdoc is classified as a srcdoc document by 
+ * this function, which may not be applicable everywhere.
+ */
+inline bool
+NS_IsSrcdocChannel(nsIChannel *aChannel)
+{
+  bool isSrcdoc;
+  nsCOMPtr<nsIInputStreamChannel> isr = do_QueryInterface(aChannel);
+  if (isr) {
+    isr->GetIsSrcdocChannel(&isSrcdoc);
+    return isSrcdoc;
+  }
+  nsCOMPtr<nsIViewSourceChannel> vsc = do_QueryInterface(aChannel);
+  if (vsc) {
+    vsc->GetIsSrcdocChannel(&isSrcdoc);
+    return isSrcdoc;
+  }
+  return false;
+}
+
+// The following members are used for network per-app metering.
+const static uint64_t NETWORK_STATS_THRESHOLD = 65536;
+
+#ifdef MOZ_WIDGET_GONK
+inline nsresult
+NS_GetActiveNetworkInterface(nsCOMPtr<nsINetworkInterface> &aNetworkInterface)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  nsresult rv;
+  nsCOMPtr<nsINetworkManager> networkManager =
+    do_GetService("@mozilla.org/network/manager;1", &rv);
+
+  if (NS_FAILED(rv) || !networkManager) {
+    aNetworkInterface = nullptr;
+    return rv;
+  }
+
+  networkManager->GetActive(getter_AddRefs(aNetworkInterface));
+
+  return NS_OK;
+}
+#endif
 
 #endif // !nsNetUtil_h__

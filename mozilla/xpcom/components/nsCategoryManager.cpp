@@ -17,7 +17,6 @@
 #include "nsClassHashtable.h"
 #include "nsIFactory.h"
 #include "nsIStringEnumerator.h"
-#include "nsIMemoryReporter.h"
 #include "nsSupportsPrimitives.h"
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
@@ -28,9 +27,11 @@
 #include "nsQuickSort.h"
 #include "nsEnumeratorUtils.h"
 #include "nsThreadUtils.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Services.h"
 
 #include "ManifestParser.h"
+#include "nsISimpleEnumerator.h"
 
 using namespace mozilla;
 class nsIComponentLoaderManager;
@@ -209,7 +210,6 @@ CategoryNode::Create(PLArenaPool* aArena)
   if (!node)
     return nullptr;
 
-  node->mTable.Init();
   return node;
 }
 
@@ -251,7 +251,7 @@ CategoryNode::AddLeaf(const char* aEntryName,
                       PLArenaPool* aArena)
 {
   if (_retval)
-    *_retval = NULL;
+    *_retval = nullptr;
 
   MutexAutoLock lock(mLock);
   CategoryLeaf* leaf = 
@@ -298,7 +298,8 @@ CategoryNode::DeleteLeaf(const char* aEntryName)
 NS_METHOD 
 CategoryNode::Enumerate(nsISimpleEnumerator **_retval)
 {
-  NS_ENSURE_ARG_POINTER(_retval);
+  if (NS_WARN_IF(!_retval))
+    return NS_ERROR_INVALID_ARG;
 
   MutexAutoLock lock(mLock);
   EntryEnumerator* enumObj = EntryEnumerator::Create(mTable);
@@ -312,7 +313,7 @@ CategoryNode::Enumerate(nsISimpleEnumerator **_retval)
 }
 
 size_t
-CategoryNode::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf)
+CategoryNode::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf)
 {
     // We don't measure the strings pointed to by the entries because the
     // pointers are non-owning.
@@ -399,16 +400,7 @@ CategoryEnumerator::enumfunc_createenumerator(const char* aStr, CategoryNode* aN
 // nsCategoryManager implementations
 //
 
-NS_IMPL_QUERY_INTERFACE1(nsCategoryManager, nsICategoryManager)
-
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(CategoryManagerMallocSizeOf)
-
-NS_MEMORY_REPORTER_IMPLEMENT(CategoryManager,
-    "explicit/xpcom/category-manager",
-    KIND_HEAP,
-    nsIMemoryReporter::UNITS_BYTES,
-    nsCategoryManager::GetCategoryManagerSize,
-    "Memory used for the XPCOM category manager.")
+NS_IMPL_QUERY_INTERFACE_INHERITED1(nsCategoryManager, MemoryUniReporter, nsICategoryManager)
 
 NS_IMETHODIMP_(nsrefcnt)
 nsCategoryManager::AddRef()
@@ -449,27 +441,25 @@ nsCategoryManager::Create(nsISupports* aOuter, REFNSIID aIID, void** aResult)
 }
 
 nsCategoryManager::nsCategoryManager()
-  : mLock("nsCategoryManager")
+  : MemoryUniReporter("explicit/xpcom/category-manager",
+                       KIND_HEAP, UNITS_BYTES,
+                       "Memory used for the XPCOM category manager.")
+  , mLock("nsCategoryManager")
   , mSuppressNotifications(false)
-  , mReporter(nullptr)
 {
   PL_INIT_ARENA_POOL(&mArena, "CategoryManagerArena",
                      NS_CATEGORYMANAGER_ARENA_SIZE);
-
-  mTable.Init();
 }
 
 void
 nsCategoryManager::InitMemoryReporter()
 {
-  mReporter = new NS_MEMORY_REPORTER_NAME(CategoryManager);
-  NS_RegisterMemoryReporter(mReporter);
+  RegisterWeakMemoryReporter(this);
 }
 
 nsCategoryManager::~nsCategoryManager()
 {
-  (void)::NS_UnregisterMemoryReporter(mReporter);
-  mReporter = nullptr;
+  UnregisterWeakMemoryReporter(this);
 
   // the hashtable contains entries that must be deleted before the arena is
   // destroyed, or else you will have PRLocks undestroyed and other Really
@@ -488,18 +478,16 @@ nsCategoryManager::get_category(const char* aName) {
   return node;
 }
 
-/* static */ int64_t
-nsCategoryManager::GetCategoryManagerSize()
+int64_t
+nsCategoryManager::Amount()
 {
-  MOZ_ASSERT(nsCategoryManager::gCategoryManager);
-  return nsCategoryManager::gCategoryManager->SizeOfIncludingThis(
-           CategoryManagerMallocSizeOf);
+    return SizeOfIncludingThis(MallocSizeOf);
 }
 
 static size_t
 SizeOfCategoryManagerTableEntryExcludingThis(nsDepCharHashKey::KeyType aKey,
                                              const nsAutoPtr<CategoryNode> &aData,
-                                             nsMallocSizeOfFun aMallocSizeOf,
+                                             MallocSizeOf aMallocSizeOf,
                                              void* aUserArg)
 {
     // We don't measure the string pointed to by aKey because it's a non-owning
@@ -508,7 +496,7 @@ SizeOfCategoryManagerTableEntryExcludingThis(nsDepCharHashKey::KeyType aKey,
 }
 
 size_t
-nsCategoryManager::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
+nsCategoryManager::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 {
   size_t n = aMallocSizeOf(this);
 
@@ -577,7 +565,9 @@ nsCategoryManager::NotifyObservers( const char *aTopic,
 
     r = new CategoryNotificationRunnable(entry, aTopic, aCategoryName);
   } else {
-    r = new CategoryNotificationRunnable(this, aTopic, aCategoryName);
+    r = new CategoryNotificationRunnable(
+              NS_ISUPPORTS_CAST(nsICategoryManager*, this),
+              aTopic, aCategoryName);
   }
 
   NS_DispatchToMainThread(r);
@@ -588,9 +578,10 @@ nsCategoryManager::GetCategoryEntry( const char *aCategoryName,
                                      const char *aEntryName,
                                      char **_retval )
 {
-  NS_ENSURE_ARG_POINTER(aCategoryName);
-  NS_ENSURE_ARG_POINTER(aEntryName);
-  NS_ENSURE_ARG_POINTER(_retval);
+  if (NS_WARN_IF(!aCategoryName) ||
+      NS_WARN_IF(!aEntryName) ||
+      NS_WARN_IF(!_retval))
+    return NS_ERROR_INVALID_ARG;;
 
   nsresult status = NS_ERROR_NOT_AVAILABLE;
 
@@ -632,7 +623,7 @@ nsCategoryManager::AddCategoryEntry(const char *aCategoryName,
                                     char** aOldValue)
 {
   if (aOldValue)
-    *aOldValue = NULL;
+    *aOldValue = nullptr;
 
   // Before we can insert a new entry, we'll need to
   //  find the |CategoryNode| to put it in...
@@ -682,8 +673,9 @@ nsCategoryManager::DeleteCategoryEntry( const char *aCategoryName,
                                         const char *aEntryName,
                                         bool aDontPersist)
 {
-  NS_ENSURE_ARG_POINTER(aCategoryName);
-  NS_ENSURE_ARG_POINTER(aEntryName);
+  if (NS_WARN_IF(!aCategoryName) ||
+      NS_WARN_IF(!aEntryName))
+    return NS_ERROR_INVALID_ARG;
 
   /*
     Note: no errors are reported since failure to delete
@@ -710,7 +702,8 @@ nsCategoryManager::DeleteCategoryEntry( const char *aCategoryName,
 NS_IMETHODIMP
 nsCategoryManager::DeleteCategory( const char *aCategoryName )
 {
-  NS_ENSURE_ARG_POINTER(aCategoryName);
+  if (NS_WARN_IF(!aCategoryName))
+    return NS_ERROR_INVALID_ARG;
 
   // the categories are arena-allocated, so we don't
   // actually delete them. We just remove all of the
@@ -735,8 +728,9 @@ NS_IMETHODIMP
 nsCategoryManager::EnumerateCategory( const char *aCategoryName,
                                       nsISimpleEnumerator **_retval )
 {
-  NS_ENSURE_ARG_POINTER(aCategoryName);
-  NS_ENSURE_ARG_POINTER(_retval);
+  if (NS_WARN_IF(!aCategoryName) ||
+      NS_WARN_IF(!_retval))
+    return NS_ERROR_INVALID_ARG;
 
   CategoryNode* category;
   {
@@ -754,7 +748,8 @@ nsCategoryManager::EnumerateCategory( const char *aCategoryName,
 NS_IMETHODIMP 
 nsCategoryManager::EnumerateCategories(nsISimpleEnumerator **_retval)
 {
-  NS_ENSURE_ARG_POINTER(_retval);
+  if (NS_WARN_IF(!_retval))
+    return NS_ERROR_INVALID_ARG;
 
   MutexAutoLock lock(mLock);
   CategoryEnumerator* enumObj = CategoryEnumerator::Create(mTable);

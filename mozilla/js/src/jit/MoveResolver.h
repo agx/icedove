@@ -7,9 +7,9 @@
 #ifndef jit_MoveResolver_h
 #define jit_MoveResolver_h
 
-#include "Registers.h"
-#include "InlineList.h"
-#include "IonAllocPolicy.h"
+#include "jit/InlineList.h"
+#include "jit/IonAllocPolicy.h"
+#include "jit/Registers.h"
 
 namespace js {
 namespace jit {
@@ -50,7 +50,11 @@ class MoveResolver
             : kind_((Kind) addrKind),
             code_(reg.code()),
             disp_(disp)
-        { }
+        {
+            // With a zero offset, this is a plain reg-to-reg move.
+            if (disp == 0 && addrKind == EFFECTIVE)
+                kind_ = REG;
+        }
         MoveOperand(const MoveOperand &other)
           : kind_(other.kind_),
             code_(other.code_),
@@ -98,6 +102,9 @@ class MoveResolver
             if (isMemory() || isEffectiveAddress())
                 return disp_ == other.disp_;
             return true;
+        }
+        bool operator !=(const MoveOperand &other) const {
+            return !operator==(other);
         }
     };
 
@@ -207,6 +214,9 @@ class MoveResolver
     }
     void clearTempObjectPool() {
         movePool_.clear();
+    }
+    void setAllocator(TempAllocator &alloc) {
+        movePool_.setAllocator(alloc);
     }
 };
 

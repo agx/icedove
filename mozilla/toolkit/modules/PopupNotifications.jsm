@@ -4,9 +4,9 @@
 
 this.EXPORTED_SYMBOLS = ["PopupNotifications"];
 
-var Cc = Components.classes, Ci = Components.interfaces;
+var Cc = Components.classes, Ci = Components.interfaces, Cu = Components.utils;
 
-Components.utils.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 const NOTIFICATION_EVENT_DISMISSED = "dismissed";
 const NOTIFICATION_EVENT_REMOVED = "removed";
@@ -268,8 +268,9 @@ PopupNotifications.prototype = {
     let notifications = this._getNotificationsForBrowser(browser);
     notifications.push(notification);
 
+    let isActive = this._isActiveBrowser(browser);
     let fm = Cc["@mozilla.org/focus-manager;1"].getService(Ci.nsIFocusManager);
-    if (browser.docShell.isActive && fm.activeWindow == this.window) {
+    if (isActive && fm.activeWindow == this.window) {
       // show panel now
       this._update(notifications, notification.anchorElement, true);
     } else {
@@ -283,7 +284,7 @@ PopupNotifications.prototype = {
       // this browser is a tab (thus showing the anchor icon). For
       // non-tabbrowser browsers, we need to make the icon visible now or the
       // user will not be able to open the panel.
-      if (!notification.dismissed && browser.docShell.isActive) {
+      if (!notification.dismissed && isActive) {
         this.window.getAttention();
         if (notification.anchorElement.parentNode != this.iconBox) {
           notification.anchorElement.setAttribute(ICON_ATTRIBUTE_SHOWING, "true");
@@ -347,7 +348,7 @@ PopupNotifications.prototype = {
 
     this._setNotificationsForBrowser(aBrowser, notifications);
 
-    if (aBrowser.docShell.isActive) {
+    if (this._isActiveBrowser(aBrowser)) {
       // get the anchor element if the browser has defined one so it will
       // _update will handle both the tabs iconBox and non-tab permission
       // anchors.
@@ -365,8 +366,8 @@ PopupNotifications.prototype = {
    */
   remove: function PopupNotifications_remove(notification) {
     this._remove(notification);
-    
-    if (notification.browser.docShell.isActive) {
+
+    if (this._isActiveBrowser(notification.browser)) {
       let notifications = this._getNotificationsForBrowser(notification.browser);
       this._update(notifications, notification.anchorElement);
     }
@@ -418,7 +419,7 @@ PopupNotifications.prototype = {
     if (index == -1)
       return;
 
-    if (notification.browser.docShell.isActive)
+    if (this._isActiveBrowser(notification.browser))
       notification.anchorElement.removeAttribute(ICON_ATTRIBUTE_SHOWING);
 
     // remove the notification
@@ -704,6 +705,14 @@ PopupNotifications.prototype = {
     return notifications;
   },
 
+  _isActiveBrowser: function (browser) {
+    // Note: This helper only exists, because in e10s builds,
+    // we can't access the docShell of a browser from chrome.
+    return browser.docShell
+      ? browser.docShell.isActive
+      : (this.window.gBrowser.selectedBrowser == browser);
+  },
+
   _onIconBoxCommand: function PopupNotifications_onIconBoxCommand(event) {
     // Left click, space or enter only
     let type = event.type;
@@ -739,8 +748,12 @@ PopupNotifications.prototype = {
   },
 
   _fireCallback: function PopupNotifications_fireCallback(n, event) {
-    if (n.options.eventCallback)
-      n.options.eventCallback.call(n, event);
+    try {
+      if (n.options.eventCallback)
+        n.options.eventCallback.call(n, event);
+    } catch (error) {
+      Cu.reportError(error);
+    }
   },
 
   _onPopupHidden: function PopupNotifications_onPopupHidden(event) {
@@ -808,7 +821,11 @@ PopupNotifications.prototype = {
                                         timeSinceShown + "ms");
       return;
     }
-    notification.mainAction.callback.call();
+    try {
+      notification.mainAction.callback.call();
+    } catch(error) {
+      Cu.reportError(error);
+    }
 
     this._remove(notification);
     this._update();
@@ -820,7 +837,11 @@ PopupNotifications.prototype = {
       throw "menucommand target has no associated action/notification";
 
     event.stopPropagation();
-    target.action.callback.call();
+    try {
+      target.action.callback.call();
+    } catch(error) {
+      Cu.reportError(error);
+    }
 
     this._remove(target.notification);
     this._update();

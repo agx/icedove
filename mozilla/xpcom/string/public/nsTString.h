@@ -3,7 +3,6 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 // IWYU pragma: private, include "nsString.h"
 
   /**
@@ -40,6 +39,15 @@ class nsTString_CharT : public nsTSubstring_CharT
           Assign(data, length);
         }
 
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      explicit
+      nsTString_CharT( char16ptr_t data, size_type length = size_type(-1) )
+        : substring_type()
+        {
+          Assign(static_cast<const char16_t*>(data), length);
+        }
+#endif
+
       nsTString_CharT( const self_type& str )
         : substring_type()
         {
@@ -64,6 +72,9 @@ class nsTString_CharT : public nsTSubstring_CharT
       self_type& operator=( char_type c )                                                       { Assign(c);        return *this; }
       self_type& operator=( const char_type* data )                                             { Assign(data);     return *this; }
       self_type& operator=( const self_type& str )                                              { Assign(str);      return *this; }
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      self_type& operator=( const char16ptr_t data )                                            { Assign(static_cast<const char16_t*>(data));     return *this; }
+#endif
       self_type& operator=( const substring_type& str )                                         { Assign(str);      return *this; }
       self_type& operator=( const substring_tuple_type& tuple )                                 { Assign(tuple);    return *this; }
 
@@ -71,7 +82,11 @@ class nsTString_CharT : public nsTSubstring_CharT
          * returns the null-terminated string
          */
 
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      char16ptr_t get() const
+#else
       const char_type* get() const
+#endif
         {
           return mData;
         }
@@ -116,6 +131,12 @@ class nsTString_CharT : public nsTSubstring_CharT
 #ifdef CharT_is_PRUnichar
       int32_t Find( const nsAFlatString& aString, int32_t aOffset=0, int32_t aCount=-1 ) const;
       int32_t Find( const PRUnichar* aString, int32_t aOffset=0, int32_t aCount=-1 ) const;
+#ifdef MOZ_USE_CHAR16_WRAPPER
+      int32_t Find( char16ptr_t aString, int32_t aOffset=0, int32_t aCount=-1 ) const
+        {
+          return Find(static_cast<const char16_t*>(aString), aOffset, aCount);
+        }
+#endif
 #endif
 
         
@@ -359,6 +380,18 @@ class nsTString_CharT : public nsTSubstring_CharT
 
 #endif // !MOZ_STRING_WITH_OBSOLETE_API
 
+      void Rebind( const char_type* data, size_type length );
+
+        /**
+         * verify restrictions for dependent strings
+         */
+      void AssertValidDepedentString()
+        {
+          NS_ASSERTION(mData, "nsTDependentString must wrap a non-NULL buffer");
+          NS_ASSERTION(mLength != size_type(-1), "nsTDependentString has bogus length");
+          NS_ASSERTION(mData[mLength] == 0, "nsTDependentString must wrap only null-terminated strings");
+        }
+
 
     protected:
 
@@ -369,7 +402,7 @@ class nsTString_CharT : public nsTSubstring_CharT
         // allow subclasses to initialize fields directly
       nsTString_CharT( char_type* data, size_type length, uint32_t flags )
         : substring_type(data, length, flags) {}
-  };
+};
 
 
 class nsTFixedString_CharT : public nsTString_CharT
@@ -463,6 +496,13 @@ class nsTAutoString_CharT : public nsTFixedString_CharT
           Assign(data, length);
         }
 
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      explicit
+      nsTAutoString_CharT( char16ptr_t data, size_type length = size_type(-1) )
+        : nsTAutoString_CharT(static_cast<const char16_t*>(data), length)
+        {}
+#endif
+
       nsTAutoString_CharT( const self_type& str )
         : fixed_string_type(mStorage, kDefaultStorageSize, 0)
         {
@@ -485,6 +525,9 @@ class nsTAutoString_CharT : public nsTFixedString_CharT
         // |operator=| does not inherit, so we must define our own
       self_type& operator=( char_type c )                                                       { Assign(c);        return *this; }
       self_type& operator=( const char_type* data )                                             { Assign(data);     return *this; }
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      self_type& operator=( char16ptr_t data )                                                  { Assign(data);     return *this; }
+#endif
       self_type& operator=( const self_type& str )                                              { Assign(str);      return *this; }
       self_type& operator=( const substring_type& str )                                         { Assign(str);      return *this; }
       self_type& operator=( const substring_tuple_type& tuple )                                 { Assign(tuple);    return *this; }
@@ -556,7 +599,11 @@ class nsTXPIDLString_CharT : public nsTString_CharT
         }
 
         // return nullptr if we are voided
+#if defined(CharT_is_PRUnichar) && defined(MOZ_USE_CHAR16_WRAPPER)
+      char16ptr_t get() const
+#else
       const char_type* get() const
+#endif
         {
           return (mFlags & F_VOIDED) ? nullptr : mData;
         }

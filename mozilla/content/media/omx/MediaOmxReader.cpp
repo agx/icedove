@@ -36,7 +36,8 @@ MediaOmxReader::MediaOmxReader(AbstractMediaDecoder *aDecoder) :
 
 MediaOmxReader::~MediaOmxReader()
 {
-  ResetDecode();
+  ReleaseMediaResources();
+  ReleaseDecoder();
   mOmxDecoder.clear();
 }
 
@@ -64,23 +65,57 @@ bool MediaOmxReader::IsDormantNeeded()
 void MediaOmxReader::ReleaseMediaResources()
 {
   ResetDecode();
+  // Before freeing a video codec, all video buffers needed to be released
+  // even from graphics pipeline.
+  VideoFrameContainer* container = mDecoder->GetVideoFrameContainer();
+  if (container) {
+    container->ClearCurrentFrame();
+  }
   if (mOmxDecoder.get()) {
     mOmxDecoder->ReleaseMediaResources();
   }
 }
 
-nsresult MediaOmxReader::ReadMetadata(VideoInfo* aInfo,
+void MediaOmxReader::ReleaseDecoder()
+{
+  if (mOmxDecoder.get()) {
+    mOmxDecoder->ReleaseDecoder();
+  }
+}
+
+nsresult MediaOmxReader::InitOmxDecoder()
+{
+  if (!mOmxDecoder.get()) {
+    //register sniffers, if they are not registered in this process.
+    DataSource::RegisterDefaultSniffers();
+    mDecoder->GetResource()->SetReadMode(MediaCacheStream::MODE_METADATA);
+
+    sp<DataSource> dataSource = new MediaStreamSource(mDecoder->GetResource(), mDecoder);
+    dataSource->initCheck();
+
+    sp<MediaExtractor> extractor = MediaExtractor::Create(dataSource);
+    if (!extractor.get()) {
+      return NS_ERROR_FAILURE;
+    }
+    mOmxDecoder = new OmxDecoder(mDecoder->GetResource(), mDecoder);
+    if (!mOmxDecoder->Init(extractor)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+  return NS_OK;
+}
+
+nsresult MediaOmxReader::ReadMetadata(MediaInfo* aInfo,
                                       MetadataTags** aTags)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
 
   *aTags = nullptr;
 
-  if (!mOmxDecoder.get()) {
-    mOmxDecoder = new OmxDecoder(mDecoder->GetResource(), mDecoder);
-    if (!mOmxDecoder->Init()) {
-      return NS_ERROR_FAILURE;
-    }
+  // Initialize the internal OMX Decoder.
+  nsresult rv = InitOmxDecoder();
+  if (NS_FAILED(rv)) {
+    return rv;
   }
 
   if (!mOmxDecoder->TryLoad()) {
@@ -113,8 +148,8 @@ nsresult MediaOmxReader::ReadMetadata(VideoInfo* aInfo,
     }
 
     // Video track's frame sizes will not overflow. Activate the video track.
-    mHasVideo = mInfo.mHasVideo = true;
-    mInfo.mDisplay = displaySize;
+    mHasVideo = mInfo.mVideo.mHasVideo = true;
+    mInfo.mVideo.mDisplay = displaySize;
     mPicture = pictureRect;
     mInitialFrame = frameSize;
     VideoFrameContainer* container = mDecoder->GetVideoFrameContainer();
@@ -128,25 +163,13 @@ nsresult MediaOmxReader::ReadMetadata(VideoInfo* aInfo,
   if (mOmxDecoder->HasAudio()) {
     int32_t numChannels, sampleRate;
     mOmxDecoder->GetAudioParameters(&numChannels, &sampleRate);
-    mHasAudio = mInfo.mHasAudio = true;
-    mInfo.mAudioChannels = numChannels;
-    mInfo.mAudioRate = sampleRate;
+    mHasAudio = mInfo.mAudio.mHasAudio = true;
+    mInfo.mAudio.mChannels = numChannels;
+    mInfo.mAudio.mRate = sampleRate;
   }
 
  *aInfo = mInfo;
 
-  return NS_OK;
-}
-
-// Resets all state related to decoding, emptying all buffers etc.
-nsresult MediaOmxReader::ResetDecode()
-{
-  MediaDecoderReader::ResetDecode();
-
-  VideoFrameContainer* container = mDecoder->GetVideoFrameContainer();
-  if (container) {
-    container->ClearCurrentFrame();
-  }
   return NS_OK;
 }
 
@@ -171,7 +194,6 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
     frame.mGraphicBuffer = nullptr;
     frame.mShouldSkip = false;
     if (!mOmxDecoder->ReadVideo(&frame, aTimeThreshold, aKeyframeSkip, doSeek)) {
-      mVideoQueue.Finish();
       return false;
     }
     doSeek = false;
@@ -233,21 +255,21 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
       b.mPlanes[2].mOffset = frame.Cr.mOffset;
       b.mPlanes[2].mSkip = frame.Cr.mSkip;
 
-      v = VideoData::Create(mInfo,
+      v = VideoData::Create(mInfo.mVideo,
                             mDecoder->GetImageContainer(),
                             pos,
                             frame.mTimeUs,
-                            frame.mTimeUs+1, // We don't know the end time.
+                            1, // We don't know the duration.
                             b,
                             frame.mKeyFrame,
                             -1,
                             picture);
     } else {
-      v = VideoData::Create(mInfo,
+      v = VideoData::Create(mInfo.mVideo,
                             mDecoder->GetImageContainer(),
                             pos,
                             frame.mTimeUs,
-                            frame.mTimeUs+1, // We don't know the end time.
+                            1, // We don't know the duration.
                             frame.mGraphicBuffer,
                             frame.mKeyFrame,
                             -1,
@@ -270,6 +292,15 @@ bool MediaOmxReader::DecodeVideoFrame(bool &aKeyframeSkip,
   return true;
 }
 
+void MediaOmxReader::NotifyDataArrived(const char* aBuffer, uint32_t aLength, int64_t aOffset)
+{
+  android::OmxDecoder *omxDecoder = mOmxDecoder.get();
+
+  if (omxDecoder) {
+    omxDecoder->NotifyDataArrived(aBuffer, aLength, aOffset);
+  }
+}
+
 bool MediaOmxReader::DecodeAudioData()
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
@@ -280,7 +311,6 @@ bool MediaOmxReader::DecodeAudioData()
   // Read next frame
   MPAPI::AudioFrame frame;
   if (!mOmxDecoder->ReadAudio(&frame, mAudioSeekTimeUs)) {
-    mAudioQueue.Finish();
     return false;
   }
   mAudioSeekTimeUs = -1;
@@ -312,8 +342,11 @@ nsresult MediaOmxReader::Seek(int64_t aTarget, int64_t aStartTime, int64_t aEndT
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
 
-  mVideoQueue.Reset();
-  mAudioQueue.Reset();
+  ResetDecode();
+  VideoFrameContainer* container = mDecoder->GetVideoFrameContainer();
+  if (container && container->GetImageContainer()) {
+    container->GetImageContainer()->ClearAllImagesExceptFront();
+  }
 
   mAudioSeekTimeUs = mVideoSeekTimeUs = aTarget;
 
@@ -325,51 +358,6 @@ static uint64_t BytesToTime(int64_t offset, uint64_t length, uint64_t durationUs
   if (perc > 1.0)
     perc = 1.0;
   return uint64_t(double(durationUs) * perc);
-}
-
-nsresult MediaOmxReader::GetBuffered(mozilla::dom::TimeRanges* aBuffered, int64_t aStartTime)
-{
-  if (!mOmxDecoder.get())
-    return NS_OK;
-
-  MediaResource* stream = mOmxDecoder->GetResource();
-
-  int64_t durationUs = 0;
-  mOmxDecoder->GetDuration(&durationUs);
-
-  // Nothing to cache if the media takes 0us to play.
-  if (!durationUs)
-    return NS_OK;
-
-  // Special case completely cached files.  This also handles local files.
-  if (stream->IsDataCachedToEndOfResource(0)) {
-    aBuffered->Add(0, durationUs);
-    return NS_OK;
-  }
-
-  int64_t totalBytes = stream->GetLength();
-
-  // If we can't determine the total size, pretend that we have nothing
-  // buffered. This will put us in a state of eternally-low-on-undecoded-data
-  // which is not get, but about the best we can do.
-  if (totalBytes == -1)
-    return NS_OK;
-
-  int64_t startOffset = stream->GetNextCachedData(0);
-  while (startOffset >= 0) {
-    int64_t endOffset = stream->GetCachedDataEnd(startOffset);
-    // Bytes [startOffset..endOffset] are cached.
-    NS_ASSERTION(startOffset >= 0, "Integer underflow in GetBuffered");
-    NS_ASSERTION(endOffset >= 0, "Integer underflow in GetBuffered");
-
-    uint64_t startUs = BytesToTime(startOffset, totalBytes, durationUs);
-    uint64_t endUs = BytesToTime(endOffset, totalBytes, durationUs);
-    if (startUs != endUs) {
-      aBuffered->Add((double)startUs / USECS_PER_S, (double)endUs / USECS_PER_S);
-    }
-    startOffset = stream->GetNextCachedData(endOffset);
-  }
-  return NS_OK;
 }
 
 void MediaOmxReader::OnDecodeThreadFinish() {

@@ -15,7 +15,7 @@
 
 #ifdef XP_WIN
 #include <objbase.h>
-bool ShouldProtectPluginCurrentDirectory(LPCWSTR pluginFilePath);
+bool ShouldProtectPluginCurrentDirectory(char16ptr_t pluginFilePath);
 #endif
 
 using mozilla::ipc::IOThreadChild;
@@ -81,7 +81,7 @@ PluginProcessChild::Init()
 #ifdef XP_WIN
     // Drag-and-drop needs OleInitialize to be called, and Silverlight depends
     // on the host calling CoInitialize (which is called by OleInitialize).
-    ::OleInitialize(NULL);
+    ::OleInitialize(nullptr);
 #endif
 
     // Certain plugins, such as flash, steal the unhandled exception filter

@@ -6,19 +6,14 @@
 // Keep in (case-insensitive) order:
 #include "gfxMatrix.h"
 #include "mozilla/dom/SVGAElement.h"
+#include "nsSVGContainerFrame.h"
 #include "nsSVGIntegrationUtils.h"
-#include "nsSVGTSpanFrame.h"
 #include "nsSVGUtils.h"
 #include "SVGLengthList.h"
 
-// <a> elements can contain text. nsSVGGlyphFrames expect to have
-// a class derived from nsSVGTextContainerFrame as a parent. We
-// also need something that implements nsISVGGlyphFragmentNode to get
-// the text DOM to work.
-
 using namespace mozilla;
 
-typedef nsSVGTSpanFrame nsSVGAFrameBase;
+typedef nsSVGDisplayContainerFrame nsSVGAFrameBase;
 
 class nsSVGAFrame : public nsSVGAFrameBase
 {
@@ -59,14 +54,8 @@ public:
   virtual void NotifySVGChanged(uint32_t aFlags);
   
   // nsSVGContainerFrame methods:
-  virtual gfxMatrix GetCanvasTM(uint32_t aFor);
-
-  // nsSVGTextContainerFrame methods:
-  virtual void GetXY(mozilla::SVGUserUnitList *aX, mozilla::SVGUserUnitList *aY);
-  virtual void GetDxDy(mozilla::SVGUserUnitList *aDx, mozilla::SVGUserUnitList *aDy);
-  virtual const SVGNumberList* GetRotate() {
-    return nullptr;
-  }
+  virtual gfxMatrix GetCanvasTM(uint32_t aFor,
+                                nsIFrame* aTransformRoot = nullptr) MOZ_OVERRIDE;
 
 private:
   nsAutoPtr<gfxMatrix> mCanvasTM;
@@ -143,9 +132,9 @@ nsSVGAFrame::NotifySVGChanged(uint32_t aFlags)
 // nsSVGContainerFrame methods:
 
 gfxMatrix
-nsSVGAFrame::GetCanvasTM(uint32_t aFor)
+nsSVGAFrame::GetCanvasTM(uint32_t aFor, nsIFrame* aTransformRoot)
 {
-  if (!(GetStateBits() & NS_STATE_SVG_NONDISPLAY_CHILD)) {
+  if (!(GetStateBits() & NS_FRAME_IS_NONDISPLAY) && !aTransformRoot) {
     if ((aFor == FOR_PAINTING && NS_SVGDisplayListPaintingEnabled()) ||
         (aFor == FOR_HIT_TESTING && NS_SVGDisplayListHitTestingEnabled())) {
       return nsSVGIntegrationUtils::GetCSSPxToDevPxMatrix(this);
@@ -157,27 +146,12 @@ nsSVGAFrame::GetCanvasTM(uint32_t aFor)
     nsSVGContainerFrame *parent = static_cast<nsSVGContainerFrame*>(mParent);
     dom::SVGAElement *content = static_cast<dom::SVGAElement*>(mContent);
 
-    gfxMatrix tm = content->PrependLocalTransformsTo(parent->GetCanvasTM(aFor));
+    gfxMatrix tm = content->PrependLocalTransformsTo(
+        this == aTransformRoot ? gfxMatrix() :
+                                 parent->GetCanvasTM(aFor, aTransformRoot));
 
     mCanvasTM = new gfxMatrix(tm);
   }
 
   return *mCanvasTM;
-}
-
-//----------------------------------------------------------------------
-// nsSVGTextContainerFrame methods:
-
-void
-nsSVGAFrame::GetXY(SVGUserUnitList *aX, SVGUserUnitList *aY)
-{
-  aX->Clear();
-  aY->Clear();
-}
-
-void
-nsSVGAFrame::GetDxDy(SVGUserUnitList *aDx, SVGUserUnitList *aDy)
-{
-  aDx->Clear();
-  aDy->Clear();
 }

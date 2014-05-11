@@ -11,7 +11,7 @@
 // not include it into any file other than Decimal.cpp.
 
 #include "../double-conversion/double-conversion.h"
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Casting.h"
 #include "mozilla/FloatingPoint.h"
 #include "mozilla/NullPtr.h"
@@ -32,14 +32,14 @@
 #endif
 #define ASSERT MOZ_ASSERT
 
-#define ASSERT_NOT_REACHED() MOZ_NOT_REACHED("")
+#define ASSERT_NOT_REACHED() MOZ_ASSUME_UNREACHABLE("moz-decimal-utils.h")
 
 #define WTF_MAKE_NONCOPYABLE(ClassName) \
   private: \
     ClassName(const ClassName&) MOZ_DELETE; \
     void operator=(const ClassName&) MOZ_DELETE;
 
-#if defined(_MSC_VER) && (_MSC_VER <= 1700)
+#if defined(_MSC_VER)
 namespace std {
   inline bool isinf(double num) { return mozilla::IsInfinite(num); }
   inline bool isnan(double num) { return mozilla::IsNaN(num); }
@@ -83,6 +83,8 @@ String mozToString(uint64_t aNum) {
   return o.str();
 }
 
+namespace moz_decimal_utils {
+
 class StringBuilder
 {
 public:
@@ -104,6 +106,8 @@ public:
 private:
   std::string mStr;
 };
+
+} // namespace moz-decimal-utils
 
 #endif
 

@@ -6,9 +6,9 @@
 
 #include "jscntxt.h"
 #include "jscompartment.h"
+
 #include "jit/Bailouts.h"
-#include "jit/IonCompartment.h"
-#include "jit/IonFrames-inl.h"
+#include "jit/JitCompartment.h"
 
 using namespace js;
 using namespace js::jit;
@@ -27,7 +27,7 @@ JS_STATIC_ASSERT(sizeof(ExtendedBailoutStack) ==
 
 #endif
 #if 0
-BailoutEnvironment::BailoutEnvironment(IonCompartment *ion, void **sp)
+BailoutEnvironment::BailoutEnvironment(JitCompartment *ion, void **sp)
   : sp_(sp)
 {
     bailout_ = reinterpret_cast<ExtendedBailoutStack *>(sp);
@@ -132,9 +132,8 @@ IonBailoutIterator::IonBailoutIterator(const JitActivationIterator &activations,
 
     // Compute the snapshot offset from the bailout ID.
     JitActivation *activation = activations.activation()->asJit();
-    JSCompartment *jsCompartment = activation->compartment();
-    IonCompartment *ionCompartment = jsCompartment->ionCompartment();
-    IonCode *code = ionCompartment->getBailoutTable(bailout->frameClass());
+    JSRuntime *rt = activation->compartment()->runtimeFromMainThread();
+    IonCode *code = rt->jitRuntime()->getBailoutTable(bailout->frameClass());
     uintptr_t tableOffset = bailout->tableOffset();
     uintptr_t tableStart = reinterpret_cast<uintptr_t>(code->raw());
 

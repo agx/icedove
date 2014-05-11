@@ -6,16 +6,26 @@
 #ifndef NSRENDERINGCONTEXT__H__
 #define NSRENDERINGCONTEXT__H__
 
-#include "nsAutoPtr.h"
-#include "nsDeviceContext.h"
-#include "nsFontMetrics.h"
-#include "nsColor.h"
-#include "nsCoord.h"
-#include "gfxContext.h"
-#include "mozilla/gfx/UserData.h"
+#include <stdint.h>                     // for uint32_t
+#include <sys/types.h>                  // for int32_t
+#include "gfxContext.h"                 // for gfxContext
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "mozilla/gfx/2D.h"
+#include "mozilla/gfx/UserData.h"       // for UserData, UserDataKey
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsBoundingMetrics.h"          // for nsBoundingMetrics
+#include "nsColor.h"                    // for nscolor
+#include "nsCoord.h"                    // for nscoord, NSToIntRound
+#include "nsDeviceContext.h"            // for nsDeviceContext
+#include "nsFontMetrics.h"              // for nsFontMetrics
+#include "nsISupports.h"                // for NS_INLINE_DECL_REFCOUNTING, etc
+#include "nsString.h"               // for nsString
+#include "nscore.h"                     // for PRUnichar
 
-struct nsPoint;
+class gfxASurface;
 class nsIntRegion;
+struct nsPoint;
+struct nsRect;
 
 typedef enum {
     nsLineStyle_kNone   = 0,
@@ -28,6 +38,7 @@ class nsRenderingContext
 {
     typedef mozilla::gfx::UserData UserData;
     typedef mozilla::gfx::UserDataKey UserDataKey;
+    typedef mozilla::gfx::DrawTarget DrawTarget;
 
 public:
     nsRenderingContext() : mP2A(0.) {}
@@ -40,6 +51,7 @@ public:
 
     // These accessors will never return null.
     gfxContext *ThebesContext() { return mThebes; }
+    DrawTarget *GetDrawTarget() { return mThebes->GetDrawTarget(); }
     nsDeviceContext *DeviceContext() { return mDeviceContext; }
     int32_t AppUnitsPerDevPixel() { return NSToIntRound(mP2A); }
 

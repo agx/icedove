@@ -71,6 +71,10 @@ GonkCameraHardware::OnNewFrame()
     return;
   }
   nsRefPtr<GraphicBufferLocked> buffer = mNativeWindow->getCurrentBuffer();
+  if (!buffer) {
+    DOM_CAMERA_LOGW("received null frame");
+    return;
+  }
   ReceiveFrame(mTarget, buffer);
 }
 
@@ -164,8 +168,10 @@ GonkCameraHardware::Init()
   mRawSensorOrientation = info.orientation;
   mSensorOrientation = mRawSensorOrientation;
 
-  // Some kernels report the wrong sensor orientation through
-  // get_camera_info()...
+  /**
+   * Non-V4L2-based camera driver adds extra offset onto picture orientation
+   * set by gecko, so we have to adjust it back.
+   */
   char propname[PROP_NAME_MAX];
   char prop[PROP_VALUE_MAX];
   int offset = 0;
@@ -183,14 +189,24 @@ GonkCameraHardware::Init()
   mNativeWindow = new GonkNativeWindow();
   mNativeWindow->setNewFrameCallback(this);
   mCamera->setListener(this);
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 17
+  mCamera->setPreviewTexture(mNativeWindow->getBufferQueue());
+#else
   mCamera->setPreviewTexture(mNativeWindow);
+#endif
   mInitialized = true;
 }
 
 sp<GonkCameraHardware>
 GonkCameraHardware::Connect(mozilla::nsGonkCameraControl* aTarget, uint32_t aCameraId)
 {
+#if defined(MOZ_WIDGET_GONK) && ANDROID_VERSION >= 18
+  sp<Camera> camera = Camera::connect(aCameraId, /* clientPackageName */String16("gonk.camera"), Camera::USE_CALLING_UID);
+#else
   sp<Camera> camera = Camera::connect(aCameraId);
+#endif
+
+
   if (camera.get() == nullptr) {
     return nullptr;
   }

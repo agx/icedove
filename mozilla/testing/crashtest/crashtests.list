@@ -3,6 +3,8 @@
 
 include ../../testing/crashtest/sanity/crashtests.list
 
+include ../../accessible/tests/crashtests/crashtests.list
+
 include ../../content/base/crashtests/crashtests.list
 include ../../content/canvas/crashtests/crashtests.list
 include ../../content/events/crashtests/crashtests.list
@@ -49,7 +51,7 @@ include ../../layout/mathml/crashtests/crashtests.list
 include ../../layout/style/crashtests/crashtests.list
 include ../../layout/svg/crashtests/crashtests.list
 include ../../layout/tables/crashtests/crashtests.list
-include ../../layout/xul/base/src/crashtests/crashtests.list
+include ../../layout/xul/crashtests/crashtests.list
 include ../../layout/xul/grid/crashtests/crashtests.list
 include ../../layout/xul/tree/crashtests/crashtests.list
 
@@ -65,7 +67,7 @@ include ../../security/manager/ssl/crashtests/crashtests.list
 include ../../view/crashtests/crashtests.list
 
 include ../../widget/cocoa/crashtests/crashtests.list
-include ../../widget/gtk2/crashtests/crashtests.list
+include ../../widget/gtk/crashtests/crashtests.list
 include ../../widget/crashtests/crashtests.list
 
 include ../../media/libpng/crashtests/crashtests.list

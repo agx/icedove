@@ -17,7 +17,7 @@
 
 using namespace mozilla;
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(TimerThread, nsIRunnable, nsIObserver)
+NS_IMPL_ISUPPORTS2(TimerThread, nsIRunnable, nsIObserver)
 
 TimerThread::TimerThread() :
   mInitInProgress(0),
@@ -84,7 +84,7 @@ nsresult TimerThread::Init()
     return NS_OK;
   }
 
-  if (PR_ATOMIC_SET(&mInitInProgress, 1) == 0) {
+  if (mInitInProgress.exchange(1) == 0) {
     // We hold on to mThread to keep the thread alive.
     nsresult rv = NS_NewThread(getter_AddRefs(mThread), this);
     if (NS_FAILED(rv)) {
@@ -159,10 +159,22 @@ nsresult TimerThread::Shutdown()
   return NS_OK;
 }
 
+#ifdef MOZ_NUWA_PROCESS
+#include "ipc/Nuwa.h"
+#endif
+
 /* void Run(); */
 NS_IMETHODIMP TimerThread::Run()
 {
   PR_SetCurrentThreadName("Timer");
+
+#ifdef MOZ_NUWA_PROCESS
+  if (IsNuwaProcess()) {
+    NS_ASSERTION(NuwaMarkCurrentThread != nullptr,
+                 "NuwaMarkCurrentThread is undefined!");
+    NuwaMarkCurrentThread(nullptr, nullptr);
+  }
+#endif
 
   MonitorAutoLock lock(mMonitor);
 

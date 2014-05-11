@@ -23,12 +23,13 @@
 #include "mozilla/Hal.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/FileUtils.h"
+#include "mozilla/ClearOnShutdown.h"
 #include "Framebuffer.h"
 #include "gfxContext.h"
 #include "gfxPlatform.h"
 #include "gfxUtils.h"
 #include "GLContextProvider.h"
-#include "LayerManagerOGL.h"
+#include "GLContext.h"
 #include "nsAutoPtr.h"
 #include "nsAppShell.h"
 #include "nsIdleService.h"
@@ -41,10 +42,11 @@
 #include "BasicLayers.h"
 #include "libdisplay/GonkDisplay.h"
 #include "pixelflinger/format.h"
-
-#if ANDROID_VERSION == 15
+#include "mozilla/BasicEvents.h"
+#include "mozilla/layers/CompositorParent.h"
+#include "ParentProcessController.h"
+#include "nsThreadUtils.h"
 #include "HwcComposer2D.h"
-#endif
 
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk" , ## args)
 #define LOGW(args...) __android_log_print(ANDROID_LOG_WARN, "Gonk", ## args)
@@ -74,7 +76,6 @@ static bool sUsingOMTC;
 static bool sUsingHwc;
 static bool sScreenInitialized;
 static nsRefPtr<gfxASurface> sOMTCSurface;
-static pthread_t sFramebufferWatchThread;
 
 namespace {
 
@@ -115,30 +116,13 @@ private:
     bool mIsOn;
 };
 
-static const char* kSleepFile = "/sys/power/wait_for_fb_sleep";
-static const char* kWakeFile = "/sys/power/wait_for_fb_wake";
+static StaticRefPtr<ScreenOnOffEvent> sScreenOnEvent;
+static StaticRefPtr<ScreenOnOffEvent> sScreenOffEvent;
 
-static void *frameBufferWatcher(void *) {
-
-    char buf;
-    bool ret;
-
-    nsRefPtr<ScreenOnOffEvent> mScreenOnEvent = new ScreenOnOffEvent(true);
-    nsRefPtr<ScreenOnOffEvent> mScreenOffEvent = new ScreenOnOffEvent(false);
-
-    while (true) {
-        // Cannot use epoll here because kSleepFile and kWakeFile are
-        // always ready to read and blocking.
-        ret = ReadSysFile(kSleepFile, &buf, sizeof(buf));
-        NS_WARN_IF_FALSE(ret, "WAIT_FOR_FB_SLEEP failed");
-        NS_DispatchToMainThread(mScreenOffEvent);
-
-        ret = ReadSysFile(kWakeFile, &buf, sizeof(buf));
-        NS_WARN_IF_FALSE(ret, "WAIT_FOR_FB_WAKE failed");
-        NS_DispatchToMainThread(mScreenOnEvent);
-    }
-
-    return NULL;
+static void
+displayEnabledCallback(bool enabled)
+{
+    NS_DispatchToMainThread(enabled ? sScreenOnEvent : sScreenOffEvent);
 }
 
 } // anonymous namespace
@@ -146,11 +130,11 @@ static void *frameBufferWatcher(void *) {
 nsWindow::nsWindow()
 {
     if (!sScreenInitialized) {
-        // Watching screen on/off state by using a pthread
-        // which implicitly calls exit() when the main thread ends
-        if (pthread_create(&sFramebufferWatchThread, NULL, frameBufferWatcher, NULL)) {
-            NS_RUNTIMEABORT("Failed to create framebufferWatcherThread, aborting...");
-        }
+        sScreenOnEvent = new ScreenOnOffEvent(true);
+        ClearOnShutdown(&sScreenOnEvent);
+        sScreenOffEvent = new ScreenOnOffEvent(false);
+        ClearOnShutdown(&sScreenOffEvent);
+        GetGonkDisplay()->OnEnabled(displayEnabledCallback);
 
         nsIntSize screenSize;
         bool gotFB = Framebuffer::GetSize(&screenSize);
@@ -174,8 +158,7 @@ nsWindow::nsWindow()
             sRotationMatrix.Rotate(M_PI);
             break;
         default:
-            MOZ_NOT_REACHED("Unknown rotation");
-            break;
+            MOZ_CRASH("Unknown rotation");
         }
         sVirtualBounds = gScreenBounds;
 
@@ -193,12 +176,13 @@ nsWindow::nsWindow()
         sUsingOMTC = ShouldUseOffMainThreadCompositing();
 
         property_get("ro.display.colorfill", propValue, "0");
-        sUsingHwc = Preferences::GetBool("layers.composer2d.enabled",
-                                         atoi(propValue) == 1);
+
+        //Update sUsingHwc whenever layers.composer2d.enabled changes
+        Preferences::AddBoolVarCache(&sUsingHwc, "layers.composer2d.enabled");
 
         if (sUsingOMTC) {
           sOMTCSurface = new gfxImageSurface(gfxIntSize(1, 1),
-                                             gfxASurface::ImageFormatRGB24);
+                                             gfxImageFormatRGB24);
         }
     }
 }
@@ -229,16 +213,7 @@ nsWindow::DoDraw(void)
     }
 
     LayerManager* lm = gWindowToRedraw->GetLayerManager();
-    if (mozilla::layers::LAYERS_OPENGL == lm->GetBackendType()) {
-        LayerManagerOGL* oglm = static_cast<LayerManagerOGL*>(lm);
-        oglm->SetClippingRegion(region);
-        oglm->SetWorldTransform(sRotationMatrix);
-
-        listener = gWindowToRedraw->GetWidgetListener();
-        if (listener) {
-            listener->PaintWindow(gWindowToRedraw, region);
-        }
-    } else if (mozilla::layers::LAYERS_CLIENT == lm->GetBackendType()) {
+    if (mozilla::layers::LAYERS_CLIENT == lm->GetBackendType()) {
       // No need to do anything, the compositor will handle drawing
     } else if (mozilla::layers::LAYERS_BASIC == lm->GetBackendType()) {
         MOZ_ASSERT(sFramebufferOpen || sUsingOMTC);
@@ -280,7 +255,7 @@ nsWindow::DoDraw(void)
 }
 
 nsEventStatus
-nsWindow::DispatchInputEvent(nsGUIEvent &aEvent, bool* aWasCaptured)
+nsWindow::DispatchInputEvent(WidgetGUIEvent& aEvent, bool* aWasCaptured)
 {
     if (aWasCaptured) {
         *aWasCaptured = false;
@@ -497,7 +472,7 @@ nsWindow::GetNativeData(uint32_t aDataType)
 }
 
 NS_IMETHODIMP
-nsWindow::DispatchEvent(nsGUIEvent *aEvent, nsEventStatus &aStatus)
+nsWindow::DispatchEvent(WidgetGUIEvent* aEvent, nsEventStatus& aStatus)
 {
     if (mWidgetListener)
       aStatus = mWidgetListener->HandleEvent(aEvent, mUseAttachedEvents);
@@ -563,10 +538,11 @@ nsWindow::GetDefaultScaleInternal()
     if (dpi < 200.0) {
         return 1.0; // mdpi devices.
     }
-    if (dpi < 280.0) {
+    if (dpi < 300.0) {
         return 1.5; // hdpi devices.
     }
-    return 2.0; // xhdpi devices.
+    // xhdpi devices and beyond.
+    return floor(dpi / 150.0);
 }
 
 LayerManager *
@@ -606,6 +582,10 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
 
     if (sUsingOMTC) {
         CreateCompositor();
+        if (mCompositorParent) {
+            uint64_t rootLayerTreeId = mCompositorParent->RootLayerTreeId();
+            CompositorParent::SetControllerForLayerTree(rootLayerTreeId, new ParentProcessController());
+        }
         if (mLayerManager)
             return mLayerManager;
     }
@@ -617,18 +597,6 @@ nsWindow::GetLayerManager(PLayerTransactionChild* aShadowManager,
         }
 
         MOZ_ASSERT(fbBounds.value == gScreenBounds);
-        if (sGLContext) {
-            nsRefPtr<LayerManagerOGL> layerManager = new LayerManagerOGL(this);
-
-            if (layerManager->Initialize(sGLContext)) {
-                mLayerManager = layerManager;
-                return mLayerManager;
-            } else {
-                LOGW("Could not create OGL LayerManager");
-            }
-        } else {
-            LOGW("GL context was not created");
-        }
     }
 
     // Fall back to software rendering.
@@ -655,7 +623,7 @@ nsWindow::GetThebesSurface()
 
     // XXX this really wants to return already_AddRefed, but this only really gets used
     // on direct assignment to a gfxASurface
-    return new gfxImageSurface(gfxIntSize(5,5), gfxImageSurface::ImageFormatRGB24);
+    return new gfxImageSurface(gfxIntSize(5,5), gfxImageFormatRGB24);
 }
 
 void
@@ -720,11 +688,9 @@ nsWindow::GetComposer2D()
         return nullptr;
     }
 
-#if ANDROID_VERSION == 15
     if (HwcComposer2D* hwc = HwcComposer2D::GetInstance()) {
         return hwc->Initialized() ? hwc : nullptr;
     }
-#endif
 
     return nullptr;
 }
@@ -847,8 +813,7 @@ ComputeOrientation(uint32_t aRotation, const nsIntSize& aScreenSize)
         return (naturallyPortrait ? eScreenOrientation_LandscapeSecondary : 
                 eScreenOrientation_PortraitSecondary);
     default:
-        MOZ_NOT_REACHED("Gonk screen must always have a known rotation");
-        return eScreenOrientation_None;
+        MOZ_CRASH("Gonk screen must always have a known rotation");
     }
 }
 

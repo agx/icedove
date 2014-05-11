@@ -205,21 +205,22 @@
   */
 
 #include "mozilla/dom/DirectionalityUtils.h"
+
 #include "nsINode.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
+#include "mozilla/DebugOnly.h"
 #include "mozilla/dom/Element.h"
 #include "nsIDOMHTMLDocument.h"
 #include "nsUnicodeProperties.h"
 #include "nsTextFragment.h"
 #include "nsAttrValue.h"
-#include "nsContentUtils.h"
 #include "nsTextNode.h"
 #include "nsCheapSets.h"
 
 namespace mozilla {
 
-typedef mozilla::dom::Element Element;
+using mozilla::dom::Element;
 
 /**
  * Returns true if aElement is one of the elements whose text content should not
@@ -540,7 +541,7 @@ public:
 
   void EnsureMapIsClear(nsINode* aTextNode)
   {
-    uint32_t clearedEntries =
+    DebugOnly<uint32_t> clearedEntries =
       mElements.EnumerateEntries(ClearEntry, aTextNode);
     MOZ_ASSERT(clearedEntries == 0, "Map should be empty already");
   }

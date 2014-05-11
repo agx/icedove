@@ -38,7 +38,8 @@ public:
 
   virtual ~nsGenericHTMLFrameElement();
 
-  NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr) MOZ_OVERRIDE;
+  NS_DECL_ISUPPORTS_INHERITED
+
   NS_DECL_NSIFRAMELOADEROWNER
   NS_DECL_NSIDOMMOZBROWSERFRAME
   NS_DECL_NSIMOZBROWSERFRAME
@@ -71,6 +72,7 @@ public:
 
   void SwapFrameLoaders(nsXULElement& aOtherOwner, mozilla::ErrorResult& aError);
 
+  static bool BrowserFramesEnabled();
 protected:
   // This doesn't really ensure a frame loade in all cases, only when
   // it makes sense.

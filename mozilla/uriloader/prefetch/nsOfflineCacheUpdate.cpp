@@ -29,7 +29,7 @@
 #include "nsIURL.h"
 #include "nsIWebProgress.h"
 #include "nsICryptoHash.h"
-#include "nsICacheEntryDescriptor.h"
+#include "nsICacheEntry.h"
 #include "nsIPermissionManager.h"
 #include "nsIPrincipal.h"
 #include "nsNetCID.h"
@@ -69,7 +69,11 @@ static const int32_t  kCustomProfileQuota = 512000;
 //
 extern PRLogModuleInfo *gOfflineCacheUpdateLog;
 #endif
+
+#undef LOG
 #define LOG(args) PR_LOG(gOfflineCacheUpdateLog, 4, args)
+
+#undef LOG_ENABLED
 #define LOG_ENABLED() PR_LOG_TEST(gOfflineCacheUpdateLog, 4)
 
 class AutoFreeArray {
@@ -1049,7 +1053,7 @@ nsOfflineManifestItem::GetOldManifestContentHash(nsIRequest *aRequest)
     nsCOMPtr<nsISupports> cacheToken;
     cachingChannel->GetCacheToken(getter_AddRefs(cacheToken));
     if (cacheToken) {
-        nsCOMPtr<nsICacheEntryDescriptor> cacheDescriptor(do_QueryInterface(cacheToken, &rv));
+        nsCOMPtr<nsICacheEntry> cacheDescriptor(do_QueryInterface(cacheToken, &rv));
         NS_ENSURE_SUCCESS(rv, rv);
 
         rv = cacheDescriptor->GetMetaDataElement("offline-manifest-hash", getter_Copies(mOldManifestHashValue));
@@ -1098,7 +1102,7 @@ nsOfflineManifestItem::CheckNewManifestContentHash(nsIRequest *aRequest)
     nsCOMPtr<nsISupports> cacheToken;
     cachingChannel->GetOfflineCacheToken(getter_AddRefs(cacheToken));
     if (cacheToken) {
-        nsCOMPtr<nsICacheEntryDescriptor> cacheDescriptor(do_QueryInterface(cacheToken, &rv));
+        nsCOMPtr<nsICacheEntry> cacheDescriptor(do_QueryInterface(cacheToken, &rv));
         NS_ENSURE_SUCCESS(rv, rv);
 
         rv = cacheDescriptor->SetMetaDataElement("offline-manifest-hash", mManifestHashValue.get());
@@ -1205,7 +1209,6 @@ NS_IMPL_ISUPPORTS3(nsOfflineCacheUpdate,
 
 nsOfflineCacheUpdate::nsOfflineCacheUpdate()
     : mState(STATE_UNINITIALIZED)
-    , mOwner(nullptr)
     , mAddedItems(false)
     , mPartialUpdate(false)
     , mOnlyCheckUpdate(false)
@@ -1331,7 +1334,7 @@ nsOfflineCacheUpdate::Init(nsIURI *aManifestURI,
     }
 
     rv = nsOfflineCacheUpdateService::OfflineAppPinnedForURI(aDocumentURI,
-                                                             NULL,
+                                                             nullptr,
                                                              &mPinned);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1383,7 +1386,7 @@ nsOfflineCacheUpdate::InitForUpdateCheck(nsIURI *aManifestURI,
     mApplicationCache = mPreviousApplicationCache;
 
     rv = nsOfflineCacheUpdateService::OfflineAppPinnedForURI(aManifestURI,
-                                                             NULL,
+                                                             nullptr,
                                                              &mPinned);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -1442,7 +1445,7 @@ nsOfflineCacheUpdate::InitPartial(nsIURI *aManifestURI,
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = nsOfflineCacheUpdateService::OfflineAppPinnedForURI(aDocumentURI,
-                                                             NULL,
+                                                             nullptr,
                                                              &mPinned);
     NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2005,6 +2008,12 @@ nsOfflineCacheUpdate::NotifyUpdateAvailability(bool updateAvailable)
 void
 nsOfflineCacheUpdate::AssociateDocuments(nsIApplicationCache* cache)
 {
+    if (!cache) {
+        LOG(("nsOfflineCacheUpdate::AssociateDocuments bypassed"
+             ", no cache provided [this=%p]", this));
+        return;
+    }
+
     nsCOMArray<nsIOfflineCacheUpdateObserver> observers;
     GatherObservers(observers);
 
@@ -2026,7 +2035,7 @@ void
 nsOfflineCacheUpdate::SetOwner(nsOfflineCacheUpdateOwner *aOwner)
 {
     NS_ASSERTION(!mOwner, "Tried to set cache update owner twice.");
-    mOwner = aOwner;
+    mOwner = aOwner->asWeakPtr();
 }
 
 bool
@@ -2147,7 +2156,9 @@ nsOfflineCacheUpdate::FinishNoNotify()
 
     if (mOwner) {
         rv = mOwner->UpdateFinished(this);
-        mOwner = nullptr;
+        // mozilla::WeakPtr is missing some key features, like setting it to
+        // null explicitly.
+        mOwner = mozilla::WeakPtr<nsOfflineCacheUpdateOwner>();
     }
 
     return rv;
@@ -2191,7 +2202,7 @@ EvictOneOfCacheGroups(nsIApplicationCacheService *cacheService,
 
         bool pinned;
         rv = nsOfflineCacheUpdateService::OfflineAppPinnedForURI(uri,
-                                                                 NULL,
+                                                                 nullptr,
                                                                  &pinned);
         NS_ENSURE_SUCCESS(rv, rv);
 

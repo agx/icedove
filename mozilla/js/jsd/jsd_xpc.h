@@ -37,7 +37,7 @@ struct PCMapEntry {
 class jsdObject MOZ_FINAL : public jsdIObject
 {
   public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_JSDIOBJECT
 
     /* you'll normally use use FromPtr() instead of directly constructing one */
@@ -69,7 +69,7 @@ class jsdObject MOZ_FINAL : public jsdIObject
 class jsdProperty : public jsdIProperty
 {
   public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_JSDIPROPERTY
     NS_DECL_JSDIEPHEMERAL
     
@@ -102,7 +102,7 @@ class jsdProperty : public jsdIProperty
 class jsdScript : public jsdIScript
 {
   public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_JSDISCRIPT
     NS_DECL_JSDIEPHEMERAL
 
@@ -159,7 +159,7 @@ uint32_t jsdScript::LastTag = 0;
 class jsdContext : public jsdIContext
 {
   public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_JSDICONTEXT
     NS_DECL_JSDIEPHEMERAL
 
@@ -175,6 +175,16 @@ class jsdContext : public jsdIContext
     jsdContext (const jsdContext&); /* no implementation */
 
     bool                   mValid;
+    // The API exposed by JSD here is problematic, because it allows for per-
+    // JSContext script disabling, which no longer exists in the platform.
+    // The only consumer here in practice is Firebug, which makes sure to re-
+    // enable any disabled script before navigation. But if some other consumer
+    // were to disable script, navigate, and try to re-enable it, we'd end up
+    // with an unmatched UnblockScript call, which violates platform invariants.
+    // So we make a half-hearted attempt to detect this by storing the Window ID
+    // of the scope for which we disabled script.
+    uint64_t               mScriptDisabledForWindowWithID;
+    bool IsScriptEnabled() { return !mScriptDisabledForWindowWithID; }
     LiveEphemeral          mLiveListEntry;
     uint32_t               mTag;
     JSDContext            *mJSDCx;
@@ -187,7 +197,7 @@ uint32_t jsdContext::LastTag = 0;
 class jsdStackFrame : public jsdIStackFrame
 {
   public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_JSDISTACKFRAME
     NS_DECL_JSDIEPHEMERAL
 
@@ -215,7 +225,7 @@ class jsdStackFrame : public jsdIStackFrame
 class jsdValue : public jsdIValue
 {
   public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_JSDIVALUE
     NS_DECL_JSDIEPHEMERAL
 
@@ -294,7 +304,7 @@ class jsdService : public jsdIDebuggerService
 class jsdContext : public jsdIContext
 {
   public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_JSDICONTEXT
 
     /* you'll normally use use FromPtr() instead of directly constructing one */
@@ -334,7 +344,7 @@ class jsdContext : public jsdIContext
 class jsdThreadState : public jsdIThreadState
 {
   public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_JSDITHREADSTATE
 
     /* you'll normally use use FromPtr() instead of directly constructing one */

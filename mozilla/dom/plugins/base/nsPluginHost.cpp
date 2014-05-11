@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include "prio.h"
 #include "prmem.h"
-#include "nsIComponentManager.h"
 #include "nsNPAPIPlugin.h"
 #include "nsNPAPIPluginStreamListener.h"
 #include "nsNPAPIPluginInstance.h"
@@ -23,7 +22,6 @@
 #include "nsIObserverService.h"
 #include "nsIHttpProtocolHandler.h"
 #include "nsIHttpChannel.h"
-#include "nsIHttpChannelInternal.h"
 #include "nsIUploadChannel.h"
 #include "nsIByteRangeRequest.h"
 #include "nsIStreamListener.h"
@@ -38,17 +36,11 @@
 #if defined(XP_MACOSX)
 #include "nsILocalFileMac.h"
 #endif
-#include "nsIInputStream.h"
-#include "nsIIOService.h"
-#include "nsIURL.h"
-#include "nsIChannel.h"
 #include "nsISeekableStream.h"
 #include "nsNetUtil.h"
 #include "nsIProgressEventSink.h"
 #include "nsIDocument.h"
-#include "nsICachingChannel.h"
 #include "nsHashtable.h"
-#include "nsIProxyInfo.h"
 #include "nsPluginLogging.h"
 #include "nsIScriptChannel.h"
 #include "nsIBlocklistService.h"
@@ -69,46 +61,23 @@
 
 // for the dialog
 #include "nsIWindowWatcher.h"
+#include "nsIDOMElement.h"
 #include "nsIDOMWindow.h"
 
-#include "nsIScriptGlobalObject.h"
-#include "nsIScriptGlobalObjectOwner.h"
-#include "nsIPrincipal.h"
-
 #include "nsNetCID.h"
-#include "nsIDOMPlugin.h"
-#include "nsIDOMMimeType.h"
-#include "nsMimeTypes.h"
 #include "prprf.h"
 #include "nsThreadUtils.h"
 #include "nsIInputStreamTee.h"
-#include "nsIInterfaceInfoManager.h"
-#include "xptinfo.h"
 
-#include "nsIMIMEService.h"
-#include "nsCExternalHandlerService.h"
-#include "nsIFileChannel.h"
-
-#include "nsICharsetConverterManager.h"
-#include "nsIPlatformCharset.h"
-
-#include "nsIDirectoryService.h"
 #include "nsDirectoryServiceDefs.h"
-#include "nsXULAppAPI.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsPluginDirServiceProvider.h"
-#include "nsError.h"
 
 #include "nsUnicharUtils.h"
 #include "nsPluginManifestLineReader.h"
 
 #include "nsIWeakReferenceUtils.h"
-#include "nsIDOMElement.h"
-#include "nsIDOMHTMLObjectElement.h"
-#include "nsIDOMHTMLEmbedElement.h"
 #include "nsIPresShell.h"
-#include "nsIWebNavigation.h"
-#include "nsIDocShell.h"
 #include "nsPluginNativeWindow.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIContentPolicy.h"
@@ -178,21 +147,7 @@ static const char *kPluginRegistryVersion = "0.16";
 // The minimum registry version we know how to read
 static const char *kMinimumRegistryVersion = "0.9";
 
-static NS_DEFINE_IID(kIPluginTagInfoIID, NS_IPLUGINTAGINFO_IID);
 static const char kDirectoryServiceContractID[] = "@mozilla.org/file/directory_service;1";
-
-// Registry keys for caching plugin info
-static const char kPluginsRootKey[] = "software/plugins";
-static const char kPluginsNameKey[] = "name";
-static const char kPluginsDescKey[] = "description";
-static const char kPluginsFilenameKey[] = "filename";
-static const char kPluginsFullpathKey[] = "fullpath";
-static const char kPluginsModTimeKey[] = "lastModTimeStamp";
-static const char kPluginsCanUnload[] = "canUnload";
-static const char kPluginsVersionKey[] = "version";
-static const char kPluginsMimeTypeKey[] = "mimetype";
-static const char kPluginsMimeDescKey[] = "description";
-static const char kPluginsMimeExtKey[] = "extension";
 
 #define kPluginRegistryFilename NS_LITERAL_CSTRING("pluginreg.dat")
 
@@ -464,32 +419,6 @@ nsresult nsPluginHost::UserAgent(const char **retstring)
   PLUGIN_LOG(PLUGIN_LOG_NORMAL, ("nsPluginHost::UserAgent return=%s\n", *retstring));
 
   return res;
-}
-
-nsresult nsPluginHost::GetPrompt(nsIPluginInstanceOwner *aOwner, nsIPrompt **aPrompt)
-{
-  nsresult rv;
-  nsCOMPtr<nsIPrompt> prompt;
-  nsCOMPtr<nsIWindowWatcher> wwatch = do_GetService(NS_WINDOWWATCHER_CONTRACTID, &rv);
-
-  if (wwatch) {
-    nsCOMPtr<nsIDOMWindow> domWindow;
-    if (aOwner) {
-      nsCOMPtr<nsIDocument> document;
-      aOwner->GetDocument(getter_AddRefs(document));
-      if (document) {
-        domWindow = document->GetWindow();
-      }
-    }
-
-    if (!domWindow) {
-      wwatch->GetWindowByName(NS_LITERAL_STRING("_content").get(), nullptr, getter_AddRefs(domWindow));
-    }
-    rv = wwatch->GetNewPrompter(domWindow, getter_AddRefs(prompt));
-  }
-
-  NS_IF_ADDREF(*aPrompt = prompt);
-  return rv;
 }
 
 nsresult nsPluginHost::GetURL(nsISupports* pluginInst,
@@ -858,14 +787,8 @@ nsPluginHost::InstantiatePluginInstance(const char *aMimeType, nsIURI* aURL,
     return rv;
   }
 
-  nsCOMPtr<nsIPluginTagInfo> pti;
-  rv = instanceOwner->QueryInterface(kIPluginTagInfoIID, getter_AddRefs(pti));
-  if (NS_FAILED(rv)) {
-    return rv;
-  }
-
   nsPluginTagType tagType;
-  rv = pti->GetTagType(&tagType);
+  rv = instanceOwner->GetTagType(&tagType);
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -1159,105 +1082,20 @@ nsPluginHost::IsPluginEnabledForExtension(const char* aExtension,
   return NS_ERROR_FAILURE;
 }
 
-class DOMPluginImpl : public nsIDOMPlugin {
-public:
-  NS_DECL_ISUPPORTS
-
-  DOMPluginImpl(nsPluginTag* aPluginTag) : mPluginTag(aPluginTag)
-  {
-  }
-
-  virtual ~DOMPluginImpl() {
-  }
-
-  NS_METHOD GetDescription(nsAString& aDescription)
-  {
-    CopyUTF8toUTF16(mPluginTag.mDescription, aDescription);
-    return NS_OK;
-  }
-
-  NS_METHOD GetFilename(nsAString& aFilename)
-  {
-    CopyUTF8toUTF16(mPluginTag.mFileName, aFilename);
-    return NS_OK;
-  }
-
-  NS_METHOD GetVersion(nsAString& aVersion)
-  {
-    CopyUTF8toUTF16(mPluginTag.mVersion, aVersion);
-    return NS_OK;
-  }
-
-  NS_METHOD GetName(nsAString& aName)
-  {
-    CopyUTF8toUTF16(mPluginTag.mName, aName);
-    return NS_OK;
-  }
-
-  NS_METHOD GetLength(uint32_t* aLength)
-  {
-    *aLength = mPluginTag.mMimeTypes.Length();
-    return NS_OK;
-  }
-
-  NS_METHOD Item(uint32_t aIndex, nsIDOMMimeType** aReturn)
-  {
-    nsIDOMMimeType* mimeType = new DOMMimeTypeImpl(&mPluginTag, aIndex);
-    NS_IF_ADDREF(mimeType);
-    *aReturn = mimeType;
-    return NS_OK;
-  }
-
-  NS_METHOD NamedItem(const nsAString& aName, nsIDOMMimeType** aReturn)
-  {
-    for (int i = mPluginTag.mMimeTypes.Length() - 1; i >= 0; --i) {
-      if (aName.Equals(NS_ConvertUTF8toUTF16(mPluginTag.mMimeTypes[i])))
-        return Item(i, aReturn);
-    }
-    return NS_OK;
-  }
-
-private:
-  nsPluginTag mPluginTag;
-};
-
-NS_IMPL_ISUPPORTS1(DOMPluginImpl, nsIDOMPlugin)
-
-nsresult
-nsPluginHost::GetPluginCount(uint32_t* aPluginCount)
+void
+nsPluginHost::GetPlugins(nsTArray<nsRefPtr<nsPluginTag> >& aPluginArray)
 {
-  LoadPlugins();
+  aPluginArray.Clear();
 
-  uint32_t count = 0;
+  LoadPlugins();
 
   nsPluginTag* plugin = mPlugins;
   while (plugin != nullptr) {
-    if (plugin->IsActive()) {
-      ++count;
+    if (plugin->IsEnabled()) {
+      aPluginArray.AppendElement(plugin);
     }
     plugin = plugin->mNext;
   }
-
-  *aPluginCount = count;
-
-  return NS_OK;
-}
-
-nsresult
-nsPluginHost::GetPlugins(uint32_t aPluginCount, nsIDOMPlugin** aPluginArray)
-{
-  LoadPlugins();
-
-  nsPluginTag* plugin = mPlugins;
-  for (uint32_t i = 0; i < aPluginCount && plugin; plugin = plugin->mNext) {
-    if (plugin->IsActive()) {
-      nsIDOMPlugin* domPlugin = new DOMPluginImpl(plugin);
-      NS_IF_ADDREF(domPlugin);
-      aPluginArray[i++] = domPlugin;
-    }
-  }
-
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1396,7 +1234,7 @@ static nsresult CreateNPAPIPlugin(nsPluginTag *aPluginTag,
     nsCOMPtr<nsIFile> file = do_CreateInstance("@mozilla.org/file/local;1");
     file->InitWithPath(NS_ConvertUTF8toUTF16(aPluginTag->mFullPath));
     nsPluginFile pluginFile(file);
-    PRLibrary* pluginLibrary = NULL;
+    PRLibrary* pluginLibrary = nullptr;
 
     if (NS_FAILED(pluginFile.LoadPlugin(&pluginLibrary)) || !pluginLibrary)
       return NS_ERROR_FAILURE;
@@ -1426,7 +1264,7 @@ nsresult nsPluginHost::EnsurePluginLoaded(nsPluginTag* aPluginTag)
 nsresult nsPluginHost::GetPlugin(const char *aMimeType, nsNPAPIPlugin** aPlugin)
 {
   nsresult rv = NS_ERROR_FAILURE;
-  *aPlugin = NULL;
+  *aPlugin = nullptr;
 
   if (!aMimeType)
     return NS_ERROR_ILLEGAL_VALUE;
@@ -1639,7 +1477,7 @@ nsPluginHost::ClearSiteData(nsIPluginTag* plugin, const nsACString& domain,
 
   // If 'domain' is the null string, clear everything.
   if (domain.IsVoid()) {
-    return library->NPP_ClearSiteData(NULL, flags, maxAge);
+    return library->NPP_ClearSiteData(nullptr, flags, maxAge);
   }
 
   // Get the list of sites from the plugin.
@@ -2237,8 +2075,8 @@ nsresult nsPluginHost::FindPlugins(bool aCreatePluginList, bool * aPluginsChange
 
       invalidPlugins = invalidPlugin->mNext;
 
-      invalidPlugin->mPrev = NULL;
-      invalidPlugin->mNext = NULL;
+      invalidPlugin->mPrev = nullptr;
+      invalidPlugin->mNext = nullptr;
     }
     else {
       invalidPlugins->mSeen = false;
@@ -2483,7 +2321,14 @@ nsPluginHost::WritePluginInfo()
     invalidPlugins = invalidPlugins->mNext;
   }
 
-  PR_Close(fd);
+  PRStatus prrc;
+  prrc = PR_Close(fd);
+  if (prrc != PR_SUCCESS) {
+    // we should obtain a refined value based on prrc;
+    rv = NS_ERROR_FAILURE;
+    MOZ_ASSERT(false, "PR_Close() failed.");
+    return rv;
+  }
   nsCOMPtr<nsIFile> parent;
   rv = pluginReg->GetParent(getter_AddRefs(parent));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2560,7 +2405,15 @@ nsPluginHost::ReadPluginInfo()
   rv = NS_ERROR_FAILURE;
 
   int32_t bread = PR_Read(fd, registry, flen);
-  PR_Close(fd);
+
+  PRStatus prrc;
+  prrc = PR_Close(fd);
+  if (prrc != PR_SUCCESS) {
+    // Strange error: this is one of those "Should not happen" error.
+    // we may want to report something more refined than  NS_ERROR_FAILURE.
+    MOZ_ASSERT(false, "PR_Close() failed.");
+    return rv;
+  }
 
   if (flen > bread)
     return rv;
@@ -2663,7 +2516,7 @@ nsPluginHost::ReadPluginInfo()
         file->GetNativeLeafName(derivedFileName);
         filename = derivedFileName.get();
       } else {
-        filename = NULL;
+        filename = nullptr;
       }
 
       // skip the next line, useless in this version
@@ -2769,9 +2622,6 @@ nsPluginHost::ReadPluginInfo()
     if (heapalloced)
       delete [] heapalloced;
 
-    if (!tag)
-      continue;
-
     // Import flags from registry into prefs for old registry versions
     if (hasValidFlags && !pluginStateImported) {
       tag->ImportFlagsToPrefs(tagflag);
@@ -2783,6 +2633,8 @@ nsPluginHost::ReadPluginInfo()
     mCachedPlugins = tag;
   }
 
+// On Android we always want to try to load a plugin again (Flash). Bug 935676.
+#ifndef MOZ_WIDGET_ANDROID
   if (hasInvalidPlugins) {
     if (!ReadSectionHeader(reader, "INVALID")) {
       return rv;
@@ -2806,6 +2658,7 @@ nsPluginHost::ReadPluginInfo()
       mInvalidPlugins = invalidTag;
     }
   }
+#endif
 
   // flip the pref so we don't import the legacy flags again
   Preferences::SetBool("plugin.importedState", true);
@@ -3769,6 +3622,18 @@ PRCList nsPluginDestroyRunnable::sRunnableListHead =
 
 PRCList PluginDestructionGuard::sListHead =
   PR_INIT_STATIC_CLIST(&PluginDestructionGuard::sListHead);
+
+PluginDestructionGuard::PluginDestructionGuard(nsNPAPIPluginInstance *aInstance)
+  : mInstance(aInstance)
+{
+  Init();
+}
+
+PluginDestructionGuard::PluginDestructionGuard(NPP npp)
+  : mInstance(npp ? static_cast<nsNPAPIPluginInstance*>(npp->ndata) : nullptr)
+{
+  Init();
+}
 
 PluginDestructionGuard::~PluginDestructionGuard()
 {

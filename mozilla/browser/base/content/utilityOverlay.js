@@ -18,7 +18,8 @@ XPCOMUtils.defineLazyGetter(this, "BROWSER_NEW_TAB_URL", function () {
           !PrivateBrowsingUtils.permanentPrivateBrowsing)
         return "about:privatebrowsing";
     }
-    return Services.prefs.getCharPref(PREF) || "about:blank";
+    let url = Services.prefs.getComplexValue(PREF, Ci.nsISupportsString).data;
+    return url || "about:blank";
   }
 
   function update() {
@@ -212,10 +213,9 @@ function openLinkIn(url, where, params) {
   var aCharset              = params.charset;
   var aReferrerURI          = params.referrerURI;
   var aRelatedToCurrent     = params.relatedToCurrent;
+  var aDisableMCB           = params.disableMCB;
   var aInBackground         = params.inBackground;
   var aDisallowInheritPrincipal = params.disallowInheritPrincipal;
-  // Currently, this parameter works only for where=="tab" or "current"
-  var aIsUTF8               = params.isUTF8;
   var aInitiatingDoc        = params.initiatingDoc;
   var aIsPrivate            = params.private;
 
@@ -304,8 +304,6 @@ function openLinkIn(url, where, params) {
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
     if (aDisallowInheritPrincipal)
       flags |= Ci.nsIWebNavigation.LOAD_FLAGS_DISALLOW_INHERIT_OWNER;
-    if (aIsUTF8)
-      flags |= Ci.nsIWebNavigation.LOAD_FLAGS_URI_IS_UTF8;
     w.gBrowser.loadURIWithFlags(url, flags, aReferrerURI, null, aPostData);
     break;
   case "tabshifted":
@@ -320,7 +318,7 @@ function openLinkIn(url, where, params) {
                        inBackground: loadInBackground,
                        allowThirdPartyFixup: aAllowThirdPartyFixup,
                        relatedToCurrent: aRelatedToCurrent,
-                       isUTF8: aIsUTF8});
+                       disableMCB: aDisableMCB});
     break;
   }
 
@@ -379,11 +377,10 @@ function gatherTextUnder ( root )
       // Add this text to our collection.
       text += " " + node.data;
     } else if ( node instanceof HTMLImageElement) {
-      // If it has an alt= attribute, use that.
+      // If it has an "alt" attribute, add that.
       var altText = node.getAttribute( "alt" );
       if ( altText && altText != "" ) {
-        text = altText;
-        break;
+        text += " " + altText;
       }
     }
     // Find next node to test.
@@ -403,10 +400,8 @@ function gatherTextUnder ( root )
       }
     }
   }
-  // Strip leading whitespace.
-  text = text.replace( /^\s+/, "" );
-  // Strip trailing whitespace.
-  text = text.replace( /\s+$/, "" );
+  // Strip leading and tailing whitespace.
+  text = text.trim();
   // Compress remaining whitespace.
   text = text.replace( /\s+/g, " " );
   return text;
@@ -456,6 +451,9 @@ function openAboutDialog() {
   while (enumerator.hasMoreElements()) {
     // Only open one about window (Bug 599573)
     let win = enumerator.getNext();
+    if (win.closed) {
+      continue;
+    }
     win.focus();
     return;
   }
@@ -472,8 +470,37 @@ function openAboutDialog() {
 
 function openPreferences(paneID, extraArgs)
 {
-  if (Services.prefs.getBoolPref("browser.preferences.inContent")) {
-    openUILinkIn("about:preferences", "tab");
+  function switchToAdvancedSubPane(doc) {
+    if (extraArgs && extraArgs["advancedTab"]) {
+      let advancedPaneTabs = doc.getElementById("advancedPrefs");
+      advancedPaneTabs.selectedTab = doc.getElementById(extraArgs["advancedTab"]);
+    }
+  }
+
+  if (getBoolPref("browser.preferences.inContent")) {
+    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    if (!win) {
+      return;
+    }
+
+    let newLoad = !win.switchToTabHavingURI("about:preferences", true);
+    let browser = win.gBrowser.selectedBrowser;
+
+    function switchToPane() {
+      if (paneID) {
+        browser.contentWindow.selectCategory(paneID);
+      }
+      switchToAdvancedSubPane(browser.contentDocument);
+    }
+
+    if (newLoad) {
+      browser.addEventListener("load", function onload() {
+        browser.removeEventListener("load", onload, true);
+        switchToPane();
+      }, true);
+    } else {
+      switchToPane();
+    }
   } else {
     var instantApply = getBoolPref("browser.preferences.instantApply", false);
     var features = "chrome,titlebar,toolbar,centerscreen" + (instantApply ? ",dialog=no" : ",modal");
@@ -486,16 +513,11 @@ function openPreferences(paneID, extraArgs)
         win.document.documentElement.showPane(pane);
       }
 
-      if (extraArgs && extraArgs["advancedTab"]) {
-        var advancedPaneTabs = win.document.getElementById("advancedPrefs");
-        advancedPaneTabs.selectedTab = win.document.getElementById(extraArgs["advancedTab"]);
-      }
-
-     return;
+      switchToAdvancedSubPane(win.document);
+    } else {
+      openDialog("chrome://browser/content/preferences/preferences.xul",
+                 "Preferences", features, paneID, extraArgs);
     }
-
-    openDialog("chrome://browser/content/preferences/preferences.xul",
-               "Preferences", features, paneID, extraArgs);
   }
 }
 
@@ -655,13 +677,16 @@ function isValidFeed(aLink, aPrincipal, aIsFeed)
 }
 
 // aCalledFromModal is optional
-function openHelpLink(aHelpTopic, aCalledFromModal) {
+function openHelpLink(aHelpTopic, aCalledFromModal, aWhere) {
   var url = Components.classes["@mozilla.org/toolkit/URLFormatterService;1"]
                       .getService(Components.interfaces.nsIURLFormatter)
                       .formatURLPref("app.support.baseURL");
   url += aHelpTopic;
 
-  var where = aCalledFromModal ? "window" : "tab";
+  var where = aWhere;
+  if (!aWhere)
+    where = aCalledFromModal ? "window" : "tab";
+
   openUILinkIn(url, where);
 }
 

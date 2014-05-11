@@ -33,7 +33,6 @@ var gLastRepeatSelection = 0;
 var gIgnoreUpdate = false;
 var gShowTimeAs = null;
 var gWarning = false;
-var gPreviousCalendarId = null;
 
 var eventDialogQuitObserver = {
   observe: function(aSubject, aTopic, aData) {
@@ -624,8 +623,8 @@ function dateTimeControls2State(aStartDatepicker) {
     var saveEndTime = gEndTime;
     var kDefaultTimezone = calendarDefaultTimezone();
 
-    let timezonesEnabled = document.getElementById('options-timezone-menuitem')
-                           .getAttribute('checked') == 'true';
+    let timezonesEnabled = document.getElementById('cmd_timezone')
+                                   .getAttribute('checked') == 'true';
     if (gStartTime) {
         // jsDate is always in OS timezone, thus we create a calIDateTime
         // object from the jsDate representation then we convert the timezone
@@ -1164,8 +1163,9 @@ function updateAccept() {
     }
 
     if (startDate && endDate) {
-        var menuItem = document.getElementById('options-timezone-menuitem');
-        if (menuItem.getAttribute('checked') == 'true') {
+        let timezonesEnabled = document.getElementById('cmd_timezone')
+                                       .getAttribute('checked') == 'true';
+        if (timezonesEnabled) {
             var startTimezone = gStartTimezone;
             var endTimezone = gEndTimezone;
             if (endTimezone.isUTC) {
@@ -1436,8 +1436,8 @@ function editAttendees() {
         endTime.isDate = false;
     }
 
-    var menuItem = document.getElementById('options-timezone-menuitem');
-    var displayTimezone = menuItem.getAttribute('checked') == 'true';
+    let displayTimezone = document.getElementById('cmd_timezone')
+                                  .getAttribute('checked') == 'true';
 
     var args = new Object();
     args.startTime = startTime;
@@ -1596,6 +1596,26 @@ function updatePrivacy() {
 }
 
 /**
+ * This function rotates the Priority of an item to the next value
+ * following the sequence -> Not specified -> Low -> Normal -> High ->.
+ */
+function rotatePriority() {
+    let hasPriority = capSupported("priority");
+    if (hasPriority) {
+        if (gPriority <= 0 || gPriority > 9) {         // not specified
+            gPriority = 9;
+        } else if (gPriority >= 1 && gPriority <= 4) { // high
+            gPriority = 0;
+        } else if (gPriority == 5) {                   // normal
+            gPriority = 1;
+        } else if (gPriority >= 6 && gPriority <= 9) { // low
+            gPriority = 5;
+        }
+        updatePriority();
+    }
+}
+
+/**
  * Handler function to change the priority from the dialog elements
  *
  * @param target    A XUL node with a value attribute which should be the new
@@ -1607,11 +1627,12 @@ function editPriority(target) {
 }
 
 /**
- * Update the dialog controls related related to priority.
+ * Update the dialog controls related to priority.
  */
 function updatePriority() {
     // Set up capabilities
     var hasPriority = capSupported("priority");
+    setElementValue("button-priority", !hasPriority && "true", "disabled");
     setElementValue("options-priority-menu", !hasPriority && "true", "disabled");
     setElementValue("status-priority", !hasPriority && "true", "collapsed");
 
@@ -1664,6 +1685,16 @@ function updatePriority() {
 }
 
 /**
+ * Rotate the Status of an item to the next value following
+ * the sequence -> NONE -> TENTATIVE -> CONFIRMED -> CANCELLED ->.
+ */
+function rotateStatus() {
+    const states = ["NONE","TENTATIVE","CONFIRMED","CANCELLED"];
+    gStatus = states[(states.indexOf(gStatus) + 1) % states.length];
+    updateStatus();
+}
+
+/**
  * Handler function to change the status from the dialog elements
  *
  * @param target    A XUL node with a value attribute which should be the new
@@ -1675,10 +1706,14 @@ function editStatus(target) {
 }
 
 /**
- * Update the dialog controls related related to status.
+ * Update the dialog controls related to status.
  */
 function updateStatus() {
     let found = false;
+    const statusLabels = ["status-status-tentative-label",
+                          "status-status-confirmed-label",
+                          "status-status-cancelled-label"];
+    setBooleanAttribute("status-status", "collapsed", true);
     [ "cmd_status_none",
       "cmd_status_tentative",
       "cmd_status_confirmed",
@@ -1689,6 +1724,13 @@ function updateStatus() {
               found = found || matches;
 
               node.setAttribute("checked", matches ? "true" : "false");
+
+              if (index > 0) {
+                  setBooleanAttribute(statusLabels[index-1], "hidden", !matches);
+                  if (matches) {
+                      setBooleanAttribute("status-status", "collapsed", false);
+                  }
+              }
           }
       );
     if (!found) {
@@ -1697,6 +1739,16 @@ function updateStatus() {
         gStatus = "NONE";
         updateStatus();
     }
+}
+
+/**
+ * Toggles the transparency (Show Time As property) of an item
+ * from BUSY (Opaque) to FREE (Transparent).
+ */
+function rotateShowTimeAs() {
+    const states = ["OPAQUE", "TRANSPARENT"];
+    gShowTimeAs = states[(states.indexOf(gShowTimeAs) + 1) % states.length];
+    updateShowTimeAs();
 }
 
 /**
@@ -1721,6 +1773,23 @@ function updateShowTimeAs() {
                             gShowTimeAs == "OPAQUE" ? "true" : "false");
     showAsFree.setAttribute("checked",
                             gShowTimeAs == "TRANSPARENT" ? "true" : "false");
+
+    setBooleanAttribute("status-freebusy",
+                        "collapsed",
+                        gShowTimeAs != "OPAQUE" && gShowTimeAs != "TRANSPARENT");
+    setBooleanAttribute("status-freebusy-free-label", "hidden", gShowTimeAs == "OPAQUE")
+    setBooleanAttribute("status-freebusy-busy-label", "hidden", gShowTimeAs == "TRANSPARENT")
+}
+
+/**
+ * Toggles the command that allows to enable the timezone
+ * links in the dialog.
+ */
+function toggleTimezoneLinks() {
+    let cmdTimezone = document.getElementById('cmd_timezone');
+    let isChecked = cmdTimezone.getAttribute("checked") == "true";
+    cmdTimezone.setAttribute("checked", isChecked ? "false" : "true");
+    updateDateTime();
 }
 
 function loadCloudProviders() {
@@ -1753,9 +1822,9 @@ function loadCloudProviders() {
 
         // Add the item to the different places we advertise cloud providers
         if (toolbarPopup) {
-            toolbarPopup.appendChild(item.cloneNode()).cloudProvider = cloudProvider;
+            toolbarPopup.appendChild(item.cloneNode(true)).cloudProvider = cloudProvider;
         }
-        attachmentPopup.appendChild(item.cloneNode()).cloudProvider = cloudProvider;
+        attachmentPopup.appendChild(item.cloneNode(true)).cloudProvider = cloudProvider;
 
         // The last one doesn't need to clone, just use the item itself.
         optionsPopup.appendChild(item).cloudProvider = cloudProvider;
@@ -2141,6 +2210,47 @@ function attachmentLinkClicked(event) {
 }
 
 /**
+ * Helper function to show a notification in the event-dialog's notificationBox
+ *
+ * @param aMessage     the message text to show
+ * @param aValue       string identifying the notification
+ * @param aPriority    (optional) the priority of the warning (info, critical), default is 'warn'
+ * @param aImage       (optional) URL of image to appear on the notification
+ * @param aButtonset   (optional) array of button descriptions to appear on the notification
+ * @param aCallback    (optional) a function to handle events from the notificationBox
+ */
+function notifyUser(aMessage, aValue, aPriority, aImage, aButtonset, aCallback) {
+    let notificationBox = document.getElementById("event-dialog-notifications");
+    // only append, if the notification does not already exist
+    if (notificationBox.getNotificationWithValue(aValue) == null) {
+        const prioMap = {
+            "info": notificationBox.PRIORITY_INFO_MEDIUM,
+            "critical": notificationBox.PRIORITY_CRITICAL_MEDIUM
+        };
+        let priority = prioMap[aPriority] || notificationBox.PRIORITY_WARNING_MEDIUM;
+        notificationBox.appendNotification(aMessage,
+                                           aValue,
+                                           aImage,
+                                           priority,
+                                           aButtonset,
+                                           aCallback);
+    }
+}
+
+/**
+ * Remove a notification from the notifiactionBox
+ *
+ * @param aValue      string identifying the notification to remove
+ */
+function removeNotification(aValue) {
+    let notificationBox = document.getElementById("event-dialog-notifications");
+    let notification = notificationBox.getNotificationWithValue(aValue);
+    if (notification != null) {
+        notificationBox.removeNotification(notification);
+    }
+}
+
+/**
  * Update the dialog controls related related to the item's calendar.
  */
 function updateCalendar() {
@@ -2149,17 +2259,12 @@ function updateCalendar() {
 
     gIsReadOnly = calendar.readOnly;
 
-    if (!gPreviousCalendarId) {
-        gPreviousCalendarId = item.calendar.id;
-    }
-
     // We might have to change the organizer, let's see
     let calendarOrgId = calendar.getProperty("organizerId");
-    if (window.organizer && calendarOrgId &&
-        calendar.id != gPreviousCalendarId) {
+    if (window.organizer && calendar.aclEntry && calendarOrgId &&
+        calendar.id != item.calendar.id) {
         window.organizer.id = calendarOrgId;
         window.organizer.commonName = calendar.getProperty("organizerCN");
-        gPreviousCalendarId = calendar.id;
     }
 
     if (!canNotifyAttendees(calendar, item) && calendar.getProperty("imip.identity")) {
@@ -2986,7 +3091,7 @@ function editTimezone(aElementId,aDateTime,aCallback) {
  * - 'todo-duedate'
  * The date/time-objects are either displayed in their respective
  * timezone or in the default timezone. This decision is based
- * on whether or not 'options-timezone-menuitem' is checked.
+ * on whether or not 'cmd_timezone' is checked.
  * the necessary information is taken from the following variables:
  * - 'gStartTime'
  * - 'gEndTime'
@@ -2995,13 +3100,14 @@ function editTimezone(aElementId,aDateTime,aCallback) {
 function updateDateTime() {
     gIgnoreUpdate = true;
 
-    var item = window.calendarItem;
-    var menuItem = document.getElementById('options-timezone-menuitem');
+    let item = window.calendarItem;
+    let timezonesEnabled = document.getElementById('cmd_timezone')
+                                   .getAttribute('checked') == 'true';
 
     // Convert to default timezone if the timezone option
     // is *not* checked, otherwise keep the specific timezone
     // and display the labels in order to modify the timezone.
-    if (menuItem.getAttribute('checked') == 'true') {
+    if (timezonesEnabled) {
         if (isEvent(item)) {
           var startTime = gStartTime.getInTimezone(gStartTimezone);
           var endTime = gEndTime.getInTimezone(gEndTimezone);
@@ -3135,16 +3241,16 @@ function updateDateTime() {
  * - 'timezone-starttime'
  * - 'timezone-endtime'
  * the timezone-links show the corrosponding names of the
- * start/end times. if 'options-timezone-menuitem' is not checked
+ * start/end times. If 'cmd_timezone' is not checked
  * the links will be collapsed.
  */
 function updateTimezone() {
-    let menuItem = document.getElementById('options-timezone-menuitem');
-
+    let timezonesEnabled = document.getElementById('cmd_timezone')
+                                   .getAttribute('checked') == 'true';
     // convert to default timezone if the timezone option
     // is *not* checked, otherwise keep the specific timezone
     // and display the labels in order to modify the timezone.
-    if (menuItem.getAttribute('checked') == 'true') {
+    if (timezonesEnabled) {
         let startTimezone = gStartTimezone;
         let endTimezone = gEndTimezone;
 

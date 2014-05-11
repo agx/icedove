@@ -6,6 +6,8 @@
 
 #include "ImageLogging.h"
 #include "nsJPEGDecoder.h"
+#include "Orientation.h"
+#include "EXIF.h"
 
 #include "nsIInputStream.h"
 
@@ -179,20 +181,15 @@ nsJPEGDecoder::FinishInternal()
    * XXXbholley - It seems wrong that this should be necessary, but at the
    * moment I'm just folding the contents of Flush() into Close() so that
    * we can get rid of it.
-   *
-   * XXX(seth): It'd be great to get rid of this. For now, we treat this as a
-   * write to a synchronous decoder, which means that this must be called only
-   * on the main thread. (That's asserted in Decoder::Finish and
-   * Decoder::FinishSharedDecoder.)
    */
   if ((mState != JPEG_DONE && mState != JPEG_SINK_NON_JPEG_TRAILER) &&
       (mState != JPEG_ERROR) &&
       !IsSizeDecode())
-    this->Write(nullptr, 0, DECODE_SYNC);
+    this->Write(nullptr, 0);
 }
 
 void
-nsJPEGDecoder::WriteInternal(const char *aBuffer, uint32_t aCount, DecodeStrategy)
+nsJPEGDecoder::WriteInternal(const char *aBuffer, uint32_t aCount)
 {
   mSegment = (const JOCTET *)aBuffer;
   mSegmentLen = aCount;
@@ -240,7 +237,7 @@ nsJPEGDecoder::WriteInternal(const char *aBuffer, uint32_t aCount, DecodeStrateg
     }
 
     // Post our size to the superclass
-    PostSize(mInfo.image_width, mInfo.image_height);
+    PostSize(mInfo.image_width, mInfo.image_height, ReadOrientationFromEXIF());
     if (HasError()) {
       // Setting the size led to an error.
       mState = JPEG_ERROR;
@@ -536,6 +533,27 @@ nsJPEGDecoder::WriteInternal(const char *aBuffer, uint32_t aCount, DecodeStrateg
   PR_LOG(GetJPEGDecoderAccountingLog(), PR_LOG_DEBUG,
          ("} (end of function)"));
   return;
+}
+
+Orientation
+nsJPEGDecoder::ReadOrientationFromEXIF()
+{
+  jpeg_saved_marker_ptr marker;
+
+  // Locate the APP1 marker, where EXIF data is stored, in the marker list.
+  for (marker = mInfo.marker_list ; marker != nullptr ; marker = marker->next) {
+    if (marker->marker == JPEG_APP0 + 1) 
+      break;
+  }
+
+  // If we're at the end of the list, there's no EXIF data.
+  if (!marker)
+    return Orientation();
+
+  // Extract the orientation information.
+  EXIFData exif = EXIFParser::Parse(marker->data,
+                                    static_cast<uint32_t>(marker->data_length));
+  return exif.orientation;
 }
 
 void

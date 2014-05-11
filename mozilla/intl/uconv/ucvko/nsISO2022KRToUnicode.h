@@ -4,10 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #ifndef nsISO2022KRToUnicode_h__
 #define nsISO2022KRToUnicode_h__
-#include "nsISupports.h"
 #include "nsUCSupport.h"
+#include "mozilla/Telemetry.h"
 
-
+using namespace mozilla;
  
 class nsISO2022KRToUnicode : public nsBasicDecoderSupport
 {
@@ -19,6 +19,7 @@ public:
     mData = 0;
     mEUCKRDecoder = nullptr;
     mRunLength = 0;
+    Telemetry::Accumulate(Telemetry::DECODER_INSTANTIATED_ISO2022KR, true);
   }
 
   virtual ~nsISO2022KRToUnicode()

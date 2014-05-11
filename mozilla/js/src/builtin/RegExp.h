@@ -7,9 +7,6 @@
 #ifndef builtin_RegExp_h
 #define builtin_RegExp_h
 
-#include "jsprvtd.h"
-
-#include "vm/MatchPairs.h"
 #include "vm/RegExpObject.h"
 
 JSObject *
@@ -22,15 +19,19 @@ js_InitRegExpClass(JSContext *cx, js::HandleObject obj);
 
 namespace js {
 
+// Whether RegExp statics should be updated with the input and results of a
+// regular expression execution.
+enum RegExpStaticsUpdate { UpdateRegExpStatics, DontUpdateRegExpStatics };
+
 RegExpRunStatus
 ExecuteRegExp(JSContext *cx, HandleObject regexp, HandleString string,
-              MatchConduit &matches);
+              MatchConduit &matches, RegExpStaticsUpdate staticsUpdate);
 
 /*
  * Legacy behavior of ExecuteRegExp(), which is baked into the JSAPI.
  *
- * |res| may be NULL if the RegExpStatics are not to be updated.
- * |input| may be NULL if there is no JSString corresponding to
+ * |res| may be nullptr if the RegExpStatics are not to be updated.
+ * |input| may be nullptr if there is no JSString corresponding to
  * |chars| and |length|.
  */
 bool
@@ -47,14 +48,34 @@ bool
 CreateRegExpMatchResult(JSContext *cx, HandleString input, const jschar *chars, size_t length,
                         MatchPairs &matches, MutableHandleValue rval);
 
-extern JSBool
+extern bool
 regexp_exec(JSContext *cx, unsigned argc, Value *vp);
 
 bool
-regexp_test_raw(JSContext *cx, HandleObject regexp, HandleString input, JSBool *result);
+regexp_test_raw(JSContext *cx, HandleObject regexp, HandleString input, bool *result);
 
-extern JSBool
+extern bool
 regexp_test(JSContext *cx, unsigned argc, Value *vp);
+
+/*
+ * The following functions are for use by self-hosted code.
+ */
+
+/*
+ * Behaves like regexp.exec(string), but doesn't set RegExp statics.
+ *
+ * Usage: match = regexp_exec_no_statics(regexp, string)
+ */
+extern bool
+regexp_exec_no_statics(JSContext *cx, unsigned argc, Value *vp);
+
+/*
+ * Behaves like regexp.test(string), but doesn't set RegExp statics.
+ *
+ * Usage: does_match = regexp_test_no_statics(regexp, string)
+ */
+extern bool
+regexp_test_no_statics(JSContext *cx, unsigned argc, Value *vp);
 
 } /* namespace js */
 

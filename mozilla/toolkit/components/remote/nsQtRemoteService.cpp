@@ -65,9 +65,6 @@ mServerWindow(0)
 NS_IMETHODIMP
 nsQtRemoteService::Startup(const char* aAppName, const char* aProfileName)
 {
-#if (MOZ_PLATFORM_MAEMO == 5)
-  return NS_ERROR_NOT_IMPLEMENTED;
-#endif
   if (mServerWindow) return NS_ERROR_ALREADY_INITIALIZED;
   NS_ASSERTION(aAppName, "Don't pass a null appname!");
 
@@ -122,13 +119,13 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsQtRemoteService)
 NS_DEFINE_NAMED_CID(NS_REMOTESERVICE_CID);
 
 static const mozilla::Module::CIDEntry kRemoteCIDs[] = {
-  { &kNS_REMOTESERVICE_CID, false, NULL, nsQtRemoteServiceConstructor },
-  { NULL }
+  { &kNS_REMOTESERVICE_CID, false, nullptr, nsQtRemoteServiceConstructor },
+  { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kRemoteContracts[] = {
   { "@mozilla.org/toolkit/remote-service;1", &kNS_REMOTESERVICE_CID },
-  { NULL }
+  { nullptr }
 };
 
 static const mozilla::Module kRemoteModule = {

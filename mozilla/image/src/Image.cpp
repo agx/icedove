@@ -11,7 +11,7 @@ namespace mozilla {
 namespace image {
 
 // Constructor
-ImageResource::ImageResource(imgStatusTracker* aStatusTracker, nsIURI* aURI) :
+ImageResource::ImageResource(ImageURL* aURI) :
   mURI(aURI),
   mInnerWindowId(0),
   mAnimationConsumers(0),
@@ -20,12 +20,6 @@ ImageResource::ImageResource(imgStatusTracker* aStatusTracker, nsIURI* aURI) :
   mAnimating(false),
   mError(false)
 {
-  if (aStatusTracker) {
-    mStatusTracker = aStatusTracker;
-    mStatusTracker->SetImage(this);
-  } else {
-    mStatusTracker = new imgStatusTracker(this);
-  }
 }
 
 uint32_t
@@ -86,24 +80,22 @@ Image::GetDecoderType(const char *aMimeType)
   else if (!strcmp(aMimeType, IMAGE_ICON_MS))
     rv = eDecoderType_icon;
 
-#ifdef MOZ_WBMP
-  // WBMP
-  else if (!strcmp(aMimeType, IMAGE_WBMP))
-    rv = eDecoderType_wbmp;
-#endif
-
   return rv;
 }
 
 void
 ImageResource::IncrementAnimationConsumers()
 {
+  MOZ_ASSERT(NS_IsMainThread(), "Main thread only to encourage serialization "
+                                "with DecrementAnimationConsumers");
   mAnimationConsumers++;
 }
 
 void
 ImageResource::DecrementAnimationConsumers()
 {
+  MOZ_ASSERT(NS_IsMainThread(), "Main thread only to encourage serialization "
+                                "with IncrementAnimationConsumers");
   NS_ABORT_IF_FALSE(mAnimationConsumers >= 1, "Invalid no. of animation consumers!");
   mAnimationConsumers--;
 }
@@ -144,7 +136,6 @@ ImageResource::EvaluateAnimation()
     mAnimating = NS_SUCCEEDED(rv);
   } else if (mAnimating && !ShouldAnimate()) {
     StopAnimation();
-    mAnimating = false;
   }
 }
 

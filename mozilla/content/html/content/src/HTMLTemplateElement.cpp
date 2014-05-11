@@ -33,7 +33,6 @@ namespace dom {
 HTMLTemplateElement::HTMLTemplateElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsGenericHTMLElement(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 nsresult
@@ -66,6 +65,8 @@ HTMLTemplateElement::~HTMLTemplateElement()
 NS_IMPL_ADDREF_INHERITED(HTMLTemplateElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLTemplateElement, Element)
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLTemplateElement)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLTemplateElement,
                                                 nsGenericHTMLElement)
   if (tmp->mContent) {
@@ -81,8 +82,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 // QueryInterface implementation for HTMLTemplateElement
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(HTMLTemplateElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-NS_ELEMENT_INTERFACE_MAP_END
+NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(HTMLTemplateElement)
 

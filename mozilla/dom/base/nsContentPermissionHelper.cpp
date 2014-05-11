@@ -2,16 +2,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#ifdef MOZ_WIDGET_GONK
+#include "GonkPermission.h"
+#include "mozilla/dom/ContentParent.h"
+#endif // MOZ_WIDGET_GONK
 #include "nsContentPermissionHelper.h"
 #include "nsIContentPermissionPrompt.h"
 #include "nsCOMPtr.h"
-#include "nsIDOMWindow.h"
 #include "nsIDOMElement.h"
 #include "nsIPrincipal.h"
+#include "mozilla/dom/Element.h"
+#include "mozilla/dom/TabParent.h"
 #include "mozilla/unused.h"
+#include "nsComponentManagerUtils.h"
 
 using mozilla::unused;          // <snicker>
 using namespace mozilla::dom;
+using namespace mozilla;
 
 nsContentPermissionRequestProxy::nsContentPermissionRequestProxy()
 {
@@ -92,7 +99,8 @@ nsContentPermissionRequestProxy::GetElement(nsIDOMElement * *aRequestingElement)
     return NS_ERROR_FAILURE;
   }
 
-  NS_IF_ADDREF(*aRequestingElement = mParent->mElement);
+  nsCOMPtr<nsIDOMElement> elem = do_QueryInterface(mParent->mElement);
+  elem.forget(aRequestingElement);
   return NS_OK;
 }
 
@@ -100,6 +108,12 @@ NS_IMETHODIMP
 nsContentPermissionRequestProxy::Cancel()
 {
   if (mParent == nullptr) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Don't send out the delete message when the managing protocol (PBrowser) is
+  // being destroyed and PContentPermissionRequest will soon be.
+  if (mParent->IsBeingDestroyed()) {
     return NS_ERROR_FAILURE;
   }
 
@@ -114,6 +128,21 @@ nsContentPermissionRequestProxy::Allow()
   if (mParent == nullptr) {
     return NS_ERROR_FAILURE;
   }
+
+  // Don't send out the delete message when the managing protocol (PBrowser) is
+  // being destroyed and PContentPermissionRequest will soon be.
+  if (mParent->IsBeingDestroyed()) {
+    return NS_ERROR_FAILURE;
+  }
+
+#ifdef MOZ_WIDGET_GONK
+  if (mType.Equals("audio-capture")) {
+    GonkPermissionService::GetInstance()->addGrantInfo(
+      "android.permission.RECORD_AUDIO",
+      static_cast<TabParent*>(mParent->Manager())->Manager()->Pid());
+  }
+#endif
+
   unused << ContentPermissionRequestParent::Send__delete__(mParent, true);
   mParent = nullptr;
   return NS_OK;
@@ -124,7 +153,7 @@ namespace dom {
 
 ContentPermissionRequestParent::ContentPermissionRequestParent(const nsACString& aType,
                                                                const nsACString& aAccess,
-                                                               nsIDOMElement *aElement,
+                                                               Element* aElement,
                                                                const IPC::Principal& aPrincipal)
 {
   MOZ_COUNT_CTOR(ContentPermissionRequestParent);
@@ -157,6 +186,15 @@ ContentPermissionRequestParent::ActorDestroy(ActorDestroyReason why)
   if (mProxy) {
     mProxy->OnParentDestroyed();
   }
+}
+
+bool
+ContentPermissionRequestParent::IsBeingDestroyed()
+{
+  // When TabParent::Destroy() is called, we are being destroyed. It's unsafe
+  // to send out any message now.
+  TabParent* tabParent = static_cast<TabParent*>(Manager());
+  return tabParent->IsDestroyed();
 }
 
 } // namespace dom

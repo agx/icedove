@@ -185,6 +185,9 @@ typedef struct
     {
       int width;
       int height;
+      uint32_t rtcp_fb_types;
+      uint32_t max_fs; /* Max frame size */
+      uint32_t max_fr; /* Max frame rate */
     } video;
   };
 
@@ -331,6 +334,7 @@ typedef struct vcm_audioAttrs_t_ {
 typedef struct vcm_attrs_t_ {
   cc_boolean         mute;
   cc_boolean         is_video;
+  cc_boolean         rtcp_mux;
   vcm_audioAttrs_t audio; /**< audio line attribs */
   vcm_videoAttrs_t video; /**< Video Atrribs */
 } vcm_mediaAttrs_t;
@@ -583,6 +587,7 @@ int vcmRxStart(cc_mcapid_t mcap_id,
  *  @param[in]   peerconnection - the peerconnection in use
  *  @param[in]   num_payloads  - number of codecs negotiated
  *  @param[in]   payloads      - list of negotiated codec details
+ *  @param[in]   setup_t       - whether playing client or server role
  *  @param[in]   fingerprint_alg - the DTLS fingerprint algorithm
  *  @param[in]   fingerprint  - the DTLS fingerprint
  *  @param[in]   attrs        - media attributes
@@ -601,6 +606,7 @@ int vcmRxStartICE(cc_mcapid_t mcap_id,
         const char *peerconnection,
         int num_payloads,
         const vcm_payload_info_t* payloads,
+        sdp_setup_type_e setup_type,
         const char *fingerprint_alg,
         const char *fingerprint,
         vcm_mediaAttrs_t *attrs);
@@ -661,6 +667,7 @@ int vcmTxStart(cc_mcapid_t mcap_id,
  *  @param[in]   peerconnection - the peerconnection in use
  *  @param[in]   payload      - payload information
  *  @param[in]   tos          - bit marking
+ *  @param[in]   setup_type   - whether playing client or server role
  *  @param[in]   fingerprint_alg - the DTLS fingerprint algorithm
  *  @param[in]   fingerprint  - the DTLS fingerprint
  *  @param[in]   attrs        - media attributes
@@ -679,6 +686,7 @@ int vcmTxStart(cc_mcapid_t mcap_id,
         const char *peerconnection,
         const vcm_payload_info_t *payload,
         short tos,
+        sdp_setup_type_e setup_type,
         const char *fingerprint_alg,
         const char *fingerprint,
         vcm_mediaAttrs_t *attrs);
@@ -1032,6 +1040,18 @@ int vcmGetILBCMode();
  *
  */
 int vcmOnSdpParseError(const char *peercconnection, const char *message);
+
+/**
+ * vcmDisableRtcpComponent
+ *
+ * If we are doing rtcp-mux we need to disable component number 2 in the ICE
+ * layer.  Otherwise we will wait for it to connect when it is unused
+ */
+int vcmDisableRtcpComponent(const char *peerconnection, int level);
+
+short vcmGetVideoMaxFs(uint16_t codec, int32_t *max_fs);
+
+short vcmGetVideoMaxFr(uint16_t codec, int32_t *max_fs);
 
 //Using C++ for gips. This is the end of extern "C" above.
 #ifdef __cplusplus

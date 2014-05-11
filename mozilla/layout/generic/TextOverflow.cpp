@@ -19,8 +19,8 @@
 #include "nsRect.h"
 #include "nsRenderingContext.h"
 #include "nsTextFrame.h"
-#include "nsStyleStructInlines.h"
-#include "mozilla/Util.h"
+#include "nsIFrameInlines.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Likely.h"
 
 namespace mozilla {
@@ -229,7 +229,7 @@ nsDisplayTextOverflowMarker::PaintTextToContext(nsRenderingContext* aCtx,
       NS_ASSERTION(!textRun->IsRightToLeft(),
                    "Ellipsis textruns should always be LTR!");
       gfxPoint gfxPt(pt.x, pt.y);
-      textRun->Draw(aCtx->ThebesContext(), gfxPt, gfxFont::GLYPH_FILL,
+      textRun->Draw(aCtx->ThebesContext(), gfxPt, DrawMode::GLYPH_FILL,
                     0, textRun->GetLength(), nullptr, nullptr, nullptr);
     }
   } else {
@@ -573,8 +573,7 @@ TextOverflow::ProcessLine(const nsDisplayListSet& aLists,
   mRight.Reset();
   mRight.mActive = mRight.mStyle->mType != NS_STYLE_TEXT_OVERFLOW_CLIP;
   
-  FrameHashtable framesToHide;
-  framesToHide.Init(100);
+  FrameHashtable framesToHide(100);
   AlignmentEdges alignmentEdges;
   ExamineLineFrames(aLine, &framesToHide, &alignmentEdges);
   bool needLeft = mLeft.IsNeeded();

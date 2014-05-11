@@ -5,11 +5,8 @@
 #ifndef nsContentPermissionHelper_h
 #define nsContentPermissionHelper_h
 
-#include "base/basictypes.h"
-
 #include "nsIContentPermissionPrompt.h"
 #include "nsString.h"
-#include "nsIDOMElement.h"
 
 #include "mozilla/dom/PermissionMessageUtils.h"
 #include "mozilla/dom/PContentPermissionRequestParent.h"
@@ -19,14 +16,21 @@ class nsContentPermissionRequestProxy;
 namespace mozilla {
 namespace dom {
 
+class Element;
+
 class ContentPermissionRequestParent : public PContentPermissionRequestParent
 {
  public:
-  ContentPermissionRequestParent(const nsACString& type, const nsACString& access, nsIDOMElement *element, const IPC::Principal& principal);
+  ContentPermissionRequestParent(const nsACString& type,
+                                 const nsACString& access,
+                                 Element* element,
+                                 const IPC::Principal& principal);
   virtual ~ContentPermissionRequestParent();
 
+  bool IsBeingDestroyed();
+
   nsCOMPtr<nsIPrincipal> mPrincipal;
-  nsCOMPtr<nsIDOMElement>    mElement;
+  nsCOMPtr<Element> mElement;
   nsCOMPtr<nsContentPermissionRequestProxy> mProxy;
   nsCString mType;
   nsCString mAccess;

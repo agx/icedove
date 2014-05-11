@@ -11,15 +11,14 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/TimeStamp.h"
-#include "nsHttpRequestHead.h"
 #include "nsILoadGroup.h"
 #include "nsString.h"
-#include "PSpdyPush3.h"
-#include "SpdySession3.h"
 #include "SpdyStream3.h"
 
 namespace mozilla {
 namespace net {
+
+class SpdySession3;
 
 class SpdyPush3TransactionBuffer;
 
@@ -73,7 +72,7 @@ private:
 class SpdyPush3TransactionBuffer MOZ_FINAL : public nsAHttpTransaction
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSAHTTPTRANSACTION
 
   SpdyPush3TransactionBuffer();

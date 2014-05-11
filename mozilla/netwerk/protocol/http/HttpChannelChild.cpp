@@ -15,13 +15,13 @@
 
 #include "nsStringStream.h"
 #include "nsHttpHandler.h"
-#include "nsMimeTypes.h"
 #include "nsNetUtil.h"
 #include "nsSerializationHelper.h"
-#include "base/compiler_specific.h"
+#include "mozilla/Attributes.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/net/DNS.h"
+#include "SerializedLoadContext.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
@@ -34,7 +34,7 @@ namespace net {
 //-----------------------------------------------------------------------------
 
 HttpChannelChild::HttpChannelChild()
-  : ALLOW_THIS_IN_INITIALIZER_LIST(HttpAsyncAborter<HttpChannelChild>(this))
+  : HttpAsyncAborter<HttpChannelChild>(MOZ_THIS_IN_INITIALIZER_LIST())
   , mIsFromCache(false)
   , mCacheEntryAvailable(false)
   , mCacheExpirationTime(nsICache::NO_EXPIRATION_TIME)
@@ -469,7 +469,7 @@ HttpChannelChild::OnStopRequest(const nsresult& statusCode)
     mKeptAlive = true;
     SendDocumentChannelCleanup();
   } else {
-    // This calls NeckoChild::DeallocPHttpChannel(), which deletes |this| if IPDL
+    // This calls NeckoChild::DeallocPHttpChannelChild(), which deletes |this| if IPDL
     // holds the last reference.  Don't rely on |this| existing after here.
     PHttpChannelChild::Send__delete__(this);
   }
@@ -744,13 +744,15 @@ HttpChannelChild::Redirect1Begin(const uint32_t& newChannelId,
   mRedirectChannelChild = do_QueryInterface(newChannel);
   if (mRedirectChannelChild) {
     mRedirectChannelChild->ConnectParent(newChannelId);
+    rv = gHttpHandler->AsyncOnChannelRedirect(this,
+                                              newChannel,
+                                              redirectFlags);
   } else {
-    NS_ERROR("Redirecting to a protocol that doesn't support universal protocol redirect");
+    LOG(("  redirecting to a protocol that doesn't implement"
+         " nsIChildChannel"));
+    rv = NS_ERROR_FAILURE;
   }
 
-  rv = gHttpHandler->AsyncOnChannelRedirect(this,
-                                            newChannel,
-                                            redirectFlags);
   if (NS_FAILED(rv))
     OnRedirectVerifyCallback(rv);
 }
@@ -885,10 +887,11 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult result)
     newHttpChannelChild->GetClientSetRequestHeaders(&headerTuples);
   }
 
+  /* If the redirect was canceled, bypass OMR and send an empty API
+   * redirect URI */
+  SerializeURI(nullptr, redirectURI);
+
   if (NS_SUCCEEDED(result)) {
-    // we know this is an HttpChannelChild
-    HttpChannelChild* base =
-      static_cast<HttpChannelChild*>(mRedirectChannelChild.get());
     // Note: this is where we would notify "http-on-modify-response" observers.
     // We have deliberately disabled this for child processes (see bug 806753)
     //
@@ -896,13 +899,18 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult result)
     // "http-on-modify-request" observers the chance to cancel before that.
     //base->CallOnModifyRequestObservers();
 
-    /* If there was an API redirect of this redirect, we need to send it
-     * down here, since it can't get sent via SendAsyncOpen. */
-    SerializeURI(base->mAPIRedirectToURI, redirectURI);
-  } else {
-    /* If the redirect was canceled, bypass OMR and send an empty API
-     * redirect URI */
-    SerializeURI(nullptr, redirectURI);
+    nsCOMPtr<nsIHttpChannelInternal> newHttpChannelInternal =
+      do_QueryInterface(mRedirectChannelChild);
+    if (newHttpChannelInternal) {
+      nsCOMPtr<nsIURI> apiRedirectURI;
+      nsresult rv = newHttpChannelInternal->GetApiRedirectToURI(
+        getter_AddRefs(apiRedirectURI));
+      if (NS_SUCCEEDED(rv) && apiRedirectURI) {
+        /* If there was an API redirect of this channel, we need to send it
+         * up here, since it can't be sent via SendAsyncOpen. */
+        SerializeURI(apiRedirectURI, redirectURI);
+      }
+    }
   }
 
   if (mIPCOpen)
@@ -918,6 +926,8 @@ HttpChannelChild::OnRedirectVerifyCallback(nsresult result)
 NS_IMETHODIMP
 HttpChannelChild::Cancel(nsresult status)
 {
+  MOZ_ASSERT(NS_IsMainThread());
+
   if (!mCanceled) {
     // If this cancel occurs before nsHttpChannel has been set up, AsyncOpen
     // is responsible for cleaning up.

@@ -15,15 +15,12 @@
 #include "nsIUnicodeDecoder.h"
 #include "nsIPlatformCharset.h"
 #include "nsICharsetConverterManager.h"
-#include "nsIDOMMimeType.h"
 #include "nsPluginLogging.h"
 #include "nsNPAPIPlugin.h"
-#include "mozilla/TimeStamp.h"
 #include "mozilla/Preferences.h"
 #include <cctype>
 
 using namespace mozilla;
-using mozilla::TimeStamp;
 
 // These legacy flags are used in the plugin registry. The states are now
 // stored in prefs, but we still need to be able to import them.
@@ -63,28 +60,7 @@ GetStatePrefNameForPlugin(nsPluginTag* aTag)
   return MakePrefNameForPlugin("state", aTag);
 }
 
-NS_IMPL_ISUPPORTS1(DOMMimeTypeImpl, nsIDOMMimeType)
-
 /* nsPluginTag */
-
-nsPluginTag::nsPluginTag(nsPluginTag* aPluginTag)
-  : mName(aPluginTag->mName),
-    mDescription(aPluginTag->mDescription),
-    mMimeTypes(aPluginTag->mMimeTypes),
-    mMimeDescriptions(aPluginTag->mMimeDescriptions),
-    mExtensions(aPluginTag->mExtensions),
-    mLibrary(nullptr),
-    mIsJavaPlugin(aPluginTag->mIsJavaPlugin),
-    mIsFlashPlugin(aPluginTag->mIsFlashPlugin),
-    mFileName(aPluginTag->mFileName),
-    mFullPath(aPluginTag->mFullPath),
-    mVersion(aPluginTag->mVersion),
-    mLastModifiedTime(0),
-    mNiceFileName(),
-    mCachedBlocklistState(nsIBlocklistService::STATE_NOT_BLOCKED),
-    mCachedBlocklistStateValid(false)
-{
-}
 
 nsPluginTag::nsPluginTag(nsPluginInfo* aPluginInfo)
   : mName(aPluginInfo->fName),
@@ -105,6 +81,7 @@ nsPluginTag::nsPluginTag(nsPluginInfo* aPluginInfo)
            aPluginInfo->fExtensionArray,
            aPluginInfo->fVariantCount);
   EnsureMembersAreUTF8();
+  FixupVersion();
 }
 
 nsPluginTag::nsPluginTag(const char* aName,
@@ -135,6 +112,7 @@ nsPluginTag::nsPluginTag(const char* aName,
            static_cast<uint32_t>(aVariants));
   if (!aArgsAreUTF8)
     EnsureMembersAreUTF8();
+  FixupVersion();
 }
 
 nsPluginTag::~nsPluginTag()
@@ -154,19 +132,29 @@ void nsPluginTag::InitMime(const char* const* aMimeTypes,
   }
 
   for (uint32_t i = 0; i < aVariantCount; i++) {
-    if (!aMimeTypes[i] || !nsPluginHost::IsTypeWhitelisted(aMimeTypes[i])) {
+    if (!aMimeTypes[i]) {
+      continue;
+    }
+
+    nsAutoCString mimeType(aMimeTypes[i]);
+
+    // Convert the MIME type, which is case insensitive, to lowercase in order
+    // to properly handle a mixed-case type.
+    ToLowerCase(mimeType);
+
+    if (!nsPluginHost::IsTypeWhitelisted(mimeType.get())) {
       continue;
     }
 
     // Look for certain special plugins.
-    if (nsPluginHost::IsJavaMIMEType(aMimeTypes[i])) {
+    if (nsPluginHost::IsJavaMIMEType(mimeType.get())) {
       mIsJavaPlugin = true;
-    } else if (strcmp(aMimeTypes[i], "application/x-shockwave-flash") == 0) {
+    } else if (mimeType.EqualsLiteral("application/x-shockwave-flash")) {
       mIsFlashPlugin = true;
     }
 
     // Fill in our MIME type array.
-    mMimeTypes.AppendElement(nsCString(aMimeTypes[i]));
+    mMimeTypes.AppendElement(mimeType);
 
     // Now fill in the MIME descriptions.
     if (aMimeDescriptions && aMimeDescriptions[i]) {
@@ -271,6 +259,15 @@ nsresult nsPluginTag::EnsureMembersAreUTF8()
     }
   }
   return NS_OK;
+#endif
+}
+
+void nsPluginTag::FixupVersion()
+{
+#if defined(XP_LINUX)
+  if (mIsFlashPlugin) {
+    mVersion.ReplaceChar(',', '.');
+  }
 #endif
 }
 
@@ -405,9 +402,9 @@ nsPluginTag::GetPluginState()
 void
 nsPluginTag::SetPluginState(PluginState state)
 {
-  MOZ_STATIC_ASSERT((uint32_t)nsPluginTag::ePluginState_Disabled == nsIPluginTag::STATE_DISABLED, "nsPluginTag::ePluginState_Disabled must match nsIPluginTag::STATE_DISABLED");
-  MOZ_STATIC_ASSERT((uint32_t)nsPluginTag::ePluginState_Clicktoplay == nsIPluginTag::STATE_CLICKTOPLAY, "nsPluginTag::ePluginState_Clicktoplay must match nsIPluginTag::STATE_CLICKTOPLAY");
-  MOZ_STATIC_ASSERT((uint32_t)nsPluginTag::ePluginState_Enabled == nsIPluginTag::STATE_ENABLED, "nsPluginTag::ePluginState_Enabled must match nsIPluginTag::STATE_ENABLED");
+  static_assert((uint32_t)nsPluginTag::ePluginState_Disabled == nsIPluginTag::STATE_DISABLED, "nsPluginTag::ePluginState_Disabled must match nsIPluginTag::STATE_DISABLED");
+  static_assert((uint32_t)nsPluginTag::ePluginState_Clicktoplay == nsIPluginTag::STATE_CLICKTOPLAY, "nsPluginTag::ePluginState_Clicktoplay must match nsIPluginTag::STATE_CLICKTOPLAY");
+  static_assert((uint32_t)nsPluginTag::ePluginState_Enabled == nsIPluginTag::STATE_ENABLED, "nsPluginTag::ePluginState_Enabled must match nsIPluginTag::STATE_ENABLED");
   SetEnabledState((uint32_t)state);
 }
 

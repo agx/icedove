@@ -7,12 +7,12 @@
 #include "HttpLog.h"
 
 #include "nsHttpAuthCache.h"
+
 #include <stdlib.h>
-#include "base/compiler_specific.h"
-#include "nsHttp.h"
+
+#include "mozilla/Attributes.h"
 #include "nsString.h"
 #include "nsCRT.h"
-#include "prprf.h"
 #include "mozIApplicationClearPrivateDataParams.h"
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
@@ -54,7 +54,7 @@ StrEquivalent(const PRUnichar *a, const PRUnichar *b)
 
 nsHttpAuthCache::nsHttpAuthCache()
     : mDB(nullptr)
-    , ALLOW_THIS_IN_INITIALIZER_LIST(mObserver(new AppDataClearObserver(this)))
+    , mObserver(new AppDataClearObserver(MOZ_THIS_IN_INITIALIZER_LIST()))
 {
     nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
     if (obsSvc) {
@@ -167,7 +167,7 @@ nsHttpAuthCache::SetAuthEntry(const char *scheme,
         if (NS_FAILED(rv))
             delete node;
         else
-            PL_HashTableAdd(mDB, nsCRT::strdup(key.get()), node);
+            PL_HashTableAdd(mDB, strdup(key.get()), node);
         return rv;
     }
 
@@ -252,7 +252,7 @@ nsHttpAuthCache::FreeEntry(void *self, PLHashEntry *he, unsigned flag)
     else if (flag == HT_FREE_ENTRY) {
         // three wonderful flavors of freeing memory ;-)
         delete (nsHttpAuthNode *) he->value;
-        nsCRT::free((char *) he->key);
+        free((char *) he->key);
         free(he);
     }
 }

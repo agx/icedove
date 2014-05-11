@@ -131,7 +131,26 @@ Site.prototype = {
 
     if (this.isPinned())
       this._updateAttributes(true);
+    // Capture the page if the thumbnail is missing, which will cause page.js
+    // to be notified and call our refreshThumbnail() method.
+    this.captureIfMissing();
+    // but still display whatever thumbnail might be available now.
+    this.refreshThumbnail();
+  },
 
+  /**
+   * Captures the site's thumbnail in the background, but only if there's no
+   * existing thumbnail and the page allows background captures.
+   */
+  captureIfMissing: function Site_captureIfMissing() {
+    if (gPage.allowBackgroundCaptures)
+      BackgroundPageThumbs.captureIfMissing(this.url);
+  },
+
+  /**
+   * Refreshes the thumbnail for the site.
+   */
+  refreshThumbnail: function Site_refreshThumbnail() {
     let thumbnailURL = PageThumbs.getThumbnailURL(this.url);
     let thumbnail = this._querySelector(".newtab-thumbnail");
     thumbnail.style.backgroundImage = "url(" + thumbnailURL + ")";
@@ -180,9 +199,6 @@ Site.prototype = {
         break;
       case "dragstart":
         gDrag.start(this, aEvent);
-        break;
-      case "drag":
-        gDrag.drag(this, aEvent);
         break;
       case "dragend":
         gDrag.end(this, aEvent);

@@ -26,7 +26,6 @@ namespace layers {
 class MOZ_STACK_CLASS AutoOpenSurface
 {
 public:
-  typedef gfxASurface::gfxContentType gfxContentType;
 
   /** |aDescriptor| must be valid while AutoOpenSurface is
    * in scope. */
@@ -39,6 +38,7 @@ public:
    * return an answer.
    */
   gfxContentType ContentType();
+  gfxImageFormat ImageFormat();
   gfxIntSize Size();
 
   /** This can't escape the scope of AutoOpenSurface. */

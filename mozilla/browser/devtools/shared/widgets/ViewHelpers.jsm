@@ -11,11 +11,16 @@ const Cu = Components.utils;
 
 const PANE_APPEARANCE_DELAY = 50;
 const PAGE_SIZE_ITEM_COUNT_RATIO = 5;
+const WIDGET_FOCUSABLE_NODES = new Set(["vbox", "hbox"]);
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Timer.jsm");
 
-this.EXPORTED_SYMBOLS = ["Heritage", "ViewHelpers", "WidgetMethods"];
+this.EXPORTED_SYMBOLS = [
+  "Heritage", "ViewHelpers", "WidgetMethods",
+  "setNamedTimeout", "clearNamedTimeout"
+];
 
 /**
  * Inheritance helpers from the addon SDK's core/heritage.
@@ -39,6 +44,41 @@ this.Heritage = {
     }, {});
   }
 };
+
+/**
+ * Helper for draining a rapid succession of events and invoking a callback
+ * once everything settles down.
+ *
+ * @param string aId
+ *        A string identifier for the named timeout.
+ * @param number aWait
+ *        The amount of milliseconds to wait after no more events are fired.
+ * @param function aCallback
+ *        Invoked when no more events are fired after the specified time.
+ */
+this.setNamedTimeout = function(aId, aWait, aCallback) {
+  clearNamedTimeout(aId);
+
+  namedTimeoutsStore.set(aId, setTimeout(() =>
+    namedTimeoutsStore.delete(aId) && aCallback(), aWait));
+};
+
+/**
+ * Clears a named timeout.
+ * @see setNamedTimeout
+ *
+ * @param string aId
+ *        A string identifier for the named timeout.
+ */
+this.clearNamedTimeout = function(aId) {
+  if (!namedTimeoutsStore) {
+    return;
+  }
+  clearTimeout(namedTimeoutsStore.get(aId));
+  namedTimeoutsStore.delete(aId);
+};
+
+XPCOMUtils.defineLazyGetter(this, "namedTimeoutsStore", () => new Map());
 
 /**
  * Helpers for creating and messaging between UI components.
@@ -153,6 +193,11 @@ this.ViewHelpers = {
    *        The element representing the pane to toggle.
    */
   togglePane: function(aFlags, aPane) {
+    // Make sure a pane is actually available first.
+    if (!aPane) {
+      return;
+    }
+
     // Hiding is always handled via margins, not the hidden attribute.
     aPane.removeAttribute("hidden");
 
@@ -167,8 +212,15 @@ this.ViewHelpers = {
       return;
     }
 
+    // The "animated" attributes enables animated toggles (slide in-out).
+    if (aFlags.animated) {
+      aPane.setAttribute("animated", "");
+    } else {
+      aPane.removeAttribute("animated");
+    }
+
     // Computes and sets the pane margins in order to hide or show it.
-    function set() {
+    let doToggle = () => {
       if (aFlags.visible) {
         aPane.style.marginLeft = "0";
         aPane.style.marginRight = "0";
@@ -193,19 +245,12 @@ this.ViewHelpers = {
       }
     }
 
-    // The "animated" attributes enables animated toggles (slide in-out).
-    if (aFlags.animated) {
-      aPane.setAttribute("animated", "");
-    } else {
-      aPane.removeAttribute("animated");
-    }
-
     // Sometimes it's useful delaying the toggle a few ticks to ensure
     // a smoother slide in-out animation.
     if (aFlags.delayed) {
-      aPane.ownerDocument.defaultView.setTimeout(set.bind(this), PANE_APPEARANCE_DELAY);
+      aPane.ownerDocument.defaultView.setTimeout(doToggle, PANE_APPEARANCE_DELAY);
     } else {
-      set.call(this);
+      doToggle();
     }
   }
 };
@@ -360,7 +405,7 @@ ViewHelpers.Prefs.prototype = {
 /**
  * A generic Item is used to describe children present in a Widget.
  * The label, value and description properties are necessarily strings.
- * Iterable via "for (let childItem in parentItem) { }".
+ * Iterable via "for (let childItem of parentItem) { }".
  *
  * @param object aOwnerView
  *        The owner view creating this item.
@@ -377,9 +422,13 @@ function Item(aOwnerView, aAttachment, aContents = []) {
   this.attachment = aAttachment;
 
   let [aLabel, aValue, aDescription] = aContents;
+  // Make sure the label and the value are always strings.
   this._label = aLabel + "";
   this._value = aValue + "";
-  this._description = (aDescription || "") + "";
+  // Make sure the description is also a string, but only if it's available.
+  if (aDescription !== undefined) {
+    this._description = aDescription + "";
+  }
 
   // Allow the insertion of prebuilt nodes, otherwise delegate the item view
   // creation to a widget.
@@ -464,7 +513,7 @@ Item.prototype = {
     if (aItem.finalize) {
       aItem.finalize(aItem);
     }
-    for (let childItem in aItem) {
+    for (let childItem of aItem) {
       aItem.remove(childItem);
     }
 
@@ -488,7 +537,7 @@ Item.prototype = {
    * @return string
    */
   toString: function() {
-    if (this._label && this._value) {
+    if (this._label != "undefined" && this._value != "undefined") {
       return this._label + " -> " + this._value;
     }
     if (this.attachment) {
@@ -499,7 +548,7 @@ Item.prototype = {
 
   _label: "",
   _value: "",
-  _description: "",
+  _description: undefined,
   _prebuiltTarget: null,
   _target: null,
   finalize: null,
@@ -508,7 +557,7 @@ Item.prototype = {
 
 /**
  * Some generic Widget methods handling Item instances.
- * Iterable via "for (let childItem in wrappedView) { }".
+ * Iterable via "for (let childItem of wrappedView) { }".
  *
  * Usage:
  *   function MyView() {
@@ -663,9 +712,12 @@ this.WidgetMethods = {
     if (!selectedItem) {
       return false;
     }
+
+    let { _label: label, _value: value, _description: desc } = selectedItem;
     this._widget.removeAttribute("notice");
-    this._widget.setAttribute("label", selectedItem._label);
-    this._widget.setAttribute("tooltiptext", selectedItem._value);
+    this._widget.setAttribute("label", label);
+    this._widget.setAttribute("tooltiptext", desc !== undefined ? desc : value);
+
     return true;
   },
 
@@ -681,6 +733,7 @@ this.WidgetMethods = {
     }
     this._widget.removeChild(aItem._target);
     this._untangleItem(aItem);
+    if (!this.itemCount) this.empty();
   },
 
   /**
@@ -715,25 +768,10 @@ this.WidgetMethods = {
   },
 
   /**
-   * Does not remove any item in this container. Instead, it overrides the
-   * current label to signal that it is unavailable and removes the tooltip.
-   */
-  setUnavailable: function() {
-    this._widget.setAttribute("notice", this.unavailableText);
-    this._widget.setAttribute("label", this.unavailableText);
-    this._widget.removeAttribute("tooltiptext");
-  },
-
-  /**
    * The label string automatically added to this container when there are
    * no child nodes present.
    */
   emptyText: "",
-
-  /**
-   * The label string added to this container when it is marked as unavailable.
-   */
-  unavailableText: "",
 
   /**
    * Toggles all the items in this container hidden or visible.
@@ -775,7 +813,7 @@ this.WidgetMethods = {
    *        If unspecified, all items will be sorted by their label.
    */
   sortContents: function(aPredicate = this._currentSortPredicate) {
-    let sortedItems = this.orderedItems.sort(this._currentSortPredicate = aPredicate);
+    let sortedItems = this.items.sort(this._currentSortPredicate = aPredicate);
 
     for (let i = 0, len = sortedItems.length; i < len; i++) {
       this.swapItems(this.getItemAtIndex(i), sortedItems[i]);
@@ -937,6 +975,18 @@ this.WidgetMethods = {
   },
 
   /**
+   * Retrieves the attachment of the selected element.
+   * @return string
+   */
+  get selectedAttachment() {
+    let selectedElement = this._widget.selectedItem;
+    if (selectedElement) {
+      return this._itemsByElement.get(selectedElement).attachment;
+    }
+    return null;
+  },
+
+  /**
    * Selects the element with the entangled item in this container.
    * @param Item | function aItem
    */
@@ -958,11 +1008,12 @@ this.WidgetMethods = {
 
     // Prevent selecting the same item again and avoid dispatching
     // a redundant selection event, so return early.
-    if (targetElement == prevElement) {
-      return;
+    if (targetElement != prevElement) {
+      this._widget.selectedItem = targetElement;
+      let dispTarget = targetElement || prevElement;
+      let dispName = this.suppressSelectionEvents ? "suppressed-select" : "select";
+      ViewHelpers.dispatchEvent(dispTarget, dispName, aItem);
     }
-    this._widget.selectedItem = targetElement;
-    ViewHelpers.dispatchEvent(targetElement || prevElement, "select", aItem);
 
     // Updates this container to reflect the information provided by the
     // currently selected item.
@@ -997,6 +1048,15 @@ this.WidgetMethods = {
     this.selectedItem = this._itemsByValue.get(aValue),
 
   /**
+   * Specifies if "select" events dispatched from the elements in this container
+   * when their respective items are selected should be suppressed or not.
+   *
+   * If this flag is set to true, then consumers of this container won't
+   * be normally notified when items are selected.
+   */
+  suppressSelectionEvents: false,
+
+  /**
    * Focus this container the first time an element is inserted?
    *
    * If this flag is set to true, then when the first item is inserted in
@@ -1024,6 +1084,12 @@ this.WidgetMethods = {
    * this container, its corresponding target element is focused as well.
    */
   autoFocusOnInput: true,
+
+  /**
+   * When focusing on input, allow right clicks?
+   * @see WidgetMethods.autoFocusOnInput
+   */
+  allowFocusOnRightClick: false,
 
   /**
    * The number of elements in this container to jump when Page Up or Page Down
@@ -1104,16 +1170,21 @@ this.WidgetMethods = {
   _focusChange: function(aDirection) {
     let commandDispatcher = this._commandDispatcher;
     let prevFocusedElement = commandDispatcher.focusedElement;
+    let currFocusedElement;
 
-    commandDispatcher.suppressFocusScroll = true;
-    commandDispatcher[aDirection]();
+    do {
+      commandDispatcher.suppressFocusScroll = true;
+      commandDispatcher[aDirection]();
+      currFocusedElement = commandDispatcher.focusedElement;
 
-    // Make sure the newly focused item is a part of this container.
-    // If the focus goes out of bounds, revert the previously focused item.
-    if (!this.getItemForElement(commandDispatcher.focusedElement)) {
-      prevFocusedElement.focus();
-      return false;
-    }
+      // Make sure the newly focused item is a part of this container. If the
+      // focus goes out of bounds, revert the previously focused item.
+      if (!this.getItemForElement(currFocusedElement)) {
+        prevFocusedElement.focus();
+        return false;
+      }
+    } while (!WIDGET_FOCUSABLE_NODES.has(currFocusedElement.tagName));
+
     // Focus remained within bounds.
     return true;
   },
@@ -1190,12 +1261,23 @@ this.WidgetMethods = {
    *
    * @param nsIDOMNode aElement
    *        The element used to identify the item.
+   * @param object aFlags [optional]
+   *        Additional options for showing the source. Supported options:
+   *          - noSiblings: if siblings shouldn't be taken into consideration
+   *                        when searching for the associated item.
    * @return Item
    *         The matched item, or null if nothing is found.
    */
-  getItemForElement: function(aElement) {
+  getItemForElement: function(aElement, aFlags = {}) {
     while (aElement) {
       let item = this._itemsByElement.get(aElement);
+
+      // Also search the siblings if allowed.
+      if (!aFlags.noSiblings) {
+        item = item ||
+          this._itemsByElement.get(aElement.nextElementSibling) ||
+          this._itemsByElement.get(aElement.previousElementSibling);
+      }
       if (item) {
         return item;
       }
@@ -1213,6 +1295,7 @@ this.WidgetMethods = {
    *         The matched item, or null if nothing is found.
    */
   getItemForPredicate: function(aPredicate, aOwner = this) {
+    // Recursively check the items in this widget for a predicate match.
     for (let [element, item] of aOwner._itemsByElement) {
       let match;
       if (aPredicate(item) && !element.hidden) {
@@ -1224,7 +1307,22 @@ this.WidgetMethods = {
         return match;
       }
     }
+    // Also check the staged items. No need to do this recursively since
+    // they're not even appended to the view yet.
+    for (let { item } of this._stagedItems) {
+      if (aPredicate(item)) {
+        return item;
+      }
+    }
     return null;
+  },
+
+  /**
+   * Shortcut function for getItemForPredicate which works on item attachments.
+   * @see getItemForPredicate
+   */
+  getItemForAttachment: function(aPredicate, aOwner = this) {
+    return this.getItemForPredicate(e => aPredicate(e.attachment));
   },
 
   /**
@@ -1263,67 +1361,40 @@ this.WidgetMethods = {
   get itemCount() this._itemsByElement.size,
 
   /**
-   * Returns a list of items in this container, in no particular order.
+   * Returns a list of items in this container, in the displayed order.
    * @return array
    */
   get items() {
-    let items = [];
-    for (let [, item] of this._itemsByElement) {
-      items.push(item);
+    let store = [];
+    let itemCount = this.itemCount;
+    for (let i = 0; i < itemCount; i++) {
+      store.push(this.getItemAtIndex(i));
     }
-    return items;
+    return store;
   },
 
   /**
-   * Returns a list of labels in this container, in no particular order.
+   * Returns a list of labels in this container, in the displayed order.
    * @return array
    */
   get labels() {
-    let labels = [];
-    for (let [label] of this._itemsByLabel) {
-      labels.push(label);
-    }
-    return labels;
+    return this.items.map(e => e._label);
   },
 
   /**
-   * Returns a list of values in this container, in no particular order.
+   * Returns a list of values in this container, in the displayed order.
    * @return array
    */
   get values() {
-    let values = [];
-    for (let [value] of this._itemsByValue) {
-      values.push(value);
-    }
-    return values;
+    return this.items.map(e => e._value);
   },
 
   /**
-   * Returns a list of all the visible (non-hidden) items in this container,
-   * in no particular order.
+   * Returns a list of attachments in this container, in the displayed order.
    * @return array
    */
-  get visibleItems() {
-    let items = [];
-    for (let [element, item] of this._itemsByElement) {
-      if (!element.hidden) {
-        items.push(item);
-      }
-    }
-    return items;
-  },
-
-  /**
-   * Returns a list of all items in this container, in the displayed order.
-   * @return array
-   */
-  get orderedItems() {
-    let items = [];
-    let itemCount = this.itemCount;
-    for (let i = 0; i < itemCount; i++) {
-      items.push(this.getItemAtIndex(i));
-    }
-    return items;
+  get attachments() {
+    return this.items.map(e => e.attachment);
   },
 
   /**
@@ -1331,16 +1402,8 @@ this.WidgetMethods = {
    * in the displayed order
    * @return array
    */
-  get orderedVisibleItems() {
-    let items = [];
-    let itemCount = this.itemCount;
-    for (let i = 0; i < itemCount; i++) {
-      let item = this.getItemAtIndex(i);
-      if (!item._target.hidden) {
-        items.push(item);
-      }
-    }
-    return items;
+  get visibleItems() {
+    return this.items.filter(e => !e._target.hidden);
   },
 
   /**
@@ -1486,7 +1549,7 @@ this.WidgetMethods = {
     if (aItem.finalize) {
       aItem.finalize(aItem);
     }
-    for (let childItem in aItem) {
+    for (let childItem of aItem) {
       aItem.remove(childItem);
     }
 
@@ -1541,12 +1604,12 @@ this.WidgetMethods = {
   },
 
   /**
-   * The keyPress event listener for this container.
+   * The mousePress event listener for this container.
    * @param string aName
    * @param MouseEvent aEvent
    */
   _onWidgetMousePress: function(aName, aEvent) {
-    if (aEvent.button != 0) {
+    if (aEvent.button != 0 && !this.allowFocusOnRightClick) {
       // Only allow left-click to trigger this event.
       return;
     }
@@ -1590,6 +1653,19 @@ this.WidgetMethods = {
     return +(aFirst._label.toLowerCase() > aSecond._label.toLowerCase());
   },
 
+  /**
+   * Call a method on this widget named `aMethodName`. Any further arguments are
+   * passed on to the method. Returns the result of the method call.
+   *
+   * @param String aMethodName
+   *        The name of the method you want to call.
+   * @param aArgs
+   *        Optional. Any arguments you want to pass through to the method.
+   */
+  callMethod: function(aMethodName, ...aArgs) {
+    return this._widget[aMethodName].apply(this._widget, aArgs);
+  },
+
   _widget: null,
   _preferredValue: null,
   _cachedCommandDispatcher: null
@@ -1598,9 +1674,7 @@ this.WidgetMethods = {
 /**
  * A generator-iterator over all the items in this container.
  */
-Item.prototype.__iterator__ =
-WidgetMethods.__iterator__ = function() {
-  for (let [, item] of this._itemsByElement) {
-    yield item;
-  }
+Item.prototype["@@iterator"] =
+WidgetMethods["@@iterator"] = function*() {
+  yield* this._itemsByElement.values();
 };

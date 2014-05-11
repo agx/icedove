@@ -6,12 +6,9 @@
 
 TEST_DIRS += ['test']
 
-MODULE = 'layout'
-
 EXPORTS += [
-    'ScrollbarActivity.h',
-    'Selection.h',
     'nsCanvasFrame.h',
+    'nsDirection.h',
     'nsFrameIdList.h',
     'nsFrameList.h',
     'nsFrameSelection.h',
@@ -20,17 +17,20 @@ EXPORTS += [
     'nsHTMLReflowState.h',
     'nsIAnonymousContentCreator.h',
     'nsIFrame.h',
+    'nsIFrameInlines.h',
     'nsIFrameUtil.h',
     'nsILineIterator.h',
     'nsIObjectFrame.h',
     'nsIPageSequenceFrame.h',
-    'nsIScrollPositionListener.h',
     'nsIScrollableFrame.h',
     'nsIScrollbarOwner.h',
+    'nsIScrollPositionListener.h',
     'nsIStatefulFrame.h',
     'nsObjectFrame.h',
     'nsQueryFrame.h',
     'nsSubDocumentFrame.h',
+    'ScrollbarActivity.h',
+    'Selection.h',
 ]
 
 EXPORTS.mozilla += [
@@ -41,15 +41,14 @@ EXPORTS.mozilla.layout += [
     'FrameChildList.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'FrameChildList.cpp',
-    'ScrollbarActivity.cpp',
-    'TextOverflow.cpp',
+    'MathVariantTextRunFactory.cpp',
     'nsAbsoluteContainingBlock.cpp',
-    'nsBRFrame.cpp',
     'nsBlockFrame.cpp',
     'nsBlockReflowContext.cpp',
     'nsBlockReflowState.cpp',
+    'nsBRFrame.cpp',
     'nsBulletFrame.cpp',
     'nsCanvasFrame.cpp',
     'nsColumnSetFrame.cpp',
@@ -72,8 +71,6 @@ CPP_SOURCES += [
     'nsIntervalSet.cpp',
     'nsLeafFrame.cpp',
     'nsLineBox.cpp',
-    'nsLineLayout.cpp',
-    'nsObjectFrame.cpp',
     'nsPageContentFrame.cpp',
     'nsPageFrame.cpp',
     'nsPlaceholderFrame.cpp',
@@ -81,9 +78,46 @@ CPP_SOURCES += [
     'nsSimplePageSequence.cpp',
     'nsSplittableFrame.cpp',
     'nsSubDocumentFrame.cpp',
-    'nsTextFrameThebes.cpp',
+    'nsTextFrame.cpp',
     'nsTextFrameUtils.cpp',
     'nsTextRunTransformations.cpp',
     'nsVideoFrame.cpp',
     'nsViewportFrame.cpp',
+    'ScrollbarActivity.cpp',
+    'StickyScrollContainer.cpp',
+    'TextOverflow.cpp',
+]
+
+# nsLineLayout.cpp needs to be built separately because it uses plarena.h.
+# nsObjectFrame.cpp needs to be built separately because of name clashes in the OS X headers.
+SOURCES += [
+    'nsLineLayout.cpp',
+    'nsObjectFrame.cpp',
+]
+
+if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+    UNIFIED_SOURCES += [
+        'nsPluginUtilsOSX.mm',
+    ]
+
+FAIL_ON_WARNINGS = not CONFIG['_MSC_VER']
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
+
+LOCAL_INCLUDES += [
+    '../../content/base/src',
+    '../../content/html/content/src',
+    '../../content/xul/content/src',
+    '../../dom/base',
+    '../../dom/plugins/base',
+    '../base',
+    '../forms',
+    '../style',
+    '../svg',
+    '../tables',
+    '../xul',
 ]

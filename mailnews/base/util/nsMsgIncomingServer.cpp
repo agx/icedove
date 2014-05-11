@@ -54,6 +54,7 @@
 
 nsMsgIncomingServer::nsMsgIncomingServer():
     m_rootFolder(0),
+    m_downloadedHdrs(50),
     m_numMsgsDownloaded(0),
     m_biffState(nsIMsgFolder::nsMsgBiffState_Unknown),
     m_serverBusy(false),
@@ -61,20 +62,14 @@ nsMsgIncomingServer::nsMsgIncomingServer():
     m_displayStartupPage(true),
     mPerformingBiff(false)
 { 
-  m_downloadedHdrs.Init(50);
 }
 
 nsMsgIncomingServer::~nsMsgIncomingServer()
 {
 }
 
-NS_IMPL_THREADSAFE_ADDREF(nsMsgIncomingServer)
-NS_IMPL_THREADSAFE_RELEASE(nsMsgIncomingServer)
-NS_INTERFACE_MAP_BEGIN(nsMsgIncomingServer)
-    NS_INTERFACE_MAP_ENTRY(nsIMsgIncomingServer)
-    NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
-    NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIMsgIncomingServer)
-NS_INTERFACE_MAP_END_THREADSAFE
+NS_IMPL_ISUPPORTS2(nsMsgIncomingServer, nsIMsgIncomingServer,
+  nsISupportsWeakReference)
 
 NS_IMETHODIMP
 nsMsgIncomingServer::SetServerBusy(bool aServerBusy)

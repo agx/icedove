@@ -8,20 +8,20 @@
 
 #include "nsISupports.h"
 #include "nsColor.h"
-#include "nsCoord.h"
 #include "nsRect.h"
-#include "nsPoint.h"
 #include "nsStringGlue.h"
 
-#include "prthread.h"
-#include "nsEvent.h"
 #include "nsCOMPtr.h"
-#include "nsITheme.h"
-#include "nsNativeWidget.h"
+#include "nsAutoPtr.h"
 #include "nsWidgetInitData.h"
 #include "nsTArray.h"
+#include "nsITimer.h"
 #include "nsXULAppAPI.h"
+#include "mozilla/EventForwards.h"
 #include "mozilla/layers/LayersTypes.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/TimeStamp.h"
+#include "Units.h"
 
 // forward declarations
 class   nsFontMetrics;
@@ -29,7 +29,6 @@ class   nsRenderingContext;
 class   nsDeviceContext;
 struct  nsFont;
 class   nsIRollupListener;
-class   nsGUIEvent;
 class   imgIContainer;
 class   gfxASurface;
 class   nsIContent;
@@ -47,19 +46,27 @@ class CompositorChild;
 class LayerManager;
 class PLayerTransactionChild;
 }
+namespace gfx {
+class DrawTarget;
+}
 }
 
 /**
  * Callback function that processes events.
  *
- * The argument is actually a subtype (subclass) of nsEvent which carries
+ * The argument is actually a subtype (subclass) of WidgetEvent which carries
  * platform specific information about the event. Platform specific code
  * knows how to deal with it.
  *
  * The return value determines whether or not the default action should take
  * place.
  */
-typedef nsEventStatus (* EVENT_CALLBACK)(nsGUIEvent *event);
+typedef nsEventStatus (* EVENT_CALLBACK)(mozilla::WidgetGUIEvent* aEvent);
+
+// Hide the native window system's real window type so as to avoid
+// including native window system types and APIs. This is necessary
+// to ensure cross-platform code.
+typedef void* nsNativeWidget;
 
 /**
  * Flags for the getNativeData function.
@@ -92,8 +99,8 @@ typedef nsEventStatus (* EVENT_CALLBACK)(nsGUIEvent *event);
 #endif
 
 #define NS_IWIDGET_IID \
-{ 0x5b9152, 0x56c8, 0x4a2d, \
-  { 0x94, 0x9e, 0xec, 0xf5, 0x3, 0x83, 0x3d, 0x48 } }
+{ 0x67da44c4, 0xe21b, 0x4742, \
+  { 0x9c, 0x2b, 0x26, 0xc7, 0x70, 0x21, 0xde, 0x87 } }
 
 /*
  * Window shadow styles
@@ -105,6 +112,17 @@ typedef nsEventStatus (* EVENT_CALLBACK)(nsGUIEvent *event);
 #define NS_STYLE_WINDOW_SHADOW_MENU             2
 #define NS_STYLE_WINDOW_SHADOW_TOOLTIP          3
 #define NS_STYLE_WINDOW_SHADOW_SHEET            4
+
+/**
+ * Transparency modes
+ */
+
+enum nsTransparencyMode {
+  eTransparencyOpaque = 0,  // Fully opaque
+  eTransparencyTransparent, // Parts of the window may be transparent
+  eTransparencyGlass,       // Transparent parts of the window have Vista AeroGlass effect applied
+  eTransparencyBorderlessGlass // As above, but without a border around the opaque areas when there would otherwise be one with eTransparencyGlass
+};
 
 /**
  * Cursor types.
@@ -187,13 +205,14 @@ enum nsTopLevelWidgetZPlacement { // for PlaceBehind()
 /**
  * Preference for receiving IME updates
  *
- * If mWantUpdates is true, nsTextStateManager will observe text change and
- * selection change and call nsIWidget::NotifyIMEOfTextChange() and
- * nsIWidget::NotifyIME(NOTIFY_IME_OF_SELECTION_CHANGE). The observing cost is
- * very expensive.
+ * If mWantUpdates is not NOTIFY_NOTHING, nsTextStateManager will observe text
+ * change and/or selection change and call nsIWidget::NotifyIMEOfTextChange()
+ * and/or nsIWidget::NotifyIME(NOTIFY_IME_OF_SELECTION_CHANGE).
+ * Please note that the text change observing cost is very expensive especially
+ * on an HTML editor has focus.
  * If the IME implementation on a particular platform doesn't care about
- * NotifyIMEOfTextChange and NotifyIME(NOTIFY_IME_OF_SELECTION_CHANGE), they
- * should set mWantUpdates to false to avoid the cost.
+ * NotifyIMEOfTextChange() and/or NotifyIME(NOTIFY_IME_OF_SELECTION_CHANGE),
+ * they should set mWantUpdates to NOTIFY_NOTHING to avoid the cost.
  *
  * If mWantHints is true, PuppetWidget will forward the content of text fields
  * to the chrome process to be cached. This way we return the cached content
@@ -204,15 +223,25 @@ enum nsTopLevelWidgetZPlacement { // for PlaceBehind()
  */
 struct nsIMEUpdatePreference {
 
+  typedef int8_t Notifications;
+
+  enum
+  {
+    NOTIFY_NOTHING           = 0x0000,
+    NOTIFY_SELECTION_CHANGE  = 0x0001,
+    NOTIFY_TEXT_CHANGE       = 0x0002
+  };
+
   nsIMEUpdatePreference()
-    : mWantUpdates(false), mWantHints(false)
+    : mWantUpdates(NOTIFY_NOTHING), mWantHints(false)
   {
   }
-  nsIMEUpdatePreference(bool aWantUpdates, bool aWantHints)
+  nsIMEUpdatePreference(Notifications aWantUpdates, bool aWantHints)
     : mWantUpdates(aWantUpdates), mWantHints(aWantHints)
   {
   }
-  bool mWantUpdates;
+
+  Notifications mWantUpdates;
   bool mWantHints;
 };
 
@@ -408,6 +437,21 @@ struct SizeConstraints {
   nsIntSize mMaxSize;
 };
 
+// NotificationToIME is shared by nsIMEStateManager and TextComposition.
+enum NotificationToIME {
+  // XXX We should replace NOTIFY_IME_OF_CURSOR_POS_CHANGED with
+  //     NOTIFY_IME_OF_SELECTION_CHANGE later.
+  NOTIFY_IME_OF_CURSOR_POS_CHANGED,
+  // An editable content is getting focus
+  NOTIFY_IME_OF_FOCUS,
+  // An editable content is losing focus
+  NOTIFY_IME_OF_BLUR,
+  // Selection in the focused editable content is changed
+  NOTIFY_IME_OF_SELECTION_CHANGE,
+  REQUEST_TO_COMMIT_COMPOSITION,
+  REQUEST_TO_CANCEL_COMPOSITION
+};
+
 } // namespace widget
 } // namespace mozilla
 
@@ -450,7 +494,9 @@ class nsIWidget : public nsISupports {
       : mLastChild(nullptr)
       , mPrevSibling(nullptr)
       , mOnDestroyCalled(false)
-    {}
+    {
+      ClearNativeTouchSequence();
+    }
 
         
     /**
@@ -610,7 +656,7 @@ class nsIWidget : public nsISupports {
      * or Windows' "font DPI". This will take into account Gecko preferences
      * overriding the system setting.
      */
-    double GetDefaultScale();
+    mozilla::CSSToLayoutDeviceScale GetDefaultScale();
 
     /**
      * Return the Gecko override of the system default scale, if any;
@@ -845,13 +891,13 @@ class nsIWidget : public nsISupports {
 
     /**
      * Minimize, maximize or normalize the window size.
-     * Takes a value from nsSizeMode (see nsGUIEvent.h)
+     * Takes a value from nsSizeMode (see nsIWidgetListener.h)
      */
     NS_IMETHOD SetSizeMode(int32_t aMode) = 0;
 
     /**
      * Return size mode (minimized, maximized, normalized).
-     * Returns a value from nsSizeMode (see nsGUIEvent.h)
+     * Returns a value from nsSizeMode (see nsIWidgetListener.h)
      */
     virtual int32_t SizeMode() = 0;
 
@@ -1174,7 +1220,23 @@ class nsIWidget : public nsISupports {
      */
     virtual void CleanupWindowEffects() = 0;
 
-    virtual void PreRender(LayerManager* aManager) = 0;
+    /**
+     * Called before rendering using OpenGL. Returns false when the widget is
+     * not ready to be rendered (for example while the window is closed).
+     *
+     * Always called from the compositing thread, which may be the main-thread if
+     * OMTC is not enabled.
+     */
+    virtual bool PreRender(LayerManager* aManager) = 0;
+
+    /**
+     * Called after rendering using OpenGL. Not called when rendering was
+     * cancelled by a negative return value from PreRender.
+     *
+     * Always called from the compositing thread, which may be the main-thread if
+     * OMTC is not enabled.
+     */
+    virtual void PostRender(LayerManager* aManager) = 0;
 
     /**
      * Called before the LayerManager draws the layer tree.
@@ -1191,6 +1253,31 @@ class nsIWidget : public nsISupports {
      * OMTC is not enabled.
      */
     virtual void DrawWindowOverlay(LayerManager* aManager, nsIntRect aRect) = 0;
+
+    /**
+     * Return a DrawTarget for the window which can be composited into.
+     *
+     * Called by BasicCompositor on the compositor thread for OMTC drawing
+     * before each composition.
+     */
+    virtual mozilla::TemporaryRef<mozilla::gfx::DrawTarget> StartRemoteDrawing() = 0;
+
+    /**
+     * Ensure that what was painted into the DrawTarget returned from
+     * StartRemoteDrawing reaches the screen.
+     *
+     * Called by BasicCompositor on the compositor thread for OMTC drawing
+     * after each composition.
+     */
+    virtual void EndRemoteDrawing() = 0;
+
+    /**
+     * Clean up any resources used by Start/EndRemoteDrawing.
+     *
+     * Called by BasicCompositor on the compositor thread for OMTC drawing
+     * when the compositor is destroyed.
+     */
+    virtual void CleanupRemoteDrawing() = 0;
 
     /**
      * Called when Gecko knows which themed widgets exist in this window.
@@ -1267,7 +1354,8 @@ class nsIWidget : public nsISupports {
      * Dispatches an event to the widget
      *
      */
-    NS_IMETHOD DispatchEvent(nsGUIEvent* event, nsEventStatus & aStatus) = 0;
+    NS_IMETHOD DispatchEvent(mozilla::WidgetGUIEvent* event,
+                             nsEventStatus & aStatus) = 0;
 
     /**
      * Enables the dropping of files to a widget (XXX this is temporary)
@@ -1370,12 +1458,14 @@ class nsIWidget : public nsISupports {
     /**
      * Begin a window resizing drag, based on the event passed in.
      */
-    NS_IMETHOD BeginResizeDrag(nsGUIEvent* aEvent, int32_t aHorizontal, int32_t aVertical) = 0;
+    NS_IMETHOD BeginResizeDrag(mozilla::WidgetGUIEvent* aEvent,
+                               int32_t aHorizontal,
+                               int32_t aVertical) = 0;
 
     /**
      * Begin a window moving drag, based on the event passed in.
      */
-    NS_IMETHOD BeginMoveDrag(nsMouseEvent* aEvent) = 0;
+    NS_IMETHOD BeginMoveDrag(mozilla::WidgetMouseEvent* aEvent) = 0;
 
     enum Modifiers {
         CAPS_LOCK = 0x01, // when CapsLock is active
@@ -1474,6 +1564,85 @@ class nsIWidget : public nsISupports {
                                                       uint32_t aModifierFlags,
                                                       uint32_t aAdditionalFlags) = 0;
 
+    /*
+     * TouchPointerState states for SynthesizeNativeTouchPoint. Match
+     * touch states in nsIDOMWindowUtils.idl.
+     */
+    enum TouchPointerState {
+      // The pointer is in a hover state above the digitizer
+      TOUCH_HOVER    = 0x01,
+      // The pointer is in contact with the digitizer
+      TOUCH_CONTACT  = 0x02,
+      // The pointer has been removed from the digitizer detection area
+      TOUCH_REMOVE   = 0x04,
+      // The pointer has been canceled. Will cancel any pending os level
+      // gestures that would triggered as a result of completion of the
+      // input sequence. This may not cancel moz platform related events
+      // that might get tirggered by input already delivered.
+      TOUCH_CANCEL   = 0x08
+    };
+
+    /*
+     * Create a new or update an existing touch pointer on the digitizer.
+     * To trigger os level gestures, individual touch points should
+     * transition through a complete set of touch states which should be
+     * sent as individual messages.
+     *
+     * @param aPointerId The touch point id to create or update.
+     * @param aPointerState one or more of the touch states listed above
+     * @param aScreenX, aScreenY screen coords of this event
+     * @param aPressure 0.0 -> 1.0 float val indicating pressure
+     * @param aOrientation 0 -> 359 degree value indicating the
+     * orientation of the pointer. Use 90 for normal taps.
+     */
+    virtual nsresult SynthesizeNativeTouchPoint(uint32_t aPointerId,
+                                                TouchPointerState aPointerState,
+                                                nsIntPoint aPointerScreenPoint,
+                                                double aPointerPressure,
+                                                uint32_t aPointerOrientation) = 0;
+
+    /*
+     * Cancels all active simulated touch input points and pending long taps.
+     * Native widgets should track existing points such that they can clear the
+     * digitizer state when this call is made.
+     */
+    virtual nsresult ClearNativeTouchSequence();
+
+    /*
+     * Helper for simulating a simple tap event with one touch point. When
+     * aLongTap is true, simulates a native long tap with a duration equal to
+     * ui.click_hold_context_menus.delay. This pref is compatible with the
+     * apzc long tap duration. Defaults to 1.5 seconds.
+     */
+    nsresult SynthesizeNativeTouchTap(nsIntPoint aPointerScreenPoint,
+                                      bool aLongTap);
+
+private:
+  class LongTapInfo
+  {
+  public:
+    LongTapInfo(int32_t aPointerId, nsIntPoint& aPoint,
+                mozilla::TimeDuration aDuration) :
+      mPointerId(aPointerId),
+      mPosition(aPoint),
+      mDuration(aDuration),
+      mStamp(mozilla::TimeStamp::Now())
+    {
+    }
+
+    int32_t mPointerId;
+    nsIntPoint mPosition;
+    mozilla::TimeDuration mDuration;
+    mozilla::TimeStamp mStamp;
+  };
+
+  static void OnLongTapTimerCallback(nsITimer* aTimer, void* aClosure);
+
+  nsAutoPtr<LongTapInfo> mLongTapTouchPoint;
+  nsCOMPtr<nsITimer> mLongTapTimer;
+  static int32_t sPointerIdCounter;
+
+public:
     /**
      * Activates a native menu item at the position specified by the index
      * string. The index string is a string of positive integers separated
@@ -1705,6 +1874,13 @@ class nsIWidget : public nsISupports {
      */
     virtual Composer2D* GetComposer2D()
     { return nullptr; }
+
+    /**
+     * Some platforms (only cocoa right now) round widget coordinates to the
+     * nearest even pixels (see bug 892994), this function allows us to
+     * determine how widget coordinates will be rounded.
+     */
+    virtual int32_t RoundsWidgetCoordinatesTo() { return 1; }
 
 protected:
     /**

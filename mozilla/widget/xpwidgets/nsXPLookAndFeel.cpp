@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nscore.h"
 
@@ -12,6 +12,7 @@
 #include "nsCRT.h"
 #include "nsFont.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/gfx/2D.h"
 
 #include "gfxPlatform.h"
 #include "qcms.h"
@@ -50,6 +51,15 @@ nsLookAndFeelIntPref nsXPLookAndFeel::sIntPrefs[] =
     false, 0 },
   { "ui.useOverlayScrollbars",
     eIntID_UseOverlayScrollbars,
+    false, 0 },
+  { "ui.scrollbarDisplayOnMouseMove",
+    eIntID_ScrollbarDisplayOnMouseMove,
+    false, 0 },
+  { "ui.scrollbarFadeBeginDelay",
+    eIntID_ScrollbarFadeBeginDelay,
+    false, 0 },
+  { "ui.scrollbarFadeDuration",
+    eIntID_ScrollbarFadeDuration,
     false, 0 },
   { "ui.showHideScrollbars",
     eIntID_ShowHideScrollbars,
@@ -101,6 +111,9 @@ nsLookAndFeelIntPref nsXPLookAndFeel::sIntPrefs[] =
     false, 0 },
   { "ui.tooltipDelay",
     eIntID_TooltipDelay,
+    false, 0 },
+  { "ui.physicalHomeButton",
+    eIntID_PhysicalHomeButton,
     false, 0 },
 };
 
@@ -209,7 +222,6 @@ const char nsXPLookAndFeel::sColorPrefs[][38] =
   "ui.-moz-mac-menutextdisable",
   "ui.-moz-mac-menutextselect",
   "ui.-moz_mac_disabledtoolbartext",
-  "ui.-moz-mac-alternateprimaryhighlight",
   "ui.-moz-mac-secondaryhighlight",
   "ui.-moz-win-mediatext",
   "ui.-moz-win-communicationstext",

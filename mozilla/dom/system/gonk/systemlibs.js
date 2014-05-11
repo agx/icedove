@@ -200,13 +200,43 @@ this.libnetutils = (function () {
     let prefixLen = ctypes.int();
     let dns1buf = ctypes.char.array(4096)();
     let dns2buf = ctypes.char.array(4096)();
+    let dnslistbuf = ctypes.char.ptr.array(4)();
     let serverbuf = ctypes.char.array(4096)();
     let lease = ctypes.int();
     let vendorbuf = ctypes.char.array(4096)();
+    let domainbuf = ctypes.char.array(4096)();
     let c_dhcp_do_request;
+    let c_dhcp_do_request_renew;
 
-    // also changed for 16
-    if (sdkVersion >= 16) {
+    // also changed for 16 and 18
+    if (sdkVersion >= 18) { // 18 == JB 4.3
+      dnslistbuf[0] = dns1buf;
+      dnslistbuf[1] = dns2buf;
+      c_dhcp_do_request =
+        library.declare("dhcp_do_request", ctypes.default_abi,
+                        ctypes.int,       // return value
+                        ctypes.char.ptr,  // ifname
+                        ctypes.char.ptr,  // ipaddr
+                        ctypes.char.ptr,  // gateway
+                        ctypes.int.ptr,   // prefixlen
+                        ctypes.char.ptr.array(), // dns
+                        ctypes.char.ptr,  // server
+                        ctypes.int.ptr,   // lease
+                        ctypes.char.ptr,  // vendorinfo
+                        ctypes.char.ptr); // domain
+      c_dhcp_do_request_renew =
+        library.declare("dhcp_do_request_renew", ctypes.default_abi,
+                        ctypes.int,       // return value
+                        ctypes.char.ptr,  // ifname
+                        ctypes.char.ptr,  // ipaddr
+                        ctypes.char.ptr,  // gateway
+                        ctypes.int.ptr,   // prefixlen
+                        ctypes.char.ptr.array(),  // dns
+                        ctypes.char.ptr,  // server
+                        ctypes.int.ptr,   // lease
+                        ctypes.char.ptr,  // vendorinfo
+                        ctypes.char.ptr); // domain
+    } else if (sdkVersion >= 16) { // 16 == JB 4.1
       c_dhcp_do_request =
         library.declare("dhcp_do_request", ctypes.default_abi,
                         ctypes.int,       // return value
@@ -219,7 +249,7 @@ this.libnetutils = (function () {
                         ctypes.char.ptr,  // server
                         ctypes.int.ptr,   // lease
                         ctypes.char.ptr); // vendorinfo
-    } else {
+    } else { // ICS
       c_dhcp_do_request =
         library.declare("dhcp_do_request", ctypes.default_abi,
                         ctypes.int,      // return value
@@ -236,7 +266,17 @@ this.libnetutils = (function () {
 
     iface.dhcp_do_request = function dhcp_do_request(ifname) {
       let ret;
-      if (sdkVersion >= 16) {
+      if (sdkVersion >= 18) {
+        ret = c_dhcp_do_request(ifname,
+                                ipaddrbuf,
+                                gatewaybuf,
+                                prefixLen.address(),
+                                dnslistbuf,
+                                serverbuf,
+                                lease.address(),
+                                vendorbuf,
+                                domainbuf);
+      } else if (sdkVersion >= 16) {
         ret = c_dhcp_do_request(ifname,
                                 ipaddrbuf,
                                 gatewaybuf,
@@ -270,7 +310,8 @@ this.libnetutils = (function () {
         dns2_str: dns2buf.readString(),
         server_str: serverbuf.readString(),
         lease: lease.value | 0,
-        vendor_str: vendorbuf.readString()
+        vendor_str: vendorbuf.readString(),
+        domain_str: domainbuf.readString()
       };
       obj.ipaddr = netHelpers.stringToIP(obj.ipaddr_str);
       obj.mask_str = netHelpers.ipToString(obj.mask);
@@ -281,7 +322,9 @@ this.libnetutils = (function () {
       obj.server = netHelpers.stringToIP(obj.server_str);
       return obj;
     };
+
     // dhcp_do_request_renew() went away in newer libnetutils.
+    // .. and then came back in 4.3! XXX implement support for this
     iface.dhcp_do_request_renew = iface.dhcp_do_request;
 
     // Same deal with ifc_reset_connections.
@@ -294,7 +337,7 @@ this.libnetutils = (function () {
     iface.ifc_reset_connections = function(ifname, reset_mask) {
       return c_ifc_reset_connections(ifname, reset_mask) | 0;
     }
-  } else {
+  } else { // version < 15 - we don't care anymore.
     let ints = ctypes.int.array(8)();
     let c_dhcp_do_request =
       library.declare("dhcp_do_request", ctypes.default_abi,
@@ -405,12 +448,15 @@ this.netHelpers = {
 
   /**
    * Convert string representation of an IP address to the integer
-   * representation.
+   * representation (network byte order).
    *
    * @param string
    *        String containing the IP address.
    */
   stringToIP: function stringToIP(string) {
+    if (!string) {
+      return null;
+    }
     let ip = 0;
     let start, end = -1;
     for (let i = 0; i < 4; i++) {

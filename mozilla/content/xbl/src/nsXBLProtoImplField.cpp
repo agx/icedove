@@ -8,6 +8,7 @@
 #include "nsString.h"
 #include "nsJSUtils.h"
 #include "jsapi.h"
+#include "js/CharacterEncoding.h"
 #include "nsUnicharUtils.h"
 #include "nsReadableUtils.h"
 #include "nsXBLProtoImplField.h"
@@ -104,7 +105,7 @@ static const uint32_t XBLPROTO_SLOT = 0;
 static const uint32_t FIELD_SLOT = 1;
 
 bool
-ValueHasISupportsPrivate(const JS::Value &v)
+ValueHasISupportsPrivate(JS::Handle<JS::Value> v)
 {
   if (!v.isObject()) {
     return false;
@@ -115,17 +116,26 @@ ValueHasISupportsPrivate(const JS::Value &v)
     return domClass->mDOMObjectIsISupports;
   }
 
-  JSClass* clasp = ::JS_GetClass(&v.toObject());
+  const JSClass* clasp = ::JS_GetClass(&v.toObject());
   const uint32_t HAS_PRIVATE_NSISUPPORTS =
     JSCLASS_HAS_PRIVATE | JSCLASS_PRIVATE_IS_NSISUPPORTS;
   return (clasp->flags & HAS_PRIVATE_NSISUPPORTS) == HAS_PRIVATE_NSISUPPORTS;
 }
 
+#ifdef DEBUG
+static bool
+ValueHasISupportsPrivate(JSContext* cx, const JS::Value& aVal)
+{
+    JS::Rooted<JS::Value> v(cx, aVal);
+    return ValueHasISupportsPrivate(v);
+}
+#endif
+
 // Define a shadowing property on |this| for the XBL field defined by the
 // contents of the callee's reserved slots.  If the property was defined,
 // *installed will be true, and idp will be set to the property name that was
 // defined.
-static JSBool
+static bool
 InstallXBLField(JSContext* cx,
                 JS::Handle<JSObject*> callee, JS::Handle<JSObject*> thisObj,
                 JS::MutableHandle<jsid> idp, bool* installed)
@@ -136,7 +146,7 @@ InstallXBLField(JSContext* cx,
   //
   // FieldAccessorGuard already determined whether |thisObj| was acceptable as
   // |this| in terms of not throwing a TypeError.  Assert this for good measure.
-  MOZ_ASSERT(ValueHasISupportsPrivate(JS::ObjectValue(*thisObj)));
+  MOZ_ASSERT(ValueHasISupportsPrivate(cx, JS::ObjectValue(*thisObj)));
 
   // But there are some cases where we must accept |thisObj| but not install a
   // property on it, or otherwise touch it.  Hence this split of |this|-vetting
@@ -221,7 +231,7 @@ InstallXBLField(JSContext* cx,
 bool
 FieldGetterImpl(JSContext *cx, JS::CallArgs args)
 {
-  const JS::Value &thisv = args.thisv();
+  JS::Handle<JS::Value> thisv = args.thisv();
   MOZ_ASSERT(ValueHasISupportsPrivate(thisv));
 
   JS::Rooted<JSObject*> thisObj(cx, &thisv.toObject());
@@ -244,14 +254,14 @@ FieldGetterImpl(JSContext *cx, JS::CallArgs args)
   }
 
   JS::Rooted<JS::Value> v(cx);
-  if (!JS_GetPropertyById(cx, thisObj, id, v.address())) {
+  if (!JS_GetPropertyById(cx, thisObj, id, &v)) {
     return false;
   }
   args.rval().set(v);
   return true;
 }
 
-static JSBool
+static bool
 FieldGetter(JSContext *cx, unsigned argc, JS::Value *vp)
 {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
@@ -262,7 +272,7 @@ FieldGetter(JSContext *cx, unsigned argc, JS::Value *vp)
 bool
 FieldSetterImpl(JSContext *cx, JS::CallArgs args)
 {
-  const JS::Value &thisv = args.thisv();
+  JS::Handle<JS::Value> thisv = args.thisv();
   MOZ_ASSERT(ValueHasISupportsPrivate(thisv));
 
   JS::Rooted<JSObject*> thisObj(cx, &thisv.toObject());
@@ -280,9 +290,7 @@ FieldSetterImpl(JSContext *cx, JS::CallArgs args)
   }
 
   if (installed) {
-    JS::Rooted<JS::Value> v(cx,
-                            args.length() > 0 ? args[0] : JS::UndefinedValue());
-    if (!::JS_SetPropertyById(cx, thisObj, id, v.address())) {
+    if (!::JS_SetPropertyById(cx, thisObj, id, args.get(0))) {
       return false;
     }
   }
@@ -290,7 +298,7 @@ FieldSetterImpl(JSContext *cx, JS::CallArgs args)
   return true;
 }
 
-static JSBool
+static bool
 FieldSetter(JSContext *cx, unsigned argc, JS::Value *vp)
 {
   JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
@@ -319,13 +327,13 @@ nsXBLProtoImplField::InstallAccessors(JSContext* aCx,
   // Get the field name as an id.
   JS::Rooted<jsid> id(aCx);
   JS::TwoByteChars chars(mName, NS_strlen(mName));
-  if (!JS_CharsToId(aCx, chars, id.address()))
+  if (!JS_CharsToId(aCx, chars, &id))
     return NS_ERROR_OUT_OF_MEMORY;
 
   // Properties/Methods have historically taken precendence over fields. We
   // install members first, so just bounce here if the property is already
   // defined.
-  JSBool found = false;
+  bool found = false;
   if (!JS_AlreadyHasOwnPropertyById(aCx, aTargetClassObject, id, &found))
     return NS_ERROR_FAILURE;
   if (found)
@@ -337,7 +345,7 @@ nsXBLProtoImplField::InstallAccessors(JSContext* aCx,
   // First, enter the XBL scope, and compile the functions there.
   JSAutoCompartment ac(aCx, scopeObject);
   JS::Rooted<JS::Value> wrappedClassObj(aCx, JS::ObjectValue(*aTargetClassObject));
-  if (!JS_WrapValue(aCx, wrappedClassObj.address()) || !JS_WrapId(aCx, id.address()))
+  if (!JS_WrapValue(aCx, &wrappedClassObj) || !JS_WrapId(aCx, id.address()))
     return NS_ERROR_OUT_OF_MEMORY;
 
   JS::Rooted<JSObject*> get(aCx,
@@ -363,7 +371,7 @@ nsXBLProtoImplField::InstallAccessors(JSContext* aCx,
   // Now, re-enter the class object's scope, wrap the getters/setters, and define
   // them there.
   JSAutoCompartment ac2(aCx, aTargetClassObject);
-  if (!JS_WrapObject(aCx, get.address()) || !JS_WrapObject(aCx, set.address()) ||
+  if (!JS_WrapObject(aCx, &get) || !JS_WrapObject(aCx, &set) ||
       !JS_WrapId(aCx, id.address()))
   {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -409,9 +417,6 @@ nsXBLProtoImplField::InstallField(nsIScriptContext* aContext,
   NS_ASSERTION(!::JS_IsExceptionPending(cx),
                "Shouldn't get here when an exception is pending!");
 
-  // compile the literal string
-  nsCOMPtr<nsIScriptContext> context = aContext;
-
   // First, enter the xbl scope, wrap the node, and use that as the scope for
   // the evaluation.
   JS::Rooted<JSObject*> scopeObject(cx, xpc::GetXBLScope(cx, aBoundNode));
@@ -419,18 +424,18 @@ nsXBLProtoImplField::InstallField(nsIScriptContext* aContext,
   JSAutoCompartment ac(cx, scopeObject);
 
   JS::Rooted<JSObject*> wrappedNode(cx, aBoundNode);
-  if (!JS_WrapObject(cx, wrappedNode.address()))
+  if (!JS_WrapObject(cx, &wrappedNode))
       return NS_ERROR_OUT_OF_MEMORY;
 
   JS::Rooted<JS::Value> result(cx);
   JS::CompileOptions options(cx);
   options.setFileAndLine(uriSpec.get(), mLineNumber)
          .setVersion(JSVERSION_LATEST);
-  rv = context->EvaluateString(nsDependentString(mFieldText,
-                                                 mFieldTextLength),
-                               wrappedNode, options,
-                               /* aCoerceToString = */ false,
-                               result.address());
+  rv = aContext->EvaluateString(nsDependentString(mFieldText,
+                                                  mFieldTextLength),
+                                wrappedNode, options,
+                                /* aCoerceToString = */ false,
+                                result.address());
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -440,9 +445,9 @@ nsXBLProtoImplField::InstallField(nsIScriptContext* aContext,
   // the bound node.
   JSAutoCompartment ac2(cx, aBoundNode);
   nsDependentString name(mName);
-  if (!JS_WrapValue(cx, result.address()) ||
+  if (!JS_WrapValue(cx, &result) ||
       !::JS_DefineUCProperty(cx, aBoundNode,
-                             reinterpret_cast<const jschar*>(mName), 
+                             reinterpret_cast<const jschar*>(mName),
                              name.Length(), result, nullptr, nullptr,
                              mJSAttributes)) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -453,8 +458,7 @@ nsXBLProtoImplField::InstallField(nsIScriptContext* aContext,
 }
 
 nsresult
-nsXBLProtoImplField::Read(nsIScriptContext* aContext,
-                          nsIObjectInputStream* aStream)
+nsXBLProtoImplField::Read(nsIObjectInputStream* aStream)
 {
   nsAutoString name;
   nsresult rv = aStream->ReadString(name);
@@ -475,8 +479,7 @@ nsXBLProtoImplField::Read(nsIScriptContext* aContext,
 }
 
 nsresult
-nsXBLProtoImplField::Write(nsIScriptContext* aContext,
-                           nsIObjectOutputStream* aStream)
+nsXBLProtoImplField::Write(nsIObjectOutputStream* aStream)
 {
   XBLBindingSerializeDetails type = XBLBinding_Serialize_Field;
 
@@ -491,5 +494,5 @@ nsXBLProtoImplField::Write(nsIScriptContext* aContext,
   rv = aStream->Write32(mLineNumber);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  return aStream->WriteWStringZ(mFieldText ? mFieldText : EmptyString().get());
+  return aStream->WriteWStringZ(mFieldText ? mFieldText : MOZ_UTF16(""));
 }

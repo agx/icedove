@@ -4,10 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jit/IonMacroAssembler.h"
 #include "gc/Marking.h"
-
-#include "jsscriptinlines.h"
+#include "jit/JitCompartment.h"
+#if defined(JS_CPU_X86)
+# include "jit/x86/MacroAssembler-x86.h"
+#elif defined(JS_CPU_X64)
+# include "jit/x64/MacroAssembler-x64.h"
+#elif defined(JS_CPU_ARM)
+# include "jit/arm/MacroAssembler-arm.h"
+#endif
 
 using namespace js;
 using namespace js::jit;
@@ -123,8 +128,7 @@ AssemblerX86Shared::InvertCondition(Condition cond)
       case BelowOrEqual:
         return Above;
       default:
-        JS_NOT_REACHED("unexpected condition");
-        return Equal;
+        MOZ_ASSUME_UNREACHABLE("unexpected condition");
     }
 }
 
@@ -144,5 +148,5 @@ AutoFlushCache::~AutoFlushCache()
         return;
 
     if (runtime_->flusher() == this)
-        runtime_->setFlusher(NULL);
+        runtime_->setFlusher(nullptr);
 }

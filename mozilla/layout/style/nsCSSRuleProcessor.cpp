@@ -19,17 +19,15 @@
 #include "nsCSSRuleProcessor.h"
 #include "nsRuleProcessorData.h"
 #include <algorithm>
-#include "nsCRT.h"
 #include "nsIAtom.h"
 #include "pldhash.h"
 #include "nsICSSPseudoComparator.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/css/StyleRule.h"
 #include "mozilla/css/GroupRule.h"
 #include "nsIDocument.h"
 #include "nsPresContext.h"
-#include "nsEventStateManager.h"
 #include "nsGkAtoms.h"
-#include "nsString.h"
 #include "nsUnicharUtils.h"
 #include "nsError.h"
 #include "nsRuleWalker.h"
@@ -43,23 +41,17 @@
 #include "nsAttrValue.h"
 #include "nsAttrValueInlines.h"
 #include "nsAttrName.h"
-#include "nsServiceManagerUtils.h"
 #include "nsTArray.h"
 #include "nsContentUtils.h"
 #include "nsIMediaList.h"
 #include "nsCSSRules.h"
-#include "nsIPrincipal.h"
 #include "nsStyleSet.h"
-#include "prlog.h"
-#include "nsIObserverService.h"
-#include "nsNetCID.h"
-#include "mozilla/Services.h"
 #include "mozilla/dom/Element.h"
 #include "nsNthIndexCache.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Likely.h"
-#include "mozilla/Util.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -202,7 +194,7 @@ typedef nsIAtom*
 (* RuleHashGetKey) (PLDHashTable *table, const PLDHashEntryHdr *entry);
 
 struct RuleHashTableOps {
-  PLDHashTableOps ops;
+  const PLDHashTableOps ops;
   // Extra callback to avoid duplicating the matchEntry callback for
   // each table.  (There used to be a getKey callback in
   // PLDHashTableOps.)
@@ -326,7 +318,11 @@ RuleHash_ClassTable_GetKey(PLDHashTable *table, const PLDHashEntryHdr *hdr)
 {
   const RuleHashTableEntry *entry =
     static_cast<const RuleHashTableEntry*>(hdr);
-  return entry->mRules[0].mSelector->mClassList->mAtom;
+  nsCSSSelector* selector = entry->mRules[0].mSelector;
+  if (selector->IsPseudoElement()) {
+    selector = selector->mNext;
+  }
+  return selector->mClassList->mAtom;
 }
 
 static nsIAtom*
@@ -334,7 +330,11 @@ RuleHash_IdTable_GetKey(PLDHashTable *table, const PLDHashEntryHdr *hdr)
 {
   const RuleHashTableEntry *entry =
     static_cast<const RuleHashTableEntry*>(hdr);
-  return entry->mRules[0].mSelector->mIDList->mAtom;
+  nsCSSSelector* selector = entry->mRules[0].mSelector;
+  if (selector->IsPseudoElement()) {
+    selector = selector->mNext;
+  }
+  return selector->mIDList->mAtom;
 }
 
 static PLDHashNumber
@@ -351,8 +351,11 @@ RuleHash_NameSpaceTable_MatchEntry(PLDHashTable *table,
   const RuleHashTableEntry *entry =
     static_cast<const RuleHashTableEntry*>(hdr);
 
-  return NS_PTR_TO_INT32(key) ==
-         entry->mRules[0].mSelector->mNameSpace;
+  nsCSSSelector* selector = entry->mRules[0].mSelector;
+  if (selector->IsPseudoElement()) {
+    selector = selector->mNext;
+  }
+  return NS_PTR_TO_INT32(key) == selector->mNameSpace;
 }
 
 static const PLDHashTableOps RuleHash_TagTable_Ops = {
@@ -456,8 +459,8 @@ public:
   void EnumerateAllRules(Element* aElement, ElementDependentRuleProcessorData* aData,
                          NodeMatchContext& aNodeMatchContext);
 
-  size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
 protected:
   typedef nsTArray<RuleValue> RuleValueList;
@@ -621,6 +624,9 @@ void RuleHash::AppendUniversalRule(const RuleSelectorPair& aRuleInfo)
 void RuleHash::AppendRule(const RuleSelectorPair& aRuleInfo)
 {
   nsCSSSelector *selector = aRuleInfo.mSelector;
+  if (selector->IsPseudoElement()) {
+    selector = selector->mNext;
+  }
   if (nullptr != selector->mIDList) {
     if (!mIdTable.ops) {
       PL_DHashTableInit(&mIdTable,
@@ -794,14 +800,14 @@ void RuleHash::EnumerateAllRules(Element* aElement, ElementDependentRuleProcesso
 }
 
 static size_t
-SizeOfRuleHashTableEntry(PLDHashEntryHdr* aHdr, nsMallocSizeOfFun aMallocSizeOf, void *)
+SizeOfRuleHashTableEntry(PLDHashEntryHdr* aHdr, MallocSizeOf aMallocSizeOf, void *)
 {
   RuleHashTableEntry* entry = static_cast<RuleHashTableEntry*>(aHdr);
   return entry->mRules.SizeOfExcludingThis(aMallocSizeOf);
 }
 
 size_t
-RuleHash::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+RuleHash::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
 
@@ -835,7 +841,7 @@ RuleHash::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 }
 
 size_t
-RuleHash::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+RuleHash::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
@@ -920,6 +926,7 @@ struct RuleCascadeData {
     : mRuleHash(aQuirksMode),
       mStateSelectors(),
       mSelectorDocumentStates(0),
+      mKeyframesRuleTable(16),
       mCacheKey(aMedium),
       mNext(nullptr),
       mQuirksMode(aQuirksMode)
@@ -943,7 +950,6 @@ struct RuleCascadeData {
     PL_DHashTableInit(&mXULTreeRules, &RuleHash_TagTable_Ops, nullptr,
                       sizeof(RuleHashTagTableEntry), 16);
 #endif
-    mKeyframesRuleTable.Init(16); // FIXME: make infallible!
   }
 
   ~RuleCascadeData()
@@ -960,7 +966,7 @@ struct RuleCascadeData {
     }
   }
 
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const;
+  size_t SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const;
 
   RuleHash                 mRuleHash;
   RuleHash*
@@ -995,14 +1001,14 @@ struct RuleCascadeData {
 };
 
 static size_t
-SizeOfSelectorsEntry(PLDHashEntryHdr* aHdr, nsMallocSizeOfFun aMallocSizeOf, void *)
+SizeOfSelectorsEntry(PLDHashEntryHdr* aHdr, MallocSizeOf aMallocSizeOf, void *)
 {
   AtomSelectorEntry* entry = static_cast<AtomSelectorEntry*>(aHdr);
   return entry->mSelectors.SizeOfExcludingThis(aMallocSizeOf);
 }
 
 size_t
-RuleCascadeData::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+RuleCascadeData::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
 
@@ -1176,6 +1182,11 @@ InitSystemMetrics()
     sSystemMetrics->AppendElement(nsGkAtoms::windows_glass);
   }
 
+  rv = LookAndFeel::GetInt(LookAndFeel::eIntID_ColorPickerAvailable, &metricResult);
+  if (NS_SUCCEEDED(rv) && metricResult) {
+    sSystemMetrics->AppendElement(nsGkAtoms::color_picker_available);
+  }
+
   rv = LookAndFeel::GetInt(LookAndFeel::eIntID_WindowsClassic, &metricResult);
   if (NS_SUCCEEDED(rv) && metricResult) {
     sSystemMetrics->AppendElement(nsGkAtoms::windows_classic);
@@ -1186,11 +1197,6 @@ InitSystemMetrics()
     sSystemMetrics->AppendElement(nsGkAtoms::touch_enabled);
   }
  
-  rv = LookAndFeel::GetInt(LookAndFeel::eIntID_MaemoClassic, &metricResult);
-  if (NS_SUCCEEDED(rv) && metricResult) {
-    sSystemMetrics->AppendElement(nsGkAtoms::maemo_classic);
-  }
-
   rv = LookAndFeel::GetInt(LookAndFeel::eIntID_SwipeAnimationEnabled,
                            &metricResult);
   if (NS_SUCCEEDED(rv) && metricResult) {
@@ -1236,6 +1242,27 @@ InitSystemMetrics()
     }
   }
 #endif
+
+  // os version metrics, currently only defined for Windows.
+  if (NS_SUCCEEDED(
+        LookAndFeel::GetInt(LookAndFeel::eIntID_OperatingSystemVersionIdentifier,
+                            &metricResult))) {
+    switch(metricResult) {
+      case LookAndFeel::eOperatingSystemVersion_WindowsXP:
+        sSystemMetrics->AppendElement(nsGkAtoms::windows_version_xp);
+        break;
+      case LookAndFeel::eOperatingSystemVersion_WindowsVista:
+        sSystemMetrics->AppendElement(nsGkAtoms::windows_version_vista);
+        break;
+      case LookAndFeel::eOperatingSystemVersion_Windows7:
+        sSystemMetrics->AppendElement(nsGkAtoms::windows_version_win7);
+        break;
+      case LookAndFeel::eOperatingSystemVersion_Windows8:
+        sSystemMetrics->AppendElement(nsGkAtoms::windows_version_win8);
+        break;
+      // don't add anything for future versions
+    }
+  }
 
   return true;
 }
@@ -1600,10 +1627,86 @@ static const nsEventStates sPseudoClassStates[] = {
   nsEventStates(),
   nsEventStates()
 };
-MOZ_STATIC_ASSERT(NS_ARRAY_LENGTH(sPseudoClassStates) ==
-                  nsCSSPseudoClasses::ePseudoClass_NotPseudoClass + 1,
-                  "ePseudoClass_NotPseudoClass is no longer at the end of"
-                  "sPseudoClassStates");
+static_assert(NS_ARRAY_LENGTH(sPseudoClassStates) ==
+              nsCSSPseudoClasses::ePseudoClass_NotPseudoClass + 1,
+              "ePseudoClass_NotPseudoClass is no longer at the end of"
+              "sPseudoClassStates");
+
+static bool
+StateSelectorMatches(Element* aElement,
+                     nsCSSSelector* aSelector,
+                     NodeMatchContext& aNodeMatchContext,
+                     TreeMatchContext& aTreeMatchContext,
+                     bool* const aDependence,
+                     nsEventStates aStatesToCheck)
+{
+  NS_PRECONDITION(!aStatesToCheck.IsEmpty(),
+                  "should only need to call StateSelectorMatches if "
+                  "aStatesToCheck is not empty");
+
+  const bool isNegated = aDependence != nullptr;
+
+  // Bit-based pseudo-classes
+  if (aStatesToCheck.HasAtLeastOneOfStates(NS_EVENT_STATE_HOVER | NS_EVENT_STATE_ACTIVE) &&
+      aTreeMatchContext.mCompatMode == eCompatibility_NavQuirks &&
+      // global selector:
+      !aSelector->HasTagSelector() && !aSelector->mIDList &&
+      !aSelector->mClassList && !aSelector->mAttrList &&
+      // This (or the other way around) both make :not() asymmetric
+      // in quirks mode (and it's hard to work around since we're
+      // testing the current mNegations, not the first
+      // (unnegated)). This at least makes it closer to the spec.
+      !isNegated &&
+      // important for |IsQuirkEventSensitive|:
+      aElement->IsHTML() && !nsCSSRuleProcessor::IsLink(aElement) &&
+      !IsQuirkEventSensitive(aElement->Tag())) {
+    // In quirks mode, only make certain elements sensitive to
+    // selectors ":hover" and ":active".
+    return false;
+  }
+
+  if (aTreeMatchContext.mForStyling &&
+      aStatesToCheck.HasAtLeastOneOfStates(NS_EVENT_STATE_HOVER)) {
+    // Mark the element as having :hover-dependent style
+    aElement->SetHasRelevantHoverRules();
+  }
+
+  if (aNodeMatchContext.mStateMask.HasAtLeastOneOfStates(aStatesToCheck)) {
+    if (aDependence) {
+      *aDependence = true;
+    }
+  } else {
+    nsEventStates contentState =
+      nsCSSRuleProcessor::GetContentStateForVisitedHandling(
+                                   aElement,
+                                   aTreeMatchContext,
+                                   aTreeMatchContext.VisitedHandling(),
+                                   aNodeMatchContext.mIsRelevantLink);
+    if (!contentState.HasAtLeastOneOfStates(aStatesToCheck)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static bool
+StateSelectorMatches(Element* aElement,
+                     nsCSSSelector* aSelector,
+                     NodeMatchContext& aNodeMatchContext,
+                     TreeMatchContext& aTreeMatchContext)
+{
+  for (nsPseudoClassList* pseudoClass = aSelector->mPseudoClassList;
+       pseudoClass; pseudoClass = pseudoClass->mNext) {
+    nsEventStates statesToCheck = sPseudoClassStates[pseudoClass->mType];
+    if (!statesToCheck.IsEmpty() &&
+        !StateSelectorMatches(aElement, aSelector, aNodeMatchContext,
+                              aTreeMatchContext, nullptr, statesToCheck)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // |aDependence| has two functions:
 //  * when non-null, it indicates that we're processing a negation,
@@ -2086,43 +2189,10 @@ static bool SelectorMatches(Element* aElement,
         NS_ABORT_IF_FALSE(false, "How did that happen?");
       }
     } else {
-      // Bit-based pseudo-classes
-      if (statesToCheck.HasAtLeastOneOfStates(NS_EVENT_STATE_HOVER | NS_EVENT_STATE_ACTIVE) &&
-          aTreeMatchContext.mCompatMode == eCompatibility_NavQuirks &&
-          // global selector:
-          !aSelector->HasTagSelector() && !aSelector->mIDList && 
-          !aSelector->mClassList && !aSelector->mAttrList &&
-          // This (or the other way around) both make :not() asymmetric
-          // in quirks mode (and it's hard to work around since we're
-          // testing the current mNegations, not the first
-          // (unnegated)). This at least makes it closer to the spec.
-          !isNegated &&
-          // important for |IsQuirkEventSensitive|:
-          aElement->IsHTML() && !nsCSSRuleProcessor::IsLink(aElement) &&
-          !IsQuirkEventSensitive(aElement->Tag())) {
-        // In quirks mode, only make certain elements sensitive to
-        // selectors ":hover" and ":active".
+      if (!StateSelectorMatches(aElement, aSelector, aNodeMatchContext,
+                                aTreeMatchContext, aDependence,
+                                statesToCheck)) {
         return false;
-      } else {
-        if (aTreeMatchContext.mForStyling &&
-            statesToCheck.HasAtLeastOneOfStates(NS_EVENT_STATE_HOVER)) {
-          // Mark the element as having :hover-dependent style
-          aElement->SetHasRelevantHoverRules();
-        }
-        if (aNodeMatchContext.mStateMask.HasAtLeastOneOfStates(statesToCheck)) {
-          if (aDependence)
-            *aDependence = true;
-        } else {
-          nsEventStates contentState =
-            nsCSSRuleProcessor::GetContentStateForVisitedHandling(
-                                         aElement,
-                                         aTreeMatchContext,
-                                         aTreeMatchContext.VisitedHandling(),
-                                         aNodeMatchContext.mIsRelevantLink);
-          if (!contentState.HasAtLeastOneOfStates(statesToCheck)) {
-            return false;
-          }
-        }
       }
     }
   }
@@ -2130,8 +2200,7 @@ static bool SelectorMatches(Element* aElement,
   bool result = true;
   if (aSelector->mAttrList) {
     // test for attribute match
-    uint32_t attrCount = aElement->GetAttrCount();
-    if (attrCount == 0) {
+    if (!aElement->HasAttrs()) {
       // if no attributes on the content, no match
       return false;
     } else {
@@ -2152,9 +2221,8 @@ static bool SelectorMatches(Element* aElement,
           // have a chance at matching, of course, are ones that the element
           // actually has attributes in), short-circuiting if we ever match.
           result = false;
-          for (uint32_t i = 0; i < attrCount; ++i) {
-            const nsAttrName* attrName = aElement->GetAttrNameAt(i);
-            NS_ASSERTION(attrName, "GetAttrCount lied or GetAttrNameAt failed");
+          const nsAttrName* attrName;
+          for (uint32_t i = 0; (attrName = aElement->GetAttrNameAt(i)); ++i) {
             if (attrName->LocalName() != matchAttribute) {
               continue;
             }
@@ -2237,6 +2305,7 @@ static bool SelectorMatchesTree(Element* aPrevElement,
                                   TreeMatchContext& aTreeMatchContext,
                                   bool aLookForRelevantLink)
 {
+  MOZ_ASSERT(!aSelector || !aSelector->IsPseudoElement());
   nsCSSSelector* selector = aSelector;
   Element* prevElement = aPrevElement;
   while (selector) { // check compound selectors
@@ -2287,6 +2356,25 @@ static bool SelectorMatchesTree(Element* aPrevElement,
           // style scope element, selector matching stops before we
           // traverse further up the tree.
           aTreeMatchContext.PopStyleScopeForSelectorMatching(element);
+        }
+
+        // Compatibility hack: First try matching this selector as though the
+        // <xbl:children> element wasn't in the tree to allow old selectors
+        // were written before <xbl:children> participated in CSS selector
+        // matching to work.
+        if (selector->mOperator == '>' && element->IsActiveChildrenElement()) {
+          Element* styleScope = aTreeMatchContext.mCurrentStyleScope;
+          if (SelectorMatchesTree(element, selector, aTreeMatchContext,
+                                  aLookForRelevantLink)) {
+            // It matched, don't try matching on the <xbl:children> element at
+            // all.
+            return true;
+          }
+          // We want to reset mCurrentStyleScope on aTreeMatchContext
+          // back to its state before the SelectorMatchesTree call, in
+          // case that call happens to traverse past the style scope element
+          // and sets it to null.
+          aTreeMatchContext.mCurrentStyleScope = styleScope;
         }
       }
     }
@@ -2371,9 +2459,19 @@ void ContentEnumFunc(const RuleValue& value, nsCSSSelector* aSelector,
     // of the selector matching is not in its scope.
     return;
   }
-  if (SelectorMatches(data->mElement, aSelector, nodeContext,
+  nsCSSSelector* selector = aSelector;
+  if (selector->IsPseudoElement()) {
+    PseudoElementRuleProcessorData* pdata =
+      static_cast<PseudoElementRuleProcessorData*>(data);
+    if (!StateSelectorMatches(pdata->mPseudoElement, aSelector, nodeContext,
+                              data->mTreeMatchContext)) {
+      return;
+    }
+    selector = selector->mNext;
+  }
+  if (SelectorMatches(data->mElement, selector, nodeContext,
                       data->mTreeMatchContext)) {
-    nsCSSSelector *next = aSelector->mNext;
+    nsCSSSelector *next = selector->mNext;
     if (!next || SelectorMatchesTree(data->mElement, next,
                                      data->mTreeMatchContext,
                                      !nodeContext.mIsRelevantLink)) {
@@ -2472,11 +2570,17 @@ static inline nsRestyleHint RestyleHintForOp(PRUnichar oper)
 }
 
 nsRestyleHint
-nsCSSRuleProcessor::HasStateDependentStyle(StateRuleProcessorData* aData)
+nsCSSRuleProcessor::HasStateDependentStyle(ElementDependentRuleProcessorData* aData,
+                                           Element* aStatefulElement,
+                                           nsCSSPseudoElements::Type aPseudoType,
+                                           nsEventStates aStateMask)
 {
   MOZ_ASSERT(!aData->mTreeMatchContext.mForScopedStyle,
              "mCurrentStyleScope will need to be saved and restored after the "
              "SelectorMatchesTree call");
+
+  bool isPseudoElement =
+    aPseudoType != nsCSSPseudoElements::ePseudo_NotPseudoElement;
 
   RuleCascadeData* cascade = GetRuleCascade(aData->mPresContext);
 
@@ -2492,10 +2596,23 @@ nsCSSRuleProcessor::HasStateDependentStyle(StateRuleProcessorData* aData)
   if (cascade) {
     StateSelector *iter = cascade->mStateSelectors.Elements(),
                   *end = iter + cascade->mStateSelectors.Length();
-    NodeMatchContext nodeContext(aData->mStateMask, false);
+    NodeMatchContext nodeContext(aStateMask, false);
     for(; iter != end; ++iter) {
       nsCSSSelector* selector = iter->mSelector;
       nsEventStates states = iter->mStates;
+
+      if (selector->IsPseudoElement() != isPseudoElement) {
+        continue;
+      }
+
+      nsCSSSelector* selectorForPseudo;
+      if (isPseudoElement) {
+        if (selector->PseudoType() != aPseudoType) {
+          continue;
+        }
+        selectorForPseudo = selector;
+        selector = selector->mNext;
+      }
 
       nsRestyleHint possibleChange = RestyleHintForOp(selector->mOperator);
 
@@ -2505,7 +2622,7 @@ nsCSSRuleProcessor::HasStateDependentStyle(StateRuleProcessorData* aData)
       // Also don't bother calling SelectorMatches if none of the
       // states passed in are relevant here.
       if ((possibleChange & ~hint) &&
-          states.HasAtLeastOneOfStates(aData->mStateMask) &&
+          states.HasAtLeastOneOfStates(aStateMask) &&
           // We can optimize away testing selectors that only involve :hover, a
           // namespace, and a tag name against nodes that don't have the
           // NodeHasRelevantHoverRules flag: such a selector didn't match
@@ -2515,7 +2632,7 @@ nsCSSRuleProcessor::HasStateDependentStyle(StateRuleProcessorData* aData)
           // the element having the hover rules flag, or the selector having
           // some sort of non-namespace, non-tagname data in it.
           (states != NS_EVENT_STATE_HOVER ||
-           aData->mElement->HasRelevantHoverRules() ||
+           aStatefulElement->HasRelevantHoverRules() ||
            selector->mIDList || selector->mClassList ||
            // We generally expect an mPseudoClassList, since we have a :hover.
            // The question is whether we have anything else in there.
@@ -2524,6 +2641,10 @@ nsCSSRuleProcessor::HasStateDependentStyle(StateRuleProcessorData* aData)
              selector->mPseudoClassList->mType !=
                nsCSSPseudoClasses::ePseudoClass_hover)) ||
            selector->mAttrList || selector->mNegations) &&
+          (!isPseudoElement ||
+           StateSelectorMatches(aStatefulElement, selectorForPseudo,
+                                nodeContext, aData->mTreeMatchContext,
+                                nullptr, aStateMask)) &&
           SelectorMatches(aData->mElement, selector, nodeContext,
                           aData->mTreeMatchContext) &&
           SelectorMatchesTree(aData->mElement, selector->mNext,
@@ -2535,6 +2656,24 @@ nsCSSRuleProcessor::HasStateDependentStyle(StateRuleProcessorData* aData)
     }
   }
   return hint;
+}
+
+nsRestyleHint
+nsCSSRuleProcessor::HasStateDependentStyle(StateRuleProcessorData* aData)
+{
+  return HasStateDependentStyle(aData,
+                                aData->mElement,
+                                nsCSSPseudoElements::ePseudo_NotPseudoElement,
+                                aData->mStateMask);
+}
+
+nsRestyleHint
+nsCSSRuleProcessor::HasStateDependentStyle(PseudoElementStateRuleProcessorData* aData)
+{
+  return HasStateDependentStyle(aData,
+                                aData->mPseudoElement,
+                                aData->mPseudoType,
+                                aData->mStateMask);
 }
 
 bool
@@ -2703,7 +2842,7 @@ nsCSSRuleProcessor::MediumFeaturesChanged(nsPresContext* aPresContext)
 }
 
 /* virtual */ size_t
-nsCSSRuleProcessor::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsCSSRuleProcessor::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
   n += mSheets.SizeOfExcludingThis(aMallocSizeOf);
@@ -2716,7 +2855,7 @@ nsCSSRuleProcessor::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 }
 
 /* virtual */ size_t
-nsCSSRuleProcessor::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsCSSRuleProcessor::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
@@ -2960,9 +3099,8 @@ AddRule(RuleSelectorPair* aRuleInfo, RuleCascadeData* aCascade)
     }
     NS_ASSERTION(aRuleInfo->mSelector->mNext,
                  "Must have mNext; parser screwed up");
-    NS_ASSERTION(aRuleInfo->mSelector->mNext->mOperator == '>',
+    NS_ASSERTION(aRuleInfo->mSelector->mNext->mOperator == ':',
                  "Unexpected mNext combinator");
-    aRuleInfo->mSelector = aRuleInfo->mSelector->mNext;
     ruleHash->AppendRule(*aRuleInfo);
   } else if (pseudoType == nsCSSPseudoElements::ePseudo_AnonBox) {
     NS_ASSERTION(!aRuleInfo->mSelector->mCasedTag &&
@@ -2997,11 +3135,19 @@ AddRule(RuleSelectorPair* aRuleInfo, RuleCascadeData* aCascade)
   for (nsCSSSelector* selector = aRuleInfo->mSelector;
            selector; selector = selector->mNext) {
     if (selector->IsPseudoElement()) {
-      NS_ASSERTION(!selector->mNegations, "Shouldn't have negations");
-      // Make sure these selectors don't end up in the hashtables we use to
-      // match against actual elements, no matter what.  Normally they wouldn't
-      // anyway, but trees overload mPseudoClassList with weird stuff.
-      continue;
+      nsCSSPseudoElements::Type pseudo = selector->PseudoType();
+      if (pseudo >= nsCSSPseudoElements::ePseudo_PseudoElementCount ||
+          !nsCSSPseudoElements::PseudoElementSupportsUserActionState(pseudo)) {
+        NS_ASSERTION(!selector->mNegations, "Shouldn't have negations");
+        // We do store selectors ending with pseudo-elements that allow :hover
+        // and :active after them in the hashtables corresponding to that
+        // selector's mNext (i.e. the thing that matches against the element),
+        // but we want to make sure that selectors for any other kinds of
+        // pseudo-elements don't end up in the hashtables.  In particular, tree
+        // pseudos store strange things in mPseudoClassList that we don't want
+        // to try to match elements against.
+        continue;
+      }
     }
     if (!AddSelector(cascade, selector, selector)) {
       return false;
@@ -3067,7 +3213,7 @@ InitWeightEntry(PLDHashTable *table, PLDHashEntryHdr *hdr,
   return true;
 }
 
-static PLDHashTableOps gRulesByWeightOps = {
+static const PLDHashTableOps gRulesByWeightOps = {
     PL_DHashAllocTable,
     PL_DHashFreeTable,
     HashIntKey,
@@ -3383,6 +3529,7 @@ TreeMatchContext::InitAncestors(Element *aElement)
 {
   MOZ_ASSERT(!mAncestorFilter.mFilter);
   MOZ_ASSERT(mAncestorFilter.mHashes.IsEmpty());
+  MOZ_ASSERT(mStyleScopes.IsEmpty());
 
   mAncestorFilter.mFilter = new AncestorFilter::Filter();
 
@@ -3400,12 +3547,39 @@ TreeMatchContext::InitAncestors(Element *aElement)
       if (!parent->IsElement()) {
         break;
       }
+
       cur = parent->AsElement();
     } while (true);
 
     // Now push them in reverse order.
     for (uint32_t i = ancestors.Length(); i-- != 0; ) {
       mAncestorFilter.PushAncestor(ancestors[i]);
+      PushStyleScope(ancestors[i]);
+    }
+  }
+}
+
+void
+TreeMatchContext::InitStyleScopes(Element* aElement)
+{
+  MOZ_ASSERT(mStyleScopes.IsEmpty());
+
+  if (MOZ_LIKELY(aElement)) {
+    // Collect up the ancestors
+    nsAutoTArray<Element*, 50> ancestors;
+    Element* cur = aElement;
+    do {
+      ancestors.AppendElement(cur);
+      nsINode* parent = cur->GetParentNode();
+      if (!parent || !parent->IsElement()) {
+        break;
+      }
+
+      cur = parent->AsElement();
+    } while (true);
+
+    // Now push them in reverse order.
+    for (uint32_t i = ancestors.Length(); i-- != 0; ) {
       PushStyleScope(ancestors[i]);
     }
   }

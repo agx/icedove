@@ -21,6 +21,8 @@
 #ifndef nsScriptNameSpaceManager_h__
 #define nsScriptNameSpaceManager_h__
 
+#include "mozilla/MemoryReporting.h"
+#include "nsIMemoryReporter.h"
 #include "nsIScriptNameSpaceManager.h"
 #include "nsString.h"
 #include "nsID.h"
@@ -28,6 +30,7 @@
 #include "nsDOMClassInfo.h"
 #include "nsIObserver.h"
 #include "nsWeakReference.h"
+#include "xpcpublic.h"
 
 
 struct nsGlobalNameStruct
@@ -58,8 +61,9 @@ struct nsGlobalNameStruct
   // mChromeOnly is only used for structs that define non-WebIDL things
   // (possibly in addition to WebIDL ones).  In particular, it's not even
   // initialized for eTypeNewDOMBinding structs.
-  bool mChromeOnly;
-  bool mDisabled;
+  bool mChromeOnly : 1;
+  bool mAllowXBL : 1;
+  bool mDisabled : 1;
 
   union {
     int32_t mDOMClassInfoID; // eTypeClassConstructor
@@ -81,11 +85,11 @@ struct nsGlobalNameStruct
 
 class nsIScriptContext;
 class nsICategoryManager;
-class nsIMemoryReporter;
 class GlobalNameMapEntry;
 
 
-class nsScriptNameSpaceManager : public nsIObserver,
+class nsScriptNameSpaceManager : public mozilla::MemoryUniReporter,
+                                 public nsIObserver,
                                  public nsSupportsWeakReference
 {
 public:
@@ -118,6 +122,7 @@ public:
   nsresult RegisterClassName(const char *aClassName,
                              int32_t aDOMClassInfoID,
                              bool aPrivileged,
+                             bool aXBLAllowed,
                              bool aDisabled,
                              const PRUnichar **aResult);
 
@@ -151,12 +156,15 @@ public:
     mozilla::dom::ConstructorEnabled* aConstructorEnabled);
 
   typedef PLDHashOperator
-  (* GlobalNameEnumerator)(const nsAString& aGlobalName, void* aClosure);
+  (* NameEnumerator)(const nsAString& aGlobalName, void* aClosure);
 
-  void EnumerateGlobalNames(GlobalNameEnumerator aEnumerator,
+  void EnumerateGlobalNames(NameEnumerator aEnumerator,
                             void* aClosure);
+  void EnumerateNavigatorNames(NameEnumerator aEnumerator,
+                               void* aClosure);
 
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf);
+  int64_t Amount() MOZ_OVERRIDE;
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
 private:
   // Adds a new entry to the hash and returns the nsGlobalNameStruct
@@ -171,10 +179,11 @@ private:
     NS_ConvertASCIItoUTF16 key(aKey);
     return AddToHash(aTable, &key, aClassName);
   }
+  // Removes an existing entry from the hash.
+  void RemoveFromHash(PLDHashTable *aTable, const nsAString *aKey);
 
   nsresult FillHash(nsICategoryManager *aCategoryManager,
                     const char *aCategory);
-  nsresult FillHashWithDOMInterfaces();
   nsresult RegisterInterface(const char* aIfName,
                              const nsIID *aIfIID,
                              bool* aFoundOld);
@@ -192,6 +201,24 @@ private:
                                   const char* aCategory,
                                   nsISupports* aEntry);
 
+  /**
+   * Remove an existing category entry from the hash table.
+   * Only some categories can be removed (see the beginning of the definition).
+   * The other ones will be ignored.
+   *
+   * @aCategory        Category where the entry will be removed from.
+   * @aEntry           The entry that should be removed.
+   */
+  nsresult RemoveCategoryEntryFromHash(nsICategoryManager* aCategoryManager,
+                                       const char* aCategory,
+                                       nsISupports* aEntry);
+
+  // common helper for AddCategoryEntryToHash and RemoveCategoryEntryFromHash
+  nsresult OperateCategoryEntryHash(nsICategoryManager* aCategoryManager,
+                                    const char* aCategory,
+                                    nsISupports* aEntry,
+                                    bool aRemove);
+
   nsGlobalNameStruct* LookupNameInternal(const nsAString& aName,
                                          const PRUnichar **aClassName = nullptr);
 
@@ -199,8 +226,6 @@ private:
   PLDHashTable mNavigatorNames;
 
   bool mIsInitialized;
-
-  nsCOMPtr<nsIMemoryReporter> mReporter;
 };
 
 #endif /* nsScriptNameSpaceManager_h__ */

@@ -7,15 +7,14 @@
 #ifndef jsatominlines_h
 #define jsatominlines_h
 
+#include "jsatom.h"
+
 #include "mozilla/PodOperations.h"
 #include "mozilla/RangedPtr.h"
 
-#include "jsatom.h"
 #include "jscntxt.h"
 #include "jsnum.h"
-#include "jsobj.h"
-#include "jsstr.h"
-#include "gc/Barrier.h"
+
 #include "vm/String.h"
 
 inline JSAtom *
@@ -39,6 +38,22 @@ AtomToId(JSAtom *atom)
         return INT_TO_JSID(int32_t(index));
 
     return JSID_FROM_BITS(size_t(atom));
+}
+
+inline bool
+ValueToIdPure(const Value &v, jsid *id)
+{
+    int32_t i;
+    if (ValueFitsInInt32(v, &i) && INT_FITS_IN_JSID(i)) {
+        *id = INT_TO_JSID(i);
+        return true;
+    }
+
+    if (!v.isString() || !v.toString()->isAtom())
+        return false;
+
+    *id = AtomToId(&v.toString()->asAtom());
+    return true;
 }
 
 template <AllowGC allowGC>
@@ -89,33 +104,29 @@ BackfillIndexInCharBuffer(uint32_t index, mozilla::RangedPtr<T> end)
     return end;
 }
 
-template <AllowGC allowGC>
 bool
-IndexToIdSlow(JSContext *cx, uint32_t index,
-              typename MaybeRooted<jsid, allowGC>::MutableHandleType idp);
+IndexToIdSlow(ExclusiveContext *cx, uint32_t index, jsid *idp);
 
 inline bool
-IndexToId(JSContext *cx, uint32_t index, MutableHandleId idp)
-{
-    MaybeCheckStackRoots(cx);
-
-    if (index <= JSID_INT_MAX) {
-        idp.set(INT_TO_JSID(index));
-        return true;
-    }
-
-    return IndexToIdSlow<CanGC>(cx, index, idp);
-}
-
-inline bool
-IndexToIdNoGC(JSContext *cx, uint32_t index, jsid *idp)
+IndexToId(ExclusiveContext *cx, uint32_t index, jsid *idp)
 {
     if (index <= JSID_INT_MAX) {
         *idp = INT_TO_JSID(index);
         return true;
     }
 
-    return IndexToIdSlow<NoGC>(cx, index, idp);
+    return IndexToIdSlow(cx, index, idp);
+}
+
+inline bool
+IndexToIdPure(uint32_t index, jsid *idp)
+{
+    if (index <= JSID_INT_MAX) {
+        *idp = INT_TO_JSID(index);
+        return true;
+    }
+
+    return false;
 }
 
 static JS_ALWAYS_INLINE JSFlatString *
@@ -130,7 +141,7 @@ IdToString(JSContext *cx, jsid id)
     RootedValue idv(cx, IdToValue(id));
     JSString *str = ToStringSlow<CanGC>(cx, idv);
     if (!str)
-        return NULL;
+        return nullptr;
 
     return str->ensureFlat(cx);
 }
@@ -152,31 +163,37 @@ AtomHasher::match(const AtomStateEntry &entry, const Lookup &lookup)
 }
 
 inline Handle<PropertyName*>
-TypeName(JSType type, JSRuntime *rt)
+TypeName(JSType type, const JSAtomState &names)
 {
     JS_ASSERT(type < JSTYPE_LIMIT);
     JS_STATIC_ASSERT(offsetof(JSAtomState, undefined) +
                      JSTYPE_LIMIT * sizeof(FixedHeapPtr<PropertyName>) <=
                      sizeof(JSAtomState));
     JS_STATIC_ASSERT(JSTYPE_VOID == 0);
-    return (&rt->atomState.undefined)[type];
+    return (&names.undefined)[type];
 }
 
 inline Handle<PropertyName*>
-TypeName(JSType type, JSContext *cx)
-{
-    return TypeName(type, cx->runtime());
-}
-
-inline Handle<PropertyName*>
-ClassName(JSProtoKey key, JSContext *cx)
+ClassName(JSProtoKey key, JSAtomState &atomState)
 {
     JS_ASSERT(key < JSProto_LIMIT);
     JS_STATIC_ASSERT(offsetof(JSAtomState, Null) +
                      JSProto_LIMIT * sizeof(FixedHeapPtr<PropertyName>) <=
                      sizeof(JSAtomState));
     JS_STATIC_ASSERT(JSProto_Null == 0);
-    return (&cx->runtime()->atomState.Null)[key];
+    return (&atomState.Null)[key];
+}
+
+inline Handle<PropertyName*>
+ClassName(JSProtoKey key, JSRuntime *rt)
+{
+    return ClassName(key, rt->atomState);
+}
+
+inline Handle<PropertyName*>
+ClassName(JSProtoKey key, ExclusiveContext *cx)
+{
+    return ClassName(key, cx->names());
 }
 
 } // namespace js

@@ -7,8 +7,8 @@
 #include "IDBFileHandle.h"
 
 #include "mozilla/dom/file/File.h"
+#include "mozilla/dom/IDBFileHandleBinding.h"
 #include "mozilla/dom/quota/FileStreams.h"
-#include "nsDOMClassInfoID.h"
 
 #include "IDBDatabase.h"
 
@@ -34,6 +34,13 @@ GetFileFor(FileInfo* aFileInfo)
 }
 
 } // anonymous namespace
+
+// virtual
+JSObject*
+IDBFileHandle::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+{
+  return IDBFileHandleBinding::Wrap(aCx, aScope, this);
+}
 
 // static
 already_AddRefed<IDBFileHandle>
@@ -70,18 +77,22 @@ IDBFileHandle::CreateStream(nsIFile* aFile, bool aReadOnly)
   nsCOMPtr<nsIOfflineStorage> storage = do_QueryInterface(mFileStorage);
   NS_ASSERTION(storage, "This should always succeed!");
 
+  PersistenceType persistenceType = storage->Type();
+  const nsACString& group = storage->Group();
   const nsACString& origin = storage->Origin();
 
   nsCOMPtr<nsISupports> result;
 
   if (aReadOnly) {
-    nsRefPtr<FileInputStream> stream = FileInputStream::Create(
-      origin, aFile, -1, -1, nsIFileInputStream::DEFER_OPEN);
+    nsRefPtr<FileInputStream> stream =
+      FileInputStream::Create(persistenceType, group, origin, aFile, -1, -1,
+                              nsIFileInputStream::DEFER_OPEN);
     result = NS_ISUPPORTS_CAST(nsIFileInputStream*, stream);
   }
   else {
-    nsRefPtr<FileStream> stream = FileStream::Create(
-      origin, aFile, -1, -1, nsIFileStream::DEFER_OPEN);
+    nsRefPtr<FileStream> stream =
+      FileStream::Create(persistenceType, group, origin, aFile, -1, -1,
+                         nsIFileStream::DEFER_OPEN);
     result = NS_ISUPPORTS_CAST(nsIFileStream*, stream);
   }
   NS_ENSURE_TRUE(result, nullptr);
@@ -99,24 +110,13 @@ IDBFileHandle::CreateFileObject(mozilla::dom::file::LockedFile* aLockedFile,
   return file.forget();
 }
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBFileHandle)
-  NS_INTERFACE_MAP_ENTRY(nsIIDBFileHandle)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(IDBFileHandle)
-NS_INTERFACE_MAP_END_INHERITING(FileHandle)
-
-NS_IMPL_ADDREF_INHERITED(IDBFileHandle, FileHandle)
-NS_IMPL_RELEASE_INHERITED(IDBFileHandle, FileHandle)
-
-DOMCI_DATA(IDBFileHandle, IDBFileHandle)
-
-NS_IMETHODIMP
-IDBFileHandle::GetDatabase(nsIIDBDatabase** aDatabase)
+IDBDatabase*
+IDBFileHandle::Database()
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  nsCOMPtr<nsIIDBDatabase> database = do_QueryInterface(mFileStorage);
-  NS_ASSERTION(database, "This should always succeed!");
+  IDBDatabase* database = static_cast<IDBDatabase*>(mFileStorage.get());
+  MOZ_ASSERT(database);
 
-  database.forget(aDatabase);
-  return NS_OK;
+  return database;
 }

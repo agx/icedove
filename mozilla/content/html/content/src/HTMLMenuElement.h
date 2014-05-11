@@ -14,9 +14,9 @@
 namespace mozilla {
 namespace dom {
 
-class HTMLMenuElement : public nsGenericHTMLElement,
-                        public nsIDOMHTMLMenuElement,
-                        public nsIHTMLMenu
+class HTMLMenuElement MOZ_FINAL : public nsGenericHTMLElement,
+                                  public nsIDOMHTMLMenuElement,
+                                  public nsIHTMLMenu
 {
 public:
   HTMLMenuElement(already_AddRefed<nsINodeInfo> aNodeInfo);
@@ -26,15 +26,6 @@ public:
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLMenuElement
   NS_DECL_NSIDOMHTMLMENUELEMENT
@@ -48,8 +39,6 @@ public:
                                 nsAttrValue& aResult) MOZ_OVERRIDE;
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const MOZ_OVERRIDE;
-
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
   uint8_t GetType() const { return mType; }
 

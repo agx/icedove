@@ -10,12 +10,25 @@ dnl The necessary comma after the tuple can't be put here because it
 dnl can mess around with things like:
 dnl    AC_SOMETHING(foo,AC_SUBST(),bar)
 define([AC_SUBST],
+[ifdef([AC_SUBST_SET_$1], [m4_fatal([Cannot use AC_SUBST and AC_SUBST_SET on the same variable ($1)])],
 [ifdef([AC_SUBST_$1], ,
 [define([AC_SUBST_$1], )dnl
 AC_DIVERT_PUSH(MOZ_DIVERSION_SUBST)dnl
     (''' $1 ''', r''' [$]$1 ''')
 AC_DIVERT_POP()dnl
-])])
+])])])
+
+dnl Like AC_SUBST, but makes the value available as a set in python,
+dnl with values got from the value of the environment variable, split on
+dnl whitespaces.
+define([AC_SUBST_SET],
+[ifdef([AC_SUBST_$1], [m4_fatal([Cannot use AC_SUBST and AC_SUBST_SET on the same variable ($1)])],
+[ifdef([AC_SUBST_SET_$1], ,
+[define([AC_SUBST_SET_$1], )dnl
+AC_DIVERT_PUSH(MOZ_DIVERSION_SUBST)dnl
+    (''' $1 ''', set(r''' [$]$1 '''.split()))
+AC_DIVERT_POP()dnl
+])])])
 
 dnl Wrap AC_DEFINE to store values in a format suitable for python.
 dnl autoconf's AC_DEFINE still needs to be used to fill confdefs.h,
@@ -42,7 +55,7 @@ ifelse($#, 2, _MOZ_AC_DEFINE_UNQUOTED($1, $2), $#, 3, _MOZ_AC_DEFINE_UNQUOTED($1
 ])
 
 dnl Replace AC_OUTPUT to create and call a python config.status
-define([AC_OUTPUT],
+define([_MOZ_AC_OUTPUT],
 [dnl Top source directory in Windows format (as opposed to msys format).
 WIN_TOP_SRC=
 encoding=utf-8
@@ -67,7 +80,6 @@ test "x$prefix" = xNONE && prefix=$ac_default_prefix
 test "x$exec_prefix" = xNONE && exec_prefix='${prefix}'
 
 trap 'rm -f $CONFIG_STATUS conftest*; exit 1' 1 2 15
-
 : ${CONFIG_STATUS=./config.status}
 
 dnl We're going to need [ ] for python syntax.
@@ -81,6 +93,7 @@ cat > $CONFIG_STATUS <<EOF
 # coding=$encoding
 
 import os
+import types
 dnl topsrcdir is the top source directory in native form, as opposed to a
 dnl form suitable for make.
 topsrcdir = '''${WIN_TOP_SRC:-$srcdir}'''
@@ -104,7 +117,7 @@ rm confdefs.pytmp confdefs.h
 cat >> $CONFIG_STATUS <<\EOF
 ] ]
 
-substs = [(name[1:-1], value[1:-1]) for name, value in [
+substs = [(name[1:-1], value[1:-1] if isinstance(value, types.StringTypes) else value) for name, value in [
 EOF
 
 dnl The MOZ_DIVERSION_SUBST output diversion contains AC_SUBSTs, in the
@@ -122,33 +135,6 @@ done
 cat >> $CONFIG_STATUS <<\EOF
 ] ]
 
-dnl List of files to apply AC_SUBSTs to. This is the list of files given
-dnl as an argument to AC_OUTPUT ($1)
-files = [
-EOF
-
-for out in $1; do
-  echo "    '$out'," >> $CONFIG_STATUS
-done
-
-cat >> $CONFIG_STATUS <<\EOF
-]
-
-dnl List of header files to apply AC_DEFINEs to. This is stored in the
-dnl AC_LIST_HEADER m4 macro by AC_CONFIG_HEADER.
-headers = [
-EOF
-
-ifdef(<<<AC_LIST_HEADER>>>, <<<
-HEADERS="AC_LIST_HEADER"
-for header in $HEADERS; do
-  echo "    '$header'," >> $CONFIG_STATUS
-done
->>>)dnl
-
-cat >> $CONFIG_STATUS <<\EOF
-]
-
 dnl List of AC_DEFINEs that aren't to be exposed in ALLDEFINES
 non_global_defines = [
 EOF
@@ -162,7 +148,7 @@ fi
 cat >> $CONFIG_STATUS <<EOF
 ]
 
-__all__ = ['topobjdir', 'topsrcdir', 'defines', 'non_global_defines', 'substs', 'files', 'headers']
+__all__ = ['topobjdir', 'topsrcdir', 'defines', 'non_global_defines', 'substs']
 
 dnl Do the actual work
 if __name__ == '__main__':
@@ -177,5 +163,24 @@ changequote([, ])
 chmod +x $CONFIG_STATUS
 rm -fr confdefs* $ac_clean_files
 dnl Execute config.status, unless --no-create was passed to configure.
-test "$no_create" = yes || ${PYTHON} $CONFIG_STATUS || exit 1
+if test "$no_create" != yes && ! ${PYTHON} $CONFIG_STATUS; then
+    trap '' EXIT
+    exit 1
+fi
 ])
+
+define([m4_fatal],[
+errprint([$1
+])
+m4exit(1)
+])
+
+define([AC_OUTPUT], [ifelse($#_$1, 1_, [_MOZ_AC_OUTPUT()],
+[m4_fatal([Use CONFIGURE_SUBST_FILES in moz.build files to create substituted files.])]
+)])
+
+define([AC_CONFIG_HEADER],
+[m4_fatal([Use CONFIGURE_DEFINE_FILES in moz.build files to produce header files.])
+])
+
+AC_SUBST([MOZ_PSEUDO_DERECURSE])

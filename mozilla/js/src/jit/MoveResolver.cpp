@@ -4,9 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "MoveResolver.h"
-
-#include "jsscriptinlines.h"
+#include "jit/MoveResolver.h"
 
 using namespace js;
 using namespace js::jit;
@@ -51,7 +49,7 @@ MoveResolver::findBlockingMove(const PendingMove *last)
     }
 
     // No blocking moves found.
-    return NULL;
+    return nullptr;
 }
 
 bool

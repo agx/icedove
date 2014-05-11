@@ -14,14 +14,14 @@ let manifest = { // normal provider
   origin: "https://example.com",
   sidebarURL: "https://example.com/browser/browser/base/content/test/social/social_sidebar.html",
   workerURL: "https://example.com/browser/browser/base/content/test/social/social_worker.js",
-  iconURL: "https://example.com/browser/browser/base/content/test/moz.png"
+  iconURL: "https://example.com/browser/browser/base/content/test/general/moz.png"
 };
 let manifest_bad = { // normal provider
   name: "provider blocked",
   origin: "https://test1.example.com",
   sidebarURL: "https://test1.example.com/browser/browser/base/content/test/social/social_sidebar.html",
   workerURL: "https://test1.example.com/browser/browser/base/content/test/social/social_worker.js",
-  iconURL: "https://test1.example.com/browser/browser/base/content/test/moz.png"
+  iconURL: "https://test1.example.com/browser/browser/base/content/test/general/moz.png"
 };
 
 function test() {
@@ -134,17 +134,19 @@ var tests = {
         let domwindow = aXULWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                                   .getInterface(Ci.nsIDOMWindow);
 
-        domwindow.addEventListener("unload", function _unload() {
-          domwindow.removeEventListener("unload", _unload, false);
-          windowWasClosed = true;
-        }, false);
-        info("dialog opened, waiting for focus");
-        waitForFocus(function() {
+        domwindow.addEventListener("load", function _load() {
+          domwindow.removeEventListener("load", _load, false);
+
+          domwindow.addEventListener("unload", function _unload() {
+            domwindow.removeEventListener("unload", _unload, false);
+            info("blocklist window was closed");
+            windowWasClosed = true;
+          }, false);
+
           is(domwindow.document.location.href, URI_EXTENSION_BLOCKLIST_DIALOG, "dialog opened and focused");
-          executeSoon(function() {
-            domwindow.close();
-          });
-        }, domwindow);
+          domwindow.close();
+
+        }, false);
       },
       onCloseWindow: function(aXULWindow) { },
       onWindowTitleChange: function(aXULWindow, aNewTitle) { }
@@ -155,14 +157,15 @@ var tests = {
     setManifestPref("social.manifest.blocked", manifest_bad);
     try {
       SocialService.addProvider(manifest_bad, function(provider) {
-        // the act of blocking should cause a 'provider-removed' notification
+        // the act of blocking should cause a 'provider-disabled' notification
         // from SocialService.
-        SocialService.registerProviderListener(function providerListener(topic) {
-          if (topic != "provider-removed")
+        SocialService.registerProviderListener(function providerListener(topic, origin, providers) {
+          if (topic != "provider-disabled")
             return;
           SocialService.unregisterProviderListener(providerListener);
+          is(origin, provider.origin, "provider disabled");
           SocialService.getProvider(provider.origin, function(p) {
-            ok(p==null, "blocklisted provider removed");
+            ok(p == null, "blocklisted provider disabled");
             Services.prefs.clearUserPref("social.manifest.blocked");
             resetBlocklist(finish);
           });

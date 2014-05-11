@@ -4,8 +4,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'content'
-
 EXPORTS += [
     'GStreamerDecoder.h',
     'GStreamerFormatHelper.h',
@@ -13,13 +11,19 @@ EXPORTS += [
     'GStreamerReader.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'GStreamerDecoder.cpp',
     'GStreamerFormatHelper.cpp',
-    'GStreamerReader.cpp',
-    'GStreamerMozVideoBuffer.cpp',
     'GStreamerLoader.cpp',
+    'GStreamerMozVideoBuffer.cpp',
+    'GStreamerReader.cpp',
 ]
 
-LIBRARY_NAME = 'gkcongstreamer_s'
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'gklayout'
+LOCAL_INCLUDES += [
+    '/content/base/src',
+    '/content/html/content/src',
+]
 

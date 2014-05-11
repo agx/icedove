@@ -11,7 +11,7 @@
 #include "nsIServiceManager.h"
 #include "nsIConsoleService.h"
 #include "nsILDAPURL.h"
-#include "nsCRT.h"
+#include "nsMemory.h"
 #include "nsILDAPErrors.h"
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
@@ -167,7 +167,7 @@ bool nsLDAPServiceEntry::DeleteEntry()
 
 // Here begins the implementation for nsLDAPService
 // 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsLDAPService,
+NS_IMPL_ISUPPORTS2(nsLDAPService,
                               nsILDAPService,
                               nsILDAPMessageListener)
 
@@ -185,13 +185,10 @@ nsLDAPService::~nsLDAPService()
 {
 }
 
-// Initializer, create some internal hash tables etc.
+// Initializer
 //
 nsresult nsLDAPService::Init()
 {
-    mServers.Init();
-    mConnections.Init();
-
     return NS_OK;
 }
 
@@ -902,13 +899,15 @@ NS_IMETHODIMP nsLDAPService::ParseDn(const char *aDn,
             ldap_value_free(rdnComponents);
             return NS_ERROR_UNEXPECTED;
         }
-        if (!(attrNameArray[index] = nsCRT::strndup(*component, len))) {
+        if (!(attrNameArray[index] = (char*)NS_Alloc(len + 1))) {
             NS_ERROR("nsLDAPService::ParseDn: out of memory ");
             ldap_value_free(dnComponents);
             ldap_value_free(rdnComponents);
             NS_FREE_XPCOM_ALLOCATED_POINTER_ARRAY(index, attrNameArray);
             return NS_ERROR_OUT_OF_MEMORY;
         }
+        memcpy(attrNameArray[index], *component, len);
+        *(attrNameArray[index] + len) = '\0';
         ++index;
     }
 

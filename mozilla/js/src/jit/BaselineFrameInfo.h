@@ -9,18 +9,17 @@
 
 #ifdef JS_ION
 
-#include "jscntxt.h"
-#include "jscompartment.h"
+#include "mozilla/Alignment.h"
 
-#include "BaselineJIT.h"
-#include "BaselineFrame.h"
-#include "BaselineRegisters.h"
-#include "BytecodeAnalysis.h"
-#include "IonMacroAssembler.h"
-#include "FixedList.h"
+#include "jit/BaselineFrame.h"
+#include "jit/BaselineRegisters.h"
+#include "jit/FixedList.h"
+#include "jit/IonMacroAssembler.h"
 
 namespace js {
 namespace jit {
+
+struct BytecodeInfo;
 
 // FrameInfo overview.
 //
@@ -161,8 +160,6 @@ class StackValue
 
 enum StackAdjustment { AdjustStack, DontAdjustStack };
 
-class BaselineCompilerShared;
-
 class FrameInfo
 {
     RootedScript script;
@@ -179,7 +176,7 @@ class FrameInfo
         spIndex(0)
     { }
 
-    bool init();
+    bool init(TempAllocator &alloc);
 
     uint32_t nlocals() const {
         return script->nfixed;

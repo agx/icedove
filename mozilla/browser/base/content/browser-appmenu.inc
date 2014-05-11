@@ -6,6 +6,7 @@
 <menupopup id="appmenu-popup"
            onpopupshowing="if (event.target == this) {
                              updateEditUIVisibility();
+                             updateSwitchToMetroVisibility();
 #ifdef MOZ_SERVICES_SYNC
                              gSyncUI.updateUI();
 #endif
@@ -147,8 +148,10 @@
           <menuseparator id="appmenu_devtools_separator"/>
           <menuitem id="appmenu_devToolbar"
                     observes="devtoolsMenuBroadcaster_DevToolbar"/>
-          <menuitem id="appmenu_chromeDebugger"
-                    observes="devtoolsMenuBroadcaster_ChromeDebugger"/>
+          <menuitem id="appmenu_devAppMgr"
+                    observes="devtoolsMenuBroadcaster_DevAppMgr"/>
+          <menuitem id="appmenu_browserToolbox"
+                    observes="devtoolsMenuBroadcaster_BrowserToolbox"/>
           <menuitem id="appmenu_browserConsole"
                     observes="devtoolsMenuBroadcaster_BrowserConsole"/>
           <menuitem id="appmenu_responsiveUI"
@@ -170,7 +173,8 @@
 #include browser-charsetmenu.inc
 #undef ID_PREFIX
 #undef OMIT_ACCESSKEYS
-          <menuitem label="&goOfflineCmd.label;"
+          <menuitem id="appmenu_offlineMode"
+                    label="&goOfflineCmd.label;"
                     type="checkbox"
                     observes="workOfflineMenuitemState"
                     oncommand="BrowserOffline.toggleOfflineStatus();"/>
@@ -198,6 +202,15 @@
                 label="&syncSyncNowItem.label;"
                 observes="sync-syncnow-state"
                 oncommand="gSyncUI.doSync(event);"/>
+#endif
+#ifdef HAVE_SHELL_SERVICE
+#ifdef XP_WIN
+#ifdef MOZ_METRO
+      <menuitem id="switch-to-metro"
+                label="&switchToMetroCmd2.label;"
+                oncommand="SwitchToMetro()"/>
+#endif
+#endif
 #endif
       <menuitem id="appmenu-quit"
                 class="menuitem-iconic"
@@ -370,6 +383,10 @@
             <menuitem id="appmenu_gettingStarted"
                       label="&appMenuGettingStarted.label;"
                       oncommand="gBrowser.loadOneTab('https://www.mozilla.org/firefox/central/', {inBackground: false});"
+                      onclick="checkForMiddleClick(this, event);"/>
+            <menuitem id="appmenu_keyboardShortcuts"
+                      label="&helpKeyboardShortcuts.label;"
+                      oncommand="openHelpLink('keyboard-shortcuts')"
                       onclick="checkForMiddleClick(this, event);"/>
 #ifdef MOZ_SERVICES_HEALTHREPORT
             <menuitem id="appmenu_healthReport"

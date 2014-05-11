@@ -9,6 +9,7 @@
  *  synthesizeMouseAtCenter
  *  synthesizeWheel
  *  synthesizeKey
+ *  synthesizeNativeKey
  *  synthesizeMouseExpectEvent
  *  synthesizeKeyExpectEvent
  *
@@ -44,7 +45,7 @@ function getElement(id) {
 this.$ = this.getElement;
 
 function sendMouseEvent(aEvent, aTarget, aWindow) {
-  if (['click', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout'].indexOf(aEvent.type) == -1) {
+  if (['click', 'contextmenu', 'dblclick', 'mousedown', 'mouseup', 'mouseover', 'mouseout'].indexOf(aEvent.type) == -1) {
     throw new Error("sendMouseEvent doesn't know about event type '" + aEvent.type + "'");
   }
 
@@ -74,7 +75,7 @@ function sendMouseEvent(aEvent, aTarget, aWindow) {
   var altKeyArg        = aEvent.altKey        || false;
   var shiftKeyArg      = aEvent.shiftKey      || false;
   var metaKeyArg       = aEvent.metaKey       || false;
-  var buttonArg        = aEvent.button        || 0;
+  var buttonArg        = aEvent.button        || (aEvent.type == 'contextmenu' ? 2 : 0);
   var relatedTargetArg = aEvent.relatedTarget || null;
 
   event.initMouseEvent(typeArg, canBubbleArg, cancelableArg, viewArg, detailArg,
@@ -82,7 +83,7 @@ function sendMouseEvent(aEvent, aTarget, aWindow) {
                        ctrlKeyArg, altKeyArg, shiftKeyArg, metaKeyArg,
                        buttonArg, relatedTargetArg);
 
-  SpecialPowers.dispatchEvent(aWindow, aTarget, event);
+  return SpecialPowers.dispatchEvent(aWindow, aTarget, event);
 }
 
 /**
@@ -449,6 +450,10 @@ function _computeKeyCodeFromChar(aChar)
     case '?':
     case '/':
       return nsIDOMKeyEvent.DOM_VK_SLASH;
+    case '\n':
+      return nsIDOMKeyEvent.DOM_VK_RETURN;
+    case ' ':
+      return nsIDOMKeyEvent.DOM_VK_SPACE;
     default:
       return 0;
   }
@@ -550,10 +555,7 @@ function synthesizeKey(aKey, aEvent, aWindow)
       // Send keydown + (optional) keypress + keyup events.
       var keyDownDefaultHappened =
         utils.sendKeyEvent("keydown", keyCode, 0, modifiers, flags);
-      if (isKeypressFiredKey(keyCode)) {
-        if (!keyDownDefaultHappened) {
-          flags |= utils.KEY_FLAG_PREVENT_DEFAULT;
-        }
+      if (isKeypressFiredKey(keyCode) && keyDownDefaultHappened) {
         utils.sendKeyEvent("keypress", keyCode, charCode, modifiers, flags);
       }
       utils.sendKeyEvent("keyup", keyCode, 0, modifiers, flags);
@@ -565,6 +567,114 @@ function synthesizeKey(aKey, aEvent, aWindow)
       utils.sendKeyEvent(aEvent.type, keyCode, 0, modifiers, flags);
     }
   }
+}
+
+function _parseNativeModifiers(aModifiers)
+{
+  var modifiers;
+  if (aModifiers.capsLockKey) {
+    modifiers |= 0x00000001;
+  }
+  if (aModifiers.numLockKey) {
+    modifiers |= 0x00000002;
+  }
+  if (aModifiers.shiftKey) {
+    modifiers |= 0x00000100;
+  }
+  if (aModifiers.shiftRightKey) {
+    modifiers |= 0x00000200;
+  }
+  if (aModifiers.ctrlKey) {
+    modifiers |= 0x00000400;
+  }
+  if (aModifiers.ctrlRightKey) {
+    modifiers |= 0x00000800;
+  }
+  if (aModifiers.altKey) {
+    modifiers |= 0x00001000;
+  }
+  if (aModifiers.altRightKey) {
+    modifiers |= 0x00002000;
+  }
+  if (aModifiers.metaKey) {
+    modifiers |= 0x00004000;
+  }
+  if (aModifiers.metaRightKey) {
+    modifiers |= 0x00008000;
+  }
+  if (aModifiers.helpKey) {
+    modifiers |= 0x00010000;
+  }
+  if (aModifiers.fnKey) {
+    modifiers |= 0x00100000;
+  }
+  if (aModifiers.numericKeyPadKey) {
+    modifiers |= 0x01000000;
+  }
+
+  if (aModifiers.accelKey) {
+    modifiers |=
+      (navigator.platform.indexOf("Mac") == 0) ? 0x00004000 : 0x00000400;
+  }
+  if (aModifiers.accelRightKey) {
+    modifiers |=
+      (navigator.platform.indexOf("Mac") == 0) ? 0x00008000 : 0x00000800;
+  }
+  return modifiers;
+}
+
+const KEYBOARD_LAYOUT_EN_US = 0;
+
+/**
+ * synthesizeNativeKey() dispatches native key event on active window.
+ * This is implemented only on Windows and Mac.
+ *
+ * @param aKeyboardLayout       One of KEYBOARD_LAYOUT_* defined above.
+ * @param aNativeKeyCode        A native keycode value defined in
+ *                              NativeKeyCodes.js.
+ * @param aModifiers            Modifier keys.  If no modifire key is pressed,
+ *                              this must be {}.  Otherwise, one or more items
+ *                              referred in _parseNativeModifiers() must be
+ *                              true.
+ * @param aChars                Specify characters which should be generated
+ *                              by the key event.
+ * @param aUnmodifiedChars      Specify characters of unmodified (except Shift)
+ *                              aChar value.
+ * @return                      True if this function succeed dispatching
+ *                              native key event.  Otherwise, false.
+ */
+
+function synthesizeNativeKey(aKeyboardLayout, aNativeKeyCode, aModifiers,
+                             aChars, aUnmodifiedChars)
+{
+  var utils = _getDOMWindowUtils(window);
+  if (!utils) {
+    return false;
+  }
+  var nativeKeyboardLayout;
+  if (navigator.platform.indexOf("Mac") == 0) {
+    switch (aKeyboardLayout) {
+      case KEYBOARD_LAYOUT_EN_US:
+        nativeKeyboardLayout = 0;
+        break;
+      default:
+        return false;
+    }
+  } else if (navigator.platform.indexOf("Win") == 0) {
+    switch (aKeyboardLayout) {
+      case KEYBOARD_LAYOUT_EN_US:
+        nativeKeyboardLayout = 0x409;
+        break;
+      default:
+        return false;
+    }
+  } else {
+    return false;
+  }
+  utils.sendNativeKeyEvent(nativeKeyboardLayout, aNativeKeyCode,
+                           _parseNativeModifiers(aModifiers),
+                           aChars, aUnmodifiedChars);
+  return true;
 }
 
 var _gSeenEvent = false;
@@ -685,7 +795,7 @@ function _getDOMWindowUtils(aWindow)
                                getInterface(_EU_Ci.nsIDOMWindowUtils);
 }
 
-// Must be synchronized with nsIDOMWindowUtils.
+// Must be synchronized with nsICompositionStringSynthesizer.
 const COMPOSITION_ATTR_RAWINPUT              = 0x02;
 const COMPOSITION_ATTR_SELECTEDRAWTEXT       = 0x03;
 const COMPOSITION_ATTR_CONVERTEDTEXT         = 0x04;
@@ -740,7 +850,7 @@ function synthesizeComposition(aEvent, aWindow)
  *                 When it's composing, set the each clauses' length to the
  *                 |composition.clauses[n].length|.  The sum of the all length
  *                 values must be same as the length of |composition.string|.
- *                 Set nsIDOMWindowUtils.COMPOSITION_ATTR_* to the
+ *                 Set nsICompositionStringSynthesizer.ATTR_* to the
  *                 |composition.clauses[n].attr|.
  *
  *                 When it's not composing, set 0 to the
@@ -767,33 +877,20 @@ function synthesizeText(aEvent, aWindow)
     return;
   }
 
-  var firstClauseLength = aEvent.composition.clauses[0].length;
-  var firstClauseAttr   = aEvent.composition.clauses[0].attr;
-  var secondClauseLength = 0;
-  var secondClauseAttr = 0;
-  var thirdClauseLength = 0;
-  var thirdClauseAttr = 0;
-  if (aEvent.composition.clauses[1]) {
-    secondClauseLength = aEvent.composition.clauses[1].length;
-    secondClauseAttr   = aEvent.composition.clauses[1].attr;
-    if (aEvent.composition.clauses[2]) {
-      thirdClauseLength = aEvent.composition.clauses[2].length;
-      thirdClauseAttr   = aEvent.composition.clauses[2].attr;
+  var compositionString = utils.createCompositionStringSynthesizer();
+  compositionString.setString(aEvent.composition.string);
+  if (aEvent.composition.clauses[0].length) {
+    for (var i = 0; i < aEvent.composition.clauses.length; i++) {
+      compositionString.appendClause(aEvent.composition.clauses[i].length,
+                                     aEvent.composition.clauses[i].attr);
     }
   }
 
-  var caretStart = -1;
-  var caretLength = 0;
   if (aEvent.caret) {
-    caretStart = aEvent.caret.start;
-    caretLength = aEvent.caret.length;
+    compositionString.setCaret(aEvent.caret.start, aEvent.caret.length);
   }
 
-  utils.sendTextEvent(aEvent.composition.string,
-                      firstClauseLength, firstClauseAttr,
-                      secondClauseLength, secondClauseAttr,
-                      thirdClauseLength, thirdClauseAttr,
-                      caretStart, caretLength);
+  compositionString.dispatchEvent();
 }
 
 /**
@@ -811,4 +908,25 @@ function synthesizeQuerySelectedText(aWindow)
   }
 
   return utils.sendQueryContentEvent(utils.QUERY_SELECTED_TEXT, 0, 0, 0, 0);
+}
+
+/**
+ * Synthesize a selection set event.
+ *
+ * @param aOffset  The character offset.  0 means the first character in the
+ *                 selection root.
+ * @param aLength  The length of the text.  If the length is too long,
+ *                 the extra length is ignored.
+ * @param aReverse If true, the selection is from |aOffset + aLength| to
+ *                 |aOffset|.  Otherwise, from |aOffset| to |aOffset + aLength|.
+ * @param aWindow  Optional (If null, current |window| will be used)
+ * @return         True, if succeeded.  Otherwise false.
+ */
+function synthesizeSelectionSet(aOffset, aLength, aReverse, aWindow)
+{
+  var utils = _getDOMWindowUtils(aWindow);
+  if (!utils) {
+    return false;
+  }
+  return utils.sendSelectionSetEvent(aOffset, aLength, aReverse);
 }

@@ -6,28 +6,14 @@
 
 TEST_DIRS += ['mochitest']
 
-XPIDL_SOURCES += [
-    'nsIAsyncScrollEventDetail.idl',
-    'nsIOpenWindowEventDetail.idl',
-]
-
 XPIDL_MODULE = 'dom_browserelement'
-
-MODULE = 'dom'
-
-EXPORTS += [
-    'nsAsyncScrollEventDetail.h',
-    'nsOpenWindowEventDetail.h',
-]
 
 EXPORTS.mozilla += [
     'BrowserElementParent.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'BrowserElementParent.cpp',
-    'nsAsyncScrollEventDetail.cpp',
-    'nsOpenWindowEventDetail.cpp',
 ]
 
 EXTRA_COMPONENTS += [
@@ -39,3 +25,22 @@ EXTRA_JS_MODULES += [
     'BrowserElementParent.jsm',
     'BrowserElementPromptService.jsm',
 ]
+
+FAIL_ON_WARNINGS = True
+
+LOCAL_INCLUDES += [
+    '../bluetooth',
+    '/content/html/content/src',
+]
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
+
+LOCAL_INCLUDES += [
+    '/content/base/src',
+    '/dom/',
+    '/dom/base',
+    '/dom/ipc',
+]
+

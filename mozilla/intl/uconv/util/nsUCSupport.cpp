@@ -3,9 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "pratom.h"
-#include "nsAlgorithm.h"
-#include "nsIComponentManager.h"
 #include "nsUCSupport.h"
 #include "nsUnicodeDecodeHelper.h"
 #include "nsUnicodeEncodeHelper.h"
@@ -31,11 +28,11 @@ nsBasicDecoderSupport::~nsBasicDecoderSupport()
 // Interface nsISupports [implementation]
 
 #ifdef DEBUG
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsBasicDecoderSupport,
-                              nsIUnicodeDecoder,
-                              nsIBasicDecoder)
+NS_IMPL_ISUPPORTS2(nsBasicDecoderSupport,
+                   nsIUnicodeDecoder,
+                   nsIBasicDecoder)
 #else
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsBasicDecoderSupport, nsIUnicodeDecoder)
+NS_IMPL_ISUPPORTS1(nsBasicDecoderSupport, nsIUnicodeDecoder)
 #endif
 
 //----------------------------------------------------------------------

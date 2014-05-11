@@ -11,9 +11,12 @@ import copy
 import errno
 import hashlib
 import os
+import stat
 import sys
+import time
 
 from StringIO import StringIO
+
 
 if sys.version_info[0] == 3:
     str_type = str
@@ -115,7 +118,7 @@ class FileAvoidWrite(StringIO):
     """
     def __init__(self, filename):
         StringIO.__init__(self)
-        self.filename = filename
+        self.name = filename
 
     def close(self):
         """Stop accepting writes, compare file contents, and rewrite if needed.
@@ -128,7 +131,7 @@ class FileAvoidWrite(StringIO):
         StringIO.close(self)
         existed = False
         try:
-            existing = open(self.filename, 'rU')
+            existing = open(self.name, 'rU')
             existed = True
         except IOError:
             pass
@@ -141,8 +144,8 @@ class FileAvoidWrite(StringIO):
             finally:
                 existing.close()
 
-        ensureParentDir(self.filename)
-        with open(self.filename, 'w') as file:
+        ensureParentDir(self.name)
+        with open(self.name, 'w') as file:
             file.write(buf)
 
         return existed, True
@@ -175,12 +178,8 @@ def resolve_target_to_make(topobjdir, target):
     Makefile containing a different Makefile, and an appropriate
     target.
     '''
-    if os.path.isabs(target):
-        print('Absolute paths for make targets are not allowed.')
-        return (None, None)
 
-    target = target.replace(os.sep, '/')
-
+    target = target.replace(os.sep, '/').lstrip('/')
     abs_target = os.path.join(topobjdir, target)
 
     # For directories, run |make -C dir|. If the directory does not
@@ -253,7 +252,7 @@ class StrictOrderingOnAppendList(list):
     """
     @staticmethod
     def ensure_sorted(l):
-        srtd = sorted(l)
+        srtd = sorted(l, key=lambda x: x.lower())
 
         if srtd != l:
             raise UnsortedError(srtd, l)
@@ -301,6 +300,74 @@ class StrictOrderingOnAppendList(list):
 
 class MozbuildDeletionError(Exception):
     pass
+
+
+def StrictOrderingOnAppendListWithFlagsFactory(flags):
+    """Returns a StrictOrderingOnAppendList-like object, with optional
+    flags on each item.
+
+    The flags are defined in the dict given as argument, where keys are
+    the flag names, and values the type used for the value of that flag.
+
+    Example:
+        FooList = StrictOrderingOnAppendListWithFlagsFactory({
+            'foo': bool, 'bar': unicode
+        })
+        foo = FooList(['a', 'b', 'c'])
+        foo['a'].foo = True
+        foo['b'].bar = 'bar'
+    """
+
+    assert isinstance(flags, dict)
+    assert all(isinstance(v, type) for v in flags.values())
+
+    class Flags(object):
+        __slots__ = flags.keys()
+        _flags = flags
+
+        def __getattr__(self, name):
+            if name not in self.__slots__:
+                raise AttributeError("'%s' object has no attribute '%s'" %
+                                     (self.__class__.__name__, name))
+            try:
+                return object.__getattr__(self, name)
+            except AttributeError:
+                value = self._flags[name]()
+                self.__setattr__(name, value)
+                return value
+
+        def __setattr__(self, name, value):
+            if name not in self.__slots__:
+                raise AttributeError("'%s' object has no attribute '%s'" %
+                                     (self.__class__.__name__, name))
+            if not isinstance(value, self._flags[name]):
+                raise TypeError("'%s' attribute of class '%s' must be '%s'" %
+                                (name, self.__class__.__name__,
+                                 self._flags[name].__name__))
+            return object.__setattr__(self, name, value)
+
+        def __delattr__(self, name):
+            raise MozbuildDeletionError('Unable to delete attributes for this object')
+
+    class StrictOrderingOnAppendListWithFlags(StrictOrderingOnAppendList):
+        def __init__(self, iterable=[]):
+            StrictOrderingOnAppendList.__init__(self, iterable)
+            self._flags_type = Flags
+            self._flags = dict()
+
+        def __getitem__(self, name):
+            if name not in self._flags:
+                if name not in self:
+                    raise KeyError("'%s'" % name)
+                self._flags[name] = self._flags_type()
+            return self._flags[name]
+
+        def __setitem__(self, name, value):
+            raise TypeError("'%s' object does not support item assignment" %
+                            self.__class__.__name__)
+
+    return StrictOrderingOnAppendListWithFlags
+
 
 class HierarchicalStringList(object):
     """A hierarchy of lists of strings.
@@ -374,3 +441,135 @@ class HierarchicalStringList(object):
             if not isinstance(v, str_type):
                 raise ValueError(
                     'Expected a list of strings, not an element of %s' % type(v))
+
+
+class LockFile(object):
+    """LockFile is used by the lock_file method to hold the lock.
+
+    This object should not be used directly, but only through
+    the lock_file method below.
+    """
+
+    def __init__(self, lockfile):
+        self.lockfile = lockfile
+
+    def __del__(self):
+        while True:
+            try:
+                os.remove(self.lockfile)
+                break
+            except OSError as e:
+                if e.errno == errno.EACCES:
+                    # Another process probably has the file open, we'll retry.
+                    # Just a short sleep since we want to drop the lock ASAP
+                    # (but we need to let some other process close the file
+                    # first).
+                    time.sleep(0.1)
+            else:
+                # Re-raise unknown errors
+                raise
+
+
+def lock_file(lockfile, max_wait = 600):
+    """Create and hold a lockfile of the given name, with the given timeout.
+
+    To release the lock, delete the returned object.
+    """
+
+    # FUTURE This function and object could be written as a context manager.
+
+    while True:
+        try:
+            fd = os.open(lockfile, os.O_EXCL | os.O_RDWR | os.O_CREAT)
+            # We created the lockfile, so we're the owner
+            break
+        except OSError as e:
+            if (e.errno == errno.EEXIST or
+                (sys.platform == "win32" and e.errno == errno.EACCES)):
+                pass
+            else:
+                # Should not occur
+                raise
+
+        try:
+            # The lock file exists, try to stat it to get its age
+            # and read its contents to report the owner PID
+            f = open(lockfile, 'r')
+            s = os.stat(lockfile)
+        except EnvironmentError as e:
+            if e.errno == errno.ENOENT or e.errno == errno.EACCES:
+            # We didn't create the lockfile, so it did exist, but it's
+            # gone now. Just try again
+                continue
+
+            raise Exception('{0} exists but stat() failed: {1}'.format(
+                lockfile, e.strerror))
+
+        # We didn't create the lockfile and it's still there, check
+        # its age
+        now = int(time.time())
+        if now - s[stat.ST_MTIME] > max_wait:
+            pid = f.readline().rstrip()
+            raise Exception('{0} has been locked for more than '
+                '{1} seconds (PID {2})'.format(lockfile, max_wait, pid))
+
+        # It's not been locked too long, wait a while and retry
+        f.close()
+        time.sleep(1)
+
+    # if we get here. we have the lockfile. Convert the os.open file
+    # descriptor into a Python file object and record our PID in it
+    f = os.fdopen(fd, 'w')
+    f.write('{0}\n'.format(os.getpid()))
+    f.close()
+
+    return LockFile(lockfile)
+
+
+class PushbackIter(object):
+    '''Utility iterator that can deal with pushed back elements.
+
+    This behaves like a regular iterable, just that you can call
+    iter.pushback(item) to get the given item as next item in the
+    iteration.
+    '''
+    def __init__(self, iterable):
+        self.it = iter(iterable)
+        self.pushed_back = []
+
+    def __iter__(self):
+        return self
+
+    def __nonzero__(self):
+        if self.pushed_back:
+            return True
+
+        try:
+            self.pushed_back.insert(0, self.it.next())
+        except StopIteration:
+            return False
+        else:
+            return True
+
+    def next(self):
+        if self.pushed_back:
+            return self.pushed_back.pop()
+        return self.it.next()
+
+    def pushback(self, item):
+        self.pushed_back.append(item)
+
+
+def shell_quote(s):
+    '''Given a string, returns a version enclosed with single quotes for use
+    in a shell command line.
+
+    As a special case, if given an int, returns a string containing the int,
+    not enclosed in quotes.
+    '''
+    if type(s) == int:
+        return '%d' % s
+    # Single quoted strings can contain any characters unescaped except the
+    # single quote itself, which can't even be escaped, so the string needs to
+    # be closed, an escaped single quote added, and reopened.
+    return "'%s'" % s.replace("'", "'\\''")

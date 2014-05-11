@@ -70,7 +70,6 @@ const SEC_ASN1Template SECKEY_PQGParamsTemplate[] = {
 
 
 static NS_DEFINE_IID(kIDOMHTMLSelectElementIID, NS_IDOMHTMLSELECTELEMENT_IID);
-static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
 
 static PQGParams *
 decode_pqg_params(char *aStr)
@@ -258,7 +257,7 @@ decode_ec_params(const char *curve)
     return ecparams;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsKeygenFormProcessor, nsIFormProcessor)
+NS_IMPL_ISUPPORTS1(nsKeygenFormProcessor, nsIFormProcessor)
 
 nsKeygenFormProcessor::nsKeygenFormProcessor()
 { 
@@ -288,6 +287,8 @@ nsKeygenFormProcessor::Create(nsISupports* aOuter, const nsIID& aIID, void* *aRe
 nsresult
 nsKeygenFormProcessor::Init()
 {
+  static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+
   nsresult rv;
 
   nsCOMPtr<nsINSSComponent> nssComponent;
@@ -724,7 +725,7 @@ nsKeygenFormProcessor::GetPublicKey(nsAString& aValue, nsAString& aChallenge,
     }
 
     CopyASCIItoUTF16(keystring, aOutPublicKey);
-    nsCRT::free(keystring);
+    free(keystring);
 
     rv = NS_OK;
 loser:

@@ -15,25 +15,18 @@
 #include "nsIURIFixup.h"
 #include "nsIURL.h"
 #include "nsIJARURI.h"
-#include "nsIIOService.h"
-#include "nsIServiceManager.h"
 #include "nsNetUtil.h"
 #include "nsCOMPtr.h"
 #include "nsEscape.h"
 #include "nsIDOMWindow.h"
-#include "nsIDOMDocument.h"
 #include "nsIDocument.h"
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
-#include "nsXPIDLString.h"
 #include "nsError.h"
 #include "nsDOMClassInfoID.h"
-#include "nsCRT.h"
-#include "nsIProtocolHandler.h"
 #include "nsReadableUtils.h"
 #include "nsITextToSubURI.h"
 #include "nsJSUtils.h"
-#include "jsfriendapi.h"
 #include "nsContentUtils.h"
 #include "mozilla/Likely.h"
 #include "nsCycleCollectionParticipant.h"
@@ -43,21 +36,13 @@ GetDocumentCharacterSetForURI(const nsAString& aHref, nsACString& aCharset)
 {
   aCharset.Truncate();
 
-  nsresult rv;
-
   JSContext *cx = nsContentUtils::GetCurrentJSContext();
   if (cx) {
-    nsCOMPtr<nsIDOMWindow> window =
+    nsCOMPtr<nsPIDOMWindow> window =
       do_QueryInterface(nsJSUtils::GetDynamicScriptGlobal(cx));
     NS_ENSURE_TRUE(window, NS_ERROR_FAILURE);
 
-    nsCOMPtr<nsIDOMDocument> domDoc;
-    rv = window->GetDocument(getter_AddRefs(domDoc));
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    nsCOMPtr<nsIDocument> doc(do_QueryInterface(domDoc));
-
-    if (doc) {
+    if (nsIDocument* doc = window->GetDoc()) {
       aCharset = doc->GetDocumentCharacterSet();
     }
   }
@@ -651,7 +636,7 @@ nsLocation::SetPort(const nsAString& aPort)
     const char *buf = portStr.get();
     int32_t port = -1;
 
-    if (buf) {
+    if (!portStr.IsEmpty() && buf) {
       if (*buf == ':') {
         port = atol(buf+1);
       }

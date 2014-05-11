@@ -6,19 +6,20 @@
 
 DIRS += ['faststartupqt']
 
-MODULE = 'widget'
-
 EXPORTS += [
     'nsQtKeyUtils.h',
 ]
 
-CPP_SOURCES += [
+GENERATED_SOURCES += [
     'moc_moziqwidget.cpp',
     'moc_mozqwidget.cpp',
     'moc_nsAppShell.cpp',
-    'mozSwipeGesture.cpp',
+]
+
+SOURCES += [
     'mozqglwidgetwrapper.cpp',
     'mozqwidget.cpp',
+    'mozSwipeGesture.cpp',
     'nsAppShell.cpp',
     'nsBidiKeyboard.cpp',
     'nsClipboard.cpp',
@@ -40,13 +41,48 @@ CPP_SOURCES += [
 ]
 
 if CONFIG['MOZ_ENABLE_CONTENTMANAGER']:
-    CPP_SOURCES += [
-        'moc_nsMFilePicker.cpp',
+    SOURCES += [
         'nsMFilePicker.cpp',
+    ]
+    GENERATED_SOURCES += [
+        'moc_nsMFilePicker.cpp',
     ]
 
 if CONFIG[' MOZ_ENABLE_QTMOBILITY']:
-    CPP_SOURCES += [
-        'moc_mozqorientationsensorfilter.cpp',
+    SOURCES += [
         'mozqorientationsensorfilter.cpp',
     ]
+    GENERATED_SOURCES += [
+        'moc_mozqorientationsensorfilter.cpp',
+    ]
+
+LIBRARY_NAME = 'widget_qt'
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'xul'
+
+LOCAL_INCLUDES += [
+    '../shared',
+    '/widget/qt/faststartupqt',
+    '/widget/shared',
+    '/widget/xpwidgets',
+]
+
+if CONFIG['MOZ_X11']:
+    LOCAL_INCLUDES += [
+        '../shared/x11',
+    ]
+
+#DEFINES['DEBUG_WIDGETS'] = True
+
+if CONFIG['OS_ARCH'] == 'Linux':
+    DEFINES['_BSD_SOURCE'] = True
+
+if CONFIG['OS_ARCH'] == 'SunOS' and not CONFIG['GNU_CC']:
+    # When using Sun's WorkShop compiler, including
+    # /wherever/workshop-5.0/SC5.0/include/CC/std/time.h
+    # causes most of these compiles to fail with:
+    # line 29: Error: Multiple declaration for std::tm.
+    # So, this gets around the problem.
+    DEFINES['_TIME_H'] = 1

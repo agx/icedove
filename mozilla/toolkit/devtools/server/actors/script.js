@@ -7,6 +7,392 @@
 "use strict";
 
 /**
+ * BreakpointStore objects keep track of all breakpoints that get set so that we
+ * can reset them when the same script is introduced to the thread again (such
+ * as after a refresh).
+ */
+function BreakpointStore() {
+  // If we have a whole-line breakpoint set at LINE in URL, then
+  //
+  //   this._wholeLineBreakpoints[URL][LINE]
+  //
+  // is an object
+  //
+  //   { url, line[, actor] }
+  //
+  // where the `actor` property is optional.
+  this._wholeLineBreakpoints = Object.create(null);
+
+  // If we have a breakpoint set at LINE, COLUMN in URL, then
+  //
+  //   this._breakpoints[URL][LINE][COLUMN]
+  //
+  // is an object
+  //
+  //   { url, line[, actor] }
+  //
+  // where the `actor` property is optional.
+  this._breakpoints = Object.create(null);
+}
+
+BreakpointStore.prototype = {
+
+  /**
+   * Add a breakpoint to the breakpoint store.
+   *
+   * @param Object aBreakpoint
+   *        The breakpoint to be added (not copied). It is an object with the
+   *        following properties:
+   *          - url
+   *          - line
+   *          - column (optional; omission implies that the breakpoint is for
+   *            the whole line)
+   *          - actor (optional)
+   */
+  addBreakpoint: function (aBreakpoint) {
+    let { url, line, column } = aBreakpoint;
+
+    if (column != null) {
+      if (!this._breakpoints[url]) {
+        this._breakpoints[url] = [];
+      }
+      if (!this._breakpoints[url][line]) {
+        this._breakpoints[url][line] = [];
+      }
+      this._breakpoints[url][line][column] = aBreakpoint;
+    } else {
+      // Add a breakpoint that breaks on the whole line.
+      if (!this._wholeLineBreakpoints[url]) {
+        this._wholeLineBreakpoints[url] = [];
+      }
+      this._wholeLineBreakpoints[url][line] = aBreakpoint;
+    }
+  },
+
+  /**
+   * Remove a breakpoint from the breakpoint store.
+   *
+   * @param Object aBreakpoint
+   *        The breakpoint to be removed. It is an object with the following
+   *        properties:
+   *          - url
+   *          - line
+   *          - column (optional)
+   */
+  removeBreakpoint: function ({ url, line, column }) {
+    if (column != null) {
+      if (this._breakpoints[url]) {
+        if (this._breakpoints[url][line]) {
+          delete this._breakpoints[url][line][column];
+
+          // If this was the last breakpoint on this line, delete the line from
+          // `this._breakpoints[url]` as well. Otherwise `_iterLines` will yield
+          // this line even though we no longer have breakpoints on
+          // it. Furthermore, we use Object.keys() instead of just checking
+          // `this._breakpoints[url].length` directly, because deleting
+          // properties from sparse arrays doesn't update the `length` property
+          // like adding them does.
+          if (Object.keys(this._breakpoints[url][line]).length === 0) {
+            delete this._breakpoints[url][line];
+          }
+        }
+      }
+    } else {
+      if (this._wholeLineBreakpoints[url]) {
+        delete this._wholeLineBreakpoints[url][line];
+      }
+    }
+  },
+
+  /**
+   * Get a breakpoint from the breakpoint store. Will throw an error if the
+   * breakpoint is not found.
+   *
+   * @param Object aLocation
+   *        The location of the breakpoint you are retrieving. It is an object
+   *        with the following properties:
+   *          - url
+   *          - line
+   *          - column (optional)
+   */
+  getBreakpoint: function (aLocation) {
+    let { url, line, column } = aLocation;
+    dbg_assert(url != null);
+    dbg_assert(line != null);
+
+    var foundBreakpoint = this.hasBreakpoint(aLocation);
+    if (foundBreakpoint == null) {
+      throw new Error("No breakpoint at url = " + url
+          + ", line = " + line
+          + ", column = " + column);
+    }
+
+    return foundBreakpoint;
+  },
+
+  /**
+   * Checks if the breakpoint store has a requested breakpoint.
+   *
+   * @param Object aLocation
+   *        The location of the breakpoint you are retrieving. It is an object
+   *        with the following properties:
+   *          - url
+   *          - line
+   *          - column (optional)
+   * @returns The stored breakpoint if it exists, null otherwise.
+   */
+  hasBreakpoint: function (aLocation) {
+    let { url, line, column } = aLocation;
+    dbg_assert(url != null);
+    dbg_assert(line != null);
+    for (let bp of this.findBreakpoints(aLocation)) {
+      // We will get whole line breakpoints before individual columns, so just
+      // return the first one and if they didn't specify a column then they will
+      // get the whole line breakpoint, and otherwise we will find the correct
+      // one.
+      return bp;
+    }
+
+    return null;
+  },
+
+  /**
+   * Iterate over the breakpoints in this breakpoint store. You can optionally
+   * provide search parameters to filter the set of breakpoints down to those
+   * that match your parameters.
+   *
+   * @param Object aSearchParams
+   *        Optional. An object with the following properties:
+   *          - url
+   *          - line (optional; requires the url property)
+   *          - column (optional; requires the line property)
+   */
+  findBreakpoints: function (aSearchParams={}) {
+    if (aSearchParams.column != null) {
+      dbg_assert(aSearchParams.line != null);
+    }
+    if (aSearchParams.line != null) {
+      dbg_assert(aSearchParams.url != null);
+    }
+
+    for (let url of this._iterUrls(aSearchParams.url)) {
+      for (let line of this._iterLines(url, aSearchParams.line)) {
+        // Always yield whole line breakpoints first. See comment in
+        // |BreakpointStore.prototype.hasBreakpoint|.
+        if (aSearchParams.column == null
+            && this._wholeLineBreakpoints[url]
+            && this._wholeLineBreakpoints[url][line]) {
+          yield this._wholeLineBreakpoints[url][line];
+        }
+        for (let column of this._iterColumns(url, line, aSearchParams.column)) {
+          yield this._breakpoints[url][line][column];
+        }
+      }
+    }
+  },
+
+  _iterUrls: function (aUrl) {
+    if (aUrl) {
+      if (this._breakpoints[aUrl] || this._wholeLineBreakpoints[aUrl]) {
+        yield aUrl;
+      }
+    } else {
+      for (let url of Object.keys(this._wholeLineBreakpoints)) {
+        yield url;
+      }
+      for (let url of Object.keys(this._breakpoints)) {
+        if (url in this._wholeLineBreakpoints) {
+          continue;
+        }
+        yield url;
+      }
+    }
+  },
+
+  _iterLines: function (aUrl, aLine) {
+    if (aLine != null) {
+      if ((this._wholeLineBreakpoints[aUrl]
+           && this._wholeLineBreakpoints[aUrl][aLine])
+          || (this._breakpoints[aUrl] && this._breakpoints[aUrl][aLine])) {
+        yield aLine;
+      }
+    } else {
+      const wholeLines = this._wholeLineBreakpoints[aUrl]
+        ? Object.keys(this._wholeLineBreakpoints[aUrl])
+        : [];
+      const columnLines = this._breakpoints[aUrl]
+        ? Object.keys(this._breakpoints[aUrl])
+        : [];
+
+      const lines = wholeLines.concat(columnLines).sort();
+
+      let lastLine;
+      for (let line of lines) {
+        if (line === lastLine) {
+          continue;
+        }
+        yield line;
+        lastLine = line;
+      }
+    }
+  },
+
+  _iterColumns: function (aUrl, aLine, aColumn) {
+    if (!this._breakpoints[aUrl] || !this._breakpoints[aUrl][aLine]) {
+      return;
+    }
+
+    if (aColumn != null) {
+      if (this._breakpoints[aUrl][aLine][aColumn]) {
+        yield aColumn;
+      }
+    } else {
+      for (let column in this._breakpoints[aUrl][aLine]) {
+        yield column;
+      }
+    }
+  },
+};
+
+/**
+ * Manages pushing event loops and automatically pops and exits them in the
+ * correct order as they are resolved.
+ *
+ * @param nsIJSInspector inspector
+ *        The underlying JS inspector we use to enter and exit nested event
+ *        loops.
+ * @param Object hooks
+ *        An object with the following properties:
+ *          - url: The URL string of the debuggee we are spinning an event loop
+ *                 for.
+ *          - preNest: function called before entering a nested event loop
+ *          - postNest: function called after exiting a nested event loop
+ * @param ThreadActor thread
+ *        The thread actor instance that owns this EventLoopStack.
+ */
+function EventLoopStack({ inspector, thread, hooks }) {
+  this._inspector = inspector;
+  this._hooks = hooks;
+  this._thread = thread;
+}
+
+EventLoopStack.prototype = {
+  /**
+   * The number of nested event loops on the stack.
+   */
+  get size() {
+    return this._inspector.eventLoopNestLevel;
+  },
+
+  /**
+   * The URL of the debuggee who pushed the event loop on top of the stack.
+   */
+  get lastPausedUrl() {
+    let url = null;
+    if (this.size > 0) {
+      try {
+        url = this._inspector.lastNestRequestor.url
+      } catch (e) {
+        // The tab's URL getter may throw if the tab is destroyed by the time
+        // this code runs, but we don't really care at this point.
+        dumpn(e);
+      }
+    }
+    return url;
+  },
+
+  /**
+   * Push a new nested event loop onto the stack.
+   *
+   * @returns EventLoop
+   */
+  push: function () {
+    return new EventLoop({
+      inspector: this._inspector,
+      thread: this._thread,
+      hooks: this._hooks
+    });
+  }
+};
+
+/**
+ * An object that represents a nested event loop. It is used as the nest
+ * requestor with nsIJSInspector instances.
+ *
+ * @param nsIJSInspector inspector
+ *        The JS Inspector that runs nested event loops.
+ * @param ThreadActor thread
+ *        The thread actor that is creating this nested event loop.
+ * @param Object hooks
+ *        The same hooks object passed into EventLoopStack during its
+ *        initialization.
+ */
+function EventLoop({ inspector, thread, hooks }) {
+  this._inspector = inspector;
+  this._thread = thread;
+  this._hooks = hooks;
+
+  this.enter = this.enter.bind(this);
+  this.resolve = this.resolve.bind(this);
+}
+
+EventLoop.prototype = {
+  entered: false,
+  resolved: false,
+  get url() { return this._hooks.url; },
+
+  /**
+   * Enter this nested event loop.
+   */
+  enter: function () {
+    let nestData = this._hooks.preNest
+      ? this._hooks.preNest()
+      : null;
+
+    this.entered = true;
+    this._inspector.enterNestedEventLoop(this);
+
+    // Keep exiting nested event loops while the last requestor is resolved.
+    if (this._inspector.eventLoopNestLevel > 0) {
+      const { resolved } = this._inspector.lastNestRequestor;
+      if (resolved) {
+        this._inspector.exitNestedEventLoop();
+      }
+    }
+
+    dbg_assert(this._thread.state === "running",
+               "Should be in the running state");
+
+    if (this._hooks.postNest) {
+      this._hooks.postNest(nestData);
+    }
+  },
+
+  /**
+   * Resolve this nested event loop.
+   *
+   * @returns boolean
+   *          True if we exited this nested event loop because it was on top of
+   *          the stack, false if there is another nested event loop above this
+   *          one that hasn't resolved yet.
+   */
+  resolve: function () {
+    if (!this.entered) {
+      throw new Error("Can't resolve an event loop before it has been entered!");
+    }
+    if (this.resolved) {
+      throw new Error("Already resolved this nested event loop!");
+    }
+    this.resolved = true;
+    if (this === this._inspector.lastNestRequestor) {
+      this._inspector.exitNestedEventLoop();
+      return true;
+    }
+    return false;
+  },
+};
+
+/**
  * JSD2 actors.
  */
 /**
@@ -17,9 +403,7 @@
  *
  * @param aHooks object
  *        An object with preNest and postNest methods for calling when entering
- *        and exiting a nested event loop, addToParentPool and
- *        removeFromParentPool methods for handling the lifetime of actors that
- *        will outlive the thread, like breakpoints.
+ *        and exiting a nested event loop.
  * @param aGlobal object [optional]
  *        An optional (for content debugging only) reference to the content
  *        window.
@@ -28,13 +412,20 @@ function ThreadActor(aHooks, aGlobal)
 {
   this._state = "detached";
   this._frameActors = [];
-  this._environmentActors = [];
   this._hooks = aHooks;
   this.global = aGlobal;
+  this._nestedEventLoops = new EventLoopStack({
+    inspector: DebuggerServer.xpcInspector,
+    hooks: aHooks,
+    thread: this
+  });
+  // A map of actorID -> actor for breakpoints created and managed by the server.
+  this._hiddenBreakpoints = new Map();
 
   this.findGlobals = this.globalManager.findGlobals.bind(this);
   this.onNewGlobal = this.globalManager.onNewGlobal.bind(this);
   this.onNewSource = this.onNewSource.bind(this);
+  this._allEventsListener = this._allEventsListener.bind(this);
 
   this._options = {
     useSourceMaps: false
@@ -45,7 +436,7 @@ function ThreadActor(aHooks, aGlobal)
  * The breakpoint store must be shared across instances of ThreadActor so that
  * page reloads don't blow away all of our breakpoints.
  */
-ThreadActor._breakpointStore = {};
+ThreadActor.breakpointStore = new BreakpointStore();
 
 ThreadActor.prototype = {
   actorPrefix: "context",
@@ -55,7 +446,7 @@ ThreadActor.prototype = {
                  this.state == "running" ||
                  this.state == "paused",
 
-  get _breakpointStore() { return ThreadActor._breakpointStore; },
+  get breakpointStore() { return ThreadActor.breakpointStore; },
 
   get threadLifetimePool() {
     if (!this._threadLifetimePool) {
@@ -74,31 +465,96 @@ ThreadActor.prototype = {
     return this._sources;
   },
 
-  clearDebuggees: function TA_clearDebuggees() {
+  get youngestFrame() {
+    if (!this.state == "paused") {
+      return null;
+    }
+    return this.dbg.getNewestFrame();
+  },
+
+  _prettyPrintWorker: null,
+  get prettyPrintWorker() {
+    if (!this._prettyPrintWorker) {
+      this._prettyPrintWorker = new ChromeWorker(
+        "resource://gre/modules/devtools/server/actors/pretty-print-worker.js");
+
+      this._prettyPrintWorker.addEventListener(
+        "error", this._onPrettyPrintError, false);
+
+      if (wantLogging) {
+        this._prettyPrintWorker.addEventListener("message", this._onPrettyPrintMsg, false);
+
+        const postMsg = this._prettyPrintWorker.postMessage;
+        this._prettyPrintWorker.postMessage = data => {
+          dumpn("Sending message to prettyPrintWorker: "
+                + JSON.stringify(data, null, 2) + "\n");
+          return postMsg.call(this._prettyPrintWorker, data);
+        };
+      }
+    }
+    return this._prettyPrintWorker;
+  },
+
+  _onPrettyPrintError: function ({ message, filename, lineno }) {
+    reportError(new Error(message + " @ " + filename + ":" + lineno));
+  },
+
+  _onPrettyPrintMsg: function ({ data }) {
+    dumpn("Received message from prettyPrintWorker: "
+          + JSON.stringify(data, null, 2) + "\n");
+  },
+
+  /**
+   * Keep track of all of the nested event loops we use to pause the debuggee
+   * when we hit a breakpoint/debugger statement/etc in one place so we can
+   * resolve them when we get resume packets. We have more than one (and keep
+   * them in a stack) because we can pause within client evals.
+   */
+  _threadPauseEventLoops: null,
+  _pushThreadPause: function () {
+    if (!this._threadPauseEventLoops) {
+      this._threadPauseEventLoops = [];
+    }
+    const eventLoop = this._nestedEventLoops.push();
+    this._threadPauseEventLoops.push(eventLoop);
+    eventLoop.enter();
+  },
+  _popThreadPause: function () {
+    const eventLoop = this._threadPauseEventLoops.pop();
+    dbg_assert(eventLoop, "Should have an event loop.");
+    eventLoop.resolve();
+  },
+
+  /**
+   * Remove all debuggees and clear out the thread's sources.
+   */
+  clearDebuggees: function () {
     if (this.dbg) {
       this.dbg.removeAllDebuggees();
     }
-    this.conn.removeActorPool(this._threadLifetimePool || undefined);
-    this._threadLifetimePool = null;
     this._sources = null;
   },
 
   /**
    * Add a debuggee global to the Debugger object.
+   *
+   * @returns the Debugger.Object that corresponds to the global.
    */
-  addDebuggee: function TA_addDebuggee(aGlobal) {
+  addDebuggee: function (aGlobal) {
+    let globalDebugObject;
     try {
-      this.dbg.addDebuggee(aGlobal);
+      globalDebugObject = this.dbg.addDebuggee(aGlobal);
     } catch (e) {
       // Ignore attempts to add the debugger's compartment as a debuggee.
       dumpn("Ignoring request to add the debugger's compartment as a debuggee");
     }
+    return globalDebugObject;
   },
 
   /**
    * Initialize the Debugger.
    */
-  _initDebugger: function TA__initDebugger() {
+  _initDebugger: function () {
     this.dbg = new Debugger();
     this.dbg.uncaughtExceptionHook = this.uncaughtExceptionHook.bind(this);
     this.dbg.onDebuggerStatement = this.onDebuggerStatement.bind(this);
@@ -111,7 +567,7 @@ ThreadActor.prototype = {
   /**
    * Remove a debuggee global from the JSInspector.
    */
-  removeDebugee: function TA_removeDebuggee(aGlobal) {
+  removeDebugee: function (aGlobal) {
     try {
       this.dbg.removeDebuggee(aGlobal);
     } catch(ex) {
@@ -122,15 +578,18 @@ ThreadActor.prototype = {
 
   /**
    * Add the provided window and all windows in its frame tree as debuggees.
+   *
+   * @returns the Debugger.Object that corresponds to the window.
    */
-  _addDebuggees: function TA__addDebuggees(aWindow) {
-    this.addDebuggee(aWindow);
+  _addDebuggees: function (aWindow) {
+    let globalDebugObject = this.addDebuggee(aWindow);
     let frames = aWindow.frames;
     if (frames) {
       for (let i = 0; i < frames.length; i++) {
         this._addDebuggees(frames[i]);
       }
     }
+    return globalDebugObject;
   },
 
   /**
@@ -138,8 +597,8 @@ ThreadActor.prototype = {
    * depending on the debugging context being required (chrome or content).
    */
   globalManager: {
-    findGlobals: function TA_findGlobals() {
-      this._addDebuggees(this.global);
+    findGlobals: function () {
+      this.globalDebugObject = this._addDebuggees(this.global);
     },
 
     /**
@@ -149,7 +608,7 @@ ThreadActor.prototype = {
      * @param aGlobal Debugger.Object
      *        The new global object that was created.
      */
-    onNewGlobal: function TA_onNewGlobal(aGlobal) {
+    onNewGlobal: function (aGlobal) {
       // Content debugging only cares about new globals in the contant window,
       // like iframe children.
       if (aGlobal.hostAnnotations &&
@@ -167,7 +626,7 @@ ThreadActor.prototype = {
     }
   },
 
-  disconnect: function TA_disconnect() {
+  disconnect: function () {
     dumpn("in ThreadActor.prototype.disconnect");
     if (this._state == "paused") {
       this.onResume();
@@ -176,6 +635,17 @@ ThreadActor.prototype = {
     this._state = "exited";
 
     this.clearDebuggees();
+    this.conn.removeActorPool(this._threadLifetimePool);
+    this._threadLifetimePool = null;
+
+    if (this._prettyPrintWorker) {
+      this._prettyPrintWorker.removeEventListener(
+        "error", this._onPrettyPrintError, false);
+      this._prettyPrintWorker.removeEventListener(
+        "message", this._onPrettyPrintMsg, false);
+      this._prettyPrintWorker.terminate();
+      this._prettyPrintWorker = null;
+    }
 
     if (!this.dbg) {
       return;
@@ -187,12 +657,12 @@ ThreadActor.prototype = {
   /**
    * Disconnect the debugger and put the actor in the exited state.
    */
-  exit: function TA_exit() {
+  exit: function () {
     this.disconnect();
   },
 
   // Request handlers
-  onAttach: function TA_onAttach(aRequest) {
+  onAttach: function (aRequest) {
     if (this.state === "exited") {
       return { type: "exited" };
     }
@@ -226,7 +696,7 @@ ThreadActor.prototype = {
       this.conn.send(packet);
 
       // Start a nested event loop.
-      this._nest();
+      this._pushThreadPause();
 
       // We already sent a response to this request, don't send one
       // now.
@@ -237,7 +707,7 @@ ThreadActor.prototype = {
     }
   },
 
-  onDetach: function TA_onDetach(aRequest) {
+  onDetach: function (aRequest) {
     this.disconnect();
     dumpn("ThreadActor.prototype.onDetach: returning 'detached' packet");
     return {
@@ -245,7 +715,7 @@ ThreadActor.prototype = {
     };
   },
 
-  onReconfigure: function TA_onReconfigure(aRequest) {
+  onReconfigure: function (aRequest) {
     if (this.state == "exited") {
       return { error: "wrongState" };
     }
@@ -269,29 +739,247 @@ ThreadActor.prototype = {
    *        Hook to modify the packet before it is sent. Feel free to return a
    *        promise.
    */
-  _pauseAndRespond: function TA__pauseAndRespond(aFrame, aReason,
-                                                 onPacket=function (k) k) {
+  _pauseAndRespond: function (aFrame, aReason, onPacket=function (k) { return k; }) {
     try {
       let packet = this._paused(aFrame);
       if (!packet) {
         return undefined;
       }
       packet.why = aReason;
-      resolve(onPacket(packet)).then(this.conn.send.bind(this.conn));
-      return this._nest();
+
+      this.sources.getOriginalLocation(packet.frame.where).then(aOrigPosition => {
+        packet.frame.where = aOrigPosition;
+        resolve(onPacket(packet))
+          .then(null, error => {
+            reportError(error);
+            return {
+              error: "unknownError",
+              message: error.message + "\n" + error.stack
+            };
+          })
+          .then(packet => {
+            this.conn.send(packet);
+          });
+      });
+
+      this._pushThreadPause();
     } catch(e) {
-      let msg = "Got an exception during TA__pauseAndRespond: " + e +
-                ": " + e.stack;
-      Cu.reportError(msg);
-      dumpn(msg);
+      reportError(e, "Got an exception during TA__pauseAndRespond: ");
+    }
+
+    return undefined;
+  },
+
+  /**
+   * Handle resume requests that include a forceCompletion request.
+   *
+   * @param Object aRequest
+   *        The request packet received over the RDP.
+   * @returns A response packet.
+   */
+  _forceCompletion: function (aRequest) {
+    // TODO: remove this when Debugger.Frame.prototype.pop is implemented in
+    // bug 736733.
+    return {
+      error: "notImplemented",
+      message: "forced completion is not yet implemented."
+    };
+  },
+
+  _makeOnEnterFrame: function ({ pauseAndRespond }) {
+    return aFrame => {
+      const generatedLocation = getFrameLocation(aFrame);
+      let { url } = this.synchronize(this.sources.getOriginalLocation(
+        generatedLocation));
+
+      return this.sources.isBlackBoxed(url)
+        ? undefined
+        : pauseAndRespond(aFrame);
+    };
+  },
+
+  _makeOnPop: function ({ thread, pauseAndRespond, createValueGrip }) {
+    return function (aCompletion) {
+      // onPop is called with 'this' set to the current frame.
+
+      const generatedLocation = getFrameLocation(this);
+      const { url } = thread.synchronize(thread.sources.getOriginalLocation(
+        generatedLocation));
+
+      if (thread.sources.isBlackBoxed(url)) {
+        return undefined;
+      }
+
+      // Note that we're popping this frame; we need to watch for
+      // subsequent step events on its caller.
+      this.reportedPop = true;
+
+      return pauseAndRespond(this, aPacket => {
+        aPacket.why.frameFinished = {};
+        if (!aCompletion) {
+          aPacket.why.frameFinished.terminated = true;
+        } else if (aCompletion.hasOwnProperty("return")) {
+          aPacket.why.frameFinished.return = createValueGrip(aCompletion.return);
+        } else if (aCompletion.hasOwnProperty("yield")) {
+          aPacket.why.frameFinished.return = createValueGrip(aCompletion.yield);
+        } else {
+          aPacket.why.frameFinished.throw = createValueGrip(aCompletion.throw);
+        }
+        return aPacket;
+      });
+    };
+  },
+
+  _makeOnStep: function ({ thread, pauseAndRespond, startFrame,
+                           startLocation }) {
+    return function () {
+      // onStep is called with 'this' set to the current frame.
+
+      const generatedLocation = getFrameLocation(this);
+      const newLocation = thread.synchronize(thread.sources.getOriginalLocation(
+        generatedLocation));
+
+      // Cases when we should pause because we have executed enough to consider
+      // a "step" to have occured:
+      //
+      // 1.1. We change frames.
+      // 1.2. We change URLs (can happen without changing frames thanks to
+      //      source mapping).
+      // 1.3. We change lines.
+      //
+      // Cases when we should always continue execution, even if one of the
+      // above cases is true:
+      //
+      // 2.1. We are in a source mapped region, but inside a null mapping
+      //      (doesn't correlate to any region of original source)
+      // 2.2. The source we are in is black boxed.
+
+      // Cases 2.1 and 2.2
+      if (newLocation.url == null
+          || thread.sources.isBlackBoxed(newLocation.url)) {
+        return undefined;
+      }
+
+      // Cases 1.1, 1.2 and 1.3
+      if (this !== startFrame
+          || startLocation.url !== newLocation.url
+          || startLocation.line !== newLocation.line) {
+        return pauseAndRespond(this);
+      }
+
+      // Otherwise, let execution continue (we haven't executed enough code to
+      // consider this a "step" yet).
       return undefined;
+    };
+  },
+
+  /**
+   * Define the JS hook functions for stepping.
+   */
+  _makeSteppingHooks: function (aStartLocation) {
+    // Bind these methods and state because some of the hooks are called
+    // with 'this' set to the current frame. Rather than repeating the
+    // binding in each _makeOnX method, just do it once here and pass it
+    // in to each function.
+    const steppingHookState = {
+      pauseAndRespond: (aFrame, onPacket=(k)=>k) => {
+        this._pauseAndRespond(aFrame, { type: "resumeLimit" }, onPacket);
+      },
+      createValueGrip: this.createValueGrip.bind(this),
+      thread: this,
+      startFrame: this.youngestFrame,
+      startLocation: aStartLocation
+    };
+
+    return {
+      onEnterFrame: this._makeOnEnterFrame(steppingHookState),
+      onPop: this._makeOnPop(steppingHookState),
+      onStep: this._makeOnStep(steppingHookState)
+    };
+  },
+
+  /**
+   * Handle attaching the various stepping hooks we need to attach when we
+   * receive a resume request with a resumeLimit property.
+   *
+   * @param Object aRequest
+   *        The request packet received over the RDP.
+   * @returns A promise that resolves to true once the hooks are attached, or is
+   *          rejected with an error packet.
+   */
+  _handleResumeLimit: function (aRequest) {
+    let steppingType = aRequest.resumeLimit.type;
+    if (["step", "next", "finish"].indexOf(steppingType) == -1) {
+      return reject({ error: "badParameterType",
+                      message: "Unknown resumeLimit type" });
+    }
+
+    const generatedLocation = getFrameLocation(this.youngestFrame);
+    return this.sources.getOriginalLocation(generatedLocation)
+      .then(originalLocation => {
+        const { onEnterFrame, onPop, onStep } = this._makeSteppingHooks(originalLocation);
+
+        // Make sure there is still a frame on the stack if we are to continue
+        // stepping.
+        let stepFrame = this._getNextStepFrame(this.youngestFrame);
+        if (stepFrame) {
+          switch (steppingType) {
+            case "step":
+              this.dbg.onEnterFrame = onEnterFrame;
+              // Fall through.
+            case "next":
+              if (stepFrame.script) {
+                  stepFrame.onStep = onStep;
+              }
+              stepFrame.onPop = onPop;
+              break;
+            case "finish":
+              stepFrame.onPop = onPop;
+          }
+        }
+
+        return true;
+      });
+  },
+
+  /**
+   * Clear the onStep and onPop hooks from the given frame and all of the frames
+   * below it.
+   *
+   * @param Debugger.Frame aFrame
+   *        The frame we want to clear the stepping hooks from.
+   */
+  _clearSteppingHooks: function (aFrame) {
+    while (aFrame) {
+      aFrame.onStep = undefined;
+      aFrame.onPop = undefined;
+      aFrame = aFrame.older;
+    }
+  },
+
+  /**
+   * Listen to the debuggee's DOM events if we received a request to do so.
+   *
+   * @param Object aRequest
+   *        The resume request packet received over the RDP.
+   */
+  _maybeListenToEvents: function (aRequest) {
+    // Break-on-DOMEvents is only supported in content debugging.
+    let events = aRequest.pauseOnDOMEvents;
+    if (this.global && events &&
+        (events == "*" ||
+        (Array.isArray(events) && events.length))) {
+      this._pauseOnDOMEvents = events;
+      let els = Cc["@mozilla.org/eventlistenerservice;1"]
+                .getService(Ci.nsIEventListenerService);
+      els.addListenerForAllEvents(this.global, this._allEventsListener, true);
     }
   },
 
   /**
    * Handle a protocol request to resume execution of the debuggee.
    */
-  onResume: function TA_onResume(aRequest) {
+  onResume: function (aRequest) {
     if (this._state !== "paused") {
       return {
         error: "wrongState",
@@ -303,133 +991,177 @@ ThreadActor.prototype = {
     // In case of multiple nested event loops (due to multiple debuggers open in
     // different tabs or multiple debugger clients connected to the same tab)
     // only allow resumption in a LIFO order.
-    if (DebuggerServer.xpcInspector.eventLoopNestLevel > 1) {
-      let lastNestRequestor = DebuggerServer.xpcInspector.lastNestRequestor;
-      if (lastNestRequestor.connection != this.conn) {
-        return { error: "wrongOrder",
-                 message: "trying to resume in the wrong order.",
-                 lastPausedUrl: lastNestRequestor.url };
-      }
+    if (this._nestedEventLoops.size && this._nestedEventLoops.lastPausedUrl
+        && this._nestedEventLoops.lastPausedUrl !== this._hooks.url) {
+      return {
+        error: "wrongOrder",
+        message: "trying to resume in the wrong order.",
+        lastPausedUrl: this._nestedEventLoops.lastPausedUrl
+      };
     }
 
     if (aRequest && aRequest.forceCompletion) {
-      // TODO: remove this when Debugger.Frame.prototype.pop is implemented in
-      // bug 736733.
-      if (typeof this.frame.pop != "function") {
-        return { error: "notImplemented",
-                 message: "forced completion is not yet implemented." };
-      }
-
-      this.dbg.getNewestFrame().pop(aRequest.completionValue);
-      let packet = this._resumed();
-      DebuggerServer.xpcInspector.exitNestedEventLoop();
-      return { type: "resumeLimit", frameFinished: aRequest.forceCompletion };
+      return this._forceCompletion(aRequest);
     }
 
+    let resumeLimitHandled;
     if (aRequest && aRequest.resumeLimit) {
-      // Bind these methods because some of the hooks are called with 'this'
-      // set to the current frame.
-      let pauseAndRespond = (aFrame, onPacket=function (k) k) => {
-        this._pauseAndRespond(aFrame, { type: "resumeLimit" }, onPacket);
-      };
-      let createValueGrip = this.createValueGrip.bind(this);
-
-      let startFrame = this.youngestFrame;
-      let startLine;
-      if (this.youngestFrame.script) {
-        let offset = this.youngestFrame.offset;
-        startLine = this.youngestFrame.script.getOffsetLine(offset);
-      }
-
-      // Define the JS hook functions for stepping.
-
-      let onEnterFrame = aFrame => {
-        if (this.sources.isBlackBoxed(aFrame.script.url)) {
-          return undefined;
-        }
-        return pauseAndRespond(aFrame);
-      };
-
-      let thread = this;
-
-      let onPop = function TA_onPop(aCompletion) {
-        // onPop is called with 'this' set to the current frame.
-        if (thread.sources.isBlackBoxed(this.script.url)) {
-          return undefined;
-        }
-
-        // Note that we're popping this frame; we need to watch for
-        // subsequent step events on its caller.
-        this.reportedPop = true;
-
-        return pauseAndRespond(this, (aPacket) => {
-          aPacket.why.frameFinished = {};
-          if (!aCompletion) {
-            aPacket.why.frameFinished.terminated = true;
-          } else if (aCompletion.hasOwnProperty("return")) {
-            aPacket.why.frameFinished.return = createValueGrip(aCompletion.return);
-          } else if (aCompletion.hasOwnProperty("yield")) {
-            aPacket.why.frameFinished.return = createValueGrip(aCompletion.yield);
-          } else {
-            aPacket.why.frameFinished.throw = createValueGrip(aCompletion.throw);
-          }
-          return aPacket;
-        });
-      };
-
-      let onStep = function TA_onStep() {
-        // onStep is called with 'this' set to the current frame.
-
-        if (thread.sources.isBlackBoxed(this.script.url)) {
-          return undefined;
-        }
-
-        // If we've changed frame or line, then report that.
-        if (this !== startFrame ||
-            (this.script &&
-             this.script.getOffsetLine(this.offset) != startLine)) {
-          return pauseAndRespond(this);
-        }
-
-        // Otherwise, let execution continue.
-        return undefined;
-      };
-
-      let steppingType = aRequest.resumeLimit.type;
-      if (["step", "next", "finish"].indexOf(steppingType) == -1) {
-            return { error: "badParameterType",
-                     message: "Unknown resumeLimit type" };
-      }
-      // Make sure there is still a frame on the stack if we are to continue
-      // stepping.
-      let stepFrame = this._getNextStepFrame(startFrame);
-      if (stepFrame) {
-        switch (steppingType) {
-          case "step":
-            this.dbg.onEnterFrame = onEnterFrame;
-            // Fall through.
-          case "next":
-            stepFrame.onStep = onStep;
-            stepFrame.onPop = onPop;
-            break;
-          case "finish":
-            stepFrame.onPop = onPop;
-        }
-      }
+      resumeLimitHandled = this._handleResumeLimit(aRequest)
+    } else {
+      this._clearSteppingHooks(this.youngestFrame);
+      resumeLimitHandled = resolve(true);
     }
 
-    if (aRequest && aRequest.pauseOnExceptions) {
+    return resumeLimitHandled.then(() => {
+      if (aRequest) {
+        this._options.pauseOnExceptions = aRequest.pauseOnExceptions;
+        this._options.ignoreCaughtExceptions = aRequest.ignoreCaughtExceptions;
+        this.maybePauseOnExceptions();
+        this._maybeListenToEvents(aRequest);
+      }
+
+      let packet = this._resumed();
+      this._popThreadPause();
+      return packet;
+    }, error => {
+      return error instanceof Error
+        ? { error: "unknownError",
+            message: safeErrorString(error) }
+        // It is a known error, and the promise was rejected with an error
+        // packet.
+        : error;
+    });
+  },
+
+  /**
+   * Spin up a nested event loop so we can synchronously resolve a promise.
+   *
+   * @param aPromise
+   *        The promise we want to resolve.
+   * @returns The promise's resolution.
+   */
+  synchronize: function(aPromise) {
+    let needNest = true;
+    let eventLoop;
+    let returnVal;
+
+    aPromise
+      .then((aResolvedVal) => {
+        needNest = false;
+        returnVal = aResolvedVal;
+      })
+      .then(null, (aError) => {
+        reportError(aError, "Error inside synchronize:");
+      })
+      .then(() => {
+        if (eventLoop) {
+          eventLoop.resolve();
+        }
+      });
+
+    if (needNest) {
+      eventLoop = this._nestedEventLoops.push();
+      eventLoop.enter();
+    }
+
+    return returnVal;
+  },
+
+  /**
+   * Set the debugging hook to pause on exceptions if configured to do so.
+   */
+  maybePauseOnExceptions: function() {
+    if (this._options.pauseOnExceptions) {
       this.dbg.onExceptionUnwind = this.onExceptionUnwind.bind(this);
     }
-    let packet = this._resumed();
-    DebuggerServer.xpcInspector.exitNestedEventLoop();
-    return packet;
+  },
+
+  /**
+   * A listener that gets called for every event fired on the page, when a list
+   * of interesting events was provided with the pauseOnDOMEvents property. It
+   * is used to set server-managed breakpoints on any existing event listeners
+   * for those events.
+   *
+   * @param Event event
+   *        The event that was fired.
+   */
+  _allEventsListener: function(event) {
+    if (this._pauseOnDOMEvents == "*" ||
+        this._pauseOnDOMEvents.indexOf(event.type) != -1) {
+      for (let listener of this._getAllEventListeners(event.target)) {
+        if (event.type == listener.type || this._pauseOnDOMEvents == "*") {
+          this._breakOnEnter(listener.script);
+        }
+      }
+    }
+  },
+
+  /**
+   * Return an array containing all the event listeners attached to the
+   * specified event target and its ancestors in the event target chain.
+   *
+   * @param EventTarget eventTarget
+   *        The target the event was dispatched on.
+   * @returns Array
+   */
+  _getAllEventListeners: function(eventTarget) {
+    let els = Cc["@mozilla.org/eventlistenerservice;1"]
+                .getService(Ci.nsIEventListenerService);
+
+    let targets = els.getEventTargetChainFor(eventTarget);
+    let listeners = [];
+
+    for (let target of targets) {
+      let handlers = els.getListenerInfoFor(target);
+      for (let handler of handlers) {
+        // Null is returned for all-events handlers, and native event listeners
+        // don't provide any listenerObject, which makes them not that useful to
+        // a JS debugger.
+        if (!handler || !handler.listenerObject || !handler.type)
+          continue;
+        // Create a listener-like object suitable for our purposes.
+        let l = Object.create(null);
+        l.type = handler.type;
+        let listener = handler.listenerObject;
+        l.script = this.globalDebugObject.makeDebuggeeValue(listener).script;
+        // Chrome listeners won't be converted to debuggee values, since their
+        // compartment is not added as a debuggee.
+        if (!l.script)
+          continue;
+        listeners.push(l);
+      }
+    }
+    return listeners;
+  },
+
+  /**
+   * Set a breakpoint on the first bytecode offset in the provided script.
+   */
+  _breakOnEnter: function(script) {
+    let offsets = script.getAllOffsets();
+    for (let line = 0, n = offsets.length; line < n; line++) {
+      if (offsets[line]) {
+        let location = { url: script.url, line: line };
+        let resp = this._createAndStoreBreakpoint(location);
+        dbg_assert(!resp.actualLocation, "No actualLocation should be returned");
+        if (resp.error) {
+          reportError(new Error("Unable to set breakpoint on event listener"));
+          return;
+        }
+        let bp = this.breakpointStore.getBreakpoint(location);
+        let bpActor = bp.actor;
+        dbg_assert(bp, "Breakpoint must exist");
+        dbg_assert(bpActor, "Breakpoint actor must be created");
+        this._hiddenBreakpoints.set(bpActor.actorID, bpActor);
+        break;
+      }
+    }
   },
 
   /**
    * Helper method that returns the next frame when stepping.
    */
-  _getNextStepFrame: function TA__getNextStepFrame(aFrame) {
+  _getNextStepFrame: function (aFrame) {
     let stepFrame = aFrame.reportedPop ? aFrame.older : aFrame;
     if (!stepFrame || !stepFrame.script) {
       stepFrame = null;
@@ -437,11 +1169,11 @@ ThreadActor.prototype = {
     return stepFrame;
   },
 
-  onClientEvaluate: function TA_onClientEvaluate(aRequest) {
+  onClientEvaluate: function (aRequest) {
     if (this.state !== "paused") {
       return { error: "wrongState",
                message: "Debuggee must be paused to evaluate code." };
-    };
+    }
 
     let frame = this._requestFrame(aRequest.frame);
     if (!frame) {
@@ -452,12 +1184,8 @@ ThreadActor.prototype = {
     if (!frame.environment) {
       return { error: "notDebuggee",
                message: "cannot access the environment of this frame." };
-    };
+    }
 
-    // We'll clobber the youngest frame if the eval causes a pause, so
-    // save our frame now to be restored after eval returns.
-    // XXX: or we could just start using dbg.getNewestFrame() now that it
-    // works as expected.
     let youngest = this.youngestFrame;
 
     // Put ourselves back in the running state and inform the client.
@@ -477,7 +1205,7 @@ ThreadActor.prototype = {
     return packet;
   },
 
-  onFrames: function TA_onFrames(aRequest) {
+  onFrames: function (aRequest) {
     if (this.state !== "paused") {
       return { error: "wrongState",
                message: "Stack frames are only available while the debuggee is paused."};
@@ -503,10 +1231,13 @@ ThreadActor.prototype = {
       form.depth = i;
       frames.push(form);
 
-      let promise = this.sources.getOriginalLocation(form.where.url,
-                                                     form.where.line)
-        .then(function (aOrigLocation) {
+      let promise = this.sources.getOriginalLocation(form.where)
+        .then((aOrigLocation) => {
           form.where = aOrigLocation;
+          let source = this.sources.source({ url: form.where.url });
+          if (source) {
+            form.source = source.form();
+          }
         });
       promises.push(promise);
     }
@@ -516,7 +1247,7 @@ ThreadActor.prototype = {
     });
   },
 
-  onReleaseMany: function TA_onReleaseMany(aRequest) {
+  onReleaseMany: function (aRequest) {
     if (!aRequest.actors) {
       return { error: "missingParameter",
                message: "no actors were specified" };
@@ -540,54 +1271,51 @@ ThreadActor.prototype = {
   /**
    * Handle a protocol request to set a breakpoint.
    */
-  onSetBreakpoint: function TA_onSetBreakpoint(aRequest) {
+  onSetBreakpoint: function (aRequest) {
     if (this.state !== "paused") {
       return { error: "wrongState",
                message: "Breakpoints can only be set while the debuggee is paused."};
     }
 
-    // XXX: `originalColumn` is never used. See bug 827639.
     let { url: originalSource,
           line: originalLine,
           column: originalColumn } = aRequest.location;
 
-    let locationPromise = this.sources.getGeneratedLocation(originalSource,
-                                                            originalLine)
-    return locationPromise.then((aLocation) => {
-      let line = aLocation.line;
-      if (this.dbg.findScripts({ url: aLocation.url }).length == 0 ||
+    let locationPromise = this.sources.getGeneratedLocation(aRequest.location);
+    return locationPromise.then(({url, line, column}) => {
+      if (line == null ||
           line < 0 ||
-          line == null) {
+          this.dbg.findScripts({ url: url }).length == 0) {
         return { error: "noScript" };
       }
 
-      // Add the breakpoint to the store for later reuse, in case it belongs to a
-      // script that hasn't appeared yet.
-      if (!this._breakpointStore[aLocation.url]) {
-        this._breakpointStore[aLocation.url] = [];
-      }
-      let scriptBreakpoints = this._breakpointStore[aLocation.url];
-      scriptBreakpoints[line] = {
-        url: aLocation.url,
+      let response = this._createAndStoreBreakpoint({
+        url: url,
         line: line,
-        column: aLocation.column
-      };
-
-      let response = this._setBreakpoint(aLocation);
+        column: column
+      });
       // If the original location of our generated location is different from
       // the original location we attempted to set the breakpoint on, we will
       // need to know so that we can set actualLocation on the response.
-      let originalLocation = this.sources.getOriginalLocation(aLocation.url,
-                                                              aLocation.line);
+      let originalLocation = this.sources.getOriginalLocation({
+        url: url,
+        line: line,
+        column: column
+      });
 
       return all([response, originalLocation])
         .then(([aResponse, {url, line}]) => {
           if (aResponse.actualLocation) {
-            let actualOrigLocation = this.sources.getOriginalLocation(
-              aResponse.actualLocation.url, aResponse.actualLocation.line);
-            return actualOrigLocation.then(function ({ url, line }) {
-              if (url !== originalSource || line !== originalLine) {
-                aResponse.actualLocation = { url: url, line: line };
+            let actualOrigLocation = this.sources.getOriginalLocation(aResponse.actualLocation);
+            return actualOrigLocation.then(({ url, line, column }) => {
+              if (url !== originalSource
+                  || line !== originalLine
+                  || column !== originalColumn) {
+                aResponse.actualLocation = {
+                  url: url,
+                  line: line,
+                  column: column
+                };
               }
               return aResponse;
             });
@@ -603,6 +1331,20 @@ ThreadActor.prototype = {
   },
 
   /**
+   * Create a breakpoint at the specified location and store it in the
+   * cache. Takes ownership of `aLocation`.
+   *
+   * @param Object aLocation
+   *        An object of the form { url, line[, column] }
+   */
+  _createAndStoreBreakpoint: function (aLocation) {
+    // Add the breakpoint to the store for later reuse, in case it belongs to a
+    // script that hasn't appeared yet.
+    this.breakpointStore.addBreakpoint(aLocation);
+    return this._setBreakpoint(aLocation);
+  },
+
+  /**
    * Set a breakpoint using the jsdbg2 API. If the line on which the breakpoint
    * is being set contains no code, then the breakpoint will slide down to the
    * next line that has runnable code. In this case the server breakpoint cache
@@ -610,21 +1352,21 @@ ThreadActor.prototype = {
    * take that into account.
    *
    * @param object aLocation
-   *        The location of the breakpoint as specified in the protocol.
+   *        The location of the breakpoint (in the generated source, if source
+   *        mapping).
    */
-  _setBreakpoint: function TA__setBreakpoint(aLocation) {
-    let breakpoints = this._breakpointStore[aLocation.url];
-
-    // Get or create the breakpoint actor for the given location
+  _setBreakpoint: function (aLocation) {
     let actor;
-    if (breakpoints[aLocation.line].actor) {
-      actor = breakpoints[aLocation.line].actor;
+    let storedBp = this.breakpointStore.getBreakpoint(aLocation);
+    if (storedBp.actor) {
+      actor = storedBp.actor;
     } else {
-      actor = breakpoints[aLocation.line].actor = new BreakpointActor(this, {
+      storedBp.actor = actor = new BreakpointActor(this, {
         url: aLocation.url,
-        line: aLocation.line
+        line: aLocation.line,
+        column: aLocation.column
       });
-      this._hooks.addToParentPool(actor);
+      this.threadLifetimePool.addActor(actor);
     }
 
     // Find all scripts matching the given location
@@ -637,32 +1379,38 @@ ThreadActor.prototype = {
     }
 
    /**
-     * For each script, if the given line has at least one entry point, set
-     * breakpoint on the bytecode offet for each of them.
-     */
-    let found = false;
+    * For each script, if the given line has at least one entry point, set a
+    * breakpoint on the bytecode offets for each of them.
+    */
+
+    // Debugger.Script -> array of offset mappings
+    let scriptsAndOffsetMappings = new Map();
+
     for (let script of scripts) {
-      let offsets = script.getLineOffsets(aLocation.line);
-      if (offsets.length > 0) {
-        for (let offset of offsets) {
-          script.setBreakpoint(offset, actor);
+      this._findClosestOffsetMappings(aLocation,
+                                      script,
+                                      scriptsAndOffsetMappings);
+    }
+
+    if (scriptsAndOffsetMappings.size > 0) {
+      for (let [script, mappings] of scriptsAndOffsetMappings) {
+        for (let offsetMapping of mappings) {
+          script.setBreakpoint(offsetMapping.offset, actor);
         }
         actor.addScript(script, this);
-        found = true;
       }
-    }
-    if (found) {
+
       return {
         actor: actor.actorID
       };
     }
 
    /**
-     * If we get here, no breakpoint was set. This is because the given line
-     * has no entry points, for example because it is empty. As a fallback
-     * strategy, we try to set the breakpoint on the smallest line greater
-     * than or equal to the given line that as at least one entry point.
-     */
+    * If we get here, no breakpoint was set. This is because the given line
+    * has no entry points, for example because it is empty. As a fallback
+    * strategy, we try to set the breakpoint on the smallest line greater
+    * than or equal to the given line that as at least one entry point.
+    */
 
     // Find all innermost scripts matching the given location
     let scripts = this.dbg.findScripts({
@@ -699,17 +1447,18 @@ ThreadActor.prototype = {
       }
     }
     if (found) {
-      if (breakpoints[actualLocation.line] &&
-          breakpoints[actualLocation.line].actor) {
+      let existingBp = this.breakpointStore.hasBreakpoint(actualLocation);
+
+      if (existingBp && existingBp.actor) {
         /**
          * We already have a breakpoint actor for the actual location, so
          * actor we created earlier is now redundant. Delete it, update the
          * breakpoint store, and return the actor for the actual location.
          */
         actor.onDelete();
-        delete breakpoints[aLocation.line];
+        this.breakpointStore.removeBreakpoint(aLocation);
         return {
-          actor: breakpoints[actualLocation.line].actor.actorID,
+          actor: existingBp.actor.actorID,
           actualLocation: actualLocation
         };
       } else {
@@ -719,10 +1468,13 @@ ThreadActor.prototype = {
          * and update the breakpoint store.
          */
         actor.location = actualLocation;
-        breakpoints[actualLocation.line] = breakpoints[aLocation.line];
-        delete breakpoints[aLocation.line];
-        // WARNING: This overwrites aLocation.line
-        breakpoints[actualLocation.line].line = actualLocation.line;
+        this.breakpointStore.addBreakpoint({
+          actor: actor,
+          url: actualLocation.url,
+          line: actualLocation.line,
+          column: actualLocation.column
+        });
+        this.breakpointStore.removeBreakpoint(aLocation);
         return {
           actor: actor.actorID,
           actualLocation: actualLocation
@@ -732,7 +1484,7 @@ ThreadActor.prototype = {
 
     /**
      * If we get here, no line matching the given line was found, so just
-     * epically.
+     * fail epically.
      */
     return {
       error: "noCodeAtLineColumn",
@@ -741,23 +1493,89 @@ ThreadActor.prototype = {
   },
 
   /**
-   * Get the script and source lists from the debugger.
+   * Find all of the offset mappings associated with `aScript` that are closest
+   * to `aTargetLocation`. If new offset mappings are found that are closer to
+   * `aTargetOffset` than the existing offset mappings inside
+   * `aScriptsAndOffsetMappings`, we empty that map and only consider the
+   * closest offset mappings. If there is no column in `aTargetLocation`, we add
+   * all offset mappings that are on the given line.
    *
-   * TODO bug 637572: we should be dealing with sources directly, not inferring
-   * them through scripts.
+   * @param Object aTargetLocation
+   *        An object of the form { url, line[, column] }.
+   * @param Debugger.Script aScript
+   *        The script in which we are searching for offsets.
+   * @param Map aScriptsAndOffsetMappings
+   *        A Map object which maps Debugger.Script instances to arrays of
+   *        offset mappings. This is an out param.
    */
-  _discoverSources: function TA__discoverSources() {
-    // Only get one script per url.
-    let scriptsByUrl = {};
-    for (let s of this.dbg.findScripts()) {
-      scriptsByUrl[s.url] = s;
+  _findClosestOffsetMappings: function (aTargetLocation,
+                                        aScript,
+                                        aScriptsAndOffsetMappings) {
+    // If we are given a column, we will try and break only at that location,
+    // otherwise we will break anytime we get on that line.
+
+    if (aTargetLocation.column == null) {
+      let offsetMappings = aScript.getLineOffsets(aTargetLocation.line)
+        .map(o => ({
+          line: aTargetLocation.line,
+          offset: o
+        }));
+      if (offsetMappings.length) {
+        aScriptsAndOffsetMappings.set(aScript, offsetMappings);
+      }
+      return;
     }
 
-    return all([this.sources.sourcesForScript(scriptsByUrl[s])
-                for (s of Object.keys(scriptsByUrl))]);
+    let offsetMappings = aScript.getAllColumnOffsets()
+      .filter(({ lineNumber }) => lineNumber === aTargetLocation.line);
+
+    // Attempt to find the current closest offset distance from the target
+    // location by grabbing any offset mapping in the map by doing one iteration
+    // and then breaking (they all have the same distance from the target
+    // location).
+    let closestDistance = Infinity;
+    if (aScriptsAndOffsetMappings.size) {
+      for (let mappings of aScriptsAndOffsetMappings.values()) {
+        closestDistance = Math.abs(aTargetLocation.column - mappings[0].columnNumber);
+        break;
+      }
+    }
+
+    for (let mapping of offsetMappings) {
+      let currentDistance = Math.abs(aTargetLocation.column - mapping.columnNumber);
+
+      if (currentDistance > closestDistance) {
+        continue;
+      } else if (currentDistance < closestDistance) {
+        closestDistance = currentDistance;
+        aScriptsAndOffsetMappings.clear();
+        aScriptsAndOffsetMappings.set(aScript, [mapping]);
+      } else {
+        if (!aScriptsAndOffsetMappings.has(aScript)) {
+          aScriptsAndOffsetMappings.set(aScript, []);
+        }
+        aScriptsAndOffsetMappings.get(aScript).push(mapping);
+      }
+    }
   },
 
-  onSources: function TA_onSources(aRequest) {
+  /**
+   * Get the script and source lists from the debugger.
+   */
+  _discoverSources: function () {
+    // Only get one script per url.
+    const sourcesToScripts = new Map();
+    for (let s of this.dbg.findScripts()) {
+      if (s.source) {
+        sourcesToScripts.set(s.source, s);
+      }
+    }
+
+    return all([this.sources.sourcesForScript(script)
+                for (script of sourcesToScripts.values())]);
+  },
+
+  onSources: function (aRequest) {
     return this._discoverSources().then(() => {
       return {
         sources: [s.form() for (s of this.sources.iter())]
@@ -773,9 +1591,8 @@ ThreadActor.prototype = {
    * caches won't hold on to the Debugger.Script objects leaking memory.
    */
   disableAllBreakpoints: function () {
-    for (let url in this._breakpointStore) {
-      for (let line in this._breakpointStore[url]) {
-        let bp = this._breakpointStore[url][line];
+    for (let bp of this.breakpointStore.findBreakpoints()) {
+      if (bp.actor) {
         bp.actor.removeScripts();
       }
     }
@@ -784,7 +1601,7 @@ ThreadActor.prototype = {
   /**
    * Handle a protocol request to pause the debuggee.
    */
-  onInterrupt: function TA_onInterrupt(aRequest) {
+  onInterrupt: function (aRequest) {
     if (this.state == "exited") {
       return { type: "exited" };
     } else if (this.state == "paused") {
@@ -810,7 +1627,7 @@ ThreadActor.prototype = {
       this.conn.send(packet);
 
       // Start a nested event loop.
-      this._nest();
+      this._pushThreadPause();
 
       // We already sent a response to this request, don't send one
       // now.
@@ -822,9 +1639,62 @@ ThreadActor.prototype = {
   },
 
   /**
+   * Handle a protocol request to retrieve all the event listeners on the page.
+   */
+  onEventListeners: function (aRequest) {
+    // This request is only supported in content debugging.
+    if (!this.global) {
+      return {
+        error: "notImplemented",
+        message: "eventListeners request is only supported in content debugging"
+      };
+    }
+
+    let els = Cc["@mozilla.org/eventlistenerservice;1"]
+                .getService(Ci.nsIEventListenerService);
+
+    let nodes = this.global.document.getElementsByTagName("*");
+    nodes = [this.global].concat([].slice.call(nodes));
+    let listeners = [];
+
+    for (let node of nodes) {
+      let handlers = els.getListenerInfoFor(node);
+
+      for (let handler of handlers) {
+        // Create a form object for serializing the listener via the protocol.
+        let listenerForm = Object.create(null);
+        let listener = handler.listenerObject;
+        // Native event listeners don't provide any listenerObject or type and
+        // are not that useful to a JS debugger.
+        if (!listener || !handler.type) {
+          continue;
+        }
+
+        // There will be no tagName if the event listener is set on the window.
+        let selector = node.tagName ? findCssSelector(node) : "window";
+        let nodeDO = this.globalDebugObject.makeDebuggeeValue(node);
+        listenerForm.node = {
+          selector: selector,
+          object: this.createValueGrip(nodeDO)
+        };
+        listenerForm.type = handler.type;
+        listenerForm.capturing = handler.capturing;
+        listenerForm.allowsUntrusted = handler.allowsUntrusted;
+        listenerForm.inSystemEventGroup = handler.inSystemEventGroup;
+        listenerForm.isEventHandler = !!node["on" + listenerForm.type];
+        // Get the Debugger.Object for the listener object.
+        let listenerDO = this.globalDebugObject.makeDebuggeeValue(listener);
+        listenerForm.function = this.createValueGrip(listenerDO);
+        listeners.push(listenerForm);
+      }
+    }
+    return { listeners: listeners };
+  },
+
+  /**
    * Return the Debug.Frame for a frame mentioned by the protocol.
    */
-  _requestFrame: function TA_requestFrame(aFrameID) {
+  _requestFrame: function (aFrameID) {
     if (!aFrameID) {
       return this.youngestFrame;
     }
@@ -836,7 +1706,7 @@ ThreadActor.prototype = {
     return undefined;
   },
 
-  _paused: function TA_paused(aFrame) {
+  _paused: function (aFrame) {
     // We don't handle nested pauses correctly.  Don't try - if we're
     // paused, just continue running whatever code triggered the pause.
     // We don't want to actually have nested pauses (although we
@@ -855,16 +1725,24 @@ ThreadActor.prototype = {
       aFrame.onStep = undefined;
       aFrame.onPop = undefined;
     }
+    // Clear DOM event breakpoints.
+    // XPCShell tests don't use actual DOM windows for globals and cause
+    // removeListenerForAllEvents to throw.
+    if (this.global && !this.global.toString().contains("Sandbox")) {
+      let els = Cc["@mozilla.org/eventlistenerservice;1"]
+                .getService(Ci.nsIEventListenerService);
+      els.removeListenerForAllEvents(this.global, this._allEventsListener, true);
+      for (let [,bp] of this._hiddenBreakpoints) {
+        bp.onDelete();
+      }
+      this._hiddenBreakpoints.clear();
+    }
 
     this._state = "paused";
 
-    // Save the pause frame (if any) as the youngest frame for
-    // stack viewing.
-    this.youngestFrame = aFrame;
-
     // Create the actor pool that will hold the pause actor and its
     // children.
-    dbg_assert(!this._pausePool);
+    dbg_assert(!this._pausePool, "No pause pool should exist yet");
     this._pausePool = new ActorPool(this.conn);
     this.conn.addActorPool(this._pausePool);
 
@@ -873,7 +1751,7 @@ ThreadActor.prototype = {
     this._pausePool.threadActor = this;
 
     // Create the pause actor itself...
-    dbg_assert(!this._pauseActor);
+    dbg_assert(!this._pauseActor, "No pause actor should exist yet");
     this._pauseActor = new PauseActor(this._pausePool);
     this._pausePool.addActor(this._pauseActor);
 
@@ -895,27 +1773,7 @@ ThreadActor.prototype = {
     return packet;
   },
 
-  _nest: function TA_nest() {
-    if (this._hooks.preNest) {
-      var nestData = this._hooks.preNest();
-    }
-
-    let requestor = Object.create(null);
-    requestor.url = this._hooks.url;
-    requestor.connection = this.conn;
-    DebuggerServer.xpcInspector.enterNestedEventLoop(requestor);
-
-    dbg_assert(this.state === "running");
-
-    if (this._hooks.postNest) {
-      this._hooks.postNest(nestData)
-    }
-
-    // "continue" resumption value.
-    return undefined;
-  },
-
-  _resumed: function TA_resumed() {
+  _resumed: function () {
     this._state = "running";
 
     // Drop the actors in the pause actor pool.
@@ -923,7 +1781,6 @@ ThreadActor.prototype = {
 
     this._pausePool = null;
     this._pauseActor = null;
-    this.youngestFrame = null;
 
     return { from: this.actorID, type: "resumed" };
   },
@@ -933,7 +1790,7 @@ ThreadActor.prototype = {
    *
    * @returns A list of actor IDs whose frames have been popped.
    */
-  _updateFrames: function TA_updateFrames() {
+  _updateFrames: function () {
     let popped = [];
 
     // Create the actor pool that will hold the still-living frames.
@@ -962,7 +1819,7 @@ ThreadActor.prototype = {
     return popped;
   },
 
-  _createFrameActor: function TA_createFrameActor(aFrame) {
+  _createFrameActor: function (aFrame) {
     if (aFrame.actor) {
       return aFrame.actor;
     }
@@ -986,7 +1843,7 @@ ThreadActor.prototype = {
    *         functions or functions scoped to a non-debuggee global.
    */
   createEnvironmentActor:
-  function TA_createEnvironmentActor(aEnvironment, aPool) {
+  function (aEnvironment, aPool) {
     if (!aEnvironment) {
       return undefined;
     }
@@ -996,7 +1853,6 @@ ThreadActor.prototype = {
     }
 
     let actor = new EnvironmentActor(aEnvironment, this);
-    this._environmentActors.push(actor);
     aPool.addActor(actor);
     aEnvironment.actor = actor;
 
@@ -1007,34 +1863,41 @@ ThreadActor.prototype = {
    * Create a grip for the given debuggee value.  If the value is an
    * object, will create an actor with the given lifetime.
    */
-  createValueGrip: function TA_createValueGrip(aValue, aPool=false) {
+  createValueGrip: function (aValue, aPool=false) {
     if (!aPool) {
       aPool = this._pausePool;
     }
-    let type = typeof(aValue);
 
-    if (type === "string" && this._stringIsLong(aValue)) {
-      return this.longStringGrip(aValue, aPool);
+    switch (typeof aValue) {
+      case "boolean":
+        return aValue;
+      case "string":
+        if (this._stringIsLong(aValue)) {
+          return this.longStringGrip(aValue, aPool);
+        }
+        return aValue;
+      case "number":
+        if (aValue === Infinity) {
+          return { type: "Infinity" };
+        } else if (aValue === -Infinity) {
+          return { type: "-Infinity" };
+        } else if (Number.isNaN(aValue)) {
+          return { type: "NaN" };
+        } else if (!aValue && 1 / aValue === -Infinity) {
+          return { type: "-0" };
+        }
+        return aValue;
+      case "undefined":
+        return { type: "undefined" };
+      case "object":
+        if (aValue === null) {
+          return { type: "null" };
+        }
+        return this.objectGrip(aValue, aPool);
+      default:
+        dbg_assert(false, "Failed to provide a grip for: " + aValue);
+        return null;
     }
-
-    if (type === "boolean" || type === "string" || type === "number") {
-      return aValue;
-    }
-
-    if (aValue === null) {
-      return { type: "null" };
-    }
-
-    if (aValue === undefined) {
-      return { type: "undefined" }
-    }
-
-    if (typeof(aValue) === "object") {
-      return this.objectGrip(aValue, aPool);
-    }
-
-    dbg_assert(false, "Failed to provide a grip for: " + aValue);
-    return null;
   },
 
   /**
@@ -1042,7 +1905,7 @@ ThreadActor.prototype = {
    * Debugger-provided completion value.
    */
   createProtocolCompletionValue:
-  function TA_createProtocolCompletionValue(aCompletion) {
+  function (aCompletion) {
     let protoValue = {};
     if ("return" in aCompletion) {
       protoValue.return = this.createValueGrip(aCompletion.return);
@@ -1064,7 +1927,7 @@ ThreadActor.prototype = {
    * @param aPool ActorPool
    *        The actor pool where the new object actor will be added.
    */
-  objectGrip: function TA_objectGrip(aValue, aPool) {
+  objectGrip: function (aValue, aPool) {
     if (!aPool.objectActors) {
       aPool.objectActors = new WeakMap();
     }
@@ -1087,7 +1950,7 @@ ThreadActor.prototype = {
    * @param aValue Debugger.Object
    *        The debuggee object value.
    */
-  pauseObjectGrip: function TA_pauseObjectGrip(aValue) {
+  pauseObjectGrip: function (aValue) {
     if (!this._pausePool) {
       throw "Object grip requested while not paused.";
     }
@@ -1101,7 +1964,7 @@ ThreadActor.prototype = {
    * @param aActor object
    *        The object actor.
    */
-  threadObjectGrip: function TA_threadObjectGrip(aActor) {
+  threadObjectGrip: function (aActor) {
     // We want to reuse the existing actor ID, so we just remove it from the
     // current pool's weak map and then let pool.addActor do the rest.
     aActor.registeredPool.objectActors.delete(aActor.obj);
@@ -1116,7 +1979,7 @@ ThreadActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onThreadGrips: function OA_onThreadGrips(aRequest) {
+  onThreadGrips: function (aRequest) {
     if (this.state != "paused") {
       return { error: "wrongState" };
     }
@@ -1143,7 +2006,7 @@ ThreadActor.prototype = {
    * @param aPool ActorPool
    *        The actor pool where the new actor will be added.
    */
-  longStringGrip: function TA_longStringGrip(aString, aPool) {
+  longStringGrip: function (aString, aPool) {
     if (!aPool.longStringActors) {
       aPool.longStringActors = {};
     }
@@ -1164,7 +2027,7 @@ ThreadActor.prototype = {
    * @param aString String
    *        The string we are creating a grip for.
    */
-  pauseLongStringGrip: function TA_pauseLongStringGrip (aString) {
+  pauseLongStringGrip: function (aString) {
     return this.longStringGrip(aString, this._pausePool);
   },
 
@@ -1174,7 +2037,7 @@ ThreadActor.prototype = {
    * @param aString String
    *        The string we are creating a grip for.
    */
-  threadLongStringGrip: function TA_pauseLongStringGrip (aString) {
+  threadLongStringGrip: function (aString) {
     return this.longStringGrip(aString, this._threadLifetimePool);
   },
 
@@ -1185,7 +2048,7 @@ ThreadActor.prototype = {
    * @param aString String
    *        The string we are checking the length of.
    */
-  _stringIsLong: function TA__stringIsLong(aString) {
+  _stringIsLong: function (aString) {
     return aString.length >= DebuggerServer.LONG_STRING_LENGTH;
   },
 
@@ -1199,7 +2062,7 @@ ThreadActor.prototype = {
    * @param aException exception
    *        The exception that was thrown in the debugger code.
    */
-  uncaughtExceptionHook: function TA_uncaughtExceptionHook(aException) {
+  uncaughtExceptionHook: function (aException) {
     dumpn("Got an exception: " + aException.message + "\n" + aException.stack);
   },
 
@@ -1210,11 +2073,16 @@ ThreadActor.prototype = {
    * @param aFrame Debugger.Frame
    *        The stack frame that contained the debugger statement.
    */
-  onDebuggerStatement: function TA_onDebuggerStatement(aFrame) {
-    if (this.sources.isBlackBoxed(aFrame.script.url)) {
-      return undefined;
-    }
-    return this._pauseAndRespond(aFrame, { type: "debuggerStatement" });
+  onDebuggerStatement: function (aFrame) {
+    // Don't pause if we are currently stepping (in or over) or the frame is
+    // black-boxed.
+    const generatedLocation = getFrameLocation(aFrame);
+    const { url } = this.synchronize(this.sources.getOriginalLocation(
+      generatedLocation));
+
+    return this.sources.isBlackBoxed(url) || aFrame.onStep
+      ? undefined
+      : this._pauseAndRespond(aFrame, { type: "debuggerStatement" });
   },
 
   /**
@@ -1226,10 +2094,27 @@ ThreadActor.prototype = {
    * @param aValue object
    *        The exception that was thrown.
    */
-  onExceptionUnwind: function TA_onExceptionUnwind(aFrame, aValue) {
-    if (this.sources.isBlackBoxed(aFrame.script.url)) {
+  onExceptionUnwind: function (aFrame, aValue) {
+    let willBeCaught = false;
+    for (let frame = aFrame; frame != null; frame = frame.older) {
+      if (frame.script.isInCatchScope(frame.offset)) {
+        willBeCaught = true;
+        break;
+      }
+    }
+
+    if (willBeCaught && this._options.ignoreCaughtExceptions) {
       return undefined;
     }
+
+    const generatedLocation = getFrameLocation(aFrame);
+    const { url } = this.synchronize(this.sources.getOriginalLocation(
+      generatedLocation));
+
+    if (this.sources.isBlackBoxed(url)) {
+      return undefined;
+    }
+
     try {
       let packet = this._paused(aFrame);
       if (!packet) {
@@ -1239,12 +2124,13 @@ ThreadActor.prototype = {
       packet.why = { type: "exception",
                      exception: this.createValueGrip(aValue) };
       this.conn.send(packet);
-      return this._nest();
+
+      this._pushThreadPause();
     } catch(e) {
-      Cu.reportError("Got an exception during TA_onExceptionUnwind: " + e +
-                     ": " + e.stack);
-      return undefined;
+      reportError(e, "Got an exception during TA_onExceptionUnwind: ");
     }
+
+    return undefined;
   },
 
   /**
@@ -1256,12 +2142,12 @@ ThreadActor.prototype = {
    * @param aGlobal Debugger.Object
    *        A Debugger.Object instance whose referent is the global object.
    */
-  onNewScript: function TA_onNewScript(aScript, aGlobal) {
+  onNewScript: function (aScript, aGlobal) {
     this._addScript(aScript);
     this.sources.sourcesForScript(aScript);
   },
 
-  onNewSource: function TA_onNewSource(aSource) {
+  onNewSource: function (aSource) {
     this.conn.send({
       from: this.actorID,
       type: "newSource",
@@ -1277,7 +2163,7 @@ ThreadActor.prototype = {
    *        The url of the script's source that will be stored.
    * @returns true, if the script can be added, false otherwise.
    */
-  _allowSource: function TA__allowSource(aSourceUrl) {
+  _allowSource: function (aSourceUrl) {
     // Ignore anything we don't have a URL for (eval scripts, for example).
     if (!aSourceUrl)
       return false;
@@ -1295,7 +2181,7 @@ ThreadActor.prototype = {
   /**
    * Restore any pre-existing breakpoints to the scripts that we have access to.
    */
-  _restoreBreakpoints: function TA__restoreBreakpoints() {
+  _restoreBreakpoints: function () {
     for (let s of this.dbg.findScripts()) {
       this._addScript(s);
     }
@@ -1308,29 +2194,55 @@ ThreadActor.prototype = {
    *        The source script that will be stored.
    * @returns true, if the script was added; false otherwise.
    */
-  _addScript: function TA__addScript(aScript) {
+  _addScript: function (aScript) {
     if (!this._allowSource(aScript.url)) {
       return false;
     }
 
     // Set any stored breakpoints.
-    let existing = this._breakpointStore[aScript.url];
-    if (existing) {
-      let endLine = aScript.startLine + aScript.lineCount - 1;
-      // Iterate over the lines backwards, so that sliding breakpoints don't
-      // affect the loop.
-      for (let line = existing.length - 1; line >= aScript.startLine; line--) {
-        let bp = existing[line];
-        // Only consider breakpoints that are not already associated with
-        // scripts, and limit search to the line numbers contained in the new
-        // script.
-        if (bp && !bp.actor.scripts.length && line <= endLine) {
-          this._setBreakpoint(bp);
-        }
+
+    let endLine = aScript.startLine + aScript.lineCount - 1;
+    for (let bp of this.breakpointStore.findBreakpoints({ url: aScript.url })) {
+      // Only consider breakpoints that are not already associated with
+      // scripts, and limit search to the line numbers contained in the new
+      // script.
+      if (!bp.actor.scripts.length
+          && bp.line >= aScript.startLine
+          && bp.line <= endLine) {
+        this._setBreakpoint(bp);
       }
     }
+
     return true;
   },
+
+
+  /**
+   * Get prototypes and properties of multiple objects.
+   */
+  onPrototypesAndProperties: function (aRequest) {
+    let result = {};
+    for (let actorID of aRequest.actors) {
+      // This code assumes that there are no lazily loaded actors returned
+      // by this call.
+      let actor = this.conn.getActor(actorID);
+      if (!actor) {
+        return { from: this.actorID,
+                 error: "noSuchActor" };
+      }
+      let handler = actor.onPrototypeAndProperties;
+      if (!handler) {
+        return { from: this.actorID,
+                 error: "unrecognizedPacketType",
+                 message: ('Actor "' + actorID +
+                           '" does not recognize the packet type ' +
+                           '"prototypeAndProperties"') };
+      }
+      result[actorID] = handler.call(actor, {});
+    }
+    return { from: this.actorID,
+             actors: result };
+  }
 
 };
 
@@ -1342,10 +2254,12 @@ ThreadActor.prototype.requestTypes = {
   "clientEvaluate": ThreadActor.prototype.onClientEvaluate,
   "frames": ThreadActor.prototype.onFrames,
   "interrupt": ThreadActor.prototype.onInterrupt,
+  "eventListeners": ThreadActor.prototype.onEventListeners,
   "releaseMany": ThreadActor.prototype.onReleaseMany,
   "setBreakpoint": ThreadActor.prototype.onSetBreakpoint,
   "sources": ThreadActor.prototype.onSources,
-  "threadGrips": ThreadActor.prototype.onThreadGrips
+  "threadGrips": ThreadActor.prototype.onThreadGrips,
+  "prototypesAndProperties": ThreadActor.prototype.onPrototypesAndProperties
 };
 
 
@@ -1386,7 +2300,7 @@ function PauseScopedActor()
  * @param aMethod Function
  *        The function we are decorating.
  */
-PauseScopedActor.withPaused = function PSA_withPaused(aMethod) {
+PauseScopedActor.withPaused = function (aMethod) {
   return function () {
     if (this.isPaused()) {
       return aMethod.apply(this, arguments);
@@ -1401,7 +2315,7 @@ PauseScopedActor.prototype = {
   /**
    * Returns true if we are in the paused state.
    */
-  isPaused: function PSA_isPaused() {
+  isPaused: function () {
     // When there is not a ThreadActor available (like in the webconsole) we
     // have to be optimistic and assume that we are paused so that we can
     // respond to requests.
@@ -1411,7 +2325,7 @@ PauseScopedActor.prototype = {
   /**
    * Returns the wrongState response packet for this actor.
    */
-  _wrongState: function PSA_wrongState() {
+  _wrongState: function () {
     return {
       error: "wrongState",
       message: this.constructor.name +
@@ -1424,88 +2338,284 @@ PauseScopedActor.prototype = {
 /**
  * A SourceActor provides information about the source of a script.
  *
- * @param aUrl String
+ * @param String url
  *        The url of the source we are representing.
- * @param aThreadActor ThreadActor
+ * @param ThreadActor thread
  *        The current thread actor.
- * @param aSourceMap SourceMapConsumer
+ * @param SourceMapConsumer sourceMap
  *        Optional. The source map that introduced this source, if available.
+ * @param String generatedSource
+ *        Optional, passed in when aSourceMap is also passed in. The generated
+ *        source url that introduced this source.
+ * @param String text
+ *        Optional. The content text of this source, if immediately available.
+ * @param String contentType
+ *        Optional. The content type of this source, if immediately available.
  */
-function SourceActor(aUrl, aThreadActor, aSourceMap=null) {
-  this._threadActor = aThreadActor;
-  this._url = aUrl;
-  this._sourceMap = aSourceMap;
+function SourceActor({ url, thread, sourceMap, generatedSource, text,
+                       contentType }) {
+  this._threadActor = thread;
+  this._url = url;
+  this._sourceMap = sourceMap;
+  this._generatedSource = generatedSource;
+  this._text = text;
+  this._contentType = contentType;
+
+  this.onSource = this.onSource.bind(this);
+  this._invertSourceMap = this._invertSourceMap.bind(this);
+  this._saveMap = this._saveMap.bind(this);
+  this._getSourceText = this._getSourceText.bind(this);
+
+  if (this.threadActor.sources.isPrettyPrinted(this.url)) {
+    this._init = this.onPrettyPrint({
+      indent: this.threadActor.sources.prettyPrintIndent(this.url)
+    }).then(null, error => {
+      DevToolsUtils.reportException("SourceActor", error);
+    });
+  } else {
+    this._init = null;
+  }
 }
 
 SourceActor.prototype = {
   constructor: SourceActor,
   actorPrefix: "source",
 
+  _oldSourceMap: null,
+  _init: null,
+
   get threadActor() this._threadActor,
   get url() this._url,
 
-  form: function SA_form() {
+  get prettyPrintWorker() {
+    return this.threadActor.prettyPrintWorker;
+  },
+
+  form: function () {
     return {
       actor: this.actorID,
       url: this._url,
-      isBlackBoxed: this.threadActor.sources.isBlackBoxed(this.url)
+      isBlackBoxed: this.threadActor.sources.isBlackBoxed(this.url),
+      isPrettyPrinted: this.threadActor.sources.isPrettyPrinted(this.url)
       // TODO bug 637572: introductionScript
     };
   },
 
-  disconnect: function LSA_disconnect() {
+  disconnect: function () {
     if (this.registeredPool && this.registeredPool.sourceActors) {
       delete this.registeredPool.sourceActors[this.actorID];
     }
   },
 
-  /**
-   * Handler for the "source" packet.
-   */
-  onSource: function SA_onSource(aRequest) {
-    let sourceContent = null;
-    if (this._sourceMap) {
-      sourceContent = this._sourceMap.sourceContentFor(this._url);
+  _getSourceText: function () {
+    const toResolvedContent = t => resolve({
+      content: t,
+      contentType: this._contentType
+    });
+
+    let sc;
+    if (this._sourceMap && (sc = this._sourceMap.sourceContentFor(this._url))) {
+      return toResolvedContent(sc);
     }
 
-    if (sourceContent) {
-      return {
-        from: this.actorID,
-        source: this.threadActor.createValueGrip(
-          sourceContent, this.threadActor.threadLifetimePool)
-      };
+    if (this._text) {
+      return toResolvedContent(this._text);
     }
 
     // XXX bug 865252: Don't load from the cache if this is a source mapped
     // source because we can't guarantee that the cache has the most up to date
     // content for this source like we can if it isn't source mapped.
-    return fetch(this._url, { loadFromCache: !this._sourceMap })
-      .then((aSource) => {
-        return this.threadActor.createValueGrip(
-          aSource, this.threadActor.threadLifetimePool);
-      })
-      .then((aSourceGrip) => {
+    return fetch(this._url, { loadFromCache: !this._sourceMap });
+  },
+
+  /**
+   * Handler for the "source" packet.
+   */
+  onSource: function () {
+    return resolve(this._init)
+      .then(this._getSourceText)
+      .then(({ content, contentType }) => {
         return {
           from: this.actorID,
-          source: aSourceGrip
+          source: this.threadActor.createValueGrip(
+            content, this.threadActor.threadLifetimePool),
+          contentType: contentType
         };
-      }, (aError) => {
-        let msg = "Got an exception during SA_onSource: " + aError +
-          "\n" + aError.stack;
-        Cu.reportError(msg);
-        dumpn(msg);
+      })
+      .then(null, aError => {
+        reportError(aError, "Got an exception during SA_onSource: ");
         return {
           "from": this.actorID,
           "error": "loadSourceError",
-          "message": "Could not load the source for " + this._url + "."
+          "message": "Could not load the source for " + this._url + ".\n"
+            + safeErrorString(aError)
         };
       });
   },
 
   /**
+   * Handler for the "prettyPrint" packet.
+   */
+  onPrettyPrint: function ({ indent }) {
+    this.threadActor.sources.prettyPrint(this._url, indent);
+    return this._getSourceText()
+      .then(this._sendToPrettyPrintWorker(indent))
+      .then(this._invertSourceMap)
+      .then(this._saveMap)
+      .then(() => {
+        // We need to reset `_init` now because we have already done the work of
+        // pretty printing, and don't want onSource to wait forever for
+        // initialization to complete.
+        this._init = null;
+      })
+      .then(this.onSource)
+      .then(null, error => {
+        this.onDisablePrettyPrint();
+        return {
+          from: this.actorID,
+          error: "prettyPrintError",
+          message: DevToolsUtils.safeErrorString(error)
+        };
+      });
+  },
+
+  /**
+   * Return a function that sends a request to the pretty print worker, waits on
+   * the worker's response, and then returns the pretty printed code.
+   *
+   * @param Number aIndent
+   *        The number of spaces to indent by the code by, when we send the
+   *        request to the pretty print worker.
+   * @returns Function
+   *          Returns a function which takes an AST, and returns a promise that
+   *          is resolved with `{ code, mappings }` where `code` is the pretty
+   *          printed code, and `mappings` is an array of source mappings.
+   */
+  _sendToPrettyPrintWorker: function (aIndent) {
+    return ({ content }) => {
+      const deferred = promise.defer();
+      const id = Math.random();
+
+      const onReply = ({ data }) => {
+        if (data.id !== id) {
+          return;
+        }
+        this.prettyPrintWorker.removeEventListener("message", onReply, false);
+
+        if (data.error) {
+          deferred.reject(new Error(data.error));
+        } else {
+          deferred.resolve(data);
+        }
+      };
+
+      this.prettyPrintWorker.addEventListener("message", onReply, false);
+      this.prettyPrintWorker.postMessage({
+        id: id,
+        url: this._url,
+        indent: aIndent,
+        source: content
+      });
+
+      return deferred.promise;
+    };
+  },
+
+  /**
+   * Invert a source map. So if a source map maps from a to b, return a new
+   * source map from b to a. We need to do this because the source map we get
+   * from _generatePrettyCodeAndMap goes the opposite way we want it to for
+   * debugging.
+   *
+   * Note that the source map is modified in place.
+   */
+  _invertSourceMap: function ({ code, mappings }) {
+    const generator = new SourceMapGenerator({ file: this._url });
+    return DevToolsUtils.yieldingEach(mappings, m => {
+      let mapping = {
+        generated: {
+          line: m.generatedLine,
+          column: m.generatedColumn
+        }
+      };
+      if (m.source) {
+        mapping.source = m.source;
+        mapping.original = {
+          line: m.originalLine,
+          column: m.originalColumn
+        };
+        mapping.name = m.name;
+      }
+      generator.addMapping(mapping);
+    }).then(() => {
+      generator.setSourceContent(this._url, code);
+      const consumer = SourceMapConsumer.fromSourceMap(generator);
+
+      // XXX bug 918802: Monkey punch the source map consumer, because iterating
+      // over all mappings and inverting each of them, and then creating a new
+      // SourceMapConsumer is slow.
+
+      const getOrigPos = consumer.originalPositionFor.bind(consumer);
+      const getGenPos = consumer.generatedPositionFor.bind(consumer);
+
+      consumer.originalPositionFor = ({ line, column }) => {
+        const location = getGenPos({
+          line: line,
+          column: column,
+          source: this._url
+        });
+        location.source = this._url;
+        return location;
+      };
+
+      consumer.generatedPositionFor = ({ line, column }) => getOrigPos({
+        line: line,
+        column: column
+      });
+
+      return {
+        code: code,
+        map: consumer
+      };
+    });
+  },
+
+  /**
+   * Save the source map back to our thread's ThreadSources object so that
+   * stepping, breakpoints, debugger statements, etc can use it. If we are
+   * pretty printing a source mapped source, we need to compose the existing
+   * source map with our new one.
+   */
+  _saveMap: function ({ map }) {
+    if (this._sourceMap) {
+      // Compose the source maps
+      this._oldSourceMap = this._sourceMap;
+      this._sourceMap = SourceMapGenerator.fromSourceMap(this._sourceMap);
+      this._sourceMap.applySourceMap(map, this._url);
+      this._sourceMap = SourceMapConsumer.fromSourceMap(this._sourceMap);
+      this._threadActor.sources.saveSourceMap(this._sourceMap,
+                                              this._generatedSource);
+    } else {
+      this._sourceMap = map;
+      this._threadActor.sources.saveSourceMap(this._sourceMap, this._url);
+    }
+  },
+
+  /**
+   * Handler for the "disablePrettyPrint" packet.
+   */
+  onDisablePrettyPrint: function () {
+    this._sourceMap = this._oldSourceMap;
+    this.threadActor.sources.saveSourceMap(this._sourceMap,
+                                           this._generatedSource || this._url);
+    this.threadActor.sources.disablePrettyPrint(this._url);
+    return this.onSource();
+  },
+
+  /**
    * Handler for the "blackbox" packet.
    */
-  onBlackBox: function SA_onBlackBox(aRequest) {
+  onBlackBox: function (aRequest) {
     this.threadActor.sources.blackBox(this.url);
     let packet = {
       from: this.actorID
@@ -1521,7 +2631,7 @@ SourceActor.prototype = {
   /**
    * Handler for the "unblackbox" packet.
    */
-  onUnblackBox: function SA_onUnblackBox(aRequest) {
+  onUnblackBox: function (aRequest) {
     this.threadActor.sources.unblackBox(this.url);
     return {
       from: this.actorID
@@ -1532,9 +2642,151 @@ SourceActor.prototype = {
 SourceActor.prototype.requestTypes = {
   "source": SourceActor.prototype.onSource,
   "blackbox": SourceActor.prototype.onBlackBox,
-  "unblackbox": SourceActor.prototype.onUnblackBox
+  "unblackbox": SourceActor.prototype.onUnblackBox,
+  "prettyPrint": SourceActor.prototype.onPrettyPrint,
+  "disablePrettyPrint": SourceActor.prototype.onDisablePrettyPrint
 };
 
+
+/**
+ * Determine if a given value is non-primitive.
+ *
+ * @param Any aValue
+ *        The value to test.
+ * @return Boolean
+ *         Whether the value is non-primitive.
+ */
+function isObject(aValue) {
+  const type = typeof aValue;
+  return type == "object" ? aValue !== null : type == "function";
+}
+
+/**
+ * Create a function that can safely stringify Debugger.Objects of a given
+ * builtin type.
+ *
+ * @param Function aCtor
+ *        The builtin class constructor.
+ * @return Function
+ *         The stringifier for the class.
+ */
+function createBuiltinStringifier(aCtor) {
+  return aObj => aCtor.prototype.toString.call(aObj.unsafeDereference());
+}
+
+/**
+ * Stringify a Debugger.Object-wrapped Error instance.
+ *
+ * @param Debugger.Object aObj
+ *        The object to stringify.
+ * @return String
+ *         The stringification of the object.
+ */
+function errorStringify(aObj) {
+  let name = DevToolsUtils.getProperty(aObj, "name");
+  if (name === "" || name === undefined) {
+    name = aObj.class;
+  } else if (isObject(name)) {
+    name = stringify(name);
+  }
+
+  let message = DevToolsUtils.getProperty(aObj, "message");
+  if (isObject(message)) {
+    message = stringify(message);
+  }
+
+  if (message === "" || message === undefined) {
+    return name;
+  }
+  return name + ": " + message;
+}
+
+/**
+ * Stringify a Debugger.Object based on its class.
+ *
+ * @param Debugger.Object aObj
+ *        The object to stringify.
+ * @return String
+ *         The stringification for the object.
+ */
+function stringify(aObj) {
+  if (Cu.isDeadWrapper(aObj)) {
+    const error = new Error("Dead object encountered.");
+    DevToolsUtils.reportException("stringify", error);
+    return "<dead object>";
+  }
+  const stringifier = stringifiers[aObj.class] || stringifiers.Object;
+  return stringifier(aObj);
+}
+
+// Used to prevent infinite recursion when an array is found inside itself.
+let seen = null;
+
+let stringifiers = {
+  Error: errorStringify,
+  EvalError: errorStringify,
+  RangeError: errorStringify,
+  ReferenceError: errorStringify,
+  SyntaxError: errorStringify,
+  TypeError: errorStringify,
+  URIError: errorStringify,
+  Boolean: createBuiltinStringifier(Boolean),
+  Function: createBuiltinStringifier(Function),
+  Number: createBuiltinStringifier(Number),
+  RegExp: createBuiltinStringifier(RegExp),
+  String: createBuiltinStringifier(String),
+  Object: obj => "[object " + obj.class + "]",
+  Array: obj => {
+    // If we're at the top level then we need to create the Set for tracking
+    // previously stringified arrays.
+    const topLevel = !seen;
+    if (topLevel) {
+      seen = new Set();
+    } else if (seen.has(obj)) {
+      return "";
+    }
+
+    seen.add(obj);
+
+    const len = DevToolsUtils.getProperty(obj, "length");
+    let string = "";
+
+    // The following check is only required because the debuggee could possibly
+    // be a Proxy and return any value. For normal objects, array.length is
+    // always a non-negative integer.
+    if (typeof len == "number" && len > 0) {
+      for (let i = 0; i < len; i++) {
+        const desc = obj.getOwnPropertyDescriptor(i);
+        if (desc) {
+          const { value } = desc;
+          if (value != null) {
+            string += isObject(value) ? stringify(value) : value;
+          }
+        }
+
+        if (i < len - 1) {
+          string += ",";
+        }
+      }
+    }
+
+    if (topLevel) {
+      seen = null;
+    }
+
+    return string;
+  },
+  DOMException: obj => {
+    const message = DevToolsUtils.getProperty(obj, "message") || "<no message>";
+    const result = (+DevToolsUtils.getProperty(obj, "result")).toString(16);
+    const code = DevToolsUtils.getProperty(obj, "code");
+    const name = DevToolsUtils.getProperty(obj, "name") || "<unknown>";
+
+    return '[Exception... "' + message + '" ' +
+           'code: "' + code +'" ' +
+           'nsresult: "0x' + result + ' (' + name + ')"]';
+  }
+};
 
 /**
  * Creates an actor for the specified object.
@@ -1556,7 +2808,7 @@ ObjectActor.prototype = {
   /**
    * Returns a grip for this actor for returning in a protocol message.
    */
-  grip: function OA_grip() {
+  grip: function () {
     let g = {
       "type": "object",
       "class": this.obj.class,
@@ -1570,15 +2822,22 @@ ObjectActor.prototype = {
     if (this.obj.class === "Function") {
       if (this.obj.name) {
         g.name = this.obj.name;
-      } else if (this.obj.displayName) {
+      }
+      if (this.obj.displayName) {
         g.displayName = this.obj.displayName;
       }
 
       // Check if the developer has added a de-facto standard displayName
       // property for us to use.
-      let desc = this.obj.getOwnPropertyDescriptor("displayName");
-      if (desc && desc.value && typeof desc.value == "string") {
-        g.userDisplayName = this.threadActor.createValueGrip(desc.value);
+      try {
+        let desc = this.obj.getOwnPropertyDescriptor("displayName");
+        if (desc && desc.value && typeof desc.value == "string") {
+          g.userDisplayName = this.threadActor.createValueGrip(desc.value);
+        }
+      } catch (e) {
+        // Calling getOwnPropertyDescriptor with displayName might throw
+        // with "permission denied" errors for some functions.
+        dumpn(e);
       }
     }
 
@@ -1588,11 +2847,53 @@ ObjectActor.prototype = {
   /**
    * Releases this actor from the pool.
    */
-  release: function OA_release() {
+  release: function () {
     if (this.registeredPool.objectActors) {
       this.registeredPool.objectActors.delete(this.obj);
     }
     this.registeredPool.removeActor(this);
+  },
+
+  /**
+   * Handle a protocol request to provide the definition site of this function
+   * object.
+   *
+   * @param aRequest object
+   *        The protocol request object.
+   */
+  onDefinitionSite: function OA_onDefinitionSite(aRequest) {
+    if (this.obj.class != "Function") {
+      return {
+        from: this.actorID,
+        error: "objectNotFunction",
+        message: this.actorID + " is not a function."
+      };
+    }
+
+    if (!this.obj.script) {
+      return {
+        from: this.actorID,
+        error: "noScript",
+        message: this.actorID + " has no Debugger.Script"
+      };
+    }
+
+    const generatedLocation = {
+      url: this.obj.script.url,
+      line: this.obj.script.startLine,
+      // TODO bug 901138: use Debugger.Script.prototype.startColumn.
+      column: 0
+    };
+
+    return this.threadActor.sources.getOriginalLocation(generatedLocation)
+      .then(({ url, line, column }) => {
+        return {
+          from: this.actorID,
+          url: url,
+          line: line,
+          column: column
+        };
+      });
   },
 
   /**
@@ -1602,7 +2903,7 @@ ObjectActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onOwnPropertyNames: function OA_onOwnPropertyNames(aRequest) {
+  onOwnPropertyNames: function (aRequest) {
     return { from: this.actorID,
              ownPropertyNames: this.obj.getOwnPropertyNames() };
   },
@@ -1614,7 +2915,7 @@ ObjectActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onPrototypeAndProperties: function OA_onPrototypeAndProperties(aRequest) {
+  onPrototypeAndProperties: function (aRequest) {
     let ownProperties = Object.create(null);
     let names;
     try {
@@ -1647,7 +2948,7 @@ ObjectActor.prototype = {
    *         An object that maps property names to safe getter descriptors as
    *         defined by the remote debugging protocol.
    */
-  _findSafeGetterValues: function OA__findSafeGetterValues(aOwnProperties)
+  _findSafeGetterValues: function (aOwnProperties)
   {
     let safeGetterValues = Object.create(null);
     let obj = this.obj;
@@ -1715,7 +3016,7 @@ ObjectActor.prototype = {
    *         A Set of names of safe getters. This result is cached for each
    *         Debugger.Object.
    */
-  _findSafeGetters: function OA__findSafeGetters(aObject)
+  _findSafeGetters: function (aObject)
   {
     if (aObject._safeGetters) {
       return aObject._safeGetters;
@@ -1734,9 +3035,7 @@ ObjectActor.prototype = {
         continue;
       }
 
-      let fn = desc.get;
-      if (fn && fn.callable && fn.class == "Function" &&
-          fn.script === undefined) {
+      if (DevToolsUtils.hasSafeGetter(desc)) {
         getters.add(name);
       }
     }
@@ -1751,7 +3050,7 @@ ObjectActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onPrototype: function OA_onPrototype(aRequest) {
+  onPrototype: function (aRequest) {
     return { from: this.actorID,
              prototype: this.threadActor.createValueGrip(this.obj.proto) };
   },
@@ -1763,7 +3062,7 @@ ObjectActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onProperty: function OA_onProperty(aRequest) {
+  onProperty: function (aRequest) {
     if (!aRequest.name) {
       return { error: "missingParameter",
                message: "no property name was specified" };
@@ -1774,13 +3073,25 @@ ObjectActor.prototype = {
   },
 
   /**
+   * Handle a protocol request to provide the display string for the object.
+   *
+   * @param aRequest object
+   *        The protocol request object.
+   */
+  onDisplayString: function (aRequest) {
+    const string = stringify(this.obj);
+    return { from: this.actorID,
+             displayString: this.threadActor.createValueGrip(string) };
+  },
+
+  /**
    * A helper method that creates a property descriptor for the provided object,
    * properly formatted for sending in a protocol response.
    *
    * @param string aName
    *        The property that the descriptor is generated for.
    */
-  _propertyDescriptor: function OA_propertyDescriptor(aName) {
+  _propertyDescriptor: function (aName) {
     let desc;
     try {
       desc = this.obj.getOwnPropertyDescriptor(aName);
@@ -1794,6 +3105,10 @@ ObjectActor.prototype = {
         enumerable: false,
         value: e.name
       };
+    }
+
+    if (!desc) {
+      return undefined;
     }
 
     let retval = {
@@ -1821,7 +3136,7 @@ ObjectActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onDecompile: function OA_onDecompile(aRequest) {
+  onDecompile: function (aRequest) {
     if (this.obj.class !== "Function") {
       return { error: "objectNotFunction",
                message: "decompile request is only valid for object grips " +
@@ -1838,7 +3153,7 @@ ObjectActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onParameterNames: function OA_onParameterNames(aRequest) {
+  onParameterNames: function (aRequest) {
     if (this.obj.class !== "Function") {
       return { error: "objectNotFunction",
                message: "'parameterNames' request is only valid for object " +
@@ -1854,20 +3169,46 @@ ObjectActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onRelease: function OA_onRelease(aRequest) {
+  onRelease: function (aRequest) {
     this.release();
     return {};
   },
+
+  /**
+   * Handle a protocol request to provide the lexical scope of a function.
+   *
+   * @param aRequest object
+   *        The protocol request object.
+   */
+  onScope: function (aRequest) {
+    if (this.obj.class !== "Function") {
+      return { error: "objectNotFunction",
+               message: "scope request is only valid for object grips with a" +
+                        " 'Function' class." };
+    }
+
+    let envActor = this.threadActor.createEnvironmentActor(this.obj.environment,
+                                                           this.registeredPool);
+    if (!envActor) {
+      return { error: "notDebuggee",
+               message: "cannot access the environment of this function." };
+    }
+
+    return { from: this.actorID, scope: envActor.form() };
+  }
 };
 
 ObjectActor.prototype.requestTypes = {
+  "definitionSite": ObjectActor.prototype.onDefinitionSite,
   "parameterNames": ObjectActor.prototype.onParameterNames,
   "prototypeAndProperties": ObjectActor.prototype.onPrototypeAndProperties,
   "prototype": ObjectActor.prototype.onPrototype,
   "property": ObjectActor.prototype.onProperty,
+  "displayString": ObjectActor.prototype.onDisplayString,
   "ownPropertyNames": ObjectActor.prototype.onOwnPropertyNames,
   "decompile": ObjectActor.prototype.onDecompile,
   "release": ObjectActor.prototype.onRelease,
+  "scope": ObjectActor.prototype.onScope,
 };
 
 
@@ -1886,6 +3227,7 @@ update(PauseScopedObjectActor.prototype, ObjectActor.prototype);
 
 update(PauseScopedObjectActor.prototype, {
   constructor: PauseScopedObjectActor,
+  actorPrefix: "pausedobj",
 
   onOwnPropertyNames:
     PauseScopedActor.withPaused(ObjectActor.prototype.onOwnPropertyNames),
@@ -1897,31 +3239,11 @@ update(PauseScopedObjectActor.prototype, {
   onProperty: PauseScopedActor.withPaused(ObjectActor.prototype.onProperty),
   onDecompile: PauseScopedActor.withPaused(ObjectActor.prototype.onDecompile),
 
+  onDisplayString:
+    PauseScopedActor.withPaused(ObjectActor.prototype.onDisplayString),
+
   onParameterNames:
     PauseScopedActor.withPaused(ObjectActor.prototype.onParameterNames),
-
-  /**
-   * Handle a protocol request to provide the lexical scope of a function.
-   *
-   * @param aRequest object
-   *        The protocol request object.
-   */
-  onScope: PauseScopedActor.withPaused(function OA_onScope(aRequest) {
-    if (this.obj.class !== "Function") {
-      return { error: "objectNotFunction",
-               message: "scope request is only valid for object grips with a" +
-                        " 'Function' class." };
-    }
-
-    let envActor = this.threadActor.createEnvironmentActor(this.obj.environment,
-                                                           this.registeredPool);
-    if (!envActor) {
-      return { error: "notDebuggee",
-               message: "cannot access the environment of this function." };
-    }
-
-    return { from: this.actorID, scope: envActor.form() };
-  }),
 
   /**
    * Handle a protocol request to promote a pause-lifetime grip to a
@@ -1930,7 +3252,7 @@ update(PauseScopedObjectActor.prototype, {
    * @param aRequest object
    *        The protocol request object.
    */
-  onThreadGrip: PauseScopedActor.withPaused(function OA_onThreadGrip(aRequest) {
+  onThreadGrip: PauseScopedActor.withPaused(function (aRequest) {
     this.threadActor.threadObjectGrip(this);
     return {};
   }),
@@ -1941,7 +3263,7 @@ update(PauseScopedObjectActor.prototype, {
    * @param aRequest object
    *        The protocol request object.
    */
-  onRelease: PauseScopedActor.withPaused(function OA_onRelease(aRequest) {
+  onRelease: PauseScopedActor.withPaused(function (aRequest) {
     if (this.registeredPool !== this.threadActor.threadLifetimePool) {
       return { error: "notReleasable",
                message: "Only thread-lifetime actors can be released." };
@@ -1953,7 +3275,6 @@ update(PauseScopedObjectActor.prototype, {
 });
 
 update(PauseScopedObjectActor.prototype.requestTypes, {
-  "scope": PauseScopedObjectActor.prototype.onScope,
   "threadGrip": PauseScopedObjectActor.prototype.onThreadGrip,
 });
 
@@ -1975,7 +3296,7 @@ LongStringActor.prototype = {
 
   actorPrefix: "longString",
 
-  disconnect: function LSA_disconnect() {
+  disconnect: function () {
     // Because longStringActors is not a weak map, we won't automatically leave
     // it so we need to manually leave on disconnect so that we don't leak
     // memory.
@@ -1987,7 +3308,7 @@ LongStringActor.prototype = {
   /**
    * Returns a grip for this actor for returning in a protocol message.
    */
-  grip: function LSA_grip() {
+  grip: function () {
     return {
       "type": "longString",
       "initial": this.string.substring(
@@ -2003,7 +3324,7 @@ LongStringActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onSubstring: function LSA_onSubString(aRequest) {
+  onSubstring: function (aRequest) {
     return {
       "from": this.actorID,
       "substring": this.string.substring(aRequest.start, aRequest.end)
@@ -2013,7 +3334,7 @@ LongStringActor.prototype = {
   /**
    * Handle a request to release this LongStringActor instance.
    */
-  onRelease: function LSA_onRelease() {
+  onRelease: function () {
     // TODO: also check if registeredPool === threadActor.threadLifetimePool
     // when the web console moves aray from manually releasing pause-scoped
     // actors.
@@ -2064,7 +3385,7 @@ FrameActor.prototype = {
    * Finalization handler that is called when the actor is being evicted from
    * the pool.
    */
-  disconnect: function FA_disconnect() {
+  disconnect: function () {
     this.conn.removeActorPool(this._frameLifetimePool);
     this._frameLifetimePool = null;
   },
@@ -2072,7 +3393,7 @@ FrameActor.prototype = {
   /**
    * Returns a frame form for use in a protocol message.
    */
-  form: function FA_form() {
+  form: function () {
     let form = { actor: this.actorID,
                  type: this.frame.type };
     if (this.frame.type === "call") {
@@ -2088,9 +3409,7 @@ FrameActor.prototype = {
     form.this = this.threadActor.createValueGrip(this.frame.this);
     form.arguments = this._args();
     if (this.frame.script) {
-      form.where = { url: this.frame.script.url,
-                     line: this.frame.script.getOffsetLine(this.frame.offset) };
-      form.isBlackBoxed = this.threadActor.sources.isBlackBoxed(this.frame.script.url)
+      form.where = getFrameLocation(this.frame);
     }
 
     if (!this.frame.older) {
@@ -2100,7 +3419,7 @@ FrameActor.prototype = {
     return form;
   },
 
-  _args: function FA__args() {
+  _args: function () {
     if (!this.frame.arguments) {
       return [];
     }
@@ -2115,7 +3434,7 @@ FrameActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onPop: function FA_onPop(aRequest) {
+  onPop: function (aRequest) {
     // TODO: remove this when Debugger.Frame.prototype.pop is implemented
     if (typeof this.frame.pop != "function") {
       return { error: "notImplemented",
@@ -2167,7 +3486,7 @@ BreakpointActor.prototype = {
    * @param ThreadActor aThreadActor
    *        The parent thread actor that contains this breakpoint.
    */
-  addScript: function BA_addScript(aScript, aThreadActor) {
+  addScript: function (aScript, aThreadActor) {
     this.threadActor = aThreadActor;
     this.scripts.push(aScript);
   },
@@ -2188,21 +3507,29 @@ BreakpointActor.prototype = {
    * @param aFrame Debugger.Frame
    *        The stack frame that contained the breakpoint.
    */
-  hit: function BA_hit(aFrame) {
-    if (this.threadActor.sources.isBlackBoxed(this.location.url)) {
+  hit: function (aFrame) {
+    // Don't pause if we are currently stepping (in or over) or the frame is
+    // black-boxed.
+    let { url } = this.threadActor.synchronize(
+      this.threadActor.sources.getOriginalLocation({
+        url: this.location.url,
+        line: this.location.line,
+        column: this.location.column
+      }));
+
+    if (this.threadActor.sources.isBlackBoxed(url) || aFrame.onStep) {
       return undefined;
     }
 
-    // TODO: add the rest of the breakpoints on that line (bug 676602).
-    let reason = { type: "breakpoint", actors: [ this.actorID ] };
-    return this.threadActor._pauseAndRespond(aFrame, reason, (aPacket) => {
-      let { url, line } = aPacket.frame.where;
-      return this.threadActor.sources.getOriginalLocation(url, line)
-        .then(function (aOrigPosition) {
-          aPacket.frame.where = aOrigPosition;
-          return aPacket;
-        });
-    });
+    let reason = {};
+    if (this.threadActor._hiddenBreakpoints.has(this.actorID)) {
+      reason.type = "pauseOnDOMEvents";
+    } else {
+      reason.type = "breakpoint";
+      // TODO: add the rest of the breakpoints on that line (bug 676602).
+      reason.actors = [ this.actorID ];
+    }
+    return this.threadActor._pauseAndRespond(aFrame, reason);
   },
 
   /**
@@ -2211,14 +3538,12 @@ BreakpointActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onDelete: function BA_onDelete(aRequest) {
+  onDelete: function (aRequest) {
     // Remove from the breakpoint store.
-    let scriptBreakpoints = this.threadActor._breakpointStore[this.location.url];
-    delete scriptBreakpoints[this.location.line];
-    this.threadActor._hooks.removeFromParentPool(this);
+    this.threadActor.breakpointStore.removeBreakpoint(this.location);
+    this.threadActor.threadLifetimePool.removeActor(this);
     // Remove the actual breakpoint from the associated scripts.
     this.removeScripts();
-
     return { from: this.actorID };
   }
 };
@@ -2250,7 +3575,7 @@ EnvironmentActor.prototype = {
   /**
    * Return an environment form for use in a protocol message.
    */
-  form: function EA_form() {
+  form: function () {
     let form = { actor: this.actorID };
 
     // What is this environment's type?
@@ -2290,7 +3615,7 @@ EnvironmentActor.prototype = {
    * Return the identifier bindings object as required by the remote protocol
    * specification.
    */
-  _bindings: function EA_bindings() {
+  _bindings: function () {
     let bindings = { arguments: [], variables: {} };
 
     // TODO: this part should be removed in favor of the commented-out part
@@ -2379,7 +3704,7 @@ EnvironmentActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onAssign: function EA_onAssign(aRequest) {
+  onAssign: function (aRequest) {
     // TODO: enable the commented-out part when getVariableDescriptor lands
     // (bug 725815).
     /*let desc = this.obj.getVariableDescriptor(aRequest.name);
@@ -2392,14 +3717,10 @@ EnvironmentActor.prototype = {
 
     try {
       this.obj.setVariable(aRequest.name, aRequest.value);
-    } catch (e) {
-      if (e instanceof Debugger.DebuggeeWouldRun) {
+    } catch (e if e instanceof Debugger.DebuggeeWouldRun) {
         return { error: "threadWouldRun",
                  cause: e.cause ? e.cause : "setter",
                  message: "Assigning a value would cause the debuggee to run" };
-      }
-      // This should never happen, so let it complain loudly if it does.
-      throw e;
     }
     return { from: this.actorID };
   },
@@ -2411,7 +3732,7 @@ EnvironmentActor.prototype = {
    * @param aRequest object
    *        The protocol request object.
    */
-  onBindings: function EA_onBindings(aRequest) {
+  onBindings: function (aRequest) {
     return { from: this.actorID,
              bindings: this._bindings() };
   }
@@ -2470,9 +3791,7 @@ Object.defineProperty(Debugger.Frame.prototype, "line", {
  *
  * @param aHooks object
  *        An object with preNest and postNest methods for calling when entering
- *        and exiting a nested event loop and also addToParentPool and
- *        removeFromParentPool methods for handling the lifetime of actors that
- *        will outlive the thread, like breakpoints.
+ *        and exiting a nested event loop.
  */
 function ChromeDebuggerActor(aConnection, aHooks)
 {
@@ -2500,7 +3819,7 @@ update(ChromeDebuggerActor.prototype, {
    * before use.
    */
   globalManager: {
-    findGlobals: function CDA_findGlobals() {
+    findGlobals: function () {
       // Add every global known to the debugger as debuggee.
       this.dbg.addAllGlobalsAsDebuggees();
     },
@@ -2512,7 +3831,7 @@ update(ChromeDebuggerActor.prototype, {
      * @param aGlobal Debugger.Object
      *        The new global object that was created.
      */
-    onNewGlobal: function CDA_onNewGlobal(aGlobal) {
+    onNewGlobal: function (aGlobal) {
       this.addDebuggee(aGlobal);
       // Notify the client.
       this.conn.send({
@@ -2537,8 +3856,6 @@ function ThreadSources(aThreadActor, aUseSourceMaps, aAllowPredicate,
   this._allow = aAllowPredicate;
   this._onNewSource = aOnNewSource;
 
-  // source map URL --> promise of SourceMapConsumer
-  this._sourceMaps = Object.create(null);
   // generated source url --> promise of SourceMapConsumer
   this._sourceMapsByGeneratedSource = Object.create(null);
   // original source url --> promise of SourceMapConsumer
@@ -2553,41 +3870,85 @@ function ThreadSources(aThreadActor, aUseSourceMaps, aAllowPredicate,
  * Must be a class property because it needs to persist across reloads, same as
  * the breakpoint store.
  */
-ThreadSources._blackBoxedSources = new Set();
+ThreadSources._blackBoxedSources = new Set(["self-hosted"]);
+ThreadSources._prettyPrintedSources = new Map();
 
 ThreadSources.prototype = {
   /**
-   * Return the source actor representing |aURL|, creating one if none
-   * exists already. Returns null if |aURL| is not allowed by the 'allow'
+   * Return the source actor representing |url|, creating one if none
+   * exists already. Returns null if |url| is not allowed by the 'allow'
    * predicate.
    *
    * Right now this takes a URL, but in the future it should
    * take a Debugger.Source. See bug 637572.
    *
-   * @param String aURL
+   * @param String url
    *        The source URL.
-   * @param optional SourceMapConsumer aSourceMap
+   * @param optional SourceMapConsumer sourceMap
    *        The source map that introduced this source, if any.
+   * @param optional String generatedSource
+   *        The generated source url that introduced this source via source map,
+   *        if any.
+   * @param optional String text
+   *        The text content of the source, if immediately available.
+   * @param optional String contentType
+   *        The content type of the source, if immediately available.
    * @returns a SourceActor representing the source at aURL or null.
    */
-  source: function TS_source(aURL, aSourceMap=null) {
-    if (!this._allow(aURL)) {
+  source: function ({ url, sourceMap, generatedSource, text, contentType }) {
+    if (!this._allow(url)) {
       return null;
     }
 
-    if (aURL in this._sourceActors) {
-      return this._sourceActors[aURL];
+    if (url in this._sourceActors) {
+      return this._sourceActors[url];
     }
 
-    let actor = new SourceActor(aURL, this._thread, aSourceMap);
+    let actor = new SourceActor({
+      url: url,
+      thread: this._thread,
+      sourceMap: sourceMap,
+      generatedSource: generatedSource,
+      text: text,
+      contentType: contentType
+    });
     this._thread.threadLifetimePool.addActor(actor);
-    this._sourceActors[aURL] = actor;
+    this._sourceActors[url] = actor;
     try {
       this._onNewSource(actor);
     } catch (e) {
       reportError(e);
     }
     return actor;
+  },
+
+  /**
+   * Only to be used when we aren't source mapping.
+   */
+  _sourceForScript: function (aScript) {
+    const spec = {
+      url: aScript.url
+    };
+
+    // XXX bug 915433: We can't rely on Debugger.Source.prototype.text if the
+    // source is an HTML-embedded <script> tag. Since we don't have an API
+    // implemented to detect whether this is the case, we need to be
+    // conservative and only use Debugger.Source.prototype.text if we get a
+    // normal .js file.
+    if (aScript.url) {
+      try {
+        const url = Services.io.newURI(aScript.url, null, null)
+          .QueryInterface(Ci.nsIURL);
+        if (url.fileExtension === "js") {
+          spec.contentType = "text/javascript";
+          spec.text = aScript.source.text;
+        }
+      } catch(ex) {
+        // Not a valid URI.
+      }
+    }
+
+    return this.source(spec);
   },
 
   /**
@@ -2598,26 +3959,26 @@ ThreadSources.prototype = {
    * use it to find all of |aScript|'s *original* sources; return a promise
    * of an array of source actors for those.
    */
-  sourcesForScript: function TS_sourcesForScript(aScript) {
+  sourcesForScript: function (aScript) {
     if (!this._useSourceMaps || !aScript.sourceMapURL) {
-      return resolve([this.source(aScript.url)].filter(isNotNull));
+      return resolve([this._sourceForScript(aScript)].filter(isNotNull));
     }
 
     return this.sourceMap(aScript)
       .then((aSourceMap) => {
         return [
-          this.source(s, aSourceMap) for (s of aSourceMap.sources)
+          this.source({ url: s,
+                        sourceMap: aSourceMap,
+                        generatedSource: aScript.url })
+          for (s of aSourceMap.sources)
         ];
       })
       .then(null, (e) => {
         reportError(e);
-        delete this._sourceMaps[this._normalize(aScript.sourceMapURL, aScript.url)];
         delete this._sourceMapsByGeneratedSource[aScript.url];
-        return [this.source(aScript.url)];
+        return [this._sourceForScript(aScript)];
       })
-      .then(function (aSources) {
-        return aSources.filter(isNotNull);
-      });
+      .then(ss => ss.filter(isNotNull));
   },
 
   /**
@@ -2625,74 +3986,102 @@ ThreadSources.prototype = {
    * |aScript|; if we already have such a promise extant, return that.
    * |aScript| must have a non-null sourceMapURL.
    */
-  sourceMap: function TS_sourceMap(aScript) {
-    if (aScript.url in this._sourceMapsByGeneratedSource) {
-      return this._sourceMapsByGeneratedSource[aScript.url];
-    }
-    dbg_assert(aScript.sourceMapURL);
+  sourceMap: function (aScript) {
+    dbg_assert(aScript.sourceMapURL, "Script should have a sourceMapURL");
     let sourceMapURL = this._normalize(aScript.sourceMapURL, aScript.url);
-    let map = this._fetchSourceMap(sourceMapURL)
-      .then((aSourceMap) => {
-        for (let s of aSourceMap.sources) {
-          this._generatedUrlsByOriginalUrl[s] = aScript.url;
-          this._sourceMapsByOriginalSource[s] = resolve(aSourceMap);
-        }
-        return aSourceMap;
-      });
+    let map = this._fetchSourceMap(sourceMapURL, aScript.url)
+      .then(aSourceMap => this.saveSourceMap(aSourceMap, aScript.url));
     this._sourceMapsByGeneratedSource[aScript.url] = map;
     return map;
+  },
+
+  /**
+   * Save the given source map so that we can use it to query source locations
+   * down the line.
+   */
+  saveSourceMap: function (aSourceMap, aGeneratedSource) {
+    if (!aSourceMap) {
+      delete this._sourceMapsByGeneratedSource[aGeneratedSource];
+      return null;
+    }
+    this._sourceMapsByGeneratedSource[aGeneratedSource] = resolve(aSourceMap);
+    for (let s of aSourceMap.sources) {
+      this._generatedUrlsByOriginalUrl[s] = aGeneratedSource;
+      this._sourceMapsByOriginalSource[s] = resolve(aSourceMap);
+    }
+    return aSourceMap;
   },
 
   /**
    * Return a promise of a SourceMapConsumer for the source map located at
    * |aAbsSourceMapURL|, which must be absolute. If there is already such a
    * promise extant, return it.
+   *
+   * @param string aAbsSourceMapURL
+   *        The source map URL, in absolute form, not relative.
+   * @param string aScriptURL
+   *        When the source map URL is a data URI, there is no sourceRoot on the
+   *        source map, and the source map's sources are relative, we resolve
+   *        them from aScriptURL.
    */
-  _fetchSourceMap: function TS__fetchSourceMap(aAbsSourceMapURL) {
-    if (aAbsSourceMapURL in this._sourceMaps) {
-      return this._sourceMaps[aAbsSourceMapURL];
-    } else {
-      let promise = fetch(aAbsSourceMapURL).then((rawSourceMap) => {
-        let map = new SourceMapConsumer(rawSourceMap);
-        let base = aAbsSourceMapURL.replace(/\/[^\/]+$/, '/');
-        if (base.indexOf("data:") !== 0) {
-          map.sourceRoot = map.sourceRoot
-            ? this._normalize(map.sourceRoot, base)
-            : base;
-        }
+  _fetchSourceMap: function (aAbsSourceMapURL, aScriptURL) {
+    return fetch(aAbsSourceMapURL, { loadFromCache: false })
+      .then(({ content }) => {
+        let map = new SourceMapConsumer(content);
+        this._setSourceMapRoot(map, aAbsSourceMapURL, aScriptURL);
         return map;
       });
-      this._sourceMaps[aAbsSourceMapURL] = promise;
-      return promise;
-    }
+  },
+
+  /**
+   * Sets the source map's sourceRoot to be relative to the source map url.
+   */
+  _setSourceMapRoot: function (aSourceMap, aAbsSourceMapURL, aScriptURL) {
+    const base = this._dirname(
+      aAbsSourceMapURL.indexOf("data:") === 0
+        ? aScriptURL
+        : aAbsSourceMapURL);
+    aSourceMap.sourceRoot = aSourceMap.sourceRoot
+      ? this._normalize(aSourceMap.sourceRoot, base)
+      : base;
+  },
+
+  _dirname: function (aPath) {
+    return Services.io.newURI(
+      ".", null, Services.io.newURI(aPath, null, null)).spec;
   },
 
   /**
    * Returns a promise of the location in the original source if the source is
    * source mapped, otherwise a promise of the same location.
-   *
-   * TODO bug 637572: take/return a column
    */
-  getOriginalLocation: function TS_getOriginalLocation(aSourceUrl, aLine) {
-    if (aSourceUrl in this._sourceMapsByGeneratedSource) {
-      return this._sourceMapsByGeneratedSource[aSourceUrl]
-        .then(function (aSourceMap) {
-          let { source, line } = aSourceMap.originalPositionFor({
-            source: aSourceUrl,
-            line: aLine,
-            column: Infinity
+  getOriginalLocation: function ({ url, line, column }) {
+    if (url in this._sourceMapsByGeneratedSource) {
+      return this._sourceMapsByGeneratedSource[url]
+        .then((aSourceMap) => {
+          let { source: aSourceURL, line: aLine, column: aColumn } = aSourceMap.originalPositionFor({
+            line: line,
+            column: column
           });
           return {
-            url: source,
-            line: line
+            url: aSourceURL,
+            line: aLine,
+            column: aColumn
           };
+        })
+        .then(null, error => {
+          if (!DevToolsUtils.reportingDisabled) {
+            DevToolsUtils.reportException(error);
+          }
+          return { url: null, line: null, column: null };
         });
     }
 
     // No source map
     return resolve({
-      url: aSourceUrl,
-      line: aLine
+      url: url,
+      line: line,
+      column: column
     });
   },
 
@@ -2704,29 +4093,29 @@ ThreadSources.prototype = {
    * above, that returns a promise P. The process of resolving P populates
    * the tables this function uses; thus, it won't know that S's original
    * source URLs map to S until P is resolved.
-   *
-   * TODO bug 637572: take/return a column
    */
-  getGeneratedLocation: function TS_getGeneratedLocation(aSourceUrl, aLine) {
-    if (aSourceUrl in this._sourceMapsByOriginalSource) {
-      return this._sourceMapsByOriginalSource[aSourceUrl]
+  getGeneratedLocation: function ({ url, line, column }) {
+    if (url in this._sourceMapsByOriginalSource) {
+      return this._sourceMapsByOriginalSource[url]
         .then((aSourceMap) => {
-          let { line } = aSourceMap.generatedPositionFor({
-            source: aSourceUrl,
-            line: aLine,
-            column: Infinity
+          let { line: aLine, column: aColumn } = aSourceMap.generatedPositionFor({
+            source: url,
+            line: line,
+            column: column == null ? Infinity : column
           });
           return {
-            url: this._generatedUrlsByOriginalUrl[aSourceUrl],
-            line: line
+            url: this._generatedUrlsByOriginalUrl[url],
+            line: aLine,
+            column: aColumn
           };
         });
     }
 
     // No source map
     return resolve({
-      url: aSourceUrl,
-      line: aLine
+      url: url,
+      line: line,
+      column: column
     });
   },
 
@@ -2737,19 +4126,17 @@ ThreadSources.prototype = {
    *        The URL of the source which we are checking whether it is black
    *        boxed or not.
    */
-  isBlackBoxed: function TS_isBlackBoxed(aURL) {
+  isBlackBoxed: function (aURL) {
     return ThreadSources._blackBoxedSources.has(aURL);
   },
 
   /**
-   * Add the given source URL to the set of sources that are black boxed. If the
-   * thread is currently paused and we are black boxing the yougest frame's
-   * source, this will force a step.
+   * Add the given source URL to the set of sources that are black boxed.
    *
    * @param aURL String
    *        The URL of the source which we are black boxing.
    */
-  blackBox: function TS_blackBox(aURL) {
+  blackBox: function (aURL) {
     ThreadSources._blackBoxedSources.add(aURL);
   },
 
@@ -2759,15 +4146,52 @@ ThreadSources.prototype = {
    * @param aURL String
    *        The URL of the source which we are no longer black boxing.
    */
-  unblackBox: function TS_unblackBox(aURL) {
+  unblackBox: function (aURL) {
     ThreadSources._blackBoxedSources.delete(aURL);
+  },
+
+  /**
+   * Returns true if the given URL is pretty printed.
+   *
+   * @param aURL String
+   *        The URL of the source that might be pretty printed.
+   */
+  isPrettyPrinted: function (aURL) {
+    return ThreadSources._prettyPrintedSources.has(aURL);
+  },
+
+  /**
+   * Add the given URL to the set of sources that are pretty printed.
+   *
+   * @param aURL String
+   *        The URL of the source to be pretty printed.
+   */
+  prettyPrint: function (aURL, aIndent) {
+    ThreadSources._prettyPrintedSources.set(aURL, aIndent);
+  },
+
+  /**
+   * Return the indent the given URL was pretty printed by.
+   */
+  prettyPrintIndent: function (aURL) {
+    return ThreadSources._prettyPrintedSources.get(aURL);
+  },
+
+  /**
+   * Remove the given URL from the set of sources that are pretty printed.
+   *
+   * @param aURL String
+   *        The URL of the source that is no longer pretty printed.
+   */
+  disablePrettyPrint: function (aURL) {
+    ThreadSources._prettyPrintedSources.delete(aURL);
   },
 
   /**
    * Normalize multiple relative paths towards the base paths on the right.
    */
-  _normalize: function TS__normalize(...aURLs) {
-    dbg_assert(aURLs.length > 1);
+  _normalize: function (...aURLs) {
+    dbg_assert(aURLs.length > 1, "Should have more than 1 URL");
     let base = Services.io.newURI(aURLs.pop(), null, null);
     let url;
     while ((url = aURLs.pop())) {
@@ -2776,7 +4200,7 @@ ThreadSources.prototype = {
     return base.spec;
   },
 
-  iter: function TS_iter() {
+  iter: function () {
     for (let url in this._sourceActors) {
       yield this._sourceActors[url];
     }
@@ -2784,6 +4208,51 @@ ThreadSources.prototype = {
 };
 
 // Utility functions.
+
+// TODO bug 863089: use Debugger.Script.prototype.getOffsetColumn when it is
+// implemented.
+function getOffsetColumn(aOffset, aScript) {
+  let bestOffsetMapping = null;
+  for (let offsetMapping of aScript.getAllColumnOffsets()) {
+    if (!bestOffsetMapping ||
+        (offsetMapping.offset <= aOffset &&
+         offsetMapping.offset > bestOffsetMapping.offset)) {
+      bestOffsetMapping = offsetMapping;
+    }
+  }
+
+  if (!bestOffsetMapping) {
+    // XXX: Try not to completely break the experience of using the debugger for
+    // the user by assuming column 0. Simultaneously, report the error so that
+    // there is a paper trail if the assumption is bad and the debugging
+    // experience becomes wonky.
+    reportError(new Error("Could not find a column for offset " + aOffset
+                          + " in the script " + aScript));
+    return 0;
+  }
+
+  return bestOffsetMapping.columnNumber;
+}
+
+/**
+ * Return the non-source-mapped location of the given Debugger.Frame. If the
+ * frame does not have a script, the location's properties are all null.
+ *
+ * @param Debugger.Frame aFrame
+ *        The frame whose location we are getting.
+ * @returns Object
+ *          Returns an object of the form { url, line, column }
+ */
+function getFrameLocation(aFrame) {
+  if (!aFrame || !aFrame.script) {
+    return { url: null, line: null, column: null };
+  }
+  return {
+    url: aFrame.script.url,
+    line: aFrame.script.getOffsetLine(aFrame.offset),
+    column: getOffsetColumn(aFrame.offset, aFrame.script)
+  }
+}
 
 /**
  * Utility function for updating an object with the properties of another
@@ -2828,6 +4297,7 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
   let scheme;
   let url = aURL.split(" -> ").pop();
   let charset;
+  let contentType;
 
   try {
     scheme = Services.io.extractScheme(url);
@@ -2844,18 +4314,22 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
     case "chrome":
     case "resource":
       try {
-        NetUtil.asyncFetch(url, function onFetch(aStream, aStatus) {
+        NetUtil.asyncFetch(url, function onFetch(aStream, aStatus, aRequest) {
           if (!Components.isSuccessCode(aStatus)) {
-            deferred.reject("Request failed: " + url);
+            deferred.reject(new Error("Request failed with status code = "
+                                      + aStatus
+                                      + " after NetUtil.asyncFetch for url = "
+                                      + url));
             return;
           }
 
           let source = NetUtil.readInputStreamToString(aStream, aStream.available());
+          contentType = aRequest.contentType;
           deferred.resolve(source);
           aStream.close();
         });
       } catch (ex) {
-        deferred.reject("Request failed: " + url);
+        deferred.reject(ex);
       }
       break;
 
@@ -2873,7 +4347,10 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
       let streamListener = {
         onStartRequest: function(aRequest, aContext, aStatusCode) {
           if (!Components.isSuccessCode(aStatusCode)) {
-            deferred.reject("Request failed: " + url);
+            deferred.reject(new Error("Request failed with status code = "
+                                      + aStatusCode
+                                      + " in onStartRequest handler for url = "
+                                      + url));
           }
         },
         onDataAvailable: function(aRequest, aContext, aStream, aOffset, aCount) {
@@ -2881,11 +4358,15 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
         },
         onStopRequest: function(aRequest, aContext, aStatusCode) {
           if (!Components.isSuccessCode(aStatusCode)) {
-            deferred.reject("Request failed: " + url);
+            deferred.reject(new Error("Request failed with status code = "
+                                      + aStatusCode
+                                      + " in onStopRequest handler for url = "
+                                      + url));
             return;
           }
 
           charset = channel.contentCharset;
+          contentType = channel.contentType;
           deferred.resolve(chunks.join(""));
         }
       };
@@ -2897,8 +4378,11 @@ function fetch(aURL, aOptions={ loadFromCache: true }) {
       break;
   }
 
-  return deferred.promise.then(function (source) {
-    return convertToUnicode(source, charset);
+  return deferred.promise.then(source => {
+    return {
+      content: convertToUnicode(source, charset),
+      contentType: contentType
+    };
   });
 }
 
@@ -2924,8 +4408,92 @@ function convertToUnicode(aString, aCharset=null) {
 
 /**
  * Report the given error in the error console and to stdout.
+ *
+ * @param Error aError
+ *        The error object you wish to report.
+ * @param String aPrefix
+ *        An optional prefix for the reported error message.
  */
-function reportError(aError) {
-  Cu.reportError(aError);
-  dumpn(aError.message + ":\n" + aError.stack);
+function reportError(aError, aPrefix="") {
+  dbg_assert(aError instanceof Error, "Must pass Error objects to reportError");
+  let msg = aPrefix + aError.message + ":\n" + aError.stack;
+  Cu.reportError(msg);
+  dumpn(msg);
+}
+
+// The following are copied here verbatim from css-logic.js, until we create a
+// server-friendly helper module.
+
+/**
+ * Find a unique CSS selector for a given element
+ * @returns a string such that ele.ownerDocument.querySelector(reply) === ele
+ * and ele.ownerDocument.querySelectorAll(reply).length === 1
+ */
+function findCssSelector(ele) {
+  var document = ele.ownerDocument;
+  if (ele.id && document.getElementById(ele.id) === ele) {
+    return '#' + ele.id;
+  }
+
+  // Inherently unique by tag name
+  var tagName = ele.tagName.toLowerCase();
+  if (tagName === 'html') {
+    return 'html';
+  }
+  if (tagName === 'head') {
+    return 'head';
+  }
+  if (tagName === 'body') {
+    return 'body';
+  }
+
+  if (ele.parentNode == null) {
+    console.log('danger: ' + tagName);
+  }
+
+  // We might be able to find a unique class name
+  var selector, index, matches;
+  if (ele.classList.length > 0) {
+    for (var i = 0; i < ele.classList.length; i++) {
+      // Is this className unique by itself?
+      selector = '.' + ele.classList.item(i);
+      matches = document.querySelectorAll(selector);
+      if (matches.length === 1) {
+        return selector;
+      }
+      // Maybe it's unique with a tag name?
+      selector = tagName + selector;
+      matches = document.querySelectorAll(selector);
+      if (matches.length === 1) {
+        return selector;
+      }
+      // Maybe it's unique using a tag name and nth-child
+      index = positionInNodeList(ele, ele.parentNode.children) + 1;
+      selector = selector + ':nth-child(' + index + ')';
+      matches = document.querySelectorAll(selector);
+      if (matches.length === 1) {
+        return selector;
+      }
+    }
+  }
+
+  // So we can be unique w.r.t. our parent, and use recursion
+  index = positionInNodeList(ele, ele.parentNode.children) + 1;
+  selector = findCssSelector(ele.parentNode) + ' > ' +
+          tagName + ':nth-child(' + index + ')';
+
+  return selector;
+};
+
+/**
+ * Find the position of [element] in [nodeList].
+ * @returns an index of the match, or -1 if there is no match
+ */
+function positionInNodeList(element, nodeList) {
+  for (var i = 0; i < nodeList.length; i++) {
+    if (element === nodeList[i]) {
+      return i;
+    }
+  }
+  return -1;
 }

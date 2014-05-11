@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "mozilla/dom/SVGUseElement.h"
 #include "mozilla/dom/SVGUseElementBinding.h"
@@ -13,6 +13,7 @@
 #include "nsIPresShell.h"
 #include "mozilla/dom/Element.h"
 #include "nsContentUtils.h"
+#include "nsIURI.h"
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Use)
 
@@ -43,6 +44,8 @@ nsSVGElement::StringInfo SVGUseElement::sStringInfo[1] =
 
 //----------------------------------------------------------------------
 // nsISupports methods
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(SVGUseElement)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(SVGUseElement,
                                                 SVGUseElementBase)
@@ -97,9 +100,6 @@ SVGUseElement::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
   *aResult = nullptr;
   nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
   SVGUseElement *it = new SVGUseElement(ni.forget());
-  if (!it) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
 
   nsCOMPtr<nsINode> kungFuDeathGrip(it);
   nsresult rv1 = it->Init();

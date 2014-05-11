@@ -2,19 +2,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "tests.h"
-#include "jsdbgapi.h"
+#include "js/OldDebugAPI.h"
+#include "jsapi-tests/tests.h"
 
-JSPrincipals *sOriginPrincipalsInErrorReporter = NULL;
-
-static void
-ErrorReporter(JSContext *cx, const char *message, JSErrorReport *report)
-{
-    sOriginPrincipalsInErrorReporter = report->originPrincipals;
-}
-
-JSPrincipals prin1 = { 1 };
-JSPrincipals prin2 = { 1 };
+static JSPrincipals *sOriginPrincipalsInErrorReporter = nullptr;
+static TestJSPrincipals prin1(1);
+static TestJSPrincipals prin2(1);
 
 BEGIN_TEST(testOriginPrincipals)
 {
@@ -51,6 +44,12 @@ BEGIN_TEST(testOriginPrincipals)
     return true;
 }
 
+static void
+ErrorReporter(JSContext *cx, const char *message, JSErrorReport *report)
+{
+    sOriginPrincipalsInErrorReporter = report->originPrincipals;
+}
+
 bool
 eval(const char *asciiChars, JSPrincipals *principals, JSPrincipals *originPrincipals, jsval *rval)
 {
@@ -60,7 +59,7 @@ eval(const char *asciiChars, JSPrincipals *principals, JSPrincipals *originPrinc
         chars[i] = asciiChars[i];
     chars[len] = 0;
 
-    JS::RootedObject global(cx, JS_NewGlobalObject(cx, getGlobalClass(), principals));
+    JS::RootedObject global(cx, JS_NewGlobalObject(cx, getGlobalClass(), principals, JS::FireOnNewGlobalHook));
     CHECK(global);
     JSAutoCompartment ac(cx, global);
     CHECK(JS_InitStandardClasses(cx, global));

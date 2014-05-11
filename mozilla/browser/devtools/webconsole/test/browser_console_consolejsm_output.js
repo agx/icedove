@@ -13,7 +13,7 @@ function test()
   let console = Cu.import("resource://gre/modules/devtools/Console.jsm", {}).console;
   console.log("bug861338-log-cached");
 
-  HUDConsoleUI.toggleBrowserConsole().then(consoleOpened);
+  HUDService.toggleBrowserConsole().then(consoleOpened);
   let hud = null;
 
   function consoleOpened(aHud)
@@ -125,7 +125,7 @@ function test()
 
       hud.jsterm.on("variablesview-fetched", onFetch);
 
-      scrollOutputToNode(clickable);
+      clickable.scrollIntoView(false);
 
       info("wait for variablesview-fetched");
       executeSoon(() =>

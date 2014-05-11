@@ -4,12 +4,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsITransport.idl"
-#include "nsINetAddr.idl"
 
 interface nsIInterfaceRequestor;
+interface nsINetAddr;
 
 %{ C++
-#include "mozilla/net/DNS.h"
+namespace mozilla {
+namespace net {
+union NetAddr;
+}
+}
 %}
 native NetAddr(mozilla::net::NetAddr);
 
@@ -27,34 +31,37 @@ native NetAddr(mozilla::net::NetAddr);
 interface nsISocketTransport : nsITransport 
 {
     /**
-     * Get the host for the underlying socket connection.
+     * Get the peer's host for the underlying socket connection.
+     * For Unix domain sockets, this is a pathname, or the empty string for
+     * unnamed and abstract socket addresses.
      */
     readonly attribute AUTF8String host;
 
     /**
      * Get the port for the underlying socket connection.
+     * For Unix domain sockets, this is zero.
      */
     readonly attribute long port;
 
-    /** 
+    /**
      * Returns the IP address of the socket connection peer. This
      * attribute is defined only once a connection has been established.
      */
     [noscript] NetAddr getPeerAddr();
 
-    /** 
+    /**
      * Returns the IP address of the initiating end. This attribute
      * is defined only once a connection has been established.
      */
     [noscript] NetAddr getSelfAddr();
 
-    /** 
+    /**
      * Returns a scriptable version of getPeerAddr. This attribute is defined
      * only once a connection has been established.
      */
     nsINetAddr getScriptablePeerAddr();
 
-    /** 
+    /**
      * Returns a scriptable version of getSelfAddr. This attribute is defined
      * only once a connection has been established.
      */
@@ -168,6 +175,12 @@ interface nsISocketTransport : nsITransport
      * connect to IPv6 ones.
      */
     const unsigned long DISABLE_IPV4 = (1 << 4);
+
+    /**
+     * If set, indicates that the socket should not connect if the hostname
+     * resolves to an RFC1918 address or IPv6 equivalent.
+     */
+    const unsigned long DISABLE_RFC1918 = (1 << 5);
 
     /**
      * Socket QoS/ToS markings. Valid values are IPTOS_DSCP_AFxx or

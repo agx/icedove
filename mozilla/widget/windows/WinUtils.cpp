@@ -8,9 +8,14 @@
 #include "nsWindow.h"
 #include "nsWindowDefs.h"
 #include "KeyboardLayout.h"
-#include "nsGUIEvent.h"
 #include "nsIDOMMouseEvent.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/WindowsVersion.h"
+
+#ifdef MOZ_LOGGING
+#define FORCE_PR_LOG /* Allow logging in the release build */
+#endif // MOZ_LOGGING
+#include "prlog.h"
 
 #include "nsString.h"
 #include "nsDirectoryServiceUtils.h"
@@ -27,68 +32,199 @@
 #include "nsIChannel.h"
 #include "nsIObserver.h"
 #include "imgIEncoder.h"
+#include "nsIThread.h"
+#include "MainThreadUtils.h"
+#include "gfxColor.h"
+#ifdef MOZ_METRO
+#include "winrt/MetroInput.h"
+#include "winrt/MetroUtils.h"
+#endif // MOZ_METRO
 
 #ifdef NS_ENABLE_TSF
 #include <textstor.h>
 #include "nsTextStore.h"
 #endif // #ifdef NS_ENABLE_TSF
 
+#ifdef PR_LOGGING
+PRLogModuleInfo* gWindowsLog = nullptr;
+#endif
+
 namespace mozilla {
 namespace widget {
 
-  NS_IMPL_ISUPPORTS1(myDownloadObserver, nsIDownloadObserver)
+NS_IMPL_ISUPPORTS1(myDownloadObserver, nsIDownloadObserver)
 #ifdef MOZ_PLACES
-  NS_IMPL_ISUPPORTS1(AsyncFaviconDataReady, nsIFaviconDataCallback)
+NS_IMPL_ISUPPORTS1(AsyncFaviconDataReady, nsIFaviconDataCallback)
 #endif
-  NS_IMPL_THREADSAFE_ISUPPORTS1(AsyncEncodeAndWriteIcon, nsIRunnable)
-  NS_IMPL_THREADSAFE_ISUPPORTS1(AsyncDeleteIconFromDisk, nsIRunnable)
-  NS_IMPL_THREADSAFE_ISUPPORTS1(AsyncDeleteAllFaviconsFromDisk, nsIRunnable)
+NS_IMPL_ISUPPORTS1(AsyncEncodeAndWriteIcon, nsIRunnable)
+NS_IMPL_ISUPPORTS1(AsyncDeleteIconFromDisk, nsIRunnable)
+NS_IMPL_ISUPPORTS1(AsyncDeleteAllFaviconsFromDisk, nsIRunnable)
 
 
-  const char FaviconHelper::kJumpListCacheDir[] = "jumpListCache";
-  const char FaviconHelper::kShortcutCacheDir[] = "shortcutCache";
+const char FaviconHelper::kJumpListCacheDir[] = "jumpListCache";
+const char FaviconHelper::kShortcutCacheDir[] = "shortcutCache";
 
 // apis available on vista and up.
-WinUtils::SHCreateItemFromParsingNamePtr WinUtils::sCreateItemFromParsingName = NULL;
-WinUtils::SHGetKnownFolderPathPtr WinUtils::sGetKnownFolderPath = NULL;
+WinUtils::SHCreateItemFromParsingNamePtr WinUtils::sCreateItemFromParsingName = nullptr;
+WinUtils::SHGetKnownFolderPathPtr WinUtils::sGetKnownFolderPath = nullptr;
 
-static const PRUnichar kSehllLibraryName[] =  L"shell32.dll";
-static HMODULE sShellDll = NULL;
+// We just leak these DLL HMODULEs. There's no point in calling FreeLibrary
+// on them during shutdown anyway.
+static const wchar_t kShellLibraryName[] =  L"shell32.dll";
+static HMODULE sShellDll = nullptr;
+static const wchar_t kDwmLibraryName[] = L"dwmapi.dll";
+static HMODULE sDwmDll = nullptr;
 
-/* static */ 
-WinUtils::WinVersion
-WinUtils::GetWindowsVersion()
+WinUtils::DwmExtendFrameIntoClientAreaProc WinUtils::dwmExtendFrameIntoClientAreaPtr = nullptr;
+WinUtils::DwmIsCompositionEnabledProc WinUtils::dwmIsCompositionEnabledPtr = nullptr;
+WinUtils::DwmSetIconicThumbnailProc WinUtils::dwmSetIconicThumbnailPtr = nullptr;
+WinUtils::DwmSetIconicLivePreviewBitmapProc WinUtils::dwmSetIconicLivePreviewBitmapPtr = nullptr;
+WinUtils::DwmGetWindowAttributeProc WinUtils::dwmGetWindowAttributePtr = nullptr;
+WinUtils::DwmSetWindowAttributeProc WinUtils::dwmSetWindowAttributePtr = nullptr;
+WinUtils::DwmInvalidateIconicBitmapsProc WinUtils::dwmInvalidateIconicBitmapsPtr = nullptr;
+WinUtils::DwmDefWindowProcProc WinUtils::dwmDwmDefWindowProcPtr = nullptr;
+WinUtils::DwmGetCompositionTimingInfoProc WinUtils::dwmGetCompositionTimingInfoPtr = nullptr;
+
+/* static */
+void
+WinUtils::Initialize()
 {
-  static int32_t version = 0;
-
-  if (version) {
-    return static_cast<WinVersion>(version);
+#ifdef PR_LOGGING
+  if (!gWindowsLog) {
+    gWindowsLog = PR_NewLogModule("Widget");
   }
+#endif
+  if (!sDwmDll && IsVistaOrLater()) {
+    sDwmDll = ::LoadLibraryW(kDwmLibraryName);
 
-  OSVERSIONINFOEX osInfo;
-  osInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
-  // This cast is safe and supposed to be here, don't worry
-  ::GetVersionEx((OSVERSIONINFO*)&osInfo);
-  version =
-    (osInfo.dwMajorVersion & 0xff) << 8 | (osInfo.dwMinorVersion & 0xff);
-  return static_cast<WinVersion>(version);
+    if (sDwmDll) {
+      dwmExtendFrameIntoClientAreaPtr = (DwmExtendFrameIntoClientAreaProc)::GetProcAddress(sDwmDll, "DwmExtendFrameIntoClientArea");
+      dwmIsCompositionEnabledPtr = (DwmIsCompositionEnabledProc)::GetProcAddress(sDwmDll, "DwmIsCompositionEnabled");
+      dwmSetIconicThumbnailPtr = (DwmSetIconicThumbnailProc)::GetProcAddress(sDwmDll, "DwmSetIconicThumbnail");
+      dwmSetIconicLivePreviewBitmapPtr = (DwmSetIconicLivePreviewBitmapProc)::GetProcAddress(sDwmDll, "DwmSetIconicLivePreviewBitmap");
+      dwmGetWindowAttributePtr = (DwmGetWindowAttributeProc)::GetProcAddress(sDwmDll, "DwmGetWindowAttribute");
+      dwmSetWindowAttributePtr = (DwmSetWindowAttributeProc)::GetProcAddress(sDwmDll, "DwmSetWindowAttribute");
+      dwmInvalidateIconicBitmapsPtr = (DwmInvalidateIconicBitmapsProc)::GetProcAddress(sDwmDll, "DwmInvalidateIconicBitmaps");
+      dwmDwmDefWindowProcPtr = (DwmDefWindowProcProc)::GetProcAddress(sDwmDll, "DwmDefWindowProc");
+      dwmGetCompositionTimingInfoPtr = (DwmGetCompositionTimingInfoProc)::GetProcAddress(sDwmDll, "DwmGetCompositionTimingInfo");
+    }
+  }
+}
+
+// static
+void
+WinUtils::LogW(const wchar_t *fmt, ...)
+{
+  va_list args = nullptr;
+  if(!lstrlenW(fmt)) {
+    return;
+  }
+  va_start(args, fmt);
+  int buflen = _vscwprintf(fmt, args);
+  wchar_t* buffer = new wchar_t[buflen+1];
+  if (!buffer) {
+    va_end(args);
+    return;
+  }
+  vswprintf(buffer, buflen, fmt, args);
+  va_end(args);
+
+  // MSVC, including remote debug sessions
+  OutputDebugStringW(buffer);
+  OutputDebugStringW(L"\n");
+
+  int len = wcslen(buffer);
+  if (len) {
+    char* utf8 = new char[len+1];
+    memset(utf8, 0, sizeof(utf8));
+    if (WideCharToMultiByte(CP_ACP, 0, buffer,
+                            -1, utf8, len+1, nullptr,
+                            nullptr) > 0) {
+      // desktop console
+      printf("%s\n", utf8);
+#ifdef PR_LOGGING
+      NS_ASSERTION(gWindowsLog, "Called WinUtils Log() but Widget "
+                                   "log module doesn't exist!");
+      PR_LOG(gWindowsLog, PR_LOG_ALWAYS, (utf8));
+#endif
+    }
+    delete[] utf8;
+  }
+  delete[] buffer;
+}
+
+// static
+void
+WinUtils::Log(const char *fmt, ...)
+{
+  va_list args = nullptr;
+  if(!strlen(fmt)) {
+    return;
+  }
+  va_start(args, fmt);
+  int buflen = _vscprintf(fmt, args);
+  char* buffer = new char[buflen+1];
+  if (!buffer) {
+    va_end(args);
+    return;
+  }
+  vsprintf(buffer, fmt, args);
+  va_end(args);
+
+  // MSVC, including remote debug sessions
+  OutputDebugStringA(buffer);
+  OutputDebugStringW(L"\n");
+
+  // desktop console
+  printf("%s\n", buffer);
+
+#ifdef PR_LOGGING
+  NS_ASSERTION(gWindowsLog, "Called WinUtils Log() but Widget "
+                               "log module doesn't exist!");
+  PR_LOG(gWindowsLog, PR_LOG_ALWAYS, (buffer));
+#endif
+  delete[] buffer;
 }
 
 /* static */
-bool
-WinUtils::GetWindowsServicePackVersion(UINT& aOutMajor, UINT& aOutMinor)
+double
+WinUtils::LogToPhysFactor()
 {
-  OSVERSIONINFOEX osInfo;
-  osInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFOEX);
-  // This cast is safe and supposed to be here, don't worry
-  if (!::GetVersionEx((OSVERSIONINFO*)&osInfo)) {
-    return false;
+  // dpi / 96.0
+  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
+#ifdef MOZ_METRO
+    return MetroUtils::LogToPhysFactor();
+#else
+    return 1.0;
+#endif
+  } else {
+    HDC hdc = ::GetDC(nullptr);
+    double result = ::GetDeviceCaps(hdc, LOGPIXELSY) / 96.0;
+    ::ReleaseDC(nullptr, hdc);
+    return result;
   }
-  
-  aOutMajor = osInfo.wServicePackMajor;
-  aOutMinor = osInfo.wServicePackMinor;
+}
 
-  return true;
+/* static */
+double
+WinUtils::PhysToLogFactor()
+{
+  // 1.0 / (dpi / 96.0)
+  return 1.0 / LogToPhysFactor();
+}
+
+/* static */
+double
+WinUtils::PhysToLog(int32_t aValue)
+{
+  return double(aValue) * PhysToLogFactor();
+}
+
+/* static */
+int32_t
+WinUtils::LogToPhys(double aValue)
+{
+  return int32_t(NS_round(aValue * LogToPhysFactor()));
 }
 
 /* static */
@@ -130,9 +266,9 @@ WinUtils::GetMessage(LPMSG aMsg, HWND aWnd, UINT aFirstMessage,
 /* static */
 bool
 WinUtils::GetRegistryKey(HKEY aRoot,
-                         const PRUnichar* aKeyName,
-                         const PRUnichar* aValueName,
-                         PRUnichar* aBuffer,
+                         char16ptr_t aKeyName,
+                         char16ptr_t aValueName,
+                         wchar_t* aBuffer,
                          DWORD aBufferLength)
 {
   NS_PRECONDITION(aKeyName, "The key name is NULL");
@@ -150,7 +286,7 @@ WinUtils::GetRegistryKey(HKEY aRoot,
 
   DWORD type;
   result =
-    ::RegQueryValueExW(key, aValueName, NULL, &type, (BYTE*) aBuffer,
+    ::RegQueryValueExW(key, aValueName, nullptr, &type, (BYTE*) aBuffer,
                        &aBufferLength);
   ::RegCloseKey(key);
   if (result != ERROR_SUCCESS || type != REG_SZ) {
@@ -164,7 +300,7 @@ WinUtils::GetRegistryKey(HKEY aRoot,
 
 /* static */
 bool
-WinUtils::HasRegistryKey(HKEY aRoot, const PRUnichar* aKeyName)
+WinUtils::HasRegistryKey(HKEY aRoot, char16ptr_t aKeyName)
 {
   MOZ_ASSERT(aRoot, "aRoot must not be NULL");
   MOZ_ASSERT(aKeyName, "aKeyName must not be NULL");
@@ -189,7 +325,7 @@ WinUtils::GetTopLevelHWND(HWND aWnd,
                           bool aStopIfNotPopup)
 {
   HWND curWnd = aWnd;
-  HWND topWnd = NULL;
+  HWND topWnd = nullptr;
 
   while (curWnd) {
     topWnd = curWnd;
@@ -216,10 +352,10 @@ WinUtils::GetTopLevelHWND(HWND aWnd,
   return topWnd;
 }
 
-static PRUnichar*
+static const wchar_t*
 GetNSWindowPropName()
 {
-  static PRUnichar sPropName[40] = L"";
+  static wchar_t sPropName[40] = L"";
   if (!*sPropName) {
     _snwprintf(sPropName, 39, L"MozillansIWidgetPtr%p",
                ::GetCurrentProcessId());
@@ -230,13 +366,20 @@ GetNSWindowPropName()
 
 /* static */
 bool
-WinUtils::SetNSWindowPtr(HWND aWnd, nsWindow* aWindow)
+WinUtils::SetNSWindowBasePtr(HWND aWnd, nsWindowBase* aWidget)
 {
-  if (!aWindow) {
+  if (!aWidget) {
     ::RemovePropW(aWnd, GetNSWindowPropName());
     return true;
   }
-  return ::SetPropW(aWnd, GetNSWindowPropName(), (HANDLE)aWindow);
+  return ::SetPropW(aWnd, GetNSWindowPropName(), (HANDLE)aWidget);
+}
+
+/* static */
+nsWindowBase*
+WinUtils::GetNSWindowBasePtr(HWND aWnd)
+{
+  return static_cast<nsWindowBase*>(::GetPropW(aWnd, GetNSWindowPropName()));
 }
 
 /* static */
@@ -258,7 +401,7 @@ int32_t
 WinUtils::GetMonitorCount()
 {
   int32_t monitorCount = 0;
-  EnumDisplayMonitors(NULL, NULL, AddMonitor, (LPARAM)&monitorCount);
+  EnumDisplayMonitors(nullptr, nullptr, AddMonitor, (LPARAM)&monitorCount);
   return monitorCount;
 }
 
@@ -283,7 +426,7 @@ WinUtils::FindOurProcessWindow(HWND aWnd)
       return wnd;
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 static bool
@@ -307,7 +450,7 @@ static HWND
 FindTopmostWindowAtPoint(HWND aWnd, const POINT& aPointInScreen)
 {
   if (!::IsWindowVisible(aWnd) || !IsPointInWindow(aWnd, aPointInScreen)) {
-    return NULL;
+    return nullptr;
   }
 
   HWND childWnd = ::GetTopWindow(aWnd);
@@ -359,7 +502,7 @@ WinUtils::FindOurWindowAtPoint(const POINT& aPointInScreen)
 {
   FindOurWindowAtPointInfo info;
   info.mInPointInScreen = aPointInScreen;
-  info.mOutWnd = NULL;
+  info.mOutWnd = nullptr;
 
   // This will enumerate all top-level windows in order from top to bottom.
   EnumWindows(FindOurWindowAtPointCallback, reinterpret_cast<LPARAM>(&info));
@@ -437,7 +580,7 @@ WinUtils::SHCreateItemFromParsingName(PCWSTR pszPath, IBindCtx *pbc,
   }
 
   if (!sShellDll) {
-    sShellDll = ::LoadLibraryW(kSehllLibraryName);
+    sShellDll = ::LoadLibraryW(kShellLibraryName);
     if (!sShellDll) {
       return false;
     }
@@ -463,7 +606,7 @@ WinUtils::SHGetKnownFolderPath(REFKNOWNFOLDERID rfid,
   }
 
   if (!sShellDll) {
-    sShellDll = ::LoadLibraryW(kSehllLibraryName);
+    sShellDll = ::LoadLibraryW(kShellLibraryName);
     if (!sShellDll) {
       return false;
     }
@@ -528,7 +671,7 @@ nsresult AsyncFaviconDataReady::OnFaviconDataNotAvailable(void)
   rv = NS_NewDownloader(getter_AddRefs(listener), downloadObserver, icoFile);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  channel->AsyncOpen(listener, NULL);
+  channel->AsyncOpen(listener, nullptr);
   return NS_OK;
 }
 
@@ -580,7 +723,7 @@ AsyncFaviconDataReady::OnComplete(nsIURI *aFaviconURI,
   if (mURLShortcut) {
     imageSurface =
       new gfxImageSurface(gfxIntSize(48, 48),
-                          gfxImageSurface::ImageFormatARGB32);
+                          gfxImageFormatARGB32);
     gfxContext context(imageSurface);
     context.SetOperator(gfxContext::OPERATOR_SOURCE);
     context.SetColor(gfxRGBA(1, 1, 1, 1));
@@ -982,7 +1125,7 @@ WinUtils::GetShellItemPath(IShellItem* aItem,
                            nsString& aResultString)
 {
   NS_ENSURE_TRUE(aItem, false);
-  LPWSTR str = NULL;
+  LPWSTR str = nullptr;
   if (FAILED(aItem->GetDisplayName(SIGDN_FILESYSPATH, &str)))
     return false;
   aResultString.Assign(str);
@@ -998,7 +1141,7 @@ WinUtils::ConvertHRGNToRegion(HRGN aRgn)
 
   nsIntRegion rgn;
 
-  DWORD size = ::GetRegionData(aRgn, 0, NULL);
+  DWORD size = ::GetRegionData(aRgn, 0, nullptr);
   nsAutoTArray<uint8_t,100> buffer;
   if (!buffer.SetLength(size))
     return rgn;
@@ -1057,6 +1200,17 @@ WinUtils::SetupKeyModifiersSequence(nsTArray<KeyPair>* aArray,
   }
 }
 
+/* static */
+bool
+WinUtils::ShouldHideScrollbars()
+{
+#ifdef MOZ_METRO
+  if (XRE_GetWindowsEnvironment() == WindowsEnvironmentType_Metro) {
+    return widget::winrt::MetroInput::IsInputModeImprecise();
+  }
+#endif // MOZ_METRO
+  return false;
+}
 
 } // namespace widget
 } // namespace mozilla

@@ -27,6 +27,7 @@
 #include "mozilla/Preferences.h"        // for Preferences
 #include "mozilla/Selection.h"          // for Selection, etc
 #include "mozilla/Services.h"           // for GetObserverService
+#include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"        // for Element, nsINode::AsElement
 #include "mozilla/mozalloc.h"           // for operator new, etc
 #include "nsAString.h"                  // for nsAString_internal::Length, etc
@@ -44,10 +45,8 @@
 #include "nsEditorEventListener.h"      // for nsEditorEventListener
 #include "nsEditorUtils.h"              // for nsAutoRules, etc
 #include "nsError.h"                    // for NS_OK, etc
-#include "nsEvent.h"                    // for nsEventStatus, etc
 #include "nsFocusManager.h"             // for nsFocusManager
 #include "nsFrameSelection.h"           // for nsFrameSelection
-#include "nsGUIEvent.h"                 // for nsKeyEvent, nsEvent, etc
 #include "nsGkAtoms.h"                  // for nsGkAtoms, nsGkAtoms::dir
 #include "nsIAbsorbingTransaction.h"    // for nsIAbsorbingTransaction
 #include "nsIAtom.h"                    // for nsIAtom
@@ -113,10 +112,6 @@ class nsIOutputStream;
 class nsIParserService;
 class nsITransferable;
 
-#ifdef NS_DEBUG_EDITOR
-static bool gNoisy = false;
-#endif
-
 #ifdef DEBUG
 #include "nsIDOMHTMLDocument.h"         // for nsIDOMHTMLDocument
 #endif
@@ -165,6 +160,8 @@ nsEditor::~nsEditor()
 
   delete mPhonetic;
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsEditor)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsEditor)
  NS_IMPL_CYCLE_COLLECTION_UNLINK(mRootElement)
@@ -778,10 +775,6 @@ nsEditor::SetTransactionManager(nsITransactionManager *aTxnManager)
 NS_IMETHODIMP 
 nsEditor::Undo(uint32_t aCount)
 {
-#ifdef NS_DEBUG_EDITOR
-  if (gNoisy) { printf("Editor::Undo ----------\n"); }
-#endif
-
   ForceCompositionEnd();
 
   bool hasTxnMgr, hasTransaction = false;
@@ -823,10 +816,6 @@ NS_IMETHODIMP nsEditor::CanUndo(bool *aIsEnabled, bool *aCanUndo)
 NS_IMETHODIMP 
 nsEditor::Redo(uint32_t aCount)
 {
-#ifdef NS_DEBUG_EDITOR
-  if (gNoisy) { printf("Editor::Redo ----------\n"); }
-#endif
-
   bool hasTxnMgr, hasTransaction = false;
   CanRedo(&hasTxnMgr, &hasTransaction);
   NS_ENSURE_TRUE(hasTransaction, NS_OK);
@@ -1734,52 +1723,57 @@ nsEditor::InsertContainerAbove(nsIContent* aNode,
 ///////////////////////////////////////////////////////////////////////////
 // MoveNode:  move aNode to {aParent,aOffset}
 nsresult
-nsEditor::MoveNode(nsIContent* aNode, nsINode* aParent, int32_t aOffset)
+nsEditor::MoveNode(nsIDOMNode* aNode, nsIDOMNode* aParent, int32_t aOffset)
 {
-  MOZ_ASSERT(aNode && aParent);
-  MOZ_ASSERT(aOffset == -1 || (0 <= aOffset &&
-                               aOffset <= (int32_t)aParent->Length()));
-  nsresult res = MoveNode(aNode->AsDOMNode(), aParent->AsDOMNode(), aOffset);
-  NS_ASSERTION(NS_SUCCEEDED(res), "MoveNode failed");
-  NS_ENSURE_SUCCESS(res, res);
-  return NS_OK;
+  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+  NS_ENSURE_STATE(node);
+
+  nsCOMPtr<nsINode> parent = do_QueryInterface(aParent);
+  NS_ENSURE_STATE(parent);
+
+  return MoveNode(node, parent, aOffset);
 }
 
 nsresult
-nsEditor::MoveNode(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset)
+nsEditor::MoveNode(nsINode* aNode, nsINode* aParent, int32_t aOffset)
 {
-  NS_ENSURE_TRUE(aNode && aParent, NS_ERROR_NULL_POINTER);
-  nsresult res;
+  MOZ_ASSERT(aNode);
+  MOZ_ASSERT(aParent);
+  MOZ_ASSERT(aOffset == -1 ||
+             (0 <= aOffset && SafeCast<uint32_t>(aOffset) <= aParent->Length()));
 
   int32_t oldOffset;
-  nsCOMPtr<nsIDOMNode> oldParent = GetNodeLocation(aNode, &oldOffset);
+  nsCOMPtr<nsINode> oldParent = GetNodeLocation(aNode, &oldOffset);
   
-  if (aOffset == -1)
-  {
-    uint32_t unsignedOffset;
-    // magic value meaning "move to end of aParent"
-    res = GetLengthOfDOMNode(aParent, unsignedOffset);
-    NS_ENSURE_SUCCESS(res, res);
-    aOffset = (int32_t)unsignedOffset;
+  if (aOffset == -1) {
+    // Magic value meaning "move to end of aParent".
+    aOffset = SafeCast<int32_t>(aParent->Length());
   }
   
-  // don't do anything if it's already in right place
-  if ((aParent == oldParent.get()) && (oldOffset == aOffset)) return NS_OK;
+  // Don't do anything if it's already in right place.
+  if (aParent == oldParent && aOffset == oldOffset) {
+    return NS_OK;
+  }
   
-  // notify our internal selection state listener
-  nsAutoMoveNodeSelNotify selNotify(mRangeUpdater, oldParent, oldOffset, aParent, aOffset);
+  // Notify our internal selection state listener.
+  nsAutoMoveNodeSelNotify selNotify(mRangeUpdater, oldParent, oldOffset,
+                                    aParent, aOffset);
   
-  // need to adjust aOffset if we are moving aNode further along in its current parent
-  if ((aParent == oldParent.get()) && (oldOffset < aOffset)) 
-  {
-    aOffset--;  // this is because when we delete aNode, it will make the offsets after it off by one
+  // Need to adjust aOffset if we are moving aNode further along in its current
+  // parent.
+  if (aParent == oldParent && oldOffset < aOffset) {
+    // This is because when we delete aNode, it will make the offsets after it
+    // off by one.
+    aOffset--;
   }
 
-  // Hold a reference so aNode doesn't go away when we remove it (bug 772282)
-  nsCOMPtr<nsIDOMNode> node = aNode;
-  res = DeleteNode(node);
-  NS_ENSURE_SUCCESS(res, res);
-  return InsertNode(node, aParent, aOffset);
+  // Hold a reference so aNode doesn't go away when we remove it (bug 772282).
+  nsCOMPtr<nsINode> kungFuDeathGrip = aNode;
+
+  nsresult rv = DeleteNode(aNode);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return InsertNode(aNode->AsDOMNode(), aParent->AsDOMNode(), aOffset);
 }
 
 
@@ -1838,7 +1832,7 @@ public:
 
     // Even if the change is caused by untrusted event, we need to dispatch
     // trusted input event since it's a fact.
-    nsEvent inputEvent(true, NS_FORM_INPUT);
+    WidgetEvent inputEvent(true, NS_FORM_INPUT);
     inputEvent.mFlags.mCancelable = false;
     inputEvent.time = static_cast<uint64_t>(PR_Now() / 1000);
     nsEventStatus status = nsEventStatus_eIgnore;
@@ -2708,10 +2702,6 @@ nsEditor::SplitNodeImpl(nsIDOMNode * aExistingRightNode,
                         nsIDOMNode*  aNewLeftNode,
                         nsIDOMNode*  aParent)
 {
-#ifdef NS_DEBUG_EDITOR
-  if (gNoisy) { printf("SplitNodeImpl: left=%p, right=%p, offset=%d\n", (void*)aNewLeftNode, (void*)aExistingRightNode, aOffset); }
-#endif
-
   NS_ASSERTION(((nullptr!=aExistingRightNode) &&
                 (nullptr!=aNewLeftNode) &&
                 (nullptr!=aParent)),
@@ -2834,209 +2824,127 @@ nsEditor::SplitNodeImpl(nsIDOMNode * aExistingRightNode,
 }
 
 nsresult
-nsEditor::JoinNodesImpl(nsIDOMNode * aNodeToKeep,
-                        nsIDOMNode * aNodeToJoin,
-                        nsIDOMNode * aParent,
-                        bool         aNodeToKeepIsFirst)
+nsEditor::JoinNodesImpl(nsINode* aNodeToKeep,
+                        nsINode* aNodeToJoin,
+                        nsINode* aParent)
 {
-  NS_ASSERTION(aNodeToKeep && aNodeToJoin && aParent, "null arg");
-  nsresult result = NS_OK;
-  if (aNodeToKeep && aNodeToJoin && aParent)
-  {
-    // get selection
-    nsCOMPtr<nsISelection> selection;
-    GetSelection(getter_AddRefs(selection));
-    NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
+  MOZ_ASSERT(aNodeToKeep);
+  MOZ_ASSERT(aNodeToJoin);
+  MOZ_ASSERT(aParent);
 
-    // remember some selection points
-    nsCOMPtr<nsIDOMNode> selStartNode, selEndNode;
-    int32_t selStartOffset, selEndOffset, joinOffset, keepOffset;
-    result = GetStartNodeAndOffset(selection, getter_AddRefs(selStartNode), &selStartOffset);
-    if (NS_FAILED(result)) selStartNode = nullptr;
-    result = GetEndNodeAndOffset(selection, getter_AddRefs(selEndNode), &selEndOffset);
-    // Joe or Kin should comment here on why the following line is not a copy/paste error
-    if (NS_FAILED(result)) selStartNode = nullptr;
+  nsRefPtr<Selection> selection = GetSelection();
+  NS_ENSURE_TRUE(selection, NS_ERROR_NULL_POINTER);
 
-    nsCOMPtr<nsIDOMNode> leftNode;
-    if (aNodeToKeepIsFirst)
-      leftNode = aNodeToKeep;
-    else
-      leftNode = aNodeToJoin;
+  // remember some selection points
+  nsCOMPtr<nsINode> selStartNode;
+  int32_t selStartOffset;
+  nsresult result = GetStartNodeAndOffset(selection, getter_AddRefs(selStartNode), &selStartOffset);
+  if (NS_FAILED(result)) {
+    selStartNode = nullptr;
+  }
 
-    uint32_t firstNodeLength;
-    result = GetLengthOfDOMNode(leftNode, firstNodeLength);
-    NS_ENSURE_SUCCESS(result, result);
-    nsCOMPtr<nsIDOMNode> parent = GetNodeLocation(aNodeToJoin, &joinOffset);
-    parent = GetNodeLocation(aNodeToKeep, &keepOffset);
-    
-    // if selection endpoint is between the nodes, remember it as being
-    // in the one that is going away instead.  This simplifies later selection
-    // adjustment logic at end of this method.
-    if (selStartNode)
-    {
-      if (selStartNode == parent)
-      {
-        if (aNodeToKeepIsFirst)
-        {
-          if ((selStartOffset > keepOffset) && (selStartOffset <= joinOffset))
-          {
-            selStartNode = aNodeToJoin; 
-            selStartOffset = 0;
-          }
-        }
-        else
-        {
-          if ((selStartOffset > joinOffset) && (selStartOffset <= keepOffset))
-          {
-            selStartNode = aNodeToJoin; 
-            selStartOffset = firstNodeLength;
-          }
-        }
-      }
-      if (selEndNode == parent)
-      {
-        if (aNodeToKeepIsFirst)
-        {
-          if ((selEndOffset > keepOffset) && (selEndOffset <= joinOffset))
-          {
-            selEndNode = aNodeToJoin; 
-            selEndOffset = 0;
-          }
-        }
-        else
-        {
-          if ((selEndOffset > joinOffset) && (selEndOffset <= keepOffset))
-          {
-            selEndNode = aNodeToJoin; 
-            selEndOffset = firstNodeLength;
-          }
-        }
-      }
+  nsCOMPtr<nsINode> selEndNode;
+  int32_t selEndOffset;
+  result = GetEndNodeAndOffset(selection, getter_AddRefs(selEndNode), &selEndOffset);
+  // Joe or Kin should comment here on why the following line is not a copy/paste error
+  if (NS_FAILED(result)) {
+    selStartNode = nullptr;
+  }
+
+  uint32_t firstNodeLength = aNodeToJoin->Length();
+
+  int32_t joinOffset;
+  GetNodeLocation(aNodeToJoin, &joinOffset);
+  int32_t keepOffset;
+  nsINode* parent = GetNodeLocation(aNodeToKeep, &keepOffset);
+
+  // if selection endpoint is between the nodes, remember it as being
+  // in the one that is going away instead.  This simplifies later selection
+  // adjustment logic at end of this method.
+  if (selStartNode) {
+    if (selStartNode == parent &&
+        joinOffset < selStartOffset && selStartOffset <= keepOffset) {
+      selStartNode = aNodeToJoin;
+      selStartOffset = firstNodeLength;
     }
-    // ok, ready to do join now.
-    // if it's a text node, just shuffle around some text
-    nsCOMPtr<nsIDOMCharacterData> keepNodeAsText( do_QueryInterface(aNodeToKeep) );
-    nsCOMPtr<nsIDOMCharacterData> joinNodeAsText( do_QueryInterface(aNodeToJoin) );
-    if (keepNodeAsText && joinNodeAsText)
-    {
-      nsAutoString rightText;
-      nsAutoString leftText;
-      if (aNodeToKeepIsFirst)
-      {
-        keepNodeAsText->GetData(leftText);
-        joinNodeAsText->GetData(rightText);
-      }
-      else
-      {
-        keepNodeAsText->GetData(rightText);
-        joinNodeAsText->GetData(leftText);
-      }
-      leftText += rightText;
-      keepNodeAsText->SetData(leftText);          
+    if (selEndNode == parent &&
+        joinOffset < selEndOffset && selEndOffset <= keepOffset) {
+      selEndNode = aNodeToJoin;
+      selEndOffset = firstNodeLength;
     }
-    else
-    {  // otherwise it's an interior node, so shuffle around the children
-      nsCOMPtr<nsIDOMNodeList> childNodes;
-      result = aNodeToJoin->GetChildNodes(getter_AddRefs(childNodes));
-      if ((NS_SUCCEEDED(result)) && (childNodes))
-      {
-        int32_t i;  // must be signed int!
-        uint32_t childCount=0;
-        nsCOMPtr<nsIDOMNode> firstNode; //only used if aNodeToKeepIsFirst is false
-        childNodes->GetLength(&childCount);
-        if (!aNodeToKeepIsFirst)
-        { // remember the first child in aNodeToKeep, we'll insert all the children of aNodeToJoin in front of it
-          result = aNodeToKeep->GetFirstChild(getter_AddRefs(firstNode));  
-          // GetFirstChild returns nullptr firstNode if aNodeToKeep has no children, that's ok.
-        }
-        nsCOMPtr<nsIDOMNode> resultNode;
-        // have to go through the list backwards to keep deletes from interfering with iteration
-        nsCOMPtr<nsIDOMNode> previousChild;
-        for (i=childCount-1; ((NS_SUCCEEDED(result)) && (0<=i)); i--)
-        {
-          nsCOMPtr<nsIDOMNode> childNode;
-          result = childNodes->Item(i, getter_AddRefs(childNode));
-          if ((NS_SUCCEEDED(result)) && (childNode))
-          {
-            if (aNodeToKeepIsFirst)
-            { // append children of aNodeToJoin
-              //was result = aNodeToKeep->AppendChild(childNode, getter_AddRefs(resultNode));
-              result = aNodeToKeep->InsertBefore(childNode, previousChild, getter_AddRefs(resultNode));
-              previousChild = do_QueryInterface(childNode);
-            }
-            else
-            { // prepend children of aNodeToJoin
-              result = aNodeToKeep->InsertBefore(childNode, firstNode, getter_AddRefs(resultNode));
-              firstNode = do_QueryInterface(childNode);
-            }
-          }
-        }
-      }
-      else if (!childNodes) {
-        result = NS_ERROR_NULL_POINTER;
-      }
-    }
-    if (NS_SUCCEEDED(result))
-    { // delete the extra node
-      nsCOMPtr<nsIDOMNode> resultNode;
-      result = aParent->RemoveChild(aNodeToJoin, getter_AddRefs(resultNode));
-      
-      if (GetShouldTxnSetSelection())
-      {
-        // editor wants us to set selection at join point
-        selection->Collapse(aNodeToKeep, firstNodeLength);
-      }
-      else if (selStartNode)
-      {
-        // and adjust the selection if needed
-        // HACK: this is overly simplified - multi-range selections need more work than this
-        bool bNeedToAdjust = false;
-        
-        // check to see if we joined nodes where selection starts
-        if (selStartNode.get() == aNodeToJoin)
-        {
-          bNeedToAdjust = true;
-          selStartNode = aNodeToKeep;
-          if (aNodeToKeepIsFirst)
-          {
-            selStartOffset += firstNodeLength;
-          }
-        }
-        else if ((selStartNode.get() == aNodeToKeep) && !aNodeToKeepIsFirst)
-        {
-          bNeedToAdjust = true;
-          selStartOffset += firstNodeLength;
-        }
-                
-        // check to see if we joined nodes where selection ends
-        if (selEndNode.get() == aNodeToJoin)
-        {
-          bNeedToAdjust = true;
-          selEndNode = aNodeToKeep;
-          if (aNodeToKeepIsFirst)
-          {
-            selEndOffset += firstNodeLength;
-          }
-        }
-        else if ((selEndNode.get() == aNodeToKeep) && !aNodeToKeepIsFirst)
-        {
-          bNeedToAdjust = true;
-          selEndOffset += firstNodeLength;
-        }
-        
-        // adjust selection if needed
-        if (bNeedToAdjust)
-        {
-          selection->Collapse(selStartNode,selStartOffset);
-          selection->Extend(selEndNode,selEndOffset);          
-        }
+  }
+
+  // ok, ready to do join now.
+  // if it's a text node, just shuffle around some text
+  nsCOMPtr<nsIDOMCharacterData> keepNodeAsText( do_QueryInterface(aNodeToKeep) );
+  nsCOMPtr<nsIDOMCharacterData> joinNodeAsText( do_QueryInterface(aNodeToJoin) );
+  if (keepNodeAsText && joinNodeAsText) {
+    nsAutoString rightText;
+    nsAutoString leftText;
+    keepNodeAsText->GetData(rightText);
+    joinNodeAsText->GetData(leftText);
+    leftText += rightText;
+    keepNodeAsText->SetData(leftText);
+  } else {
+    // otherwise it's an interior node, so shuffle around the children
+    nsCOMPtr<nsINodeList> childNodes = aNodeToJoin->ChildNodes();
+    MOZ_ASSERT(childNodes);
+
+    // remember the first child in aNodeToKeep, we'll insert all the children of aNodeToJoin in front of it
+    // GetFirstChild returns nullptr firstNode if aNodeToKeep has no children, that's ok.
+    nsCOMPtr<nsIContent> firstNode = aNodeToKeep->GetFirstChild();
+
+    // have to go through the list backwards to keep deletes from interfering with iteration
+    for (uint32_t i = childNodes->Length(); i > 0; --i) {
+      nsCOMPtr<nsIContent> childNode = childNodes->Item(i - 1);
+      if (childNode) {
+        // prepend children of aNodeToJoin
+        ErrorResult err;
+        aNodeToKeep->InsertBefore(*childNode, firstNode, err);
+        NS_ENSURE_SUCCESS(err.ErrorCode(), err.ErrorCode());
+        firstNode = childNode.forget();
       }
     }
   }
-  else
-    result = NS_ERROR_INVALID_ARG;
 
-  return result;
+  // delete the extra node
+  ErrorResult err;
+  aParent->RemoveChild(*aNodeToJoin, err);
+
+  if (GetShouldTxnSetSelection()) {
+    // editor wants us to set selection at join point
+    selection->Collapse(aNodeToKeep, SafeCast<int32_t>(firstNodeLength));
+  } else if (selStartNode) {
+    // and adjust the selection if needed
+    // HACK: this is overly simplified - multi-range selections need more work than this
+    bool bNeedToAdjust = false;
+
+    // check to see if we joined nodes where selection starts
+    if (selStartNode == aNodeToJoin) {
+      bNeedToAdjust = true;
+      selStartNode = aNodeToKeep;
+    } else if (selStartNode == aNodeToKeep) {
+      bNeedToAdjust = true;
+      selStartOffset += firstNodeLength;
+    }
+
+    // check to see if we joined nodes where selection ends
+    if (selEndNode == aNodeToJoin) {
+      bNeedToAdjust = true;
+      selEndNode = aNodeToKeep;
+    } else if (selEndNode == aNodeToKeep) {
+      bNeedToAdjust = true;
+      selEndOffset += firstNodeLength;
+    }
+
+    // adjust selection if needed
+    if (bNeedToAdjust) {
+      selection->Collapse(selStartNode, selStartOffset);
+      selection->Extend(selEndNode, selEndOffset);
+    }
+  }
+
+  return err.ErrorCode();
 }
 
 
@@ -3071,6 +2979,22 @@ nsEditor::GetNodeLocation(nsIDOMNode* aChild, int32_t* outOffset)
   }
 
   return parent.forget();
+}
+
+nsINode*
+nsEditor::GetNodeLocation(nsINode* aChild, int32_t* aOffset)
+{
+  MOZ_ASSERT(aChild);
+  MOZ_ASSERT(aOffset);
+
+  nsINode* parent = aChild->GetParentNode();
+  if (parent) {
+    *aOffset = parent->IndexOf(aChild);
+    MOZ_ASSERT(*aOffset != -1);
+  } else {
+    *aOffset = -1;
+  }
+  return parent;
 }
 
 // returns the number of things inside aNode.  
@@ -3837,21 +3761,40 @@ nsEditor::GetStartNodeAndOffset(nsISelection *aSelection,
 {
   NS_ENSURE_TRUE(outStartNode && outStartOffset && aSelection, NS_ERROR_NULL_POINTER);
 
-  *outStartNode = nullptr;
-  *outStartOffset = 0;
+  nsCOMPtr<nsINode> startNode;
+  nsresult rv = GetStartNodeAndOffset(static_cast<Selection*>(aSelection),
+                                      getter_AddRefs(startNode),
+                                      outStartOffset);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  Selection* selection = static_cast<Selection*>(aSelection);
-  NS_ENSURE_TRUE(selection->GetRangeCount(), NS_ERROR_FAILURE);
+  if (startNode) {
+    NS_ADDREF(*outStartNode = startNode->AsDOMNode());
+  } else {
+    *outStartNode = nullptr;
+  }
+  return NS_OK;
+}
 
-  nsRange* range = selection->GetRangeAt(0);
+nsresult
+nsEditor::GetStartNodeAndOffset(Selection* aSelection, nsINode** aStartNode,
+                                int32_t* aStartOffset)
+{
+  MOZ_ASSERT(aSelection);
+  MOZ_ASSERT(aStartNode);
+  MOZ_ASSERT(aStartOffset);
+
+  *aStartNode = nullptr;
+  *aStartOffset = 0;
+
+  NS_ENSURE_TRUE(aSelection->GetRangeCount(), NS_ERROR_FAILURE);
+
+  const nsRange* range = aSelection->GetRangeAt(0);
   NS_ENSURE_TRUE(range, NS_ERROR_FAILURE);
 
-  nsresult result = range->GetStartContainer(outStartNode);
-  NS_ENSURE_SUCCESS(result, result);
+  NS_ENSURE_TRUE(range->IsPositioned(), NS_ERROR_FAILURE);
 
-  result = range->GetStartOffset(outStartOffset);
-  NS_ENSURE_SUCCESS(result, result);
-
+  NS_IF_ADDREF(*aStartNode = range->GetStartParent());
+  *aStartOffset = range->StartOffset();
   return NS_OK;
 }
 
@@ -3864,23 +3807,42 @@ nsEditor::GetEndNodeAndOffset(nsISelection *aSelection,
                                        nsIDOMNode **outEndNode,
                                        int32_t *outEndOffset)
 {
-  NS_ENSURE_TRUE(outEndNode && outEndOffset, NS_ERROR_NULL_POINTER);
+  NS_ENSURE_TRUE(outEndNode && outEndOffset && aSelection, NS_ERROR_NULL_POINTER);
 
-  *outEndNode = nullptr;
-    
-  Selection* selection = static_cast<Selection*>(aSelection);
-  NS_ENSURE_TRUE(selection, NS_ERROR_FAILURE);
-  NS_ENSURE_TRUE(selection->GetRangeCount(), NS_ERROR_FAILURE);
+  nsCOMPtr<nsINode> endNode;
+  nsresult rv = GetEndNodeAndOffset(static_cast<Selection*>(aSelection),
+                                    getter_AddRefs(endNode),
+                                    outEndOffset);
+  NS_ENSURE_SUCCESS(rv, rv);
 
-  nsRange* range = selection->GetRangeAt(0);
+  if (endNode) {
+    NS_ADDREF(*outEndNode = endNode->AsDOMNode());
+  } else {
+    *outEndNode = nullptr;
+  }
+  return NS_OK;
+}
+
+nsresult
+nsEditor::GetEndNodeAndOffset(Selection* aSelection, nsINode** aEndNode,
+                              int32_t* aEndOffset)
+{
+  MOZ_ASSERT(aSelection);
+  MOZ_ASSERT(aEndNode);
+  MOZ_ASSERT(aEndOffset);
+
+  *aEndNode = nullptr;
+  *aEndOffset = 0;
+
+  NS_ENSURE_TRUE(aSelection->GetRangeCount(), NS_ERROR_FAILURE);
+
+  const nsRange* range = aSelection->GetRangeAt(0);
   NS_ENSURE_TRUE(range, NS_ERROR_FAILURE);
-    
-  if (NS_FAILED(range->GetEndContainer(outEndNode)))
-    return NS_ERROR_FAILURE;
-    
-  if (NS_FAILED(range->GetEndOffset(outEndOffset)))
-    return NS_ERROR_FAILURE;
-    
+
+  NS_ENSURE_TRUE(range->IsPositioned(), NS_ERROR_FAILURE);
+
+  NS_IF_ADDREF(*aEndNode = range->GetEndParent());
+  *aEndOffset = range->EndOffset();
   return NS_OK;
 }
 
@@ -4831,7 +4793,8 @@ nsEditor::HandleKeyPressEvent(nsIDOMKeyEvent* aKeyEvent)
   // And also when you add new key handling, you need to change the subclass's
   // HandleKeyPressEvent()'s switch statement.
 
-  nsKeyEvent* nativeKeyEvent = GetNativeKeyEvent(aKeyEvent);
+  WidgetKeyboardEvent* nativeKeyEvent =
+    aKeyEvent->GetInternalNSEvent()->AsKeyboardEvent();
   NS_ENSURE_TRUE(nativeKeyEvent, NS_ERROR_UNEXPECTED);
   NS_ASSERTION(nativeKeyEvent->message == NS_KEY_PRESS,
                "HandleKeyPressEvent gets non-keypress event");
@@ -5182,16 +5145,6 @@ bool
 nsEditor::IsModifiableNode(nsINode *aNode)
 {
   return true;
-}
-
-nsKeyEvent*
-nsEditor::GetNativeKeyEvent(nsIDOMKeyEvent* aDOMKeyEvent)
-{
-  NS_ENSURE_TRUE(aDOMKeyEvent, nullptr);
-  nsEvent* nativeEvent = aDOMKeyEvent->GetInternalNSEvent();
-  NS_ENSURE_TRUE(nativeEvent, nullptr);
-  NS_ENSURE_TRUE(nativeEvent->eventStructType == NS_KEY_EVENT, nullptr);
-  return static_cast<nsKeyEvent*>(nativeEvent);
 }
 
 already_AddRefed<nsIContent>

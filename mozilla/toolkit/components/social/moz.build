@@ -5,3 +5,15 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 TEST_DIRS += ['test']
+
+if CONFIG['MOZ_SOCIAL']:
+    # social is turned off for android
+    EXTRA_JS_MODULES = [
+        'FrameWorker.jsm',
+        'FrameWorkerContent.js',
+        'MessagePortBase.jsm',
+        'MessagePortWorker.js',
+        'MozSocialAPI.jsm',
+        'SocialService.jsm',
+        'WorkerAPI.jsm',
+    ]

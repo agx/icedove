@@ -1,6 +1,6 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
- * vim: sw=2 ts=2 et lcs=trail\:.,tab\:>~ :
- * This Source Code Form is subject to the terms of the Mozilla Public
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
@@ -8,6 +8,7 @@
 #define mozilla_places_History_h_
 
 #include "mozilla/IHistory.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/Mutex.h"
 #include "mozIAsyncHistory.h"
 #include "nsIDownloadHistory.h"
@@ -19,6 +20,7 @@
 #include "nsURIHashKey.h"
 #include "nsTObserverArray.h"
 #include "nsDeque.h"
+#include "nsIMemoryReporter.h"
 #include "nsIObserver.h"
 #include "mozIStorageConnection.h"
 
@@ -33,13 +35,14 @@ struct VisitData;
 // Max size of History::mRecentlyVisitedURIs
 #define RECENTLY_VISITED_URI_SIZE 8
 
-class History : public IHistory
+class History : mozilla::MemoryUniReporter
+              , public IHistory
               , public nsIDownloadHistory
               , public mozIAsyncHistory
               , public nsIObserver
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_IHISTORY
   NS_DECL_NSIDOWNLOADHISTORY
   NS_DECL_MOZIASYNCHISTORY
@@ -82,7 +85,8 @@ public:
    * Get the number of bytes of memory this History object is using,
    * including sizeof(*this))
    */
-  size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf);
+  int64_t Amount() MOZ_OVERRIDE;
+  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf);
 
   /**
    * Obtains a pointer to this service.
@@ -127,6 +131,8 @@ public:
 
 private:
   virtual ~History();
+
+  void InitMemoryReporter();
 
   /**
    * Obtains a read-write database connection.
@@ -192,7 +198,7 @@ private:
    * SizeOfIncludingThis().
    */
   static size_t SizeOfEntryExcludingThis(KeyClass* aEntry,
-                                         nsMallocSizeOfFun aMallocSizeOf,
+                                         mozilla::MallocSizeOf aMallocSizeOf,
                                          void*);
 
   nsTHashtable<KeyClass> mObservers;

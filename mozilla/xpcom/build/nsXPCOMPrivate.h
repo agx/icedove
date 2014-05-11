@@ -15,6 +15,7 @@
 class nsStringContainer;
 class nsCStringContainer;
 class nsIComponentLoader;
+class nsPurpleBufferEntry;
 
 /**
  * During this shutdown notification all threads which run XPCOM code must
@@ -89,7 +90,7 @@ typedef bool       (* CycleCollectorFunc)(nsISupports*);
 typedef nsPurpleBufferEntry*
                    (* CycleCollectorSuspect2Func)(void*, nsCycleCollectionParticipant*);
 typedef bool       (* CycleCollectorForget2Func)(nsPurpleBufferEntry*);
-
+typedef void       (* CycleCollectorSuspect3Func)(void*, nsCycleCollectionParticipant*,nsCycleCollectingAutoRefCnt*,bool*);
 // PRIVATE AND DEPRECATED
 typedef NS_CALLBACK(XPCOMExitRoutine)(void);
 
@@ -157,7 +158,7 @@ typedef struct XPCOMFunctions{
     GetXPTCallStubFunc getXPTCallStubFunc;
     DestroyXPTCallStubFunc destroyXPTCallStubFunc;
     InvokeByIndexFunc invokeByIndexFunc;
-    CycleCollectorFunc cycleSuspectFunc; // obsolete: use cycleSuspect2Func
+    CycleCollectorFunc cycleSuspectFunc; // obsolete: use cycleSuspect3Func
     CycleCollectorFunc cycleForgetFunc; // obsolete
     StringSetIsVoidFunc stringSetIsVoid;
     StringGetIsVoidFunc stringGetIsVoid;
@@ -165,8 +166,10 @@ typedef struct XPCOMFunctions{
     CStringGetIsVoidFunc cstringGetIsVoid;
 
     // Added for Mozilla 1.9.1
-    CycleCollectorSuspect2Func cycleSuspect2Func;
+    CycleCollectorSuspect2Func cycleSuspect2Func; // obsolete: use cycleSuspect3Func
     CycleCollectorForget2Func cycleForget2Func; // obsolete
+
+    CycleCollectorSuspect3Func cycleSuspect3Func;
 
 } XPCOMFunctions;
 
@@ -270,6 +273,7 @@ void LogTerm();
 #endif
 
 extern bool gXPCOMShuttingDown;
+extern bool gXPCOMThreadsShutDown;
 
 namespace mozilla {
 namespace services {

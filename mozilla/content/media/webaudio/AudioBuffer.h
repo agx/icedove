@@ -14,17 +14,16 @@
 #include "nsAutoPtr.h"
 #include "nsTArray.h"
 #include "AudioContext.h"
-#include "AudioSegment.h"
-#include "AudioNodeEngine.h"
-
-struct JSContext;
-class JSObject;
+#include "js/TypeDecls.h"
 
 namespace mozilla {
 
 class ErrorResult;
+class ThreadSharedFloatArrayBufferList;
 
 namespace dom {
+
+class AudioContext;
 
 /**
  * An AudioBuffer keeps its data either in the mJSChannels objects, which
@@ -81,6 +80,12 @@ public:
    */
   JSObject* GetChannelData(JSContext* aJSContext, uint32_t aChannel,
                            ErrorResult& aRv);
+
+  void CopyFromChannel(const Float32Array& aDestination, uint32_t aChannelNumber,
+                       uint32_t aStartInChannel, ErrorResult& aRv);
+  void CopyToChannel(JSContext* aJSContext, const Float32Array& aSource,
+                     uint32_t aChannelNumber, uint32_t aStartInChannel,
+                     ErrorResult& aRv);
 
   /**
    * Returns a ThreadSharedFloatArrayBufferList containing the sample data.

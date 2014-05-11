@@ -7,17 +7,11 @@
 /* class that a parent frame uses to reflow a block frame */
 
 #include "nsBlockReflowContext.h"
-#include "nsLineLayout.h"
+#include "nsBlockReflowState.h"
 #include "nsFloatManager.h"
-#include "nsPresContext.h"
-#include "nsFrameManager.h"
-#include "nsIContent.h"
-#include "nsStyleContext.h"
 #include "nsContainerFrame.h"
 #include "nsBlockFrame.h"
 #include "nsLineBox.h"
-#include "nsGkAtoms.h"
-#include "nsCOMPtr.h"
 #include "nsLayoutUtils.h"
 
 #ifdef DEBUG
@@ -333,8 +327,7 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState& aReflowState,
     aBottomMarginResult.Zero();
   }
 
-  nscoord x = mX;
-  nscoord y = mY;
+  nsPoint position(mX, mY);
   nscoord backupContainingBlockAdvance = 0;
 
   // Check whether the block's bottom margin collapses with its top
@@ -358,7 +351,7 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState& aReflowState,
     printf(": ");
     nsFrame::ListTag(stdout, mFrame);
     printf(" -- collapsing top & bottom margin together; y=%d spaceY=%d\n",
-           y, mSpace.y);
+           position.y, mSpace.y);
 #endif
     // Section 8.3.1 of CSS 2.1 says that blocks with adjoining
     // top/bottom margins whose top margin collapses with their
@@ -385,7 +378,7 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState& aReflowState,
   // even if there's some sort of integer overflow that makes y +
   // mMetrics.height appear to go beyond the available height.
   if (!empty && !aForceFit && mSpace.height != NS_UNCONSTRAINEDSIZE) {
-    nscoord yMost = y - backupContainingBlockAdvance + mMetrics.height;
+    nscoord yMost = position.y - backupContainingBlockAdvance + mMetrics.height;
     if (yMost > mSpace.YMost()) {
       // didn't fit, we must acquit.
       mFrame->DidReflow(mPresContext, &aReflowState, nsDidReflowStatus::FINISHED);
@@ -393,20 +386,16 @@ nsBlockReflowContext::PlaceBlock(const nsHTMLReflowState& aReflowState,
     }
   }
 
-  aInFlowBounds = nsRect(x, y - backupContainingBlockAdvance,
+  aInFlowBounds = nsRect(position.x, position.y - backupContainingBlockAdvance,
                          mMetrics.width, mMetrics.height);
   
-  // Apply CSS relative positioning
-  const nsStyleDisplay* styleDisp = mFrame->StyleDisplay();
-  if (NS_STYLE_POSITION_RELATIVE == styleDisp->mPosition) {
-    x += aReflowState.mComputedOffsets.left;
-    y += aReflowState.mComputedOffsets.top;
-  }
+  aReflowState.ApplyRelativePositioning(&position);
   
   // Now place the frame and complete the reflow process
-  nsContainerFrame::FinishReflowChild(mFrame, mPresContext, &aReflowState, mMetrics, x, y, 0);
+  nsContainerFrame::FinishReflowChild(mFrame, mPresContext, &aReflowState,
+                                      mMetrics, position.x, position.y, 0);
 
-  aOverflowAreas = mMetrics.mOverflowAreas + nsPoint(x, y);
+  aOverflowAreas = mMetrics.mOverflowAreas + position;
 
   return true;
 }

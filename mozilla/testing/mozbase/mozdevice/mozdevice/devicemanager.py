@@ -6,6 +6,7 @@ import hashlib
 import mozlog
 import socket
 import os
+import posixpath
 import re
 import struct
 import StringIO
@@ -168,21 +169,25 @@ class DeviceManager(object):
             self.removeFile(tempScreenshotFile)
 
     @abstractmethod
-    def pushFile(self, localFilename, remoteFilename, retryLimit=1):
+    def pushFile(self, localFilename, remoteFilename, retryLimit=1, createDir=True):
         """
         Copies localname from the host to destname on the device.
         """
 
     @abstractmethod
-    def pushDir(self, localDirname, remoteDirname, retryLimit=1):
+    def pushDir(self, localDirname, remoteDirname, retryLimit=1, timeout=None):
         """
         Push local directory from host to remote directory on the device,
         """
 
     @abstractmethod
-    def pullFile(self, remoteFilename):
+    def pullFile(self, remoteFilename, offset=None, length=None):
         """
         Returns contents of remoteFile using the "pull" command.
+
+        :param remoteFilename: Path to file to pull from remote device.
+        :param offset: Offset in bytes from which to begin reading (optional)
+        :param length: Number of bytes to read (optional)
         """
 
     @abstractmethod
@@ -234,15 +239,14 @@ class DeviceManager(object):
         WARNING: does not create last part of the path. For example, if asked to
         create `/mnt/sdcard/foo/bar/baz`, it will only create `/mnt/sdcard/foo/bar`
         """
-        dirParts = filename.rsplit('/', 1)
-        if not self.dirExists(dirParts[0]):
+        filename = posixpath.normpath(filename)
+        containing = posixpath.dirname(filename)
+        if not self.dirExists(containing):
             parts = filename.split('/')
-            name = ""
-            for part in parts:
-                if part is parts[-1]:
-                    break
+            name = "/"
+            for part in parts[:-1]:
                 if part != "":
-                    name += '/' + part
+                    name = posixpath.join(name, part)
                     self.mkDir(name) # mkDir will check previous existence
 
     @abstractmethod
@@ -254,7 +258,8 @@ class DeviceManager(object):
     @abstractmethod
     def fileExists(self, filepath):
         """
-        Return whether filepath exists and is a file on the device file system.
+        Return whether filepath exists on the device file system,
+        regardless of file type.
         """
 
     @abstractmethod
@@ -414,10 +419,13 @@ class DeviceManager(object):
 
 
     @abstractmethod
-    def killProcess(self, processName, forceKill=False):
+    def killProcess(self, processName, sig=None):
         """
-        Kills the process named processName. If forceKill is True, process is
-        killed regardless of state.
+        Kills the process named processName. If sig is not None, process is
+        killed with the specified signal.
+
+        :param processName: path or name of the process to kill
+        :param sig: signal to pass into the kill command (optional)
         """
 
     @abstractmethod

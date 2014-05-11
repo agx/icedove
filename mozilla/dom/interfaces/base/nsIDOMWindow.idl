@@ -25,7 +25,7 @@ interface nsIVariant;
  * @see <http://www.whatwg.org/html/#window>
  */
 
-[scriptable, uuid(be62660a-e3f6-409c-a4a9-378364a9526f)]
+[scriptable, uuid(b0ebb526-ed69-43c6-8242-b381a1fe79da)]
 interface nsIDOMWindow : nsISupports
 {
   // the current browsing context
@@ -49,7 +49,7 @@ interface nsIDOMWindow : nsISupports
   /* The setter that takes a string argument needs to be special cased! */
   readonly attribute nsIDOMLocation                     location;
 
-  readonly attribute nsIDOMHistory                      history;
+  readonly attribute nsISupports                        history;
 
 
   /* [replaceable] locationbar */
@@ -249,6 +249,13 @@ interface nsIDOMWindow : nsISupports
   readonly attribute nsIDOMStorage localStorage;
 
 
+  // IndexedDB
+  // https://dvcs.w3.org/hg/IndexedDB/raw-file/tip/Overview.html#requests
+  // IDBEnvironment
+  readonly attribute nsISupports indexedDB;
+  readonly attribute nsISupports mozIndexedDB;
+
+
   // DOM Range
   /**
    * Method for accessing this window's selection object.
@@ -360,7 +367,7 @@ interface nsIDOMWindow : nsISupports
   void                      sizeToContent();
 
   /* [replaceable] content */
-  readonly attribute nsIDOMWindow                       content;
+  [noscript] readonly attribute nsIDOMWindow            content;
 
   /* [replaceable] prompter */
   [noscript] readonly attribute nsIPrompt               prompter;
@@ -515,5 +522,5 @@ interface nsIDOMWindowPerformance : nsISupports
  * Empty interface for compatibility with older versions.
  * @deprecated Use nsIDOMWindow instead
  */
-[scriptable, uuid(ad5768c7-8668-4cd4-bcac-3d0a400d50be)]
+[scriptable, uuid(2ec49e81-b2ba-4633-991a-f48f1e1d8800)]
 interface nsIDOMWindowInternal : nsIDOMWindow {};

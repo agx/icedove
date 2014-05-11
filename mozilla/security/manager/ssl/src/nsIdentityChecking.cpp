@@ -89,7 +89,7 @@ struct nsMyTrustedEVInfo
  *   Remove all whitespaces. If you use multiple lines, make sure that
  *   only the final line will be followed by a comma.
  * - the "Serial DER Base64" (as printed by pp)
- * - a NULL pointer value
+ * - a nullptr value
  *
  * After adding an entry, test it locally against the test site that
  * has been provided by the CA. Note that you must use a version of NSS
@@ -112,19 +112,25 @@ static struct nsMyTrustedEVInfo myTrustedEVInfos[] = {
    * as an existing entry, then please use the same oid_name.
    */
 #ifdef DEBUG
+  /* Debug EV certificates should all use the OID (repeating EV OID is OK):
+   * 1.3.6.1.4.1.13769.666.666.666.1.500.9.1.
+   * If you add or remove debug EV certs you must also modify IdentityInfoInit
+   * (there is another #ifdef DEBUG section there) so that the correct number of
+   * certs are skipped as these debug EV certs are NOT part of the default trust
+   * store.
+   */
   {
-    // This is the testing EV signature.
-    // C=US, ST=CA, L=Mountain View, O=Mozilla - EV debug test CA, OU=Security Engineering, CN=EV Testing (untrustworthy) CA/name=ev-test-ca/emailAddress=charlatan@testing.example.com
+    // This is the testing EV signature (xpcshell) (RSA)
+    // CN=XPCShell EV Testing (untrustworthy) CA,OU=Security Engineering,O=Mozilla - EV debug test CA,L=Mountain View,ST=CA,C=US"
     "1.3.6.1.4.1.13769.666.666.666.1.500.9.1",
     "DEBUGtesting EV OID",
     SEC_OID_UNKNOWN,
-    "AD:FE:0E:44:16:45:B0:17:46:8B:76:01:74:B7:FF:64:5A:EC:35:91",
-    "MIHhMQswCQYDVQQGEwJVUzELMAkGA1UECBMCQ0ExFjAUBgNVBAcTDU1vdW50YWlu"
-    "IFZpZXcxIzAhBgNVBAoTGk1vemlsbGEgLSBFViBkZWJ1ZyB0ZXN0IENBMR0wGwYD"
-    "VQQLExRTZWN1cml0eSBFbmdpbmVlcmluZzEmMCQGA1UEAxMdRVYgVGVzdGluZyAo"
-    "dW50cnVzdHdvcnRoeSkgQ0ExEzARBgNVBCkTCmV2LXRlc3QtY2ExLDAqBgkqhkiG"
-    "9w0BCQEWHWNoYXJsYXRhbkB0ZXN0aW5nLmV4YW1wbGUuY29t",
-    "AK/FPSJmJkky",
+    "9C:62:EF:DB:AE:F9:EB:36:58:FB:3B:D3:47:64:93:9D:86:29:6A:E0",
+    "MIGnMQswCQYDVQQGEwJVUzELMAkGA1UECAwCQ0ExFjAUBgNVBAcMDU1vdW50YWlu"
+    "IFZpZXcxIzAhBgNVBAoMGk1vemlsbGEgLSBFViBkZWJ1ZyB0ZXN0IENBMR0wGwYD"
+    "VQQLDBRTZWN1cml0eSBFbmdpbmVlcmluZzEvMC0GA1UEAwwmWFBDU2hlbGwgRVYg"
+    "VGVzdGluZyAodW50cnVzdHdvcnRoeSkgQ0E=",
+    "At+3zdo=",
     nullptr
   },
 #endif
@@ -661,6 +667,106 @@ static struct nsMyTrustedEVInfo myTrustedEVInfos[] = {
     nullptr
   },
   {
+    // CN=TURKTRUST Elektronik Sertifika Hizmet Saglayicisi,O=TURKTRUST Bilgi Illetisim ve Bilisim Guvenligi Hizmetleri A.S.,C=TR
+    "2.16.792.3.0.3.1.1.5",
+    "TurkTrust EV OID",
+    SEC_OID_UNKNOWN,
+    "F1:7F:6F:B6:31:DC:99:E3:A3:C8:7F:FE:1C:F1:81:10:88:D9:60:33",
+    "MIG/MT8wPQYDVQQDDDZUw5xSS1RSVVNUIEVsZWt0cm9uaWsgU2VydGlmaWthIEhp"
+    "em1ldCBTYcSfbGF5xLFjxLFzxLExCzAJBgNVBAYTAlRSMQ8wDQYDVQQHDAZBbmth"
+    "cmExXjBcBgNVBAoMVVTDnFJLVFJVU1QgQmlsZ2kgxLBsZXRpxZ9pbSB2ZSBCaWxp"
+    "xZ9pbSBHw7x2ZW5sacSfaSBIaXptZXRsZXJpIEEuxZ4uIChjKSBBcmFsxLFrIDIw"
+    "MDc=",
+    "AQ==",
+    nullptr
+  },
+  {
+    // CN=China Internet Network Information Center EV Certificates Root,O=China Internet Network Information Center,C=CN
+    "1.3.6.1.4.1.29836.1.10",
+    "CNNIC EV OID",
+    SEC_OID_UNKNOWN,
+    "4F:99:AA:93:FB:2B:D1:37:26:A1:99:4A:CE:7F:F0:05:F2:93:5D:1E",
+    "MIGKMQswCQYDVQQGEwJDTjEyMDAGA1UECgwpQ2hpbmEgSW50ZXJuZXQgTmV0d29y"
+    "ayBJbmZvcm1hdGlvbiBDZW50ZXIxRzBFBgNVBAMMPkNoaW5hIEludGVybmV0IE5l"
+    "dHdvcmsgSW5mb3JtYXRpb24gQ2VudGVyIEVWIENlcnRpZmljYXRlcyBSb290",
+    "SJ8AAQ==",
+    nullptr
+  },
+  {
+    // CN=TWCA Root Certification Authority,OU=Root CA,O=TAIWAN-CA,C=TW
+    "1.3.6.1.4.1.40869.1.1.22.3",
+    "TWCA EV OID",
+    SEC_OID_UNKNOWN,
+    "CF:9E:87:6D:D3:EB:FC:42:26:97:A3:B5:A3:7A:A0:76:A9:06:23:48",
+    "MF8xCzAJBgNVBAYTAlRXMRIwEAYDVQQKDAlUQUlXQU4tQ0ExEDAOBgNVBAsMB1Jv"
+    "b3QgQ0ExKjAoBgNVBAMMIVRXQ0EgUm9vdCBDZXJ0aWZpY2F0aW9uIEF1dGhvcml0"
+    "eQ==",
+    "AQ==",
+    nullptr
+  },
+  {
+    // CN=D-TRUST Root Class 3 CA 2 EV 2009,O=D-Trust GmbH,C=DE
+    "1.3.6.1.4.1.4788.2.202.1",
+    "D-TRUST EV OID",
+    SEC_OID_UNKNOWN,
+    "96:C9:1B:0B:95:B4:10:98:42:FA:D0:D8:22:79:FE:60:FA:B9:16:83",
+    "MFAxCzAJBgNVBAYTAkRFMRUwEwYDVQQKDAxELVRydXN0IEdtYkgxKjAoBgNVBAMM"
+    "IUQtVFJVU1QgUm9vdCBDbGFzcyAzIENBIDIgRVYgMjAwOQ==",
+    "CYP0",
+    nullptr
+  },
+  {
+    // CN=Swisscom Root EV CA 2,OU=Digital Certificate Services,O=Swisscom,C=ch
+    "2.16.756.1.83.21.0",
+    "Swisscom  EV OID",
+    SEC_OID_UNKNOWN,
+    "E7:A1:90:29:D3:D5:52:DC:0D:0F:C6:92:D3:EA:88:0D:15:2E:1A:6B",
+    "MGcxCzAJBgNVBAYTAmNoMREwDwYDVQQKEwhTd2lzc2NvbTElMCMGA1UECxMcRGln"
+    "aXRhbCBDZXJ0aWZpY2F0ZSBTZXJ2aWNlczEeMBwGA1UEAxMVU3dpc3Njb20gUm9v"
+    "dCBFViBDQSAy",
+    "APL6ZOJ0Y9ON/RAdBB92ylg=",
+    nullptr
+  },
+  {
+    // CN=VeriSign Universal Root Certification Authority,OU="(c) 2008 VeriSign, Inc. - For authorized use only",OU=VeriSign Trust Network,O="VeriSign, Inc.",C=US
+    "2.16.840.1.113733.1.7.23.6",
+    "VeriSign EV OID",
+    SEC_OID_UNKNOWN,
+    "36:79:CA:35:66:87:72:30:4D:30:A5:FB:87:3B:0F:A7:7B:B7:0D:54",
+    "MIG9MQswCQYDVQQGEwJVUzEXMBUGA1UEChMOVmVyaVNpZ24sIEluYy4xHzAdBgNV"
+    "BAsTFlZlcmlTaWduIFRydXN0IE5ldHdvcmsxOjA4BgNVBAsTMShjKSAyMDA4IFZl"
+    "cmlTaWduLCBJbmMuIC0gRm9yIGF1dGhvcml6ZWQgdXNlIG9ubHkxODA2BgNVBAMT"
+    "L1ZlcmlTaWduIFVuaXZlcnNhbCBSb290IENlcnRpZmljYXRpb24gQXV0aG9yaXR5",
+    "QBrEZCGzEyEDDrvkEhrFHQ==",
+    nullptr
+  },
+  {
+    // CN=GeoTrust Primary Certification Authority - G3,OU=(c) 2008 GeoTrust Inc. - For authorized use only,O=GeoTrust Inc.,C=US
+    "1.3.6.1.4.1.14370.1.6",
+    "GeoTrust EV OID",
+    SEC_OID_UNKNOWN,
+    "03:9E:ED:B8:0B:E7:A0:3C:69:53:89:3B:20:D2:D9:32:3A:4C:2A:FD",
+    "MIGYMQswCQYDVQQGEwJVUzEWMBQGA1UEChMNR2VvVHJ1c3QgSW5jLjE5MDcGA1UE"
+    "CxMwKGMpIDIwMDggR2VvVHJ1c3QgSW5jLiAtIEZvciBhdXRob3JpemVkIHVzZSBv"
+    "bmx5MTYwNAYDVQQDEy1HZW9UcnVzdCBQcmltYXJ5IENlcnRpZmljYXRpb24gQXV0"
+    "aG9yaXR5IC0gRzM=",
+    "FaxulBmyeUtB9iepwxgPHw==",
+    nullptr
+  },
+  {
+    // CN=thawte Primary Root CA - G3,OU="(c) 2008 thawte, Inc. - For authorized use only",OU=Certification Services Division,O="thawte, Inc.",C=US
+    "2.16.840.1.113733.1.7.48.1",
+    "Thawte EV OID",
+    SEC_OID_UNKNOWN,
+    "F1:8B:53:8D:1B:E9:03:B6:A6:F0:56:43:5B:17:15:89:CA:F3:6B:F2",
+    "MIGuMQswCQYDVQQGEwJVUzEVMBMGA1UEChMMdGhhd3RlLCBJbmMuMSgwJgYDVQQL"
+    "Ex9DZXJ0aWZpY2F0aW9uIFNlcnZpY2VzIERpdmlzaW9uMTgwNgYDVQQLEy8oYykg"
+    "MjAwOCB0aGF3dGUsIEluYy4gLSBGb3IgYXV0aG9yaXplZCB1c2Ugb25seTEkMCIG"
+    "A1UEAxMbdGhhd3RlIFByaW1hcnkgUm9vdCBDQSAtIEcz",
+    "YAGXt0an6rS0mtZLL/eQ+w==",
+    nullptr
+  },
+  {
     // OU=Sample Certification Authority,O=\"Sample, Inc.\",C=US
     "0.0.0.0",
     0, // for real entries use a string like "Sample INVALID EV OID"
@@ -736,27 +842,6 @@ typedef nsTArray< nsMyTrustedEVInfoClass* > testEVArray;
 static testEVArray *testEVInfos;
 static bool testEVInfosLoaded = false;
 #endif
-
-static bool isEVMatch(SECOidTag policyOIDTag, 
-                        CERTCertificate *rootCert, 
-                        const nsMyTrustedEVInfo &info)
-{
-  if (!rootCert)
-    return false;
-
-  NS_ConvertASCIItoUTF16 info_sha1(info.ev_root_sha1_fingerprint);
-
-  nsNSSCertificate c(rootCert);
-
-  nsAutoString fingerprint;
-  if (NS_FAILED(c.GetSha1Fingerprint(fingerprint)))
-    return false;
-
-  if (fingerprint != info_sha1)
-    return false;
-
-  return (policyOIDTag == info.oid_tag);
-}
 
 #ifdef PSM_ENABLE_TEST_EV_ROOTS
 static const char kTestEVRootsFileName[] = "test_ev_roots.txt";
@@ -979,35 +1064,6 @@ getRootsForOidFromExternalRootsFile(CERTCertList* certList,
 
   return false;
 }
-
-static bool 
-isEVMatchInExternalDebugRootsFile(SECOidTag policyOIDTag, 
-                                  CERTCertificate *rootCert)
-{
-  if (!testEVInfos)
-    return false;
-
-  if (!rootCert)
-    return false;
-  
-  char *env_val = getenv("ENABLE_TEST_EV_ROOTS_FILE");
-  if (!env_val)
-    return false;
-    
-  int enabled_val = atoi(env_val);
-  if (!enabled_val)
-    return false;
-
-  for (size_t i=0; i<testEVInfos->Length(); ++i) {
-    nsMyTrustedEVInfoClass *ev = testEVInfos->ElementAt(i);
-    if (!ev)
-      continue;
-    if (isEVMatch(policyOIDTag, rootCert, *ev))
-      return true;
-  }
-
-  return false;
-}
 #endif
 
 static bool 
@@ -1057,30 +1113,6 @@ getRootsForOid(SECOidTag oid_tag)
 
 } } // namespace mozilla::psm
 
-static bool 
-isApprovedForEV(SECOidTag policyOIDTag, CERTCertificate *rootCert)
-{
-  if (!rootCert)
-    return false;
-
-  for (size_t iEV=0; iEV < (sizeof(myTrustedEVInfos)/sizeof(nsMyTrustedEVInfo)); ++iEV) {
-    nsMyTrustedEVInfo &entry = myTrustedEVInfos[iEV];
-    if (!entry.oid_name) // invalid or placeholder list entry
-      continue;
-    if (isEVMatch(policyOIDTag, rootCert, entry)) {
-      return true;
-    }
-  }
-
-#ifdef PSM_ENABLE_TEST_EV_ROOTS
-  if (isEVMatchInExternalDebugRootsFile(policyOIDTag, rootCert)) {
-    return true;
-  }
-#endif
-
-  return false;
-}
-
 PRStatus
 nsNSSComponent::IdentityInfoInit()
 {
@@ -1101,8 +1133,8 @@ nsNSSComponent::IdentityInfoInit()
     entry.cert = CERT_FindCertByIssuerAndSN(nullptr, &ias);
 
 #ifdef DEBUG
-    // The debug CA info is at position 0, and is NOT on the NSS root db
-    if (iEV != 0) {
+    // The debug CA cert is at positions 0, and is NOT in the NSS root db.
+    if (iEV > 0) {
        NS_ASSERTION(entry.cert, "Could not find EV root in NSS storage");
     }
 #endif
@@ -1255,10 +1287,12 @@ nsNSSCertificate::hasValidEVOidTag(SECOidTag &resultOidTag, bool &validEV)
   validEV = false;
   resultOidTag = SEC_OID_UNKNOWN;
 
+  uint32_t flags = mozilla::psm::CertVerifier::FLAG_LOCAL_ONLY |
+                   mozilla::psm::CertVerifier::FLAG_NO_DV_FALLBACK_FOR_EV;
   SECStatus rv = certVerifier->VerifyCert(mCert,
                                           certificateUsageSSLServer, PR_Now(),
                                           nullptr /* XXX pinarg*/,
-                                          0, nullptr, &resultOidTag);
+                                          flags, nullptr, &resultOidTag);
 
   if (rv != SECSuccess) {
     resultOidTag = SEC_OID_UNKNOWN;

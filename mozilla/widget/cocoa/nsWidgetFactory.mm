@@ -15,6 +15,7 @@
 #include "nsAppShell.h"
 #include "nsAppShellSingleton.h"
 #include "nsFilePicker.h"
+#include "nsColorPicker.h"
 
 #include "nsClipboard.h"
 #include "nsClipboardHelper.h"
@@ -27,16 +28,21 @@
 
 #include "nsSound.h"
 #include "nsIdleServiceX.h"
+#include "OSXNotificationCenter.h"
 
 #include "nsScreenManagerCocoa.h"
 #include "nsDeviceContextSpecX.h"
 #include "nsPrintOptionsX.h"
 #include "nsPrintDialogX.h"
 #include "nsPrintSession.h"
+#include "nsToolkitCompsCID.h"
+
+using namespace mozilla;
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsCocoaWindow)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsChildView)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsFilePicker)
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsColorPicker)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsSound)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsTransferable)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsHTMLFormatConverter)
@@ -49,6 +55,7 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintOptionsX, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintDialogServiceX, Init)
 NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsPrintSession, Init)
 NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsIdleServiceX, nsIdleServiceX::GetInstance)
+NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(OSXNotificationCenter, Init)
 
 #include "nsMenuBarX.h"
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsNativeMenuServiceX)
@@ -76,11 +83,64 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(GfxInfo, Init)
 }
 }
 
+#include "NativeKeyBindings.h"
+namespace mozilla {
+namespace widget {
+
+static nsresult
+NativeKeyBindingsConstructor(nsISupports* aOuter, REFNSIID aIID,
+                             void** aResult, NativeKeyBindingsType aType)
+{
+  NativeKeyBindings* inst;
+
+  *aResult = NULL;
+  if (NULL != aOuter) {
+    return NS_ERROR_NO_AGGREGATION;
+  }
+
+  inst = new NativeKeyBindings();
+  NS_ADDREF(inst);
+  nsresult rv = inst->Init(aType);
+  if (NS_SUCCEEDED(rv)) {
+    rv = inst->QueryInterface(aIID, aResult);
+  }
+  NS_RELEASE(inst);
+
+  return rv;
+}
+
+static nsresult
+NativeKeyBindingsInputConstructor(nsISupports* aOuter, REFNSIID aIID,
+                                  void** aResult)
+{
+  return NativeKeyBindingsConstructor(aOuter, aIID, aResult,
+                                      eNativeKeyBindingsType_Input);
+}
+
+static nsresult
+NativeKeyBindingsTextAreaConstructor(nsISupports* aOuter, REFNSIID aIID,
+                                     void** aResult)
+{
+  return NativeKeyBindingsConstructor(aOuter, aIID, aResult,
+                                      eNativeKeyBindingsType_TextArea);
+}
+
+static nsresult
+NativeKeyBindingsEditorConstructor(nsISupports* aOuter, REFNSIID aIID,
+                                   void** aResult)
+{
+  return NativeKeyBindingsConstructor(aOuter, aIID, aResult,
+                                      eNativeKeyBindingsType_Editor);
+}
+
+} // namespace widget
+} // namespace mozilla
 
 NS_DEFINE_NAMED_CID(NS_WINDOW_CID);
 NS_DEFINE_NAMED_CID(NS_POPUP_CID);
 NS_DEFINE_NAMED_CID(NS_CHILD_CID);
 NS_DEFINE_NAMED_CID(NS_FILEPICKER_CID);
+NS_DEFINE_NAMED_CID(NS_COLORPICKER_CID);
 NS_DEFINE_NAMED_CID(NS_APPSHELL_CID);
 NS_DEFINE_NAMED_CID(NS_SOUND_CID);
 NS_DEFINE_NAMED_CID(NS_TRANSFERABLE_CID);
@@ -96,11 +156,15 @@ NS_DEFINE_NAMED_CID(NS_PRINTSESSION_CID);
 NS_DEFINE_NAMED_CID(NS_PRINTSETTINGSSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_PRINTDIALOGSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_IDLE_SERVICE_CID);
+NS_DEFINE_NAMED_CID(NS_SYSTEMALERTSSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_NATIVEMENUSERVICE_CID);
 NS_DEFINE_NAMED_CID(NS_MACDOCKSUPPORT_CID);
 NS_DEFINE_NAMED_CID(NS_MACWEBAPPUTILS_CID);
 NS_DEFINE_NAMED_CID(NS_STANDALONENATIVEMENU_CID);
 NS_DEFINE_NAMED_CID(NS_GFXINFO_CID);
+NS_DEFINE_NAMED_CID(NS_NATIVEKEYBINDINGS_INPUT_CID);
+NS_DEFINE_NAMED_CID(NS_NATIVEKEYBINDINGS_TEXTAREA_CID);
+NS_DEFINE_NAMED_CID(NS_NATIVEKEYBINDINGS_EDITOR_CID);
 
 
 static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
@@ -108,6 +172,7 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
   { &kNS_POPUP_CID, false, NULL, nsCocoaWindowConstructor },
   { &kNS_CHILD_CID, false, NULL, nsChildViewConstructor },
   { &kNS_FILEPICKER_CID, false, NULL, nsFilePickerConstructor },
+  { &kNS_COLORPICKER_CID, false, NULL, nsColorPickerConstructor },
   { &kNS_APPSHELL_CID, false, NULL, nsAppShellConstructor },
   { &kNS_SOUND_CID, false, NULL, nsSoundConstructor },
   { &kNS_TRANSFERABLE_CID, false, NULL, nsTransferableConstructor },
@@ -123,11 +188,18 @@ static const mozilla::Module::CIDEntry kWidgetCIDs[] = {
   { &kNS_PRINTSETTINGSSERVICE_CID, false, NULL, nsPrintOptionsXConstructor },
   { &kNS_PRINTDIALOGSERVICE_CID, false, NULL, nsPrintDialogServiceXConstructor },
   { &kNS_IDLE_SERVICE_CID, false, NULL, nsIdleServiceXConstructor },
+  { &kNS_SYSTEMALERTSSERVICE_CID, false, NULL, OSXNotificationCenterConstructor },
   { &kNS_NATIVEMENUSERVICE_CID, false, NULL, nsNativeMenuServiceXConstructor },
   { &kNS_MACDOCKSUPPORT_CID, false, NULL, nsMacDockSupportConstructor },
   { &kNS_MACWEBAPPUTILS_CID, false, NULL, nsMacWebAppUtilsConstructor },
   { &kNS_STANDALONENATIVEMENU_CID, false, NULL, nsStandaloneNativeMenuConstructor },
   { &kNS_GFXINFO_CID, false, NULL, mozilla::widget::GfxInfoConstructor },
+  { &kNS_NATIVEKEYBINDINGS_INPUT_CID, false, NULL,
+    mozilla::widget::NativeKeyBindingsInputConstructor },
+  { &kNS_NATIVEKEYBINDINGS_TEXTAREA_CID, false, NULL,
+    mozilla::widget::NativeKeyBindingsTextAreaConstructor },
+  { &kNS_NATIVEKEYBINDINGS_EDITOR_CID, false, NULL,
+    mozilla::widget::NativeKeyBindingsEditorConstructor },
   { NULL }
 };
 
@@ -136,6 +208,7 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/widgets/popup/mac;1", &kNS_POPUP_CID },
   { "@mozilla.org/widgets/childwindow/mac;1", &kNS_CHILD_CID },
   { "@mozilla.org/filepicker;1", &kNS_FILEPICKER_CID },
+  { "@mozilla.org/colorpicker;1", &kNS_COLORPICKER_CID },
   { "@mozilla.org/widget/appshell/mac;1", &kNS_APPSHELL_CID },
   { "@mozilla.org/sound;1", &kNS_SOUND_CID },
   { "@mozilla.org/widget/transferable;1", &kNS_TRANSFERABLE_CID },
@@ -151,11 +224,16 @@ static const mozilla::Module::ContractIDEntry kWidgetContracts[] = {
   { "@mozilla.org/gfx/printsettings-service;1", &kNS_PRINTSETTINGSSERVICE_CID },
   { NS_PRINTDIALOGSERVICE_CONTRACTID, &kNS_PRINTDIALOGSERVICE_CID },
   { "@mozilla.org/widget/idleservice;1", &kNS_IDLE_SERVICE_CID },
+  { "@mozilla.org/system-alerts-service;1", &kNS_SYSTEMALERTSSERVICE_CID },
   { "@mozilla.org/widget/nativemenuservice;1", &kNS_NATIVEMENUSERVICE_CID },
   { "@mozilla.org/widget/macdocksupport;1", &kNS_MACDOCKSUPPORT_CID },
   { "@mozilla.org/widget/mac-web-app-utils;1", &kNS_MACWEBAPPUTILS_CID },
   { "@mozilla.org/widget/standalonenativemenu;1", &kNS_STANDALONENATIVEMENU_CID },
   { "@mozilla.org/gfx/info;1", &kNS_GFXINFO_CID },
+  { NS_NATIVEKEYBINDINGSINPUT_CONTRACTID, &kNS_NATIVEKEYBINDINGS_INPUT_CID },
+  { NS_NATIVEKEYBINDINGSTEXTAREA_CONTRACTID,
+    &kNS_NATIVEKEYBINDINGS_TEXTAREA_CID },
+  { NS_NATIVEKEYBINDINGSEDITOR_CONTRACTID, &kNS_NATIVEKEYBINDINGS_EDITOR_CID },
   { NULL }
 };
 

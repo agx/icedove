@@ -10,6 +10,8 @@
  */
 
 #include "mozilla/css/StyleRule.h"
+
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/css/GroupRule.h"
 #include "mozilla/css/Declaration.h"
 #include "nsCSSStyleSheet.h"
@@ -33,7 +35,7 @@
 class nsIDOMCSSStyleDeclaration;
 class nsIDOMCSSStyleSheet;
 
-namespace css = mozilla::css;
+using namespace mozilla;
 
 #define NS_IF_CLONE(member_)                                                  \
   PR_BEGIN_MACRO                                                              \
@@ -82,7 +84,7 @@ nsAtomList::Clone(bool aDeep) const
 }
 
 size_t
-nsAtomList::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsAtomList::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
   const nsAtomList* a = this;
@@ -177,7 +179,7 @@ nsPseudoClassList::Clone(bool aDeep) const
 }
 
 size_t
-nsPseudoClassList::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsPseudoClassList::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
   const nsPseudoClassList* p = this;
@@ -300,8 +302,8 @@ nsCSSSelector::nsCSSSelector(void)
     mPseudoType(nsCSSPseudoElements::ePseudo_NotPseudoElement)
 {
   MOZ_COUNT_CTOR(nsCSSSelector);
-  MOZ_STATIC_ASSERT(nsCSSPseudoElements::ePseudo_MAX < INT16_MAX,
-                    "nsCSSPseudoElements::Type values overflow mPseudoType");
+  static_assert(nsCSSPseudoElements::ePseudo_MAX < INT16_MAX,
+                "nsCSSPseudoElements::Type values overflow mPseudoType");
 }
 
 nsCSSSelector*
@@ -471,7 +473,13 @@ int32_t nsCSSSelector::CalcWeightWithoutNegations() const
 {
   int32_t weight = 0;
 
-  if (nullptr != mLowercaseTag) {
+  MOZ_ASSERT(!IsPseudoElement() ||
+             mPseudoType >= nsCSSPseudoElements::ePseudo_PseudoElementCount ||
+             (!mIDList && !mClassList && !mAttrList),
+             "if pseudo-elements can have ID, class or attribute selectors "
+             "after them, specificity calculation must be updated");
+
+  if (nullptr != mCasedTag) {
     weight += 0x000001;
   }
   nsAtomList* list = mIDList;
@@ -542,7 +550,7 @@ nsCSSSelector::ToString(nsAString& aString, nsCSSStyleSheet* aSheet,
       const nsCSSSelector *next = stack.ElementAt(index - 1);
       PRUnichar oper = s->mOperator;
       if (next->IsPseudoElement()) {
-        NS_ASSERTION(oper == PRUnichar('>'),
+        NS_ASSERTION(oper == PRUnichar(':'),
                      "improperly chained pseudo element");
       } else {
         NS_ASSERTION(oper != PRUnichar(0),
@@ -809,7 +817,7 @@ nsCSSSelector::CanBeNamespaced(bool aIsNegated) const
 }
 
 size_t
-nsCSSSelector::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsCSSSelector::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
   const nsCSSSelector* s = this;
@@ -899,7 +907,7 @@ nsCSSSelectorList::Clone(bool aDeep) const
 }
 
 size_t
-nsCSSSelectorList::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsCSSSelectorList::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t n = 0;
   const nsCSSSelectorList* s = this;
@@ -1160,6 +1168,8 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMCSSStyleRule)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMCSSStyleRule)
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(DOMCSSStyleRule)
+
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(DOMCSSStyleRule)
   // Trace the wrapper for our declaration.  This just expands out
   // NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER which we can't use
@@ -1171,7 +1181,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMCSSStyleRule)
   // Unlink the wrapper for our declaraton.  This just expands out
   // NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER which we can't use
   // directly because the wrapper is on the declaration, not on us.
-  nsContentUtils::ReleaseWrapper(static_cast<nsISupports*>(p), tmp->DOMDeclaration());
+  tmp->DOMDeclaration()->ReleaseWrapper(static_cast<nsISupports*>(p));
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMCSSStyleRule)
@@ -1501,7 +1511,7 @@ StyleRule::SetSelectorText(const nsAString& aSelectorText)
 }
 
 /* virtual */ size_t
-StyleRule::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+StyleRule::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   size_t n = aMallocSizeOf(this);
   n += mSelector ? mSelector->SizeOfIncludingThis(aMallocSizeOf) : 0;

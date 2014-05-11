@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
-
 #include "nsIDOMHTMLVideoElement.h"
 #include "nsIDOMHTMLSourceElement.h"
 #include "mozilla/dom/HTMLVideoElement.h"
@@ -24,7 +22,6 @@
 
 #include "nsIScriptSecurityManager.h"
 #include "nsIXPConnect.h"
-#include "jsapi.h"
 
 #include "nsITimer.h"
 
@@ -33,20 +30,20 @@
 #include "nsIPowerManagerService.h"
 #include "MediaError.h"
 #include "MediaDecoder.h"
+#include "mozilla/Preferences.h"
+#include "nsIDOMWakeLock.h"
+#include "nsPerformance.h"
+#include "mozilla/dom/VideoPlaybackQuality.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Video)
 
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_ADDREF_INHERITED(HTMLVideoElement, HTMLMediaElement)
-NS_IMPL_RELEASE_INHERITED(HTMLVideoElement, HTMLMediaElement)
+static bool sVideoStatsEnabled;
 
-NS_INTERFACE_TABLE_HEAD(HTMLVideoElement)
-  NS_HTML_CONTENT_INTERFACES(HTMLMediaElement)
-  NS_INTERFACE_TABLE_INHERITED2(HTMLVideoElement, nsIDOMHTMLMediaElement, nsIDOMHTMLVideoElement)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS_INHERITED2(HTMLVideoElement, HTMLMediaElement,
+                             nsIDOMHTMLMediaElement, nsIDOMHTMLVideoElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLVideoElement)
 
@@ -72,7 +69,6 @@ NS_IMETHODIMP HTMLVideoElement::GetVideoHeight(uint32_t *aVideoHeight)
 HTMLVideoElement::HTMLVideoElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : HTMLMediaElement(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 HTMLVideoElement::~HTMLVideoElement()
@@ -104,9 +100,9 @@ HTMLVideoElement::ParseAttribute(int32_t aNamespaceID,
                                            aResult);
 }
 
-static void
-MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                      nsRuleData* aData)
+void
+HTMLVideoElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                        nsRuleData* aData)
 {
   nsGenericHTMLElement::MapImageSizeAttributesInto(aAttributes, aData);
   nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);
@@ -160,6 +156,9 @@ NS_IMPL_URI_ATTR(HTMLVideoElement, Poster, poster)
 uint32_t HTMLVideoElement::MozParsedFrames() const
 {
   MOZ_ASSERT(NS_IsMainThread(), "Should be on main thread.");
+  if (!sVideoStatsEnabled) {
+    return 0;
+  }
   return mDecoder ? mDecoder->GetFrameStatistics().GetParsedFrames() : 0;
 }
 
@@ -172,6 +171,9 @@ NS_IMETHODIMP HTMLVideoElement::GetMozParsedFrames(uint32_t *aMozParsedFrames)
 uint32_t HTMLVideoElement::MozDecodedFrames() const
 {
   MOZ_ASSERT(NS_IsMainThread(), "Should be on main thread.");
+  if (!sVideoStatsEnabled) {
+    return 0;
+  }
   return mDecoder ? mDecoder->GetFrameStatistics().GetDecodedFrames() : 0;
 }
 
@@ -184,6 +186,9 @@ NS_IMETHODIMP HTMLVideoElement::GetMozDecodedFrames(uint32_t *aMozDecodedFrames)
 uint32_t HTMLVideoElement::MozPresentedFrames() const
 {
   MOZ_ASSERT(NS_IsMainThread(), "Should be on main thread.");
+  if (!sVideoStatsEnabled) {
+    return 0;
+  }
   return mDecoder ? mDecoder->GetFrameStatistics().GetPresentedFrames() : 0;
 }
 
@@ -196,6 +201,9 @@ NS_IMETHODIMP HTMLVideoElement::GetMozPresentedFrames(uint32_t *aMozPresentedFra
 uint32_t HTMLVideoElement::MozPaintedFrames()
 {
   MOZ_ASSERT(NS_IsMainThread(), "Should be on main thread.");
+  if (!sVideoStatsEnabled) {
+    return 0;
+  }
   layers::ImageContainer* container = GetImageContainer();
   return container ? container->GetPaintCount() : 0;
 }
@@ -243,6 +251,39 @@ HTMLVideoElement::NotifyOwnerDocumentActivityChanged()
   WakeLockUpdate();
 }
 
+already_AddRefed<VideoPlaybackQuality>
+HTMLVideoElement::GetVideoPlaybackQuality()
+{
+  DOMHighResTimeStamp creationTime = 0;
+  uint64_t totalFrames = 0;
+  uint64_t droppedFrames = 0;
+  uint64_t corruptedFrames = 0;
+  double totalFrameDelay = 0.0;
+
+  if (sVideoStatsEnabled) {
+    nsPIDOMWindow* window = OwnerDoc()->GetInnerWindow();
+    if (window) {
+      nsPerformance* perf = window->GetPerformance();
+      if (perf) {
+        creationTime = perf->GetDOMTiming()->TimeStampToDOMHighRes(TimeStamp::Now());
+      }
+    }
+
+    if (mDecoder) {
+      MediaDecoder::FrameStatistics& stats = mDecoder->GetFrameStatistics();
+      totalFrames = stats.GetParsedFrames();
+      droppedFrames = totalFrames - stats.GetPresentedFrames();
+      corruptedFrames = totalFrames - stats.GetDecodedFrames();
+      totalFrameDelay = stats.GetTotalFrameDelay();
+    }
+  }
+
+  nsRefPtr<VideoPlaybackQuality> playbackQuality =
+    new VideoPlaybackQuality(this, creationTime, totalFrames, droppedFrames,
+                             corruptedFrames, totalFrameDelay);
+  return playbackQuality.forget();
+}
+
 void
 HTMLVideoElement::WakeLockCreate()
 {
@@ -258,12 +299,7 @@ HTMLVideoElement::WakeLockRelease()
 void
 HTMLVideoElement::WakeLockUpdate()
 {
-  bool hidden = true;
-
-  nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(OwnerDoc());
-  if (domDoc) {
-    domDoc->GetHidden(&hidden);
-  }
+  bool hidden = OwnerDoc()->Hidden();
 
   if (mScreenWakeLock && (mPaused || hidden)) {
     mScreenWakeLock->Unlock();
@@ -282,5 +318,10 @@ HTMLVideoElement::WakeLockUpdate()
   }
 }
 
+void
+HTMLVideoElement::Init()
+{
+  Preferences::AddBoolVarCache(&sVideoStatsEnabled, "media.video_stats.enabled");
+}
 } // namespace dom
 } // namespace mozilla

@@ -16,5 +16,8 @@ EXTRA_JS_MODULES += [
     'socket.jsm',
 ]
 
-if not CONFIG['MOZ_THUNDERBIRD']:
-    EXTRA_JS_MODULES += ['http.jsm']
+EXTRA_PP_JS_MODULES += [
+    'hiddenWindow.jsm',
+    'imTextboxUtils.jsm',
+]
+

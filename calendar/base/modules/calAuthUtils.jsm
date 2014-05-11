@@ -304,11 +304,8 @@ cal.auth.Prompt.prototype = {
             }
         };
 
-
-        let hostKey = (aChannel.URI.host + ":" + aChannel.URI.port + " (" + aAuthInfo.realm + ")");
-
         var asyncprompter = Components.classes["@mozilla.org/messenger/msgAsyncPrompter;1"]
                                       .getService(Components.interfaces.nsIMsgAsyncPrompter);
-        asyncprompter.queueAsyncAuthPrompt(hostKey, false, promptlistener);
+        asyncprompter.queueAsyncAuthPrompt(aChannel.URI.spec, false, promptlistener);
     }
 };

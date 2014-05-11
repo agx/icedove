@@ -8,6 +8,8 @@
 #define jit_arm_Architecture_arm_h
 
 #include <limits.h>
+#include <stdint.h>
+
 // gcc appears to use __ARM_PCS_VFP to denote that the target is a hard-float target.
 #ifdef __ARM_PCS_VFP
 #define JS_CPU_ARM_HARDFP
@@ -47,7 +49,7 @@ static const uint32_t BAILOUT_TABLE_ENTRY_SIZE    = 4;
 class Registers
 {
   public:
-    typedef enum {
+    enum RegisterID {
         r0 = 0,
         r1,
         r2,
@@ -71,7 +73,7 @@ class Registers
         r15,
         pc = r15,
         invalid_reg
-    } RegisterID;
+    };
     typedef RegisterID Code;
 
     static const char *GetName(Code code) {
@@ -143,12 +145,11 @@ typedef uint16_t PackedRegisterMask;
 class FloatRegisters
 {
   public:
-    typedef enum {
+    enum FPRegisterID {
         d0,
         d1,
         d2,
         d3,
-        SD0 = d3,
         d4,
         d5,
         d6,
@@ -177,7 +178,7 @@ class FloatRegisters
         d29,
         d30,
         invalid_freg
-    } FPRegisterID;
+    };
     typedef FPRegisterID Code;
 
     static const char *GetName(Code code) {
@@ -193,13 +194,22 @@ class FloatRegisters
 
     static const uint32_t AllMask = (1 << Total) - 1;
 
-    static const uint32_t VolatileMask = AllMask;
-    static const uint32_t NonVolatileMask = 0;
+    // d15 is the ScratchFloatReg.
+    static const uint32_t NonVolatileMask =
+        (1 << d8) |
+        (1 << d9) |
+        (1 << d10) |
+        (1 << d11) |
+        (1 << d12) |
+        (1 << d13) |
+        (1 << d14);
+
+    static const uint32_t VolatileMask = AllMask & ~NonVolatileMask;
 
     static const uint32_t WrapperMask = VolatileMask;
 
-    // d1 is the ARM scratch float register.
-    static const uint32_t NonAllocatableMask = (1 << d1) | (1 << invalid_freg);
+    // d15 is the ARM scratch float register.
+    static const uint32_t NonAllocatableMask = (1 << d15) | (1 << invalid_freg);
 
     // Registers that can be allocated without being saved, generally.
     static const uint32_t TempMask = VolatileMask & ~NonAllocatableMask;
@@ -207,10 +217,12 @@ class FloatRegisters
     static const uint32_t AllocatableMask = AllMask & ~NonAllocatableMask;
 };
 
+uint32_t GetARMFlags();
 bool hasMOVWT();
 bool hasVFPv3();
 bool hasVFP();
 bool has16DP();
+bool hasIDIV();
 
 } // namespace jit
 } // namespace js

@@ -10,7 +10,6 @@
 
 #include "nsMargin.h"
 #include "nsStyleCoord.h"
-#include "nsStyleStructInlines.h"
 #include "nsIFrame.h"
 #include "mozilla/Assertions.h"
 #include <algorithm>
@@ -20,14 +19,6 @@ class nsRenderingContext;
 class nsFloatManager;
 class nsLineLayout;
 class nsIPercentHeightObserver;
-
-struct nsStyleDisplay;
-struct nsStyleVisibility;
-struct nsStylePosition;
-struct nsStyleBorder;
-struct nsStyleMargin;
-struct nsStylePadding;
-struct nsStyleText;
 struct nsHypotheticalBox;
 
 
@@ -50,13 +41,6 @@ NS_CSS_MINMAX(NumericType aValue, NumericType aMinValue, NumericType aMaxValue)
     result = aMinValue;
   return result;
 }
-
-/**
- * Constant used to indicate an unconstrained size.
- *
- * @see #Reflow()
- */
-#define NS_UNCONSTRAINEDSIZE NS_MAXSIZE
 
 /**
  * CSS Frame type. Included as part of the reflow state.
@@ -110,14 +94,6 @@ typedef uint32_t  nsCSSFrameType;
 #define NS_FRAME_GET_TYPE(_ft)                           \
   ((_ft) & ~(NS_CSS_FRAME_TYPE_REPLACED |                \
              NS_CSS_FRAME_TYPE_REPLACED_CONTAINS_BLOCK))
-
-#define NS_INTRINSICSIZE    NS_UNCONSTRAINEDSIZE
-#define NS_AUTOHEIGHT       NS_UNCONSTRAINEDSIZE
-#define NS_AUTOMARGIN       NS_UNCONSTRAINEDSIZE
-#define NS_AUTOOFFSET       NS_UNCONSTRAINEDSIZE
-// NOTE: there are assumptions all over that these have the same value, namely NS_UNCONSTRAINEDSIZE
-//       if any are changed to be a value other than NS_UNCONSTRAINEDSIZE
-//       at least update AdjustComputedHeight/Width and test ad nauseum
 
 // A base class of nsHTMLReflowState that computes only the padding,
 // border, and margin, since those values are needed more often.
@@ -251,7 +227,7 @@ struct nsHTMLReflowState : public nsCSSOffsetState {
   // pointer to the float manager associated with this area
   nsFloatManager* mFloatManager;
 
-  // LineLayout object (only for inline reflow; set to NULL otherwise)
+  // LineLayout object (only for inline reflow; set to nullptr otherwise)
   nsLineLayout*    mLineLayout;
 
   // The appropriate reflow state for the containing block (for
@@ -334,13 +310,9 @@ public:
   const nsStylePadding*    mStylePadding;
   const nsStyleText*       mStyleText;
 
-  bool IsFloating() const {
-    return mStyleDisplay->IsFloating(frame);
-  }
+  bool IsFloating() const;
 
-  uint8_t GetDisplay() const {
-    return mStyleDisplay->GetDisplay(frame);
-  }
+  uint8_t GetDisplay() const;
 
   // a frame (e.g. nsTableCellFrame) which may need to generate a special 
   // reflow for percent height calculations 
@@ -403,30 +375,59 @@ public:
   // can use that and then override specific values if you want, or you can
   // call Init as desired...
 
-  // Initialize a <b>root</b> reflow state with a rendering context to
-  // use for measuring things.
+  /**
+   * Initialize a ROOT reflow state.
+   *
+   * @param aPresContext Must be equal to aFrame->PresContext().
+   * @param aFrame The frame for whose reflow state is being constructed.
+   * @param aRenderingContext The rendering context to be used for measurements.
+   * @param aAvailableSpace See comments for availableHeight and availableWidth
+   *        members.
+   * @param aFlags A set of flags used for additional boolean parameters (see
+   *        below).
+   */
   nsHTMLReflowState(nsPresContext*           aPresContext,
                     nsIFrame*                aFrame,
-                    nsRenderingContext*     aRenderingContext,
+                    nsRenderingContext*      aRenderingContext,
                     const nsSize&            aAvailableSpace,
                     uint32_t                 aFlags = 0);
 
-  // Initialize a reflow state for a child frames reflow. Some state
-  // is copied from the parent reflow state; the remaining state is
-  // computed. 
+  /**
+   * Initialize a reflow state for a child frame's reflow. Some parts of the
+   * state are copied from the parent's reflow state. The remainder is computed.
+   *
+   * @param aPresContext Must be equal to aFrame->PresContext().
+   * @param aParentReflowState A reference to an nsHTMLReflowState object that
+   *        is to be the parent of this object.
+   * @param aFrame The frame for whose reflow state is being constructed.
+   * @param aAvailableSpace See comments for availableHeight and availableWidth
+   *        members.
+   * @param aContainingBlockWidth An optional width, in app units, that is used
+   *        by absolute positioning code to override default containing block
+   *        width.
+   * @param aContainingBlockHeight An optional height, in app units, that is
+   *        used by absolute positioning code to override default containing
+   *        block height.
+   * @param aFlags A set of flags used for additional boolean parameters (see
+   *        below).
+   */
   nsHTMLReflowState(nsPresContext*           aPresContext,
                     const nsHTMLReflowState& aParentReflowState,
                     nsIFrame*                aFrame,
                     const nsSize&            aAvailableSpace,
-                    // These two are used by absolute positioning code
-                    // to override default containing block w & h:
                     nscoord                  aContainingBlockWidth = -1,
                     nscoord                  aContainingBlockHeight = -1,
-                    bool                     aInit = true);
+                    uint32_t                 aFlags = 0);
 
   // Values for |aFlags| passed to constructor
   enum {
-    DUMMY_PARENT_REFLOW_STATE = (1<<0)
+    // Indicates that the parent of this reflow state is "fake" (see
+    // mDummyParentReflowState in mFlags).
+    DUMMY_PARENT_REFLOW_STATE = (1<<0),
+
+    // Indicates that the calling function will initialize the reflow state, and
+    // that the constructor should not call Init().
+    CALLER_WILL_INIT = (1<<1)
   };
 
   // This method initializes various data members. It is automatically
@@ -480,15 +481,28 @@ public:
     }
     return std::max(aWidth, mComputedMinWidth);
   }
+
   /**
    * Apply the mComputed(Min/Max)Height constraints to the content
    * size computed so far.
+   *
+   * @param aHeight The height that we've computed an to which we want to apply
+   *        min/max constraints.
+   * @param aConsumed The amount of the computed height that was consumed by
+   *        our prev-in-flows.
    */
-  nscoord ApplyMinMaxHeight(nscoord aHeight) const {
+  nscoord ApplyMinMaxHeight(nscoord aHeight, nscoord aConsumed = 0) const {
+    aHeight += aConsumed;
+
     if (NS_UNCONSTRAINEDSIZE != mComputedMaxHeight) {
       aHeight = std::min(aHeight, mComputedMaxHeight);
     }
-    return std::max(aHeight, mComputedMinHeight);
+
+    if (NS_UNCONSTRAINEDSIZE != mComputedMinHeight) {
+      aHeight = std::max(aHeight, mComputedMinHeight);
+    }
+
+    return aHeight - aConsumed;
   }
 
   bool ShouldReflowAllKids() const {
@@ -532,6 +546,15 @@ public:
                                      nscoord aContainingBlockWidth,
                                      nscoord aContainingBlockHeight,
                                      nsMargin& aComputedOffsets);
+
+  // If a relatively positioned element, adjust the position appropriately.
+  static void ApplyRelativePositioning(nsIFrame* aFrame,
+                                       const nsMargin& aComputedOffsets,
+                                       nsPoint* aPosition);
+
+  void ApplyRelativePositioning(nsPoint* aPosition) const {
+    ApplyRelativePositioning(frame, mComputedOffsets, aPosition);
+  }
 
 #ifdef DEBUG
   // Reflow trace methods.  Defined in nsFrame.cpp so they have access

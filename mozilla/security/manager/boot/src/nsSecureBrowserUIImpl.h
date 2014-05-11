@@ -6,6 +6,9 @@
 #ifndef nsSecureBrowserUIImpl_h_
 #define nsSecureBrowserUIImpl_h_
 
+#ifdef DEBUG
+#include "mozilla/Atomics.h"
+#endif
 #include "mozilla/ReentrantMonitor.h"
 #include "nsCOMPtr.h"
 #include "nsString.h"
@@ -48,7 +51,7 @@ public:
   nsSecureBrowserUIImpl();
   virtual ~nsSecureBrowserUIImpl();
   
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIWEBPROGRESSLISTENER
   NS_DECL_NSISECUREBROWSERUI
   
@@ -93,7 +96,7 @@ protected:
   bool mOnLocationChangeSeen;
 #ifdef DEBUG
   /* related to mReentrantMonitor */
-  int32_t mOnStateLocationChangeReentranceDetection;
+  mozilla::Atomic<int32_t> mOnStateLocationChangeReentranceDetection;
 #endif
 
   static already_AddRefed<nsISupports> ExtractSecurityInfo(nsIRequest* aRequest);

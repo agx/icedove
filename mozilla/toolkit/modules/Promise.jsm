@@ -98,6 +98,7 @@ const Cu = Components.utils;
 const Cr = Components.results;
 
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 const STATUS_PENDING = 0;
 const STATUS_RESOLVED = 1;
@@ -113,6 +114,179 @@ const Name = (n) => "{private:" + n + ":" + salt + "}";
 const N_STATUS = Name("status");
 const N_VALUE = Name("value");
 const N_HANDLERS = Name("handlers");
+const N_WITNESS = Name("witness");
+
+
+/////// Warn-upon-finalization mechanism
+//
+// One of the difficult problems with promises is locating uncaught
+// rejections. We adopt the following strategy: if a promise is rejected
+// at the time of its garbage-collection *and* if the promise is at the
+// end of a promise chain (i.e. |thatPromise.then| has never been
+// called), then we print a warning.
+//
+//  let deferred = Promise.defer();
+//  let p = deferred.promise.then();
+//  deferred.reject(new Error("I am un uncaught error"));
+//  deferred = null;
+//  p = null;
+//
+// In this snippet, since |deferred.promise| is not the last in the
+// chain, no error will be reported for that promise. However, since
+// |p| is the last promise in the chain, the error will be reported
+// for |p|.
+//
+// Note that this may, in some cases, cause an error to be reported more
+// than once. For instance, consider:
+//
+//   let deferred = Promise.defer();
+//   let p1 = deferred.promise.then();
+//   let p2 = deferred.promise.then();
+//   deferred.reject(new Error("I am an uncaught error"));
+//   p1 = p2 = deferred = null;
+//
+// In this snippet, the error is reported both by p1 and by p2.
+//
+
+XPCOMUtils.defineLazyServiceGetter(this, "FinalizationWitnessService",
+                                   "@mozilla.org/toolkit/finalizationwitness;1",
+                                   "nsIFinalizationWitnessService");
+
+let PendingErrors = {
+  _counter: 0,
+  _map: new Map(),
+  register: function(error) {
+    let id = "pending-error-" + (this._counter++);
+    //
+    // At this stage, ideally, we would like to store the error itself
+    // and delay any treatment until we are certain that we will need
+    // to report that error. However, in the (unlikely but possible)
+    // case the error holds a reference to the promise itself, doing so
+    // would prevent the promise from being garbabe-collected, which
+    // would both cause a memory leak and ensure that we cannot report
+    // the uncaught error.
+    //
+    // To avoid this situation, we rather extract relevant data from
+    // the error and further normalize it to strings.
+    //
+    let value = {
+      date: new Date(),
+      message: "" + error,
+      fileName: null,
+      stack: null,
+      lineNumber: null
+    };
+    try { // Defend against non-enumerable values
+      if (error && error instanceof Ci.nsIException) {
+        // nsIException does things a little differently.
+        try {
+          // For starters |.toString()| does not only contain the message, but
+          // also the top stack frame, and we don't really want that.
+          value.message = error.message;
+        } catch (ex) {
+          // Ignore field
+        }
+        try {
+          // All lowercase filename. ;)
+          value.fileName = error.filename;
+        } catch (ex) {
+          // Ignore field
+        }
+        try {
+          value.lineNumber = error.lineNumber;
+        } catch (ex) {
+          // Ignore field
+        }
+      } else if (typeof error == "object" && error) {
+        for (let k of ["fileName", "stack", "lineNumber"]) {
+          try { // Defend against fallible getters and string conversions
+            let v = error[k];
+            value[k] = v ? ("" + v) : null;
+          } catch (ex) {
+            // Ignore field
+          }
+        }
+      }
+
+      if (!value.stack) {
+        // |error| is not an Error (or Error-alike). Try to figure out the stack.
+        let stack = null;
+        if (error && error.location &&
+            error.location instanceof Ci.nsIStackFrame) {
+          // nsIException has full stack frames in the |.location| member.
+          stack = error.location;
+        } else {
+          // Components.stack to the rescue!
+          stack  = Components.stack;
+          // Remove those top frames that refer to Promise.jsm.
+          while (stack) {
+            if (!stack.filename.endsWith("/Promise.jsm")) {
+              break;
+            }
+            stack = stack.caller;
+          }
+        }
+        if (stack) {
+          let frames = [];
+          while (stack) {
+            frames.push(stack);
+            stack = stack.caller;
+          }
+          value.stack = frames.join("\n");
+        }
+      }
+    } catch (ex) {
+      // Ignore value
+    }
+    this._map.set(id, value);
+    return id;
+  },
+  extract: function(id) {
+    let value = this._map.get(id);
+    this._map.delete(id);
+    return value;
+  },
+  unregister: function(id) {
+    this._map.delete(id);
+  }
+};
+
+// Actually print the finalization warning.
+Services.obs.addObserver(function observe(aSubject, aTopic, aValue) {
+  let error = PendingErrors.extract(aValue);
+  let {message, date, fileName, stack, lineNumber} = error;
+  let error = Cc['@mozilla.org/scripterror;1'].createInstance(Ci.nsIScriptError);
+  if (!error || !Services.console) {
+    // Too late during shutdown to use the nsIConsole
+    dump("*************************\n");
+    dump("A promise chain failed to handle a rejection\n\n");
+    dump("On: " + date + "\n");
+    dump("Full message: " + message + "\n");
+    dump("See https://developer.mozilla.org/Mozilla/JavaScript_code_modules/Promise.jsm/Promise\n");
+    dump("Full stack: " + (stack||"not available") + "\n");
+    dump("*************************\n");
+    return;
+  }
+  if (stack) {
+    message += "\nFull Stack: " + stack;
+  }
+  error.init(
+             /*message*/"A promise chain failed to handle a rejection.\n\n" +
+             "Date: " + date + "\nFull Message: " + message,
+             /*sourceName*/ fileName,
+             /*sourceLine*/ lineNumber?("" + lineNumber):0,
+             /*lineNumber*/ lineNumber || 0,
+             /*columnNumber*/ 0,
+             /*flags*/ Ci.nsIScriptError.errorFlag,
+             /*category*/ "chrome javascript");
+  Services.console.logMessage(error);
+}, "promise-finalization-witness", false);
+
+///////// Additional warnings for developers
+//
+// The following error types are considered programmer errors, which should be
+// reported (possibly redundantly) so as to let programmers fix their code.
+const ERRORS_TO_REPORT = ["EvalError", "RangeError", "ReferenceError", "TypeError"];
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Promise
@@ -172,6 +346,60 @@ this.Promise = Object.freeze({
     PromiseWalker.completePromise(promise, STATUS_REJECTED, aReason);
     return promise;
   },
+
+  /**
+   * Returns a promise that is resolved or rejected when all values are
+   * resolved or any is rejected.
+   *
+   * @param aValues
+   *        Array of promises that may be pending, resolved, or rejected. When
+   *        all are resolved or any is rejected, the returned promise will be
+   *        resolved or rejected as well.
+   *
+   * @return A new promise that is fulfilled when all values are resolved or
+   *         that is rejected when any of the values are rejected. Its
+   *         resolution value will be an array of all resolved values in the
+   *         given order, or undefined if aValues is an empty array. The reject
+   *         reason will be forwarded from the first promise in the list of
+   *         given promises to be rejected.
+   */
+  all: function (aValues)
+  {
+    if (!Array.isArray(aValues)) {
+      throw new Error("Promise.all() expects an array of promises or values.");
+    }
+
+    if (!aValues.length) {
+      return Promise.resolve([]);
+    }
+
+    let countdown = aValues.length;
+    let deferred = Promise.defer();
+    let resolutionValues = new Array(countdown);
+
+    function checkForCompletion(aValue, aIndex) {
+      resolutionValues[aIndex] = aValue;
+
+      if (--countdown === 0) {
+        deferred.resolve(resolutionValues);
+      }
+    }
+
+    for (let i = 0; i < aValues.length; i++) {
+      let index = i;
+      let value = aValues[i];
+      let resolve = val => checkForCompletion(val, index);
+
+      if (value && typeof(value.then) == "function") {
+        value.then(resolve, deferred.reject);
+      } else {
+        // Given value is not a promise, forward it as a resolution value.
+        resolve(value);
+      }
+    }
+
+    return deferred.promise;
+  },
 });
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -225,7 +453,24 @@ this.PromiseWalker = {
     aPromise[N_VALUE] = aValue;
     if (aPromise[N_HANDLERS].length > 0) {
       this.schedulePromise(aPromise);
+    } else if (aStatus == STATUS_REJECTED) {
+      // This is a rejection and the promise is the last in the chain.
+      // For the time being we therefore have an uncaught error.
+      let id = PendingErrors.register(aValue);
+      let witness =
+          FinalizationWitnessService.make("promise-finalization-witness", id);
+      aPromise[N_WITNESS] = [id, witness];
     }
+  },
+
+  /**
+   * Sets up the PromiseWalker loop to start on the next tick of the event loop
+   */
+  scheduleWalkerLoop: function()
+  {
+    this.walkerLoopScheduled = true;
+    Services.tm.currentThread.dispatch(this.walkerLoop,
+                                       Ci.nsIThread.DISPATCH_NORMAL);
   },
 
   /**
@@ -246,9 +491,7 @@ this.PromiseWalker = {
 
     // Schedule the walker loop on the next tick of the event loop.
     if (!this.walkerLoopScheduled) {
-      this.walkerLoopScheduled = true;
-      Services.tm.currentThread.dispatch(this.walkerLoop,
-                                         Ci.nsIThread.DISPATCH_NORMAL);
+      this.scheduleWalkerLoop();
     }
   },
 
@@ -267,15 +510,21 @@ this.PromiseWalker = {
    */
   walkerLoop: function ()
   {
-    // Allow rescheduling the walker loop immediately.  This makes this walker
-    // resilient to the case where one handler does not return, but starts a
-    // nested event loop.  In that case, the newly scheduled walker will take
-    // over.  In the common case, the newly scheduled walker will be invoked
+    // If there is more than one handler waiting, reschedule the walker loop
+    // immediately.  Otherwise, use walkerLoopScheduled to tell schedulePromise()
+    // to reschedule the loop if it adds more handlers to the queue.  This makes
+    // this walker resilient to the case where one handler does not return, but
+    // starts a nested event loop.  In that case, the newly scheduled walker will
+    // take over.  In the common case, the newly scheduled walker will be invoked
     // after this one has returned, with no actual handler to process.  This
     // small overhead is required to make nested event loops work correctly, but
     // occurs at most once per resolution chain, thus having only a minor
     // impact on overall performance.
-    this.walkerLoopScheduled = false;
+    if (this.handlers.length > 1) {
+      this.scheduleWalkerLoop();
+    } else {
+      this.walkerLoopScheduled = false;
+    }
 
     // Process all the known handlers eagerly.
     while (this.handlers.length > 0) {
@@ -384,6 +633,15 @@ function PromiseImpl()
    */
   Object.defineProperty(this, N_HANDLERS, { value: [] });
 
+  /**
+   * When the N_STATUS property is STATUS_REJECTED and until there is
+   * a rejection callback, this contains an array
+   * - {string} id An id for use with |PendingErrors|;
+   * - {FinalizationWitness} witness A witness broadcasting |id| on
+   *   notification "promise-finalization-witness".
+   */
+  Object.defineProperty(this, N_WITNESS, { writable: true });
+
   Object.seal(this);
 }
 
@@ -439,6 +697,15 @@ PromiseImpl.prototype = {
     // Ensure the handler is scheduled for processing if this promise is already
     // resolved or rejected.
     if (this[N_STATUS] != STATUS_PENDING) {
+
+      // This promise is not the last in the chain anymore. Remove any watchdog.
+      if (this[N_WITNESS] != null) {
+        let [id, witness] = this[N_WITNESS];
+        this[N_WITNESS] = null;
+        witness.forget();
+        PendingErrors.unregister(id);
+      }
+
       PromiseWalker.schedulePromise(this);
     }
 
@@ -504,7 +771,30 @@ Handler.prototype = {
         nextStatus = STATUS_RESOLVED;
       }
     } catch (ex) {
-      // If an exception occurred in the handler, reject the next promise.
+
+      // An exception has occurred in the handler.
+
+      if (ex && typeof ex == "object" && "name" in ex &&
+          ERRORS_TO_REPORT.indexOf(ex.name) != -1) {
+
+        // We suspect that the exception is a programmer error, so we now
+        // display it using dump().  Note that we do not use Cu.reportError as
+        // we assume that this is a programming error, so we do not want end
+        // users to see it. Also, if the programmer handles errors correctly,
+        // they will either treat the error or log them somewhere.
+
+        dump("*************************\n");
+        dump("A coding exception was thrown in a Promise " +
+             ((nextStatus == STATUS_RESOLVED) ? "resolution":"rejection") +
+             " callback.\n\n");
+        dump("Full message: " + ex + "\n");
+        dump("See https://developer.mozilla.org/Mozilla/JavaScript_code_modules/Promise.jsm/Promise\n");
+        dump("Full stack: " + (("stack" in ex)?ex.stack:"not available") + "\n");
+        dump("*************************\n");
+
+      }
+
+      // Additionally, reject the next promise.
       nextStatus = STATUS_REJECTED;
       nextValue = ex;
     }

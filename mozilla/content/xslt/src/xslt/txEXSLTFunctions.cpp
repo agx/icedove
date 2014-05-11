@@ -3,8 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/FloatingPoint.h"
-#include "mozilla/Util.h"
 
 #include "nsIAtom.h"
 #include "nsGkAtoms.h"
@@ -368,7 +368,6 @@ txEXSLTFunctionCall::evaluate(txIEvalContext *aContext,
             NS_ENSURE_SUCCESS(rv, rv);
 
             nsTHashtable<nsStringHashKey> hash;
-            hash.Init();
 
             int32_t i, len = nodes->size();
             for (i = 0; i < len; ++i) {

@@ -248,7 +248,7 @@ nsMsgLocalMailFolder::GetSubFolders(nsISimpleEnumerator **aResult)
         NS_ENSURE_SUCCESS(rv, NS_MSG_INVALID_OR_MISSING_SERVER);
 
         // first create the folders on disk (as empty files)
-        rv = localMailServer->CreateDefaultMailboxes(path);
+        rv = localMailServer->CreateDefaultMailboxes();
         if (NS_FAILED(rv) && rv != NS_MSG_FOLDER_EXISTS)
           return rv;
 
@@ -3562,21 +3562,25 @@ nsMsgLocalMailFolder::AddMessageBatch(uint32_t aMessageCount,
 }
 
 NS_IMETHODIMP
-nsMsgLocalMailFolder::WarnIfLocalFileTooBig(nsIMsgWindow *aWindow, bool *aTooBig)
+nsMsgLocalMailFolder::WarnIfLocalFileTooBig(nsIMsgWindow *aWindow,
+                                            int64_t aSpaceRequested,
+                                            bool *aTooBig)
 {
   NS_ENSURE_ARG_POINTER(aTooBig);
-  *aTooBig = false;
+
+  *aTooBig = true;
   nsCOMPtr<nsIMsgPluggableStore> msgStore;
   nsresult rv = GetMsgStore(getter_AddRefs(msgStore));
   NS_ENSURE_SUCCESS(rv, rv);
-  bool spaceAvailable;
+  bool spaceAvailable = false;
   // check if we have a reasonable amount of space left
-  rv = msgStore->HasSpaceAvailable(this, 0xFFFFF, &spaceAvailable);
-  if (!spaceAvailable)
-    {
-      ThrowAlertMsg("mailboxTooLarge", aWindow);
-      *aTooBig = true;
-    }
+  rv = msgStore->HasSpaceAvailable(this, aSpaceRequested, &spaceAvailable);
+  if (NS_FAILED(rv) || !spaceAvailable)
+  {
+    ThrowAlertMsg("mailboxTooLarge", aWindow);
+  } else {
+    *aTooBig = false;
+  }
   return NS_OK;
 }
 

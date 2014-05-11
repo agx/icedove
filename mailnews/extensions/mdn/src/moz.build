@@ -3,9 +3,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'msgmdn'
-
-CPP_SOURCES += [
+SOURCES += [
     'nsMsgMdnGenerator.cpp',
 ]
 
@@ -13,4 +11,11 @@ EXTRA_COMPONENTS += [
     'mdn-service.js',
     'mdn-service.manifest',
 ]
+
+if CONFIG['MOZ_INCOMPLETE_EXTERNAL_LINKAGE']:
+    FORCE_STATIC_LIB = True
+else:
+    LIBXUL_LIBRARY = True
+
+LIBRARY_NAME = 'msgmdn_s'
 

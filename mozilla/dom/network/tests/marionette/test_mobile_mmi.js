@@ -5,7 +5,16 @@ MARIONETTE_TIMEOUT = 20000;
 
 SpecialPowers.addPermission("mobileconnection", true, document);
 
-let mobileConnection = navigator.mozMobileConnection;
+// Permission changes can't change existing Navigator.prototype
+// objects, so grab our objects from a new Navigator
+let ifr = document.createElement("iframe");
+let mobileConnection;
+ifr.onload = function() {
+  mobileConnection = ifr.contentWindow.navigator.mozMobileConnections[0];
+
+  tasks.run();
+};
+document.body.appendChild(ifr);
 
 let tasks = {
   // List of test functions. Each of them should call |tasks.next()| when
@@ -43,7 +52,7 @@ let tasks = {
 tasks.push(function verifyInitialState() {
   log("Verifying initial state.");
 
-  ok(mobileConnection instanceof MozMobileConnection,
+  ok(mobileConnection instanceof ifr.contentWindow.MozMobileConnection,
       "mobileConnection is instanceof " + mobileConnection.constructor);
 
   tasks.next();
@@ -58,12 +67,36 @@ tasks.push(function testGettingIMEI() {
 
   request.onsuccess = function onsuccess(event) {
     ok(true, "request success");
-    is(event.target.result, "000000000000000", "Emulator IMEI");
+    is(typeof event.target.result, "object", "typeof result object");
+    ok(event.target.result instanceof Object, "result instanceof Object");
+    is(event.target.result.statusMessage, "000000000000000", "Emulator IMEI");
+    is(event.target.result.serviceCode, "scImei", "Service code IMEI");
+    is(event.target.result.additionalInformation, undefined,
+       "No additional information");
     tasks.next();
   }
   request.onerror = function onerror() {
-    ok(false, "request success");
+    ok(false, "request should not error");
     tasks.abort();
+  };
+});
+
+tasks.push(function testInvalidMMICode(){
+  log("Test invalid MMI code ...");
+
+  let request = mobileConnection.sendMMI("InvalidMMICode");
+  ok(request instanceof DOMRequest,
+     "request is instanceof " + request.constructor);
+
+  request.onsuccess = function onsuccess(event) {
+    ok(false, "request should not success");
+    tasks.abort();
+  };
+
+  request.onerror = function onerror() {
+    ok(true, "request error");
+    is(request.error.name, "emMmiError", "MMI error name");
+    tasks.next();
   };
 });
 
@@ -72,5 +105,3 @@ tasks.push(function cleanUp() {
   SpecialPowers.removePermission("mobileconnection", document);
   finish();
 });
-
-tasks.run();

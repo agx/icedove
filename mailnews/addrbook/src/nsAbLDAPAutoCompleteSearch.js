@@ -92,10 +92,6 @@ nsAbLDAPAutoCompleteSearch.prototype = {
   // The URI of the currently active query.
   _activeQuery: null,
 
-  // Cache of the identity to save getting it each time if it doesn't change
-  _cachedParam: null,
-  _cachedIdentity: null,
-
   // The current search result.
   _result: null,
   // The listener to pass back results to.
@@ -103,13 +99,9 @@ nsAbLDAPAutoCompleteSearch.prototype = {
 
   _parser: MailServices.headerParser,
 
+  applicableHeaders: Set(["addr_to", "addr_cc", "addr_bcc", "addr_reply"]),
+
   // Private methods
-  // fullString is the full search string.
-  // rest is anything after the first word.
-  _checkEntry: function _checkEntry(card, search) {
-    return card.displayName.toLocaleLowerCase().startsWith(search) ||
-           card.primaryEmail.toLocaleLowerCase().startsWith(search);
-  },
 
   _checkDuplicate: function _checkDuplicate(card, emailAddress) {
     var lcEmailAddress = emailAddress.toLocaleLowerCase();
@@ -169,6 +161,10 @@ nsAbLDAPAutoCompleteSearch.prototype = {
 
   startSearch: function startSearch(aSearchString, aParam,
                                     aPreviousResult, aListener) {
+    let params = JSON.parse(aParam);
+    let applicable = this.applicableHeaders.has(params.type);
+    let idKey = params.idKey;
+
     this._result = new nsAbLDAPAutoCompleteResult(aSearchString);
     aSearchString = aSearchString.toLocaleLowerCase();
 
@@ -177,58 +173,30 @@ nsAbLDAPAutoCompleteSearch.prototype = {
     // result ignored.
     // The comma check is so that we don't autocomplete against the user
     // entering multiple addresses.
-    if (!aSearchString || aSearchString.contains(",")) {
+    if (!applicable || !aSearchString || aSearchString.contains(",")) {
       this._result.searchResult = ACR.RESULT_IGNORED;
       aListener.onSearchResult(this, this._result);
       return;
     }
 
-    // Compare lowercase strings, because autocomplete may mangle the case
-    // depending on the previous results.
-    if (aPreviousResult instanceof nsIAbAutoCompleteResult &&
-        aSearchString.startsWith(
-          aPreviousResult.searchString.toLocaleLowerCase()) &&
-        aPreviousResult.searchResult == ACR.RESULT_SUCCESS) {
-      // We have successful previous matches, therefore iterate through the
-      // list and reduce as appropriate.
-      for (var i = 0; i < aPreviousResult.matchCount; ++i) {
-        var card = aPreviousResult.getCardAt(i);
-        if (this._checkEntry(card, aSearchString)) {
-          // If it matches, just add it straight onto the array, these will
-          // already be in order because the previous search returned them
-          // in the correct order.
-          this._result._searchResults.push({
-            value: aPreviousResult.getValueAt(i),
-            card: card
-          });
-        }
-      }
-
-      if (this._result.matchCount) {
-        this._result.searchResult = ACR.RESULT_SUCCESS;
-        // For LDAP results, the comment column is always the same, so just
-        // use the first value from the previous results to set the value.
-        this._result._commentColumn = aPreviousResult.getCommentAt(0);
-      }
-      aListener.onSearchResult(this, this._result);
-      return;
-    }
-
-    // Here we need to do the real search, as we haven't got any previous
-    // results to fall back on.
-
-    if (aParam != this._cachedParam) {
-      this._cachedIdentity = MailServices.accounts.getIdentity(aParam);
-      this._cachedParam = aParam;
-    }
-
     // The rules here: If the current identity has a directoryServer set, then
     // use that, otherwise, try the global preference instead.
     var acDirURI = null;
+    var identity;
+
+    if (idKey) {
+      try {
+        identity = MailServices.accounts.getIdentity(idKey);
+      }
+      catch(ex) {
+        Components.utils.reportError("Couldn't get specified identity, falling " +
+                                     "back to global settings");
+      }
+    }
 
     // Does the current identity override the global preference?
-    if (this._cachedIdentity.overrideGlobalPref)
-      acDirURI = this._cachedIdentity.directoryServer;
+    if (identity && identity.overrideGlobalPref)
+      acDirURI = identity.directoryServer;
     else {
       // Try the global one
       if (Services.prefs.getBoolPref("ldap_2.autoComplete.useDirectory"))

@@ -6,10 +6,11 @@
 
 const {Cu} = require("chrome");
 
-let Promise = require("sdk/core/promise");
+let promise = require("sdk/core/promise");
 let EventEmitter = require("devtools/shared/event-emitter");
 
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource:///modules/devtools/DOMHelpers.jsm");
 
 /**
  * A toolbox host represents an object that contains a toolbox (e.g. the
@@ -23,8 +24,9 @@ Cu.import("resource://gre/modules/Services.jsm");
 exports.Hosts = {
   "bottom": BottomHost,
   "side": SidebarHost,
-  "window": WindowHost
-}
+  "window": WindowHost,
+  "custom": CustomHost
+};
 
 /**
  * Host object for the dock on the bottom of the browser
@@ -44,7 +46,7 @@ BottomHost.prototype = {
    * Create a box at the bottom of the host tab.
    */
   create: function BH_create() {
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
 
     let gBrowser = this.hostTab.ownerDocument.defaultView.gBrowser;
     let ownerDocument = gBrowser.ownerDocument;
@@ -61,17 +63,17 @@ BottomHost.prototype = {
     this._nbox.appendChild(this.frame);
 
     let frameLoad = function() {
-      this.frame.removeEventListener("DOMContentLoaded", frameLoad, true);
       this.emit("ready", this.frame);
-
       deferred.resolve(this.frame);
     }.bind(this);
 
     this.frame.tooltip = "aHTMLTooltip";
-    this.frame.addEventListener("DOMContentLoaded", frameLoad, true);
 
     // we have to load something so we can switch documents if we have to
     this.frame.setAttribute("src", "about:blank");
+
+    let domHelper = new DOMHelpers(this.frame.contentWindow);
+    domHelper.onceDOMReady(frameLoad);
 
     focusTab(this.hostTab);
 
@@ -104,7 +106,7 @@ BottomHost.prototype = {
       this._nbox.removeChild(this.frame);
     }
 
-    return Promise.resolve(null);
+    return promise.resolve(null);
   }
 }
 
@@ -127,7 +129,7 @@ SidebarHost.prototype = {
    * Create a box in the sidebar of the host tab.
    */
   create: function SH_create() {
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
 
     let gBrowser = this.hostTab.ownerDocument.defaultView.gBrowser;
     let ownerDocument = gBrowser.ownerDocument;
@@ -144,15 +146,15 @@ SidebarHost.prototype = {
     this._sidebar.appendChild(this.frame);
 
     let frameLoad = function() {
-      this.frame.removeEventListener("DOMContentLoaded", frameLoad, true);
       this.emit("ready", this.frame);
-
       deferred.resolve(this.frame);
     }.bind(this);
 
-    this.frame.addEventListener("DOMContentLoaded", frameLoad, true);
     this.frame.tooltip = "aHTMLTooltip";
     this.frame.setAttribute("src", "about:blank");
+
+    let domHelper = new DOMHelpers(this.frame.contentWindow);
+    domHelper.onceDOMReady(frameLoad);
 
     focusTab(this.hostTab);
 
@@ -185,7 +187,7 @@ SidebarHost.prototype = {
       this._sidebar.removeChild(this.frame);
     }
 
-    return Promise.resolve(null);
+    return promise.resolve(null);
   }
 }
 
@@ -207,7 +209,7 @@ WindowHost.prototype = {
    * Create a new xul window to contain the toolbox.
    */
   create: function WH_create() {
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
 
     let flags = "chrome,centerscreen,resizable,dialog=no";
     let win = Services.ww.openWindow(null, this.WINDOW_URL, "_blank",
@@ -268,7 +270,63 @@ WindowHost.prototype = {
       this._window.close();
     }
 
-    return Promise.resolve(null);
+    return promise.resolve(null);
+  }
+};
+
+/**
+ * Host object for the toolbox in its own tab
+ */
+function CustomHost(hostTab, options) {
+  this.frame = options.customIframe;
+  this.uid = options.uid;
+  EventEmitter.decorate(this);
+}
+
+CustomHost.prototype = {
+  type: "custom",
+
+  _sendMessageToTopWindow: function CH__sendMessageToTopWindow(msg, data) {
+    // It's up to the custom frame owner (parent window) to honor
+    // "close" or "raise" instructions.
+    let topWindow = this.frame.ownerDocument.defaultView;
+    let json = {name:"toolbox-" + msg, uid: this.uid};
+    if (data) {
+      json.data = data;
+    }
+    topWindow.postMessage(JSON.stringify(json), "*");
+  },
+
+  /**
+   * Create a new xul window to contain the toolbox.
+   */
+  create: function CH_create() {
+    return promise.resolve(this.frame);
+  },
+
+  /**
+   * Raise the host.
+   */
+  raise: function CH_raise() {
+    this._sendMessageToTopWindow("raise");
+  },
+
+  /**
+   * Set the toolbox title.
+   */
+  setTitle: function CH_setTitle(title) {
+    this._sendMessageToTopWindow("title", { value: title });
+  },
+
+  /**
+   * Destroy the window.
+   */
+  destroy: function WH_destroy() {
+    if (!this._destroyed) {
+      this._destroyed = true;
+      this._sendMessageToTopWindow("close");
+    }
+    return promise.resolve(null);
   }
 }
 

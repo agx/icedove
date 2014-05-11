@@ -3,32 +3,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "nsCOMPtr.h"
-#include "nsHTMLParts.h"
-#include "nsFrame.h"
+#include "nsMathMLContainerFrame.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
-#include "nsCSSAnonBoxes.h"
 #include "nsStyleContext.h"
-#include "nsStyleConsts.h"
 #include "nsINameSpaceManager.h"
 #include "nsRenderingContext.h"
-
 #include "nsIDOMMutationEvent.h"
-#include "nsFrameManager.h"
-#include "nsStyleChangeList.h"
-
 #include "nsGkAtoms.h"
-#include "nsMathMLParts.h"
-#include "nsMathMLContainerFrame.h"
 #include "nsAutoPtr.h"
-#include "nsStyleSet.h"
 #include "nsDisplayList.h"
-#include "nsCSSFrameConstructor.h"
 #include "nsIReflowCallback.h"
 #include "mozilla/Likely.h"
 #include "nsIScriptError.h"
 #include "nsContentUtils.h"
+#include "nsMathMLElement.h"
 
 using namespace mozilla;
 
@@ -40,6 +29,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsMathMLContainerFrame)
 
 NS_QUERYFRAME_HEAD(nsMathMLContainerFrame)
   NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
+  NS_QUERYFRAME_ENTRY(nsMathMLContainerFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
 
 // =============================================================================
@@ -996,7 +986,11 @@ nsMathMLContainerFrame::GetMinWidth(nsRenderingContext *aRenderingContext)
 {
   nscoord result;
   DISPLAY_MIN_WIDTH(this, result);
-  result = GetIntrinsicWidth(aRenderingContext);
+  nsHTMLReflowMetrics desiredSize;
+  GetIntrinsicWidthMetrics(aRenderingContext, desiredSize);
+  nsBoundingMetrics bm = desiredSize.mBoundingMetrics;
+  // We include the overflow to compensate for FixInterFrameSpacing.
+  result = std::max(bm.width, bm.rightBearing) - std::min(0, bm.leftBearing);
   return result;
 }
 
@@ -1005,29 +999,46 @@ nsMathMLContainerFrame::GetPrefWidth(nsRenderingContext *aRenderingContext)
 {
   nscoord result;
   DISPLAY_MIN_WIDTH(this, result);
-  result = GetIntrinsicWidth(aRenderingContext);
+  nsHTMLReflowMetrics desiredSize;
+  GetIntrinsicWidthMetrics(aRenderingContext, desiredSize);
+  nsBoundingMetrics bm = desiredSize.mBoundingMetrics;
+  // We include the overflow to compensate for FixInterFrameSpacing.
+  result = std::max(bm.width, bm.rightBearing) - std::min(0, bm.leftBearing);
   return result;
 }
 
-/* virtual */ nscoord
-nsMathMLContainerFrame::GetIntrinsicWidth(nsRenderingContext* aRenderingContext)
+/* virtual */ void
+nsMathMLContainerFrame::GetIntrinsicWidthMetrics(nsRenderingContext* aRenderingContext, nsHTMLReflowMetrics& aDesiredSize)
 {
   // Get child widths
   nsIFrame* childFrame = mFrames.FirstChild();
   while (childFrame) {
-    // XXX This includes margin while Reflow currently doesn't consider
-    // margin, so we may end up with too much space, but, with stretchy
-    // characters, this is an approximation anyway.
-    nscoord width =
-      nsLayoutUtils::IntrinsicForContainer(aRenderingContext, childFrame,
-                                           nsLayoutUtils::PREF_WIDTH);
-
     nsHTMLReflowMetrics childDesiredSize;
-    childDesiredSize.width = width;
-    childDesiredSize.mBoundingMetrics.width = width;
-    // TODO: we need nsIFrame::GetIntrinsicHBounds() for better values here.
-    childDesiredSize.mBoundingMetrics.leftBearing = 0;
-    childDesiredSize.mBoundingMetrics.rightBearing = width;
+
+    nsMathMLContainerFrame* containerFrame = do_QueryFrame(childFrame);
+    if (containerFrame) {
+      containerFrame->GetIntrinsicWidthMetrics(aRenderingContext,
+                                               childDesiredSize);
+    } else {
+      // XXX This includes margin while Reflow currently doesn't consider
+      // margin, so we may end up with too much space, but, with stretchy
+      // characters, this is an approximation anyway.
+      nscoord width =
+        nsLayoutUtils::IntrinsicForContainer(aRenderingContext, childFrame,
+                                             nsLayoutUtils::PREF_WIDTH);
+
+      childDesiredSize.width = width;
+      childDesiredSize.mBoundingMetrics.width = width;
+      childDesiredSize.mBoundingMetrics.leftBearing = 0;
+      childDesiredSize.mBoundingMetrics.rightBearing = width;
+
+      nscoord x, xMost;
+      if (NS_SUCCEEDED(childFrame->GetPrefWidthTightBounds(aRenderingContext,
+                                                           &x, &xMost))) {
+        childDesiredSize.mBoundingMetrics.leftBearing = x;
+        childDesiredSize.mBoundingMetrics.rightBearing = xMost;
+      }
+    }
 
     SaveReflowAndBoundingMetricsFor(childFrame, childDesiredSize,
                                     childDesiredSize.mBoundingMetrics);
@@ -1036,15 +1047,12 @@ nsMathMLContainerFrame::GetIntrinsicWidth(nsRenderingContext* aRenderingContext)
   }
 
   // Measure
-  nsHTMLReflowMetrics desiredSize;
-  nsresult rv = MeasureForWidth(*aRenderingContext, desiredSize);
+  nsresult rv = MeasureForWidth(*aRenderingContext, aDesiredSize);
   if (NS_FAILED(rv)) {
-    ReflowError(*aRenderingContext, desiredSize);
+    ReflowError(*aRenderingContext, aDesiredSize);
   }
 
   ClearSavedChildMetrics();
-
-  return desiredSize.width;
 }
 
 /* virtual */ nsresult
@@ -1523,7 +1531,7 @@ nsMathMLContainerFrame::ReportErrorToConsole(const char*       errorMsgId,
                                              uint32_t          aParamCount)
 {
   return nsContentUtils::ReportToConsole(nsIScriptError::errorFlag,
-                                         "MathML", mContent->OwnerDoc(),
+                                         NS_LITERAL_CSTRING("MathML"), mContent->OwnerDoc(),
                                          nsContentUtils::eMATHML_PROPERTIES,
                                          errorMsgId, aParams, aParamCount);
 }
@@ -1544,6 +1552,14 @@ nsMathMLContainerFrame::ReportChildCountError()
   return ReportErrorToConsole("ChildCountIncorrect", &arg, 1);
 }
 
+nsresult
+nsMathMLContainerFrame::ReportInvalidChildError(nsIAtom* aChildTag)
+{
+  const PRUnichar* argv[] =
+    { aChildTag->GetUTF16String(), mContent->Tag()->GetUTF16String() };
+  return ReportErrorToConsole("InvalidChild", argv, 2);
+}
+
 //==========================
 
 nsIFrame*
@@ -1551,9 +1567,7 @@ NS_NewMathMLmathBlockFrame(nsIPresShell* aPresShell, nsStyleContext* aContext,
                            uint32_t aFlags)
 {
   nsMathMLmathBlockFrame* it = new (aPresShell) nsMathMLmathBlockFrame(aContext);
-  if (it) {
-    it->SetFlags(aFlags);
-  }
+  it->SetFlags(aFlags);
   return it;
 }
 

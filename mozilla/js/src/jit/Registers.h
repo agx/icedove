@@ -7,20 +7,15 @@
 #ifndef jit_Registers_h
 #define jit_Registers_h
 
-#include "jsutil.h"
-#include "IonTypes.h"
-#if defined(JS_CPU_X86)
-# include "x86/Architecture-x86.h"
-#elif defined(JS_CPU_X64)
-# include "x64/Architecture-x64.h"
-#elif defined(JS_CPU_ARM)
-# include "arm/Architecture-arm.h"
-#endif
-#include "FixedArityList.h"
+#include "mozilla/Array.h"
 
-// ARM defines the RegisterID within Architecture-arm.h
-#if !defined(JS_CPU_ARM) && defined(JS_METHODJIT)
-#include "assembler/assembler/MacroAssembler.h"
+#include "jit/IonTypes.h"
+#if defined(JS_CPU_X86)
+# include "jit/x86/Architecture-x86.h"
+#elif defined(JS_CPU_X64)
+# include "jit/x64/Architecture-x64.h"
+#elif defined(JS_CPU_ARM)
+# include "jit/arm/Architecture-arm.h"
 #endif
 
 namespace js {
@@ -29,7 +24,6 @@ namespace jit {
 struct Register {
     typedef Registers Codes;
     typedef Codes::Code Code;
-    typedef js::jit::Registers::RegisterID RegisterID;
     Code code_;
 
     static Register FromCode(uint32_t i) {
@@ -84,11 +78,26 @@ struct FloatRegister {
     }
 };
 
+class RegisterDump
+{
+  protected: // Silence Clang warning.
+    uintptr_t regs_[Registers::Total];
+    double fpregs_[FloatRegisters::Total];
+
+  public:
+    static size_t offsetOfRegister(Register reg) {
+        return offsetof(RegisterDump, regs_) + reg.code() * sizeof(uintptr_t);
+    }
+    static size_t offsetOfRegister(FloatRegister reg) {
+        return offsetof(RegisterDump, fpregs_) + reg.code() * sizeof(double);
+    }
+};
+
 // Information needed to recover machine register state.
 class MachineState
 {
-    FixedArityList<uintptr_t *, Registers::Total> regs_;
-    FixedArityList<double *, FloatRegisters::Total> fpregs_;
+    mozilla::Array<uintptr_t *, Registers::Total> regs_;
+    mozilla::Array<double *, FloatRegisters::Total> fpregs_;
 
   public:
     static MachineState FromBailout(uintptr_t regs[Registers::Total],
@@ -102,10 +111,10 @@ class MachineState
     }
 
     bool has(Register reg) const {
-        return regs_[reg.code()] != NULL;
+        return regs_[reg.code()] != nullptr;
     }
     bool has(FloatRegister reg) const {
-        return fpregs_[reg.code()] != NULL;
+        return fpregs_[reg.code()] != nullptr;
     }
     uintptr_t read(Register reg) const {
         return *regs_[reg.code()];

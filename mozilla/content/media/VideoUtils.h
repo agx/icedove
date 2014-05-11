@@ -11,8 +11,11 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "mozilla/CheckedInt.h"
 
-#include "nsRect.h"
+#if !(defined(XP_WIN) || defined(XP_MACOSX) || defined(LINUX)) || \
+    defined(MOZ_ASAN)
+// For MEDIA_THREAD_STACK_SIZE
 #include "nsIThreadManager.h"
+#endif
 #include "nsThreadUtils.h"
 #include "prtime.h"
 
@@ -20,6 +23,8 @@ using mozilla::CheckedInt64;
 using mozilla::CheckedUint64;
 using mozilla::CheckedInt32;
 using mozilla::CheckedUint32;
+
+struct nsIntSize;
 
 // This file contains stuff we'd rather put elsewhere, but which is
 // dependent on other changes which we don't want to wait for. We plan to
@@ -29,48 +34,6 @@ using mozilla::CheckedUint32;
 // This belongs in xpcom/monitor/Monitor.h, once we've made
 // mozilla::Monitor non-reentrant.
 namespace mozilla {
-
-/**
- * ReentrantMonitorAutoExit
- * Exit the ReentrantMonitor when it enters scope, and enters it when it leaves 
- * scope.
- *
- * MUCH PREFERRED to bare calls to ReentrantMonitor.Exit and Enter.
- */ 
-class MOZ_STACK_CLASS ReentrantMonitorAutoExit
-{
-public:
-    /**
-     * Constructor
-     * The constructor releases the given lock.  The destructor
-     * acquires the lock. The lock must be held before constructing
-     * this object!
-     * 
-     * @param aReentrantMonitor A valid mozilla::ReentrantMonitor*. It
-     *                 must be already locked.
-     **/
-    ReentrantMonitorAutoExit(ReentrantMonitor& aReentrantMonitor) :
-        mReentrantMonitor(&aReentrantMonitor)
-    {
-        NS_ASSERTION(mReentrantMonitor, "null monitor");
-        mReentrantMonitor->AssertCurrentThreadIn();
-        mReentrantMonitor->Exit();
-    }
-    
-    ~ReentrantMonitorAutoExit(void)
-    {
-        mReentrantMonitor->Enter();
-    }
- 
-private:
-    ReentrantMonitorAutoExit();
-    ReentrantMonitorAutoExit(const ReentrantMonitorAutoExit&);
-    ReentrantMonitorAutoExit& operator =(const ReentrantMonitorAutoExit&);
-    static void* operator new(size_t) CPP_THROW_NEW;
-    static void operator delete(void*);
-
-    ReentrantMonitor* mReentrantMonitor;
-};
 
 /**
  * ReentrantMonitorConditionallyEnter
@@ -112,7 +75,7 @@ private:
 };
 
 // Shuts down a thread asynchronously.
-class ShutdownThreadEvent : public nsRunnable 
+class ShutdownThreadEvent : public nsRunnable
 {
 public:
   ShutdownThreadEvent(nsIThread* aThread) : mThread(aThread) {}
@@ -127,12 +90,9 @@ private:
 };
 
 class MediaResource;
-} // namespace mozilla
 
-namespace mozilla {
 namespace dom {
 class TimeRanges;
-}
 }
 
 // Estimates the buffered ranges of a MediaResource using a simple
@@ -186,5 +146,9 @@ void ScaleDisplayByAspectRatio(nsIntSize& aDisplay, float aAspectRatio);
 // All other platforms use their system defaults.
 #define MEDIA_THREAD_STACK_SIZE nsIThreadManager::DEFAULT_STACK_SIZE
 #endif
+
+bool IsVideoContentType(const nsCString& aContentType);
+
+} // end namespace mozilla
 
 #endif

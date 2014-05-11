@@ -5,7 +5,6 @@
 
 #include "mozilla/dom/HTMLFrameElement.h"
 #include "mozilla/dom/HTMLFrameElementBinding.h"
-#include "mozilla/Util.h"
 
 class nsIDOMDocument;
 
@@ -18,7 +17,6 @@ HTMLFrameElement::HTMLFrameElement(already_AddRefed<nsINodeInfo> aNodeInfo,
                                    FromParser aFromParser)
   : nsGenericHTMLFrameElement(aNodeInfo, aFromParser)
 {
-  SetIsDOMBinding();
 }
 
 HTMLFrameElement::~HTMLFrameElement()
@@ -26,17 +24,8 @@ HTMLFrameElement::~HTMLFrameElement()
 }
 
 
-NS_IMPL_ADDREF_INHERITED(HTMLFrameElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLFrameElement, Element)
-
-
-// QueryInterface implementation for HTMLFrameElement
-NS_INTERFACE_TABLE_HEAD(HTMLFrameElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLFrameElement)
-  NS_INTERFACE_TABLE_INHERITED1(HTMLFrameElement, nsIDOMHTMLFrameElement)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
-
+NS_IMPL_ISUPPORTS_INHERITED1(HTMLFrameElement, nsGenericHTMLFrameElement,
+                             nsIDOMHTMLFrameElement)
 
 NS_IMPL_ELEMENT_CLONE(HTMLFrameElement)
 
@@ -91,9 +80,9 @@ HTMLFrameElement::ParseAttribute(int32_t aNamespaceID,
                                                    aValue, aResult);
 }
 
-static void
-MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
-                      nsRuleData* aData)
+void
+HTMLFrameElement::MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
+                                        nsRuleData* aData)
 {
   nsGenericHTMLElement::MapScrollingAttributeInto(aAttributes, aData);
   nsGenericHTMLElement::MapCommonAttributesInto(aAttributes, aData);

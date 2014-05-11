@@ -7,6 +7,7 @@
 #include "gfxFT2Utils.h"
 #include "harfbuzz/hb.h"
 #include "mozilla/Likely.h"
+#include "gfxFontConstants.h"
 
 using namespace mozilla::gfx;
 
@@ -91,7 +92,7 @@ gfxFT2FontBase::GetGlyph(uint32_t aCharCode)
 void
 gfxFT2FontBase::GetGlyphExtents(uint32_t aGlyph, cairo_text_extents_t* aExtents)
 {
-    NS_PRECONDITION(aExtents != NULL, "aExtents must not be NULL");
+    NS_PRECONDITION(aExtents != nullptr, "aExtents must not be NULL");
 
     cairo_glyph_t glyphs[1];
     glyphs[0].index = aGlyph;

@@ -13,7 +13,6 @@ import platform
 import shutil
 import socket
 import subprocess
-import sys
 from telnetlib import Telnet
 import tempfile
 import time
@@ -49,7 +48,7 @@ class Emulator(object):
 
     def __init__(self, homedir=None, noWindow=False, logcat_dir=None,
                  arch="x86", emulatorBinary=None, res=None, sdcard=None,
-                 userdata=None):
+                 symbols_path=None, userdata=None):
         self.port = None
         self.dm = None
         self._emulator_launched = False
@@ -70,6 +69,7 @@ class Emulator(object):
         self.screen = EmulatorScreen(self)
         self.homedir = homedir
         self.sdcard = sdcard
+        self.symbols_path = symbols_path
         self.noWindow = noWindow
         if self.homedir is not None:
             self.homedir = os.path.expanduser(homedir)
@@ -77,7 +77,8 @@ class Emulator(object):
         self.copy_userdata = self.dataImg is None
 
     def _check_for_b2g(self):
-        self.b2g = B2GInstance(homedir=self.homedir, emulator=True)
+        self.b2g = B2GInstance(homedir=self.homedir, emulator=True,
+                               symbols_path=self.symbols_path)
         self.adb = self.b2g.adb_path
         self.homedir = self.b2g.homedir
 
@@ -160,13 +161,11 @@ class Emulator(object):
         closed), and self.proc.poll() is also not None (meaning the emulator
         process has terminated).
         """
-        if (self._emulator_launched and self.proc is not None
-                                    and self.proc.poll() is not None):
-            return True
-        return False
+        return self._emulator_launched and self.proc is not None \
+                                       and self.proc.poll() is not None
 
-    def check_for_minidumps(self, symbols_path):
-        return self.b2g.check_for_crashes(symbols_path)
+    def check_for_minidumps(self):
+        return self.b2g.check_for_crashes()
 
     def create_sdcard(self, sdcard):
         self._tmp_sdcard = tempfile.mktemp(prefix='sdcard')
@@ -275,6 +274,9 @@ waitFor(
             # older emulators.  45s *should* be enough of a delay
             # to allow telephony API's to work.
             pass
+        except InvalidResponseException:
+            self.check_for_minidumps()
+            raise
         print 'done'
         marionette.set_context(marionette.CONTEXT_CONTENT)
         marionette.delete_session()
@@ -342,6 +344,26 @@ waitFor(
 
         # setup DNS fix for networking
         self._run_adb(['shell', 'setprop', 'net.dns1', '10.0.2.3'])
+
+    def wait_for_homescreen(self, marionette):
+        print 'waiting for homescreen...'
+
+        created_session = False
+        if not marionette.session:
+            marionette.start_session()
+            created_session = True
+
+        marionette.set_context(marionette.CONTEXT_CONTENT)
+        marionette.execute_async_script("""
+window.addEventListener('mozbrowserloadend', function loaded(aEvent) {
+  if (aEvent.target.src.indexOf('ftu') != -1 || aEvent.target.src.indexOf('homescreen') != -1) {
+    window.removeEventListener('mozbrowserloadend', loaded);
+    marionetteScriptFinished();
+  }
+});""", script_timeout=60000)
+        print '...done'
+        if created_session:
+            marionette.delete_session()
 
     def setup(self, marionette, gecko_path=None, busybox=None):
         if busybox:
@@ -453,7 +475,7 @@ waitFor(
         filename = os.path.join(self.logcat_dir, "emulator-%d.log" % self.port)
         if os.access(filename, os.F_OK):
             self.rotate_log(filename)
-        cmd = [self.adb, '-s', 'emulator-%d' % self.port, 'logcat']
+        cmd = [self.adb, '-s', 'emulator-%d' % self.port, 'logcat', '-v', 'threadtime']
 
         self.logcat_proc = LogcatProc(filename, cmd)
         self.logcat_proc.run()
@@ -462,16 +484,14 @@ waitFor(
         """ Set up TCP port forwarding to the specified port on the device,
             using any availble local port, and return the local port.
         """
-
-        import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(("",0))
         local_port = s.getsockname()[1]
         s.close()
 
-        output = self._run_adb(['forward',
-                                'tcp:%d' % local_port,
-                                'tcp:%d' % remote_port])
+        self._run_adb(['forward',
+                       'tcp:%d' % local_port,
+                       'tcp:%d' % remote_port])
 
         self.marionette_port = local_port
 

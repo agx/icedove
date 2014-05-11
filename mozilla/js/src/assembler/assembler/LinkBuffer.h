@@ -34,7 +34,7 @@
 
 #if ENABLE_ASSEMBLER
 
-#include <assembler/MacroAssembler.h>
+#include "assembler/assembler/MacroAssembler.h"
 
 namespace JSC {
 
@@ -190,6 +190,11 @@ public:
         performFinalization();
 
         return CodeLocationLabel(code());
+    }
+
+    // Useful as a proxy to detect OOM.
+    void* unsafeCode() {
+        return code();
     }
 
 protected:

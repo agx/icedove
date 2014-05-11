@@ -5,8 +5,17 @@
 #ifndef GFX_BASICIMPLDATA_H
 #define GFX_BASICIMPLDATA_H
 
+#include "Layers.h"                     // for Layer (ptr only), etc
+#include "gfxContext.h"                 // for gfxContext, etc
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+class gfxASurface;
+
 namespace mozilla {
 namespace layers {
+
+class ReadbackProcessor;
+class SurfaceDescriptor;
 
 /**
  * This is the ImplData for all Basic layers. It also exposes methods
@@ -63,6 +72,9 @@ public:
                            LayerManager::DrawThebesLayerCallback aCallback,
                            void* aCallbackData,
                            ReadbackProcessor* aReadback) {}
+
+  virtual void Validate(LayerManager::DrawThebesLayerCallback aCallback,
+                        void* aCallbackData) {}
 
   /**
    * Layers will get this call when their layer manager is destroyed, this

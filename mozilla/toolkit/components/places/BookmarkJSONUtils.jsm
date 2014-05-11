@@ -7,11 +7,14 @@ this.EXPORTED_SYMBOLS = [ "BookmarkJSONUtils" ];
 const Ci = Components.interfaces;
 const Cc = Components.classes;
 const Cu = Components.utils;
+const Cr = Components.results;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
 Cu.import("resource://gre/modules/FileUtils.jsm");
+Cu.import("resource://gre/modules/osfile.jsm");
 Cu.import("resource://gre/modules/PlacesUtils.jsm");
+Cu.import("resource://gre/modules/Sqlite.jsm");
 Cu.import("resource://gre/modules/Task.jsm");
 Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
 
@@ -513,6 +516,7 @@ BookmarkExporter.prototype = {
                       createInstance(Ci.nsIFileOutputStream);
     safeFileOut.init(aLocalFile, FileUtils.MODE_WRONLY | FileUtils.MODE_CREATE |
                      FileUtils.MODE_TRUNCATE, parseInt("0600", 8), 0);
+    let nodeCount;
 
     try {
       // We need a buffered output stream for performance.  See bug 202477.
@@ -525,7 +529,7 @@ BookmarkExporter.prototype = {
                              createInstance(Ci.nsIConverterOutputStream);
         this._converterOut.init(bufferedOut, "utf-8", 0, 0);
         try {
-          yield this._writeContentToFile();
+          nodeCount = yield this._writeContentToFile();
 
           // Flush the buffer and retain the target file on success only.
           bufferedOut.QueryInterface(Ci.nsISafeOutputStream).finish();
@@ -539,27 +543,262 @@ BookmarkExporter.prototype = {
     } finally {
       safeFileOut.close();
     }
+    throw new Task.Result(nodeCount);
   },
 
   _writeContentToFile: function BE__writeContentToFile() {
-    // Weep over stream interface variance.
-    let streamProxy = {
-      converter: this._converterOut,
-      write: function(aData, aLen) {
-        this.converter.writeString(aData);
+    return Task.spawn(function() {
+      // Weep over stream interface variance.
+      let streamProxy = {
+        converter: this._converterOut,
+        write: function(aData, aLen) {
+          this.converter.writeString(aData);
+        }
+      };
+
+      // Get list of itemIds that must be excluded from the backup.
+      let excludeItems = PlacesUtils.annotations.getItemsWithAnnotation(
+                           PlacesUtils.EXCLUDE_FROM_BACKUP_ANNO);
+      // Serialize to JSON and write to stream.
+      let nodeCount = yield BookmarkRow.serializeJSONToOutputStream(streamProxy,
+                                                                    excludeItems);
+      throw new Task.Result(nodeCount);
+    }.bind(this));
+  }
+}
+
+let BookmarkRow = {
+  /**
+   * Serializes the SQL results as JSON with async SQL call and writes the
+   * serialization to the given output stream.
+   *
+   * @param   aStream
+   *          An nsIOutputStream. NOTE: it only uses the write(str, len)
+   *          method of nsIOutputStream. The caller is responsible for
+   *          closing the stream.
+   * @param   aExcludeItems
+   *          An array of item ids that should not be written to the backup.
+   * @return  {Promise}
+   * @resolves the number of serialized uri nodes.
+   */
+  serializeJSONToOutputStream: function(aStream, aExcludeItems) {
+    return Task.spawn(function() {
+      let nodes = [];
+      let nodeCount = 0;
+
+      let dbFilePath = OS.Path.join(OS.Constants.Path.profileDir,
+                                    "places.sqlite");
+      let conn = yield Sqlite.openConnection({ path: dbFilePath,
+                                               sharedMemoryCache: false });
+      try {
+        let rows = yield conn.execute(
+          "SELECT b.id, h.url, b.position, b.title, b.parent, " +
+            "b.type, b.dateAdded, b.lastModified, b.guid, t.parent AS grandParent " +
+          "FROM moz_bookmarks b " +
+          "LEFT JOIN moz_bookmarks t ON t.id = b.parent " +
+          "LEFT JOIN moz_places h ON h.id = b.fk " +
+          "ORDER BY b.parent, b.position, b.id");
+
+        // Create a Map for lookup.
+        let rowMap = new Map();
+        for (let row of rows) {
+          let parent = row.getResultByName("parent");
+          if (rowMap.has(parent)) {
+            let data = rowMap.get(parent);
+            data.children.push(row);
+          } else {
+            rowMap.set(parent, { children: [row] });
+          }
+        }
+
+        let root = rowMap.get(0);
+        if (!root) {
+          throw new Error("Root does not exist.");
+        }
+        let result = yield BookmarkRow._appendConvertedNode(root.children[0],
+                                                            rowMap,
+                                                            nodes,
+                                                            aExcludeItems);
+        if (result.appendedNode) {
+          nodeCount = result.nodeCount;
+          let json = JSON.stringify(nodes[0]);
+          aStream.write(json, json.length);
+        }
+      } catch(e) {
+        Cu.reportError("serializeJSONToOutputStream error " + e);
+      } finally {
+        yield conn.close();
       }
-    };
+      throw new Task.Result(nodeCount);
+    });
+  },
 
-    // Get list of itemIds that must be excluded from the backup.
-    let excludeItems = PlacesUtils.annotations.getItemsWithAnnotation(
-                         PlacesUtils.EXCLUDE_FROM_BACKUP_ANNO);
-    let root = PlacesUtils.getFolderContents(PlacesUtils.placesRootId, false,
-                                             false).root;
+  _appendConvertedNode: function BR__appendConvertedNode(
+    aRow, aRowMap, aNodes, aExcludeItems) {
+    return Task.spawn(function() {
+      let node = {};
+      let nodeCount = 0;
 
-    // Serialize to JSON and write to stream.
-    yield BookmarkNode.serializeAsJSONToOutputStream(root, streamProxy, false, false,
-                                                     excludeItems);
-    root.containerOpen = false;
+      this._addGenericProperties(aRow, node);
+
+      let parent = aRow.getResultByName("parent");
+      let grandParent = parent ? aRow.getResultByName("grandParent") : null;
+      let type = aRow.getResultByName("type");
+
+      if (type == Ci.nsINavBookmarksService.TYPE_BOOKMARK) {
+        // Tag root accept only folder nodes
+        if (parent == PlacesUtils.tagsFolderId)
+          throw new Task.Result({ appendedNode: false, nodeCount: nodeCount });
+
+        // Check for url validity, since we can't halt while writing a backup.
+        // This will throw if we try to serialize an invalid url and it does
+        // not make sense saving a wrong or corrupt uri node.
+        try {
+          NetUtil.newURI(aRow.getResultByName("url"));
+        } catch (ex) {
+          throw new Task.Result({ appendedNode: false, nodeCount: nodeCount });
+        }
+        yield this._addURIProperties(aRow, node);
+        nodeCount++;
+      } else if (type == Ci.nsINavBookmarksService.TYPE_FOLDER) {
+        // Tag containers accept only uri nodes
+        if (grandParent && grandParent == PlacesUtils.tagsFolderId) {
+          throw new Task.Result({ appendedNode: false, nodeCount: nodeCount });
+        }
+        this._addContainerProperties(aRow, node);
+      } else if (type == Ci.nsINavBookmarksService.TYPE_SEPARATOR) {
+        // Tag root accept only folder nodes
+        // Tag containers accept only uri nodes
+        if ((parent == PlacesUtils.tagsFolderId) ||
+            (grandParent == PlacesUtils.tagsFolderId)) {
+          throw new Task.Result({ appendedNode: false, nodeCount: nodeCount });
+        }
+        this._addSeparatorProperties(aRow, node);
+      }
+
+      if (node.type == PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER) {
+        nodeCount += yield this._appendConvertedComplexNode(node,
+                                                            aNodes,
+                                                            aRowMap,
+                                                            aExcludeItems);
+        throw new Task.Result({ appendedNode: true, nodeCount: nodeCount });
+      }
+
+      aNodes.push(node);
+      throw new Task.Result({ appendedNode: true, nodeCount: nodeCount });
+    }.bind(this));
+  },
+
+  _addGenericProperties: function BR__addGenericProperties(aRow, aJSNode) {
+    let title = aRow.getResultByName("title")
+    aJSNode.title = title ? title : "";
+    aJSNode.guid = aRow.getResultByName("guid");
+    aJSNode.id = aRow.getResultByName("id");
+    aJSNode.index = aRow.getResultByName("position");
+    if (aJSNode.id != -1) {
+      let parent = aRow.getResultByName("parent");
+      if (parent)
+        aJSNode.parent = parent;
+      let dateAdded = aRow.getResultByName("dateAdded");;
+      if (dateAdded)
+        aJSNode.dateAdded = dateAdded;
+      let lastModified = aRow.getResultByName("lastModified");
+      if (lastModified)
+        aJSNode.lastModified = lastModified;
+
+      // XXX need a hasAnnos api
+      let annos = [];
+      try {
+        annos =
+          PlacesUtils.getAnnotationsForItem(aJSNode.id).filter(function(anno) {
+          // XXX should whitelist this instead, w/ a pref for
+          // backup/restore of non-whitelisted annos
+          // XXX causes JSON encoding errors, so utf-8 encode
+          // anno.value = unescape(encodeURIComponent(anno.value));
+          if (anno.name == PlacesUtils.LMANNO_FEEDURI)
+            aJSNode.livemark = 1;
+          return true;
+        });
+      } catch(ex) {}
+      if (annos.length != 0)
+        aJSNode.annos = annos;
+    }
+    // XXXdietrich - store annos for non-bookmark items
+  },
+
+  _addURIProperties: function BR__addURIProperties(aRow, aJSNode) {
+    return Task.spawn(function() {
+      aJSNode.type = PlacesUtils.TYPE_X_MOZ_PLACE;
+      aJSNode.uri = aRow.getResultByName("url");
+      if (aJSNode.id && aJSNode.id != -1) {
+        // Harvest bookmark-specific properties
+        let keyword = PlacesUtils.bookmarks.getKeywordForBookmark(aJSNode.id);
+        if (keyword)
+          aJSNode.keyword = keyword;
+      }
+
+      // Last character-set
+      let uri = NetUtil.newURI(aRow.getResultByName("url"));
+      let lastCharset = yield PlacesUtils.getCharsetForURI(uri)
+      if (lastCharset)
+        aJSNode.charset = lastCharset;
+    });
+  },
+
+  _addSeparatorProperties: function BR__addSeparatorProperties(aRow, aJSNode) {
+    aJSNode.type = PlacesUtils.TYPE_X_MOZ_PLACE_SEPARATOR;
+  },
+
+  _addContainerProperties: function BR__addContainerProperties(aRow, aJSNode) {
+    // This is a bookmark or a tag container.
+    // Bookmark folder or a shortcut we should convert to folder.
+    aJSNode.type = PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER;
+
+    // Mark root folders
+    let itemId = aRow.getResultByName("id");
+    if (itemId == PlacesUtils.placesRootId)
+      aJSNode.root = "placesRoot";
+    else if (itemId == PlacesUtils.bookmarksMenuFolderId)
+      aJSNode.root = "bookmarksMenuFolder";
+    else if (itemId == PlacesUtils.tagsFolderId)
+      aJSNode.root = "tagsFolder";
+    else if (itemId == PlacesUtils.unfiledBookmarksFolderId)
+      aJSNode.root = "unfiledBookmarksFolder";
+    else if (itemId == PlacesUtils.toolbarFolderId)
+      aJSNode.root = "toolbarFolder";
+  },
+
+  _appendConvertedComplexNode: function BR__appendConvertedComplexNode(
+    aNode, aNodes, aRowMap, aExcludeItems) {
+    return Task.spawn(function() {
+      let repr = {};
+      let nodeCount = 0;
+
+      for (let [name, value] in Iterator(aNode))
+        repr[name] = value;
+      repr.children = [];
+
+      let data = aRowMap.get(aNode.id);
+      if (data) {
+        for (let row of data.children) {
+          let id = row.getResultByName("id");
+          // ignore exclude items
+          if (aExcludeItems && aExcludeItems.indexOf(id) != -1) {
+            continue;
+          }
+          let result = yield this._appendConvertedNode(row,
+                                                       aRowMap,
+                                                       repr.children,
+                                                       aExcludeItems);
+          nodeCount += result.nodeCount;
+        }
+      } else {
+        Cu.reportError("_appendConvertedComplexNode error: Unable to find node");
+      }
+
+      aNodes.push(repr);
+      throw new Task.Result(nodeCount);
+    }.bind(this));
   }
 }
 
@@ -582,6 +821,7 @@ let BookmarkNode = {
    * @param   aExcludeItems
    *          An array of item ids that should not be written to the backup.
    * @returns Task promise
+   * @resolves the number of serialized uri nodes.
    */
   serializeAsJSONToOutputStream: function BN_serializeAsJSONToOutputStream(
     aNode, aStream, aIsUICommand, aResolveShortcuts, aExcludeItems) {
@@ -589,20 +829,25 @@ let BookmarkNode = {
     return Task.spawn(function() {
       // Serialize to stream
       let array = [];
-      if (yield this._appendConvertedNode(aNode, null, array, aIsUICommand,
-                                          aResolveShortcuts, aExcludeItems)) {
+      let result = yield this._appendConvertedNode(aNode, null, array,
+                                                   aIsUICommand,
+                                                   aResolveShortcuts,
+                                                   aExcludeItems);
+      if (result.appendedNode) {
         let json = JSON.stringify(array[0]);
         aStream.write(json, json.length);
       } else {
         throw Cr.NS_ERROR_UNEXPECTED;
       }
-    }.bind(this));                                  
+      throw new Task.Result(result.nodeCount);
+    }.bind(this));
   },
 
   _appendConvertedNode: function BN__appendConvertedNode(
     bNode, aIndex, aArray, aIsUICommand, aResolveShortcuts, aExcludeItems) {
     return Task.spawn(function() {
       let node = {};
+      let nodeCount = 0;
 
       // Set index in order received
       // XXX handy shortcut, but are there cases where we don't want
@@ -618,7 +863,7 @@ let BookmarkNode = {
       if (PlacesUtils.nodeIsURI(bNode)) {
         // Tag root accept only folder nodes
         if (parent && parent.itemId == PlacesUtils.tagsFolderId)
-          throw new Task.Result(false);
+          throw new Task.Result({ appendedNode: false, nodeCount: nodeCount });
 
         // Check for url validity, since we can't halt while writing a backup.
         // This will throw if we try to serialize an invalid url and it does
@@ -626,14 +871,15 @@ let BookmarkNode = {
         try {
           NetUtil.newURI(bNode.uri);
         } catch (ex) {
-          throw new Task.Result(false);
+          throw new Task.Result({ appendedNode: false, nodeCount: nodeCount });
         }
 
         yield this._addURIProperties(bNode, node, aIsUICommand);
+        nodeCount++;
       } else if (PlacesUtils.nodeIsContainer(bNode)) {
         // Tag containers accept only uri nodes
         if (grandParent && grandParent.itemId == PlacesUtils.tagsFolderId)
-          throw new Task.Result(false);
+          throw new Task.Result({ appendedNode: false, nodeCount: nodeCount });
 
         this._addContainerProperties(bNode, node, aIsUICommand,
                                      aResolveShortcuts);
@@ -642,19 +888,24 @@ let BookmarkNode = {
         // Tag containers accept only uri nodes
         if ((parent && parent.itemId == PlacesUtils.tagsFolderId) ||
             (grandParent && grandParent.itemId == PlacesUtils.tagsFolderId))
-          throw new Task.Result(false);
+          throw new Task.Result({ appendedNode: false, nodeCount: nodeCount });
 
         this._addSeparatorProperties(bNode, node);
       }
 
       if (!node.feedURI && node.type == PlacesUtils.TYPE_X_MOZ_PLACE_CONTAINER) {
-        throw new Task.Result(yield this._appendConvertedComplexNode(node, bNode, aArray, aIsUICommand,
-                                                                     aResolveShortcuts, aExcludeItems));
+        nodeCount += yield this._appendConvertedComplexNode(node,
+                                                           bNode,
+                                                           aArray,
+                                                           aIsUICommand,
+                                                           aResolveShortcuts,
+                                                           aExcludeItems)
+        throw new Task.Result({ appendedNode: true, nodeCount: nodeCount });
       }
 
       aArray.push(node);
-      throw new Task.Result(true);
-    }.bind(this));                                   
+      throw new Task.Result({ appendedNode: true, nodeCount: nodeCount });
+    }.bind(this));
   },
 
   _addGenericProperties: function BN__addGenericProperties(
@@ -765,6 +1016,7 @@ let BookmarkNode = {
     aExcludeItems) {
     return Task.spawn(function() {
       let repr = {};
+      let nodeCount = 0;
 
       for (let [name, value] in Iterator(aNode))
         repr[name] = value;
@@ -781,16 +1033,17 @@ let BookmarkNode = {
           let childNode = aSourceNode.getChild(i);
           if (aExcludeItems && aExcludeItems.indexOf(childNode.itemId) != -1)
             continue;
-          yield this._appendConvertedNode(aSourceNode.getChild(i), i, children,
-                                          aIsUICommand, aResolveShortcuts,
-                                          aExcludeItems);
+          let result = yield this._appendConvertedNode(aSourceNode.getChild(i), i, children,
+                                                       aIsUICommand, aResolveShortcuts,
+                                                       aExcludeItems);
+          nodeCount += result.nodeCount;
         }
         if (!wasOpen)
           aSourceNode.containerOpen = false;
       }
 
       aArray.push(repr);
-      throw new Task.Result(true);
+      throw new Task.Result(nodeCount);
     }.bind(this));
   }
 }

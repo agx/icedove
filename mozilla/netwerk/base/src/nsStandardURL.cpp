@@ -7,8 +7,6 @@
 #include "IPCMessageUtils.h"
 
 #include "nsStandardURL.h"
-#include "nsDependentSubstring.h"
-#include "nsReadableUtils.h"
 #include "nsCRT.h"
 #include "nsEscape.h"
 #include "nsIFile.h"
@@ -18,11 +16,12 @@
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
 #include "nsIIDNService.h"
-#include "nsNetUtil.h"
 #include "prlog.h"
 #include "nsAutoPtr.h"
 #include "nsIProgrammingLanguage.h"
-#include "nsVoidArray.h"
+#include "nsIURLParser.h"
+#include "nsNetCID.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/ipc/URIUtils.h"
 #include <algorithm>
 
@@ -47,6 +46,7 @@ static PRLogModuleInfo *gStandardURLLog;
 // The Chromium code defines its own LOG macro which we don't want
 #undef LOG
 #define LOG(args)     PR_LOG(gStandardURLLog, PR_LOG_DEBUG, args)
+#undef LOG_ENABLED
 #define LOG_ENABLED() PR_LOG_TEST(gStandardURLLog, PR_LOG_DEBUG)
 
 //----------------------------------------------------------------------------
@@ -283,7 +283,9 @@ nsStandardURL::~nsStandardURL()
 {
     LOG(("Destroying nsStandardURL @%p\n", this));
 
-    CRTFREEIF(mHostA);
+    if (mHostA) {
+        free(mHostA);
+    }
 #ifdef DEBUG_DUMP_URLS_AT_SHUTDOWN
     PR_REMOVE_LINK(&mDebugCList);
 #endif
@@ -375,7 +377,10 @@ nsStandardURL::InvalidateCache(bool invalidateCachedFile)
 {
     if (invalidateCachedFile)
         mFile = 0;
-    CRTFREEIF(mHostA);
+    if (mHostA) {
+        free(mHostA);
+        mHostA = nullptr;
+    }
     mSpecEncoding = eEncoding_Unknown;
 }
 
@@ -832,19 +837,19 @@ nsStandardURL::AppendToSubstring(uint32_t pos,
 {
     // Verify pos and length are within boundaries
     if (pos > mSpec.Length())
-        return NULL;
+        return nullptr;
     if (len < 0)
-        return NULL;
+        return nullptr;
     if ((uint32_t)len > (mSpec.Length() - pos))
-        return NULL;
+        return nullptr;
     if (!tail)
-        return NULL;
+        return nullptr;
 
     uint32_t tailLen = strlen(tail);
 
     // Check for int overflow for proposed length of combined string
     if (UINT32_MAX - ((uint32_t)len + 1) < tailLen)
-        return NULL;
+        return nullptr;
 
     char *result = (char *) NS_Alloc(len + tailLen + 1);
     if (result) {
@@ -1409,13 +1414,39 @@ nsStandardURL::SetPassword(const nsACString &input)
 }
 
 NS_IMETHODIMP
-nsStandardURL::SetHostPort(const nsACString &value)
+nsStandardURL::SetHostPort(const nsACString &aValue)
 {
     ENSURE_MUTABLE();
 
-    // XXX needs implementation!!
-    NS_NOTREACHED("not implemented");
-    return NS_ERROR_NOT_IMPLEMENTED;
+  // We cannot simply call nsIURI::SetHost because that would treat the name as
+  // an IPv6 address (like http:://[server:443]/).  We also cannot call
+  // nsIURI::SetHostPort because that isn't implemented.  Sadfaces.
+
+  // First set the hostname.
+  nsACString::const_iterator start, end;
+  aValue.BeginReading(start);
+  aValue.EndReading(end);
+  nsACString::const_iterator iter(start);
+  FindCharInReadable(':', iter, end);
+
+  nsresult rv = SetHost(Substring(start, iter));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  // Also set the port if needed.
+  if (iter != end) {
+    iter++;
+    if (iter != end) {
+      nsCString portStr(Substring(iter, end));
+      nsresult rv;
+      int32_t port = portStr.ToInteger(&rv);
+      if (NS_SUCCEEDED(rv)) {
+        rv = SetPort(port);
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+    }
+  }
+
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -1476,14 +1507,7 @@ nsStandardURL::SetHost(const nsACString &input)
         len = flat.Length();
 
     if (mHost.mLen < 0) {
-        int port_length = 0;
-        if (mPort != -1) {
-            nsAutoCString buf;
-            buf.Assign(':');
-            buf.AppendInt(mPort);
-            port_length = buf.Length();
-        }
-        mHost.mPos = mAuthority.mPos + mAuthority.mLen - port_length;
+        mHost.mPos = mAuthority.mPos;
         mHost.mLen = 0;
     }
 
@@ -1527,7 +1551,7 @@ nsStandardURL::SetPort(int32_t port)
         nsAutoCString buf;
         buf.Assign(':');
         buf.AppendInt(port);
-        mSpec.Insert(buf, mAuthority.mPos + mAuthority.mLen);
+        mSpec.Insert(buf, mHost.mPos + mHost.mLen);
         mAuthority.mLen += buf.Length();
         ShiftFromPath(buf.Length());
     }
@@ -1535,14 +1559,9 @@ nsStandardURL::SetPort(int32_t port)
         // Don't allow mPort == mDefaultPort
         port = -1;
 
-        // compute length of the current port
-        nsAutoCString buf;
-        buf.Assign(':');
-        buf.AppendInt(mPort);
-
         // need to remove the port number from the URL spec
-        uint32_t start = mAuthority.mPos + mAuthority.mLen - buf.Length();
-        int32_t lengthToCut = buf.Length();
+        uint32_t start = mHost.mPos + mHost.mLen;
+        int32_t lengthToCut = mPath.mPos - start;
         mSpec.Cut(start, lengthToCut);
         mAuthority.mLen -= lengthToCut;
         ShiftFromPath(-lengthToCut);
@@ -1550,13 +1569,9 @@ nsStandardURL::SetPort(int32_t port)
     else {
         // need to replace the existing port
         nsAutoCString buf;
-        buf.Assign(':');
-        buf.AppendInt(mPort);
-        uint32_t start = mAuthority.mPos + mAuthority.mLen - buf.Length();
-        uint32_t length = buf.Length();
-
-        buf.Assign(':');
         buf.AppendInt(port);
+        uint32_t start = mHost.mPos + mHost.mLen + 1;
+        uint32_t length = mPath.mPos - start;
         mSpec.Replace(start, length, buf);
         if (buf.Length() != length) {
             mAuthority.mLen += buf.Length() - length;
@@ -1764,7 +1779,7 @@ nsStandardURL::CloneInternal(nsStandardURL::RefHandlingEnum refHandlingMode,
     clone->mURLType = mURLType;
     clone->mParser = mParser;
     clone->mFile = mFile;
-    clone->mHostA = mHostA ? nsCRT::strdup(mHostA) : nullptr;
+    clone->mHostA = mHostA ? strdup(mHostA) : nullptr;
     clone->mMutable = true;
     clone->mSupportsFileURL = mSupportsFileURL;
     clone->mHostEncoding = mHostEncoding;
@@ -3050,7 +3065,7 @@ nsStandardURL::GetClassIDNoAlloc(nsCID *aClassIDNoAlloc)
 //----------------------------------------------------------------------------
 
 size_t
-nsStandardURL::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsStandardURL::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   return mSpec.SizeOfExcludingThisIfUnshared(aMallocSizeOf) +
          mOriginCharset.SizeOfExcludingThisIfUnshared(aMallocSizeOf) +
@@ -3063,6 +3078,6 @@ nsStandardURL::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
 }
 
 size_t
-nsStandardURL::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const {
+nsStandardURL::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
   return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }

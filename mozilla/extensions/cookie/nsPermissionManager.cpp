@@ -32,6 +32,7 @@
 #include "nsIEffectiveTLDService.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocument.h"
+#include "mozilla/net/NeckoMessageUtils.h"
 
 static nsPermissionManager *gPermissionManager = nullptr;
 
@@ -75,7 +76,7 @@ ChildProcess()
   ENSURE_NOT_CHILD_PROCESS_({ return NS_ERROR_NOT_AVAILABLE; })
 
 #define ENSURE_NOT_CHILD_PROCESS_NORET \
-  ENSURE_NOT_CHILD_PROCESS_()
+  ENSURE_NOT_CHILD_PROCESS_(;)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -128,6 +129,20 @@ GetHostForPrincipal(nsIPrincipal* aPrincipal, nsACString& aHost)
 
   rv = uri->GetAsciiHost(aHost);
   if (NS_SUCCEEDED(rv) && !aHost.IsEmpty()) {
+    return NS_OK;
+  }
+
+  // For the mailto scheme, we use the path of the URI. We have to chop off the
+  // query part if one exists, so we eliminate everything after a ?.
+  bool isMailTo = false;
+  if (NS_SUCCEEDED(uri->SchemeIs("mailto", &isMailTo)) && isMailTo) {
+    rv = uri->GetPath(aHost);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    int32_t spart = aHost.FindChar('?', 0);
+    if (spart >= 0) {
+      aHost.Cut(spart, aHost.Length() - spart);
+    }
     return NS_OK;
   }
 
@@ -242,7 +257,7 @@ CloseDatabaseListener::CloseDatabaseListener(nsPermissionManager* aManager,
 }
 
 NS_IMETHODIMP
-CloseDatabaseListener::Complete()
+CloseDatabaseListener::Complete(nsresult, nsISupports*)
 {
   // Help breaking cycles
   nsRefPtr<nsPermissionManager> manager = mManager.forget();
@@ -288,8 +303,7 @@ DeleteFromMozHostListener(nsPermissionManager* aManager)
 
 NS_IMETHODIMP DeleteFromMozHostListener::HandleResult(mozIStorageResultSet *)
 {
-  MOZ_NOT_REACHED("Should not get any results");
-  return NS_OK;
+  MOZ_CRASH("Should not get any results");
 }
 
 NS_IMETHODIMP DeleteFromMozHostListener::HandleError(mozIStorageError *)
@@ -371,8 +385,6 @@ nsresult
 nsPermissionManager::Init()
 {
   nsresult rv;
-
-  mPermissionTable.Init();
 
   mObserverService = do_GetService("@mozilla.org/observer-service;1", &rv);
   if (NS_SUCCEEDED(rv)) {

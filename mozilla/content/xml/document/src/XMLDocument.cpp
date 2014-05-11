@@ -32,7 +32,6 @@
 #include "nsIPrincipal.h"
 #include "nsLayoutCID.h"
 #include "mozilla/dom/Attr.h"
-#include "nsGUIEvent.h"
 #include "nsCExternalHandlerService.h"
 #include "nsMimeTypes.h"
 #include "nsEventListenerManager.h"
@@ -41,7 +40,6 @@
 #include "nsJSUtils.h"
 #include "nsCRT.h"
 #include "nsIAuthPrompt.h"
-#include "nsIScriptGlobalObjectOwner.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentPolicyUtils.h"
 #include "nsIDOMUserDataHandler.h"
@@ -50,7 +48,8 @@
 #include "nsIConsoleService.h"
 #include "nsIScriptError.h"
 #include "nsIHTMLDocument.h"
-#include "mozilla/dom/Element.h" // DOMCI_NODE_DATA
+#include "mozilla/BasicEvents.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/XMLDocumentBinding.h"
 
 using namespace mozilla;
@@ -221,8 +220,6 @@ XMLDocument::XMLDocument(const char* aContentType)
 {
   // NOTE! nsDocument::operator new() zeroes out all members, so don't
   // bother initializing members to 0.
-
-  SetIsDOMBinding();
 }
 
 XMLDocument::~XMLDocument()
@@ -277,15 +274,6 @@ XMLDocument::SetAsync(bool aAsync)
   return NS_OK;
 }
 
-static void
-ReportUseOfDeprecatedMethod(nsIDocument *aDoc, const char* aWarning)
-{
-  nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                  "DOM3 Load", aDoc,
-                                  nsContentUtils::eDOM_PROPERTIES,
-                                  aWarning);
-}
-
 NS_IMETHODIMP
 XMLDocument::Load(const nsAString& aUrl, bool *aReturn)
 {
@@ -305,7 +293,7 @@ XMLDocument::Load(const nsAString& aUrl, ErrorResult& aRv)
     return false;
   }
 
-  ReportUseOfDeprecatedMethod(this, "UseOfDOM3LoadMethodWarning");
+  WarnOnceAbout(nsIDocument::eUseOfDOM3LoadMethod);
 
   nsCOMPtr<nsIDocument> callingDoc = nsContentUtils::GetDocumentFromContext();
 
@@ -583,16 +571,16 @@ XMLDocument::EndLoad()
     // Generate a document load event for the case when an XML
     // document was loaded as pure data without any presentation
     // attached to it.
-    nsEvent event(true, NS_LOAD);
+    WidgetEvent event(true, NS_LOAD);
     nsEventDispatcher::Dispatch(static_cast<nsIDocument*>(this), nullptr,
                                 &event);
-  }    
+  }
 }
- 
+
 /* virtual */ void
-XMLDocument::DocSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
+XMLDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
 {
-  nsDocument::DocSizeOfExcludingThis(aWindowSizes);
+  nsDocument::DocAddSizeOfExcludingThis(aWindowSizes);
 }
 
 // nsIDOMDocument interface
@@ -604,7 +592,6 @@ XMLDocument::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const
                "Can't import this document into another document!");
 
   nsRefPtr<XMLDocument> clone = new XMLDocument();
-  NS_ENSURE_TRUE(clone, NS_ERROR_OUT_OF_MEMORY);
   nsresult rv = CloneDocHelper(clone);
   NS_ENSURE_SUCCESS(rv, rv);
 

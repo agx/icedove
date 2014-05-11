@@ -5,6 +5,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/CallbackObject.h"
+#include "mozilla/dom/BindingUtils.h"
+#include "mozilla/dom/DOMError.h"
+#include "mozilla/dom/DOMErrorBinding.h"
 #include "jsfriendapi.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIXPConnect.h"
@@ -14,6 +17,8 @@
 #include "nsCxPusher.h"
 #include "nsIScriptSecurityManager.h"
 #include "xpcprivate.h"
+#include "WorkerPrivate.h"
+#include "nsGlobalWindow.h"
 
 namespace mozilla {
 namespace dom {
@@ -25,6 +30,8 @@ NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(CallbackObject)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(CallbackObject)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(CallbackObject)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(CallbackObject)
   tmp->DropCallback();
@@ -38,11 +45,17 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 CallbackObject::CallSetup::CallSetup(JS::Handle<JSObject*> aCallback,
                                      ErrorResult& aRv,
-                                     ExceptionHandling aExceptionHandling)
+                                     ExceptionHandling aExceptionHandling,
+                                     JSCompartment* aCompartment)
   : mCx(nullptr)
+  , mCompartment(aCompartment)
   , mErrorResult(aRv)
   , mExceptionHandling(aExceptionHandling)
+  , mIsMainThread(NS_IsMainThread())
 {
+  if (mIsMainThread) {
+    nsContentUtils::EnterMicroTask();
+  }
   // We need to produce a useful JSContext here.  Ideally one that the callback
   // is in some sense associated with, so that we can sort of treat it as a
   // "script entry point".  Though once we actually have script entry points,
@@ -51,45 +64,37 @@ CallbackObject::CallSetup::CallSetup(JS::Handle<JSObject*> aCallback,
 
   // First, find the real underlying callback.
   JSObject* realCallback = js::UncheckedUnwrap(aCallback);
-
-  // Now get the nsIScriptGlobalObject for this callback.
   JSContext* cx = nullptr;
-  nsIScriptContext* ctx = nullptr;
-  nsIScriptGlobalObject* sgo = nsJSUtils::GetStaticScriptGlobal(realCallback);
-  if (sgo) {
-    // Make sure that if this is a window it's the current inner, since the
-    // nsIScriptContext and hence JSContext are associated with the outer
-    // window.  Which means that if someone holds on to a function from a
-    // now-unloaded document we'd have the new document as the script entry
-    // point...
-    nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(sgo);
+
+  if (mIsMainThread) {
+    // Now get the global and JSContext for this callback.
+    nsGlobalWindow* win = xpc::WindowGlobalOrNull(realCallback);
     if (win) {
+      // Make sure that if this is a window it's the current inner, since the
+      // nsIScriptContext and hence JSContext are associated with the outer
+      // window.  Which means that if someone holds on to a function from a
+      // now-unloaded document we'd have the new document as the script entry
+      // point...
       MOZ_ASSERT(win->IsInnerWindow());
       nsPIDOMWindow* outer = win->GetOuterWindow();
       if (!outer || win != outer->GetCurrentInnerWindow()) {
         // Just bail out from here
         return;
       }
+      cx = win->GetContext() ? win->GetContext()->GetNativeContext()
+                             // This happens - Removing it causes
+                             // test_bug293235.xul to go orange.
+                             : nsContentUtils::GetSafeJSContext();
+    } else {
+      // No DOM Window. Use the SafeJSContext.
+      cx = nsContentUtils::GetSafeJSContext();
     }
-    // if not a window at all, just press on
 
-    ctx = sgo->GetContext();
-    if (ctx) {
-      // We don't check whether scripts are enabled on ctx, because
-      // CheckFunctionAccess will do that anyway... and because we ignore them
-      // being disabled if the callee is system.
-      cx = ctx->GetNativeContext();
-    }
+    // Make sure our JSContext is pushed on the stack.
+    mCxPusher.Push(cx);
+  } else {
+    cx = workers::GetCurrentThreadJSContext();
   }
-
-  if (!cx) {
-    // We didn't manage to hunt down a script global to work with.  Just fall
-    // back on using the safe context.
-    cx = nsContentUtils::GetSafeJSContext();
-  }
-
-  // Make sure our JSContext is pushed on the stack.
-  mCxPusher.Push(cx);
 
   // Unmark the callable, and stick it in a Rooted before it can go gray again.
   // Nothing before us in this function can trigger a CC, so it's safe to wait
@@ -99,26 +104,19 @@ CallbackObject::CallSetup::CallSetup(JS::Handle<JSObject*> aCallback,
   //
   // We can do this even though we're not in the right compartment yet, because
   // Rooted<> does not care about compartments.
-  xpc_UnmarkGrayObject(aCallback);
+  JS::ExposeObjectToActiveJS(aCallback);
   mRootedCallable.construct(cx, aCallback);
 
-  // After this point we guarantee calling ScriptEvaluated() if we
-  // have an nsIScriptContext.
-  // XXXbz Why, if, say CheckFunctionAccess fails?  I know that's how
-  // nsJSContext::CallEventHandler used to work, but is it required?
-  // FIXME: Bug 807369.
-  mCtx = ctx;
+  if (mIsMainThread) {
+    // Check that it's ok to run this callback at all.
+    // Make sure to unwrap aCallback before passing it in to get the global of
+    // the callback object, not the wrapper.
+    bool allowed = nsContentUtils::GetSecurityManager()->
+      ScriptAllowed(js::GetGlobalForObjectCrossCompartment(js::UncheckedUnwrap(aCallback)));
 
-  // Check that it's ok to run this callback at all.
-  // FIXME: Bug 807371: we want a less silly check here.
-  // Make sure to unwrap aCallback before passing it in, because
-  // getting principals from wrappers is silly.
-  nsresult rv = nsContentUtils::GetSecurityManager()->
-    CheckFunctionAccess(cx, js::UncheckedUnwrap(aCallback), nullptr);
-
-  if (NS_FAILED(rv)) {
-    // Security check failed.  We're done here.
-    return;
+    if (!allowed) {
+      return;
+    }
   }
 
   // Enter the compartment of our callback, so we can actually work with it.
@@ -128,10 +126,38 @@ CallbackObject::CallSetup::CallSetup(JS::Handle<JSObject*> aCallback,
   mCx = cx;
 
   // Make sure the JS engine doesn't report exceptions we want to re-throw
-  if (mExceptionHandling == eRethrowExceptions) {
-    mSavedJSContextOptions = JS_GetOptions(cx);
-    JS_SetOptions(cx, mSavedJSContextOptions | JSOPTION_DONT_REPORT_UNCAUGHT);
+  if (mExceptionHandling == eRethrowContentExceptions ||
+      mExceptionHandling == eRethrowExceptions) {
+    mSavedJSContextOptions = JS::ContextOptionsRef(cx);
+    JS::ContextOptionsRef(cx).setDontReportUncaught(true);
   }
+}
+
+bool
+CallbackObject::CallSetup::ShouldRethrowException(JS::Handle<JS::Value> aException)
+{
+  if (mExceptionHandling == eRethrowExceptions) {
+    return true;
+  }
+
+  MOZ_ASSERT(mExceptionHandling == eRethrowContentExceptions);
+
+  // For eRethrowContentExceptions we only want to throw an exception if the
+  // object that was thrown is a DOMError object in the caller compartment
+  // (which we stored in mCompartment).
+
+  if (!aException.isObject()) {
+    return false;
+  }
+
+  JS::Rooted<JSObject*> obj(mCx, &aException.toObject());
+  obj = js::UncheckedUnwrap(obj, /* stopAtOuter = */ false);
+  if (js::GetObjectCompartment(obj) != mCompartment) {
+    return false;
+  }
+
+  DOMError* domError;
+  return NS_SUCCEEDED(UNWRAP_OBJECT(DOMError, obj, domError));
 }
 
 CallbackObject::CallSetup::~CallSetup()
@@ -140,13 +166,15 @@ CallbackObject::CallSetup::~CallSetup()
   // errors on it, unless we were told to re-throw them.
   if (mCx) {
     bool dealtWithPendingException = false;
-    if (mExceptionHandling == eRethrowExceptions) {
+    if ((mCompartment && mExceptionHandling == eRethrowContentExceptions) ||
+        mExceptionHandling == eRethrowExceptions) {
       // Restore the old context options
-      JS_SetOptions(mCx, mSavedJSContextOptions);
+      JS::ContextOptionsRef(mCx) = mSavedJSContextOptions;
       mErrorResult.MightThrowJSException();
       if (JS_IsExceptionPending(mCx)) {
         JS::Rooted<JS::Value> exn(mCx);
-        if (JS_GetPendingException(mCx, exn.address())) {
+        if (JS_GetPendingException(mCx, &exn) &&
+            ShouldRethrowException(exn)) {
           mErrorResult.ThrowJSException(mCx, exn);
           JS_ClearPendingException(mCx);
           dealtWithPendingException = true;
@@ -162,10 +190,8 @@ CallbackObject::CallSetup::~CallSetup()
     }
   }
 
-  // If we have an mCtx, we need to call ScriptEvaluated() on it.  But we have
-  // to do that after we pop the JSContext stack (see bug 295983).  And to get
-  // our nesting right we have to destroy our JSAutoCompartment first.  But be
-  // careful: it might not have been constructed at all!
+  // To get our nesting right we have to destroy our JSAutoCompartment first.
+  // But be careful: it might not have been constructed at all!
   mAc.destroyIfConstructed();
 
   // XXXbz For that matter why do we need to manually call ScriptEvaluated at
@@ -177,8 +203,10 @@ CallbackObject::CallSetup::~CallSetup()
   // Popping an nsCxPusher is safe even if it never got pushed.
   mCxPusher.Pop();
 
-  if (mCtx) {
-    mCtx->ScriptEvaluated(true);
+  // It is important that this is the last thing we do, after leaving the
+  // compartment and popping the context.
+  if (mIsMainThread) {
+    nsContentUtils::LeaveMicroTask();
   }
 }
 
@@ -186,6 +214,7 @@ already_AddRefed<nsISupports>
 CallbackObjectHolderBase::ToXPCOMCallback(CallbackObject* aCallback,
                                           const nsIID& aIID) const
 {
+  MOZ_ASSERT(NS_IsMainThread());
   if (!aCallback) {
     return nullptr;
   }

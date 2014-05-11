@@ -141,7 +141,7 @@ ApplicationAccessible::FocusedChild()
 }
 
 Relation
-ApplicationAccessible::RelationByType(uint32_t aRelationType)
+ApplicationAccessible::RelationByType(RelationType aRelationType)
 {
   return Relation();
 }
@@ -265,17 +265,13 @@ ApplicationAccessible::GetPlatformVersion(nsAString& aVersion)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// nsAccessNode public methods
+// Accessible public methods
 
 void
 ApplicationAccessible::Shutdown()
 {
   mAppInfo = nullptr;
 }
-
-
-////////////////////////////////////////////////////////////////////////////////
-// Accessible public methods
 
 void
 ApplicationAccessible::ApplyARIAState(uint64_t* aState) const

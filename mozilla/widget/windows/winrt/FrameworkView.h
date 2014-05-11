@@ -5,10 +5,8 @@
 
 #pragma once
 
-#include "nsGUIEvent.h"
-#include "MetroInput.h"
-#include "mozilla/TimeStamp.h"
 #include "MetroWidget.h"
+#include "MetroInput.h"
 #include "gfxWindowsPlatform.h"
 #include "gfxD2DSurface.h"
 #include "nsDataHashtable.h"
@@ -80,10 +78,10 @@ public:
   STDMETHODIMP Run();
   STDMETHODIMP Uninitialize();
 
+  HRESULT ActivateView();
+
   // Public apis for MetroWidget
-  void ShutdownXPCOM();
-  bool Render();
-  bool Render(const nsIntRegion& aInvalidRegion);
+  int GetPreviousExecutionState();
   float GetDPI() { return mDPI; }
   ICoreWindow* GetCoreWindow() { return mWindow.Get(); }
   void SetWidget(MetroWidget* aWidget);
@@ -101,6 +99,7 @@ public:
 
   // MetroApp apis
   void SetupContracts();
+  void Shutdown();
 
   // MetroContracts settings panel enumerator entry
   void AddSetting(ISettingsPaneCommandsRequestedEventArgs* aArgs, uint32_t aId,
@@ -114,8 +113,6 @@ protected:
 
   HRESULT OnWindowSizeChanged(ICoreWindow* aSender,
                               IWindowSizeChangedEventArgs* aArgs);
-  HRESULT OnWindowClosed(ICoreWindow* aSender,
-                         ICoreWindowEventArgs* aArgs);
   HRESULT OnWindowActivated(ICoreWindow* aSender,
                             IWindowActivatedEventArgs* aArgs);
   HRESULT OnLogicalDpiChanged(IInspectable* aSender);
@@ -152,6 +149,7 @@ protected:
   void UpdateLogicalDPI();
   void FireViewStateObservers();
   void ProcessLaunchArguments();
+  void UpdateBounds();
 
   // Printing and preview
   void CreatePrintControl(IPrintDocumentPackageTarget* aDocPackageTarget, 
@@ -178,11 +176,10 @@ private:
   EventRegistrationToken mPrintManager;
 
 private:
-  nsRefPtr<gfxD2DSurface> mD2DWindowSurface;
+  ABI::Windows::ApplicationModel::Activation::ApplicationExecutionState mPreviousExecutionState;
   nsIntRect mWindowBounds; // in device-pixel coordinates
   float mDPI;
   bool mShuttingDown;
-  bool mPainting;
   nsAutoString mActivationURI;
   nsAutoString mActivationCommandLine;
   Microsoft::WRL::ComPtr<IInspectable> mAutomationProvider;
@@ -192,14 +189,12 @@ private:
   //Microsoft::WRL::ComPtr<IWICImagingFactory2> mWicFactory;
   Microsoft::WRL::ComPtr<MetroApp> mMetroApp;
   Microsoft::WRL::ComPtr<ICoreWindow> mWindow;
-  Microsoft::WRL::ComPtr<ICoreDispatcher> mDispatcher;
   Microsoft::WRL::ComPtr<MetroWidget> mWidget;
   Microsoft::WRL::ComPtr<MetroInput> mMetroInput;
   static bool sKeyboardIsVisible;
   static Rect sKeyboardRect;
   bool mWinVisible;
   bool mWinActiveState;
-  ApplicationViewState mViewState;
 };
 
 } } }

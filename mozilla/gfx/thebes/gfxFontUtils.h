@@ -6,23 +6,16 @@
 #ifndef GFX_FONT_UTILS_H
 #define GFX_FONT_UTILS_H
 
-#include "gfxTypes.h"
 #include "gfxPlatform.h"
-
-#include "nsAlgorithm.h"
-#include "prcpucfg.h"
-
-#include "nsDataHashtable.h"
-
 #include "nsITimer.h"
 #include "nsCOMPtr.h"
-#include "nsIRunnable.h"
-#include "nsThreadUtils.h"
 #include "nsComponentManagerUtils.h"
 #include "nsTArray.h"
 #include "nsAutoPtr.h"
+#include "nsIObserver.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Endian.h"
+#include "mozilla/MemoryReporting.h"
 
 #include "zlib.h"
 #include <algorithm>
@@ -257,7 +250,7 @@ public:
         }
     }
 
-    size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const {
+    size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
         size_t total = mBlocks.SizeOfExcludingThis(aMallocSizeOf);
         for (uint32_t i = 0; i < mBlocks.Length(); i++) {
             if (mBlocks[i]) {
@@ -267,7 +260,7 @@ public:
         return total;
     }
 
-    size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const {
+    size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const {
         return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
     }
 
@@ -799,21 +792,10 @@ public:
                    uint32_t aUnicode, uint32_t aVarSelector = 0);
 
 #ifdef XP_WIN
-
-    // given a TrueType/OpenType data file, produce a EOT-format header
-    // for use with Windows T2Embed API AddFontResource type API's
-    // effectively hide existing fonts with matching names aHeaderLen is
-    // the size of the header buffer on input, the actual size of the
-    // EOT header on output
-    static nsresult
-    MakeEOTHeader(const uint8_t *aFontData, uint32_t aFontDataLength,
-                  FallibleTArray<uint8_t> *aHeader, FontDataOverlay *aOverlay);
-
     // determine whether a font (which has already been sanitized, so is known
     // to be a valid sfnt) is CFF format rather than TrueType
     static bool
-    IsCffFont(const uint8_t* aFontData, bool& hasVertical);
-
+    IsCffFont(const uint8_t* aFontData);
 #endif
 
     // determine the format of font data
@@ -982,55 +964,31 @@ public:
     {
     }
 
-    virtual ~gfxFontInfoLoader() {}
+    virtual ~gfxFontInfoLoader();
 
     // start timer with an initial delay, then call Run method at regular intervals
-    void StartLoader(uint32_t aDelay, uint32_t aInterval) {
-        mInterval = aInterval;
-
-        // sanity check
-        if (mState != stateInitial && mState != stateTimerOff)
-            CancelLoader();
-
-        // set up timer
-        if (!mTimer) {
-            mTimer = do_CreateInstance("@mozilla.org/timer;1");
-            if (!mTimer) {
-                NS_WARNING("Failure to create font info loader timer");
-                return;
-            }
-        }
-
-        // need an initial delay?
-        uint32_t timerInterval;
-
-        if (aDelay) {
-            mState = stateTimerOnDelay;
-            timerInterval = aDelay;
-        } else {
-            mState = stateTimerOnInterval;
-            timerInterval = mInterval;
-        }
-
-        InitLoader();
-
-        // start timer
-        mTimer->InitWithFuncCallback(LoaderTimerCallback, this, timerInterval,
-                                     nsITimer::TYPE_REPEATING_SLACK);
-    }
+    void StartLoader(uint32_t aDelay, uint32_t aInterval);
 
     // cancel the timer and cleanup
-    void CancelLoader() {
-        if (mState == stateInitial)
-            return;
-        mState = stateTimerOff;
-        if (mTimer) {
-            mTimer->Cancel();
-        }
-        FinishLoader();
-    }
+    void CancelLoader();
 
 protected:
+    class ShutdownObserver : public nsIObserver
+    {
+    public:
+        NS_DECL_ISUPPORTS
+        NS_DECL_NSIOBSERVER
+
+        ShutdownObserver(gfxFontInfoLoader *aLoader)
+            : mLoader(aLoader)
+        { }
+
+        virtual ~ShutdownObserver()
+        { }
+
+    protected:
+        gfxFontInfoLoader *mLoader;
+    };
 
     // Init - initialization at start time after initial delay
     virtual void InitLoader() = 0;
@@ -1041,25 +999,18 @@ protected:
     // Finish - cleanup after done
     virtual void FinishLoader() = 0;
 
+    // Timer interval callbacks
     static void LoaderTimerCallback(nsITimer *aTimer, void *aThis) {
         gfxFontInfoLoader *loader = static_cast<gfxFontInfoLoader*>(aThis);
         loader->LoaderTimerFire();
     }
 
-    // start the timer, interval callbacks
-    void LoaderTimerFire() {
-        if (mState == stateTimerOnDelay) {
-            mState = stateTimerOnInterval;
-            mTimer->SetDelay(mInterval);
-        }
+    void LoaderTimerFire();
 
-        bool done = RunLoader();
-        if (done) {
-            CancelLoader();
-        }
-    }
+    void RemoveShutdownObserver();
 
     nsCOMPtr<nsITimer> mTimer;
+    nsCOMPtr<nsIObserver> mObserver;
     uint32_t mInterval;
     TimerState mState;
 };

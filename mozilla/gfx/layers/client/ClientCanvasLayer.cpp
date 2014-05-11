@@ -4,14 +4,29 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ClientCanvasLayer.h"
-#include "gfxPlatform.h"
-#include "SurfaceStream.h"
-#include "SharedSurfaceGL.h"
-#include "SharedSurfaceEGL.h"
+#include "GLContext.h"                  // for GLContext
+#include "GLScreenBuffer.h"             // for GLScreenBuffer
+#include "GeckoProfiler.h"              // for PROFILER_LABEL
+#include "SharedSurfaceEGL.h"           // for SurfaceFactory_EGLImage
+#include "SharedSurfaceGL.h"            // for SurfaceFactory_GLTexture, etc
+#include "SurfaceStream.h"              // for SurfaceStream, etc
+#include "SurfaceTypes.h"               // for SurfaceStreamType
+#include "ClientLayerManager.h"         // for ClientLayerManager, etc
+#include "mozilla/gfx/Point.h"          // for IntSize
+#include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/LayersTypes.h"
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsISupportsImpl.h"            // for Layer::AddRef, etc
+#include "nsRect.h"                     // for nsIntRect
+#include "nsXULAppAPI.h"                // for XRE_GetProcessType, etc
 #ifdef MOZ_WIDGET_GONK
 #include "SharedSurfaceGralloc.h"
 #endif
+#ifdef XP_MACOSX
+#include "SharedSurfaceIO.h"
+#endif
 
+using namespace mozilla::gfx;
 using namespace mozilla::gl;
 
 namespace mozilla {
@@ -31,7 +46,7 @@ ClientCanvasLayer::Initialize(const Data& aData)
                                           screen->PreserveBuffer());
     SurfaceFactory_GL* factory = nullptr;
     if (!mForceReadback) {
-      if (ClientManager()->GetCompositorBackendType() == mozilla::layers::LAYERS_OPENGL) {
+      if (ClientManager()->AsShadowForwarder()->GetCompositorBackendType() == mozilla::layers::LAYERS_OPENGL) {
         if (mGLContext->GetEGLContext()) {
           bool isCrossProcess = !(XRE_GetProcessType() == GeckoProcessType_Default);
 
@@ -41,7 +56,7 @@ ClientCanvasLayer::Initialize(const Data& aData)
           } else {
             // [Basic/OGL Layers, OOPC] WebGL layer init. (Out Of Process Compositing)
 #ifdef MOZ_WIDGET_GONK
-            factory = new SurfaceFactory_Gralloc(mGLContext, screen->Caps(), ClientManager());
+            factory = new SurfaceFactory_Gralloc(mGLContext, screen->Caps(), ClientManager()->AsShadowForwarder());
 #else
             // we could do readback here maybe
             NS_NOTREACHED("isCrossProcess but not on native B2G!");
@@ -50,7 +65,11 @@ ClientCanvasLayer::Initialize(const Data& aData)
         } else {
           // [Basic Layers, OMTC] WebGL layer init.
           // Well, this *should* work...
+#ifdef XP_MACOSX
+          factory = new SurfaceFactory_IOSurface(mGLContext, screen->Caps());
+#else
           factory = new SurfaceFactory_GLTexture(mGLContext, nullptr, screen->Caps());
+#endif
         }
       }
     }
@@ -74,27 +93,27 @@ ClientCanvasLayer::RenderLayer()
   }
   
   if (!mCanvasClient) {
-    TextureFlags flags = 0;
+    TextureFlags flags = TEXTURE_IMMEDIATE_UPLOAD;
     if (mNeedsYFlip) {
-      flags |= NeedsYFlip;
+      flags |= TEXTURE_NEEDS_Y_FLIP;
     }
 
-    bool isCrossProcess = !(XRE_GetProcessType() == GeckoProcessType_Default);
-    //Append OwnByClient flag for streaming buffer under OOPC case
-    if (isCrossProcess && mGLContext) {
-      GLScreenBuffer* screen = mGLContext->Screen();
-      if (screen && screen->Stream()) {
-        flags |= OwnByClient;
-      }
+    if (!mGLContext) {
+      // We don't support locking for buffer surfaces currently
+      flags |= TEXTURE_IMMEDIATE_UPLOAD;
+    } else {
+      // GLContext's SurfaceStream handles ownership itself,
+      // and doesn't require layers to do any deallocation.
+      flags |= TEXTURE_DEALLOCATE_CLIENT;
     }
-    mCanvasClient = CanvasClient::CreateCanvasClient(GetCompositableClientType(),
-                                                     ClientManager(), flags);
+    mCanvasClient = CanvasClient::CreateCanvasClient(GetCanvasClientType(),
+                                                     ClientManager()->AsShadowForwarder(), flags);
     if (!mCanvasClient) {
       return;
     }
     if (HasShadow()) {
       mCanvasClient->Connect();
-      ClientManager()->Attach(mCanvasClient, this);
+      ClientManager()->AsShadowForwarder()->Attach(mCanvasClient, this);
     }
   }
   
@@ -105,6 +124,7 @@ ClientCanvasLayer::RenderLayer()
 
   ClientManager()->Hold(this);
   mCanvasClient->Updated();
+  mCanvasClient->OnTransaction();
 }
 
 already_AddRefed<CanvasLayer>

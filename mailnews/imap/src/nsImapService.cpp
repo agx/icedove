@@ -83,15 +83,13 @@ static bool gInitialized = false;
 static int32_t gMIMEOnDemandThreshold = 15000;
 static bool gMIMEOnDemand = false;
 
-NS_IMPL_THREADSAFE_ADDREF(nsImapService)
-NS_IMPL_THREADSAFE_RELEASE(nsImapService)
-NS_IMPL_QUERY_INTERFACE6(nsImapService,
-                         nsIImapService,
-                         nsIMsgMessageService,
-                         nsIProtocolHandler,
-                         nsIMsgProtocolInfo,
-                         nsIMsgMessageFetchPartService,
-                         nsIContentHandler)
+NS_IMPL_ISUPPORTS6(nsImapService,
+                   nsIImapService,
+                   nsIMsgMessageService,
+                   nsIProtocolHandler,
+                   nsIMsgProtocolInfo,
+                   nsIMsgMessageFetchPartService,
+                   nsIContentHandler)
 
 nsImapService::nsImapService()
 {
@@ -2742,9 +2740,9 @@ NS_IMETHODIMP nsImapService::NewChannel(nsIURI *aURI, nsIChannel **aRetVal)
         CopyASCIItoUTF16(fullFolderName, unescapedName);
       const PRUnichar *formatStrings[1] = { unescapedName.get() };
       
-      rv = bundle->FormatStringFromID(IMAP_SUBSCRIBE_PROMPT,
-                                      formatStrings, 1,
-                                      getter_Copies(confirmText));
+      rv = bundle->FormatStringFromName(
+        NS_LITERAL_STRING("imapSubscribePrompt").get(),
+        formatStrings, 1, getter_Copies(confirmText));
       NS_ENSURE_SUCCESS(rv,rv);
       
       bool confirmResult = false;

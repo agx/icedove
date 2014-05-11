@@ -4,6 +4,7 @@
 
 #ifndef MOZPNGCONF_H
 #define MOZPNGCONF_H
+#define PNGLCONF_H /* So we don't try to use libpng's pnglibconf.h */
 
 #define PNG_API_RULE 0
 #define PNG_COST_SHIFT 3
@@ -15,6 +16,11 @@
 #define PNG_USER_WIDTH_MAX 1000000
 #define PNG_WEIGHT_SHIFT 8
 #define PNG_ZBUF_SIZE 8192
+#define PNG_IDAT_READ_SIZE PNG_ZBUF_SIZE
+#define PNG_INFLATE_BUF_SIZE 1024
+#define PNG_Z_DEFAULT_COMPRESSION (-1)
+#define PNG_Z_DEFAULT_NOFILTER_STRATEGY 0
+#define PNG_Z_DEFAULT_STRATEGY 1
 
 #ifdef _MSC_VER
 /* The PNG_PEDANTIC_WARNINGS (attributes) fail to build with some MSC
@@ -23,7 +29,10 @@
 #define PNG_NO_PEDANTIC_WARNINGS
 #endif
 
-#ifdef MOZ_PNG_READ
+#undef PNG_ARM_NEON_OPT /* This may have been defined in pngpriv.h */
+#define PNG_ARM_NEON_OPT 0
+
+#define PNG_BENIGN_READ_ERRORS_SUPPORTED
 #define PNG_READ_SUPPORTED
 #define PNG_READ_APNG_SUPPORTED
 #define PNG_READ_cHRM_SUPPORTED
@@ -41,13 +50,15 @@
 #define PNG_READ_INTERLACING_SUPPORTED
 #define PNG_READ_SCALE_16_TO_8_SUPPORTED
 #define PNG_READ_TRANSFORMS_SUPPORTED
-#endif
 
 /* necessary for boot animation code */
 #ifdef MOZ_WIDGET_GONK
-#define PNG_EASY_ACCESS_SUPPORTED
+#define PNG_UNKNOWN_CHUNKS_SUPPORTED
+#define PNG_SET_UNKNOWN_CHUNKS_SUPPORTED
 #define PNG_HANDLE_AS_UNKNOWN_SUPPORTED
+#define PNG_EASY_ACCESS_SUPPORTED
 #define PNG_READ_BGR_SUPPORTED
+#define PNG_BENIGN_READ_ERRORS_SUPPORTED
 #define PNG_READ_EXPAND_SUPPORTED
 #define PNG_READ_FILLER_SUPPORTED
 #define PNG_READ_GRAY_TO_RGB_SUPPORTED
@@ -57,7 +68,6 @@
 #define PNG_SEQUENTIAL_READ_SUPPORTED
 #endif
 
-#ifdef MOZ_PNG_WRITE
 #define PNG_WRITE_SUPPORTED
 #define PNG_WRITE_APNG_SUPPORTED
 #define PNG_WRITE_tRNS_SUPPORTED
@@ -66,11 +76,13 @@
 #define PNG_WRITE_FLUSH_SUPPORTED
 #define PNG_WRITE_OPTIMIZE_CMF_SUPPORTED
 #define PNG_WRITE_INT_FUNCTIONS_SUPPORTED
-#endif
 
 #define PNG_APNG_SUPPORTED
+#define PNG_BENIGN_ERRORS_SUPPORTED
 #define PNG_cHRM_SUPPORTED
+#define PNG_COLORSPACE_SUPPORTED
 #define PNG_gAMA_SUPPORTED
+#define PNG_GAMMA_SUPPORTED
 #define PNG_iCCP_SUPPORTED
 #define PNG_sRGB_SUPPORTED
 #define PNG_tRNS_SUPPORTED
@@ -86,7 +98,6 @@
 #define PNG_TEXT_SUPPORTED
 
 #ifdef PR_LOGGING
-#define PNG_BENIGN_ERRORS_SUPPORTED
 #define PNG_ERROR_TEXT_SUPPORTED
 #define PNG_WARNINGS_SUPPORTED
 #endif
@@ -479,6 +490,7 @@
 #define png_set_progressive_frame_fn    MOZ_APNG_set_prog_frame_fn
 #define png_write_acTL                  MOZ_APNG_write_acTL
 #define png_write_fcTL                  MOZ_APNG_write_fcTL
+#define png_write_fdAT                  MOZ_APNG_write_fdAT
 #define png_write_frame_head            MOZ_APNG_write_frame_head
 #define png_write_frame_tail            MOZ_APNG_write_frame_tail
 #define png_write_reinit                MOZ_APNG_write_reinit
@@ -590,6 +602,34 @@
 #define convert_gamma_value                       MOZ_convert_gamma_value
 #define ppi_from_ppm                              MOZ_ppi_from_ppm
 #define translate_gamma_flags                     MOZ_translate_gamma_flags
+
+/* libpng-1.6.x additions */
+#define png_app_error                             MOZ_PNG_app_err
+#define png_app_warning                           MOZ_PNG_app_warn
+#define png_benign_error                          MOZ_PNG_benign_err
+#define png_chunk_benign_error                    MOZ_PNG_chunk_benign_err
+#define png_chunk_report                          MOZ_PNG_chunk_report
+#define png_colorspace_set_ICC                    MOZ_PNG_cs_set_ICC
+#define png_colorspace_set_chromaticities         MOZ_PNG_cs_set_chromats
+#define png_colorspace_set_endpoints              MOZ_PNG_cs_set_endpts
+#define png_colorspace_set_gamma                  MOZ_PNG_cs_set_gamma
+#define png_colorspace_set_sRGB                   MOZ_PNG_cs_set_sRGB
+#define png_colorspace_sync                       MOZ_PNG_cs_sync
+#define png_colorspace_sync_info                  MOZ_PNG_cs_sync_info
+#define png_compress_IDAT                         MOZ_PNG_compress_IDAT
+#define png_create_png_struct                     MOZ_PNG_create_png_struct
+#define png_destroy_png_struct                    MOZ_PNG_destroy_png_struct
+#define png_free_buffer_list                      MOZ_PNG_free_buffer_list
+#define png_free_jmpbuf                           MOZ_PNG_free_jmpbuf
+#define png_get_uint_31                           MOZ_PNG_get_uint_31
+#define png_icc_check_header                      MOZ_PNG_icc_check_header
+#define png_icc_check_length                      MOZ_PNG_icc_check_length
+#define png_icc_check_tag_table                   MOZ_PNG_icc_check_tags
+#define png_icc_set_sRGB                          MOZ_PNG_icc_set_sRGB
+#define png_malloc_array                          MOZ_PNG_malloc_array
+#define png_malloc_base                           MOZ_PNG_malloc_base
+#define png_realloc_array                         MOZ_PNG_realloc_array
+#define png_zstream_error                         MOZ_PNG_zstream_error
 
 #if defined(PR_LOGGING) && defined(PNG_WARNINGS_SUPPORTED)
 #define png_warning                     MOZ_PNG_warning

@@ -15,12 +15,13 @@ XPIDL_SOURCES += [
     'nsIAutoCompleteSimpleResult.idl',
 ]
 
-MODULE = 'autocomplete'
+XPIDL_MODULE = 'autocomplete'
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsAutoCompleteController.cpp',
     'nsAutoCompleteSimpleResult.cpp',
 ]
 
-LIBRARY_NAME = 'tkautocomplete'
+FAIL_ON_WARNINGS = True
 
+FINAL_LIBRARY = 'xul'

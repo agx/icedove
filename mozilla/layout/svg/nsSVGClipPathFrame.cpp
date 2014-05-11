@@ -85,7 +85,7 @@ nsSVGClipPathFrame::ClipPaint(nsRenderingContext* aContext,
     if (referencedClipIsTrivial) {
       clipPathFrame->ClipPaint(aContext, aParent, aMatrix);
     } else {
-      gfx->PushGroup(gfxASurface::CONTENT_ALPHA);
+      gfx->PushGroup(GFX_CONTENT_ALPHA);
     }
   }
 
@@ -111,7 +111,7 @@ nsSVGClipPathFrame::ClipPaint(nsRenderingContext* aContext,
         if (isTrivial) {
           clipPathFrame->ClipPaint(aContext, aParent, aMatrix);
         } else {
-          gfx->PushGroup(gfxASurface::CONTENT_ALPHA);
+          gfx->PushGroup(GFX_CONTENT_ALPHA);
         }
       }
 
@@ -122,7 +122,7 @@ nsSVGClipPathFrame::ClipPaint(nsRenderingContext* aContext,
           gfx->PopGroupToSource();
 
           nsRefPtr<gfxPattern> clipMaskSurface;
-          gfx->PushGroup(gfxASurface::CONTENT_ALPHA);
+          gfx->PushGroup(GFX_CONTENT_ALPHA);
 
           clipPathFrame->ClipPaint(aContext, aParent, aMatrix);
           clipMaskSurface = gfx->PopGroup();
@@ -141,7 +141,7 @@ nsSVGClipPathFrame::ClipPaint(nsRenderingContext* aContext,
       gfx->PopGroupToSource();
 
       nsRefPtr<gfxPattern> clipMaskSurface;
-      gfx->PushGroup(gfxASurface::CONTENT_ALPHA);
+      gfx->PushGroup(GFX_CONTENT_ALPHA);
 
       clipPathFrame->ClipPaint(aContext, aParent, aMatrix);
       clipMaskSurface = gfx->PopGroup();
@@ -260,7 +260,6 @@ nsSVGClipPathFrame::IsValid()
         nsIAtom *type = grandKid->GetType();
 
         if (type != nsGkAtoms::svgPathGeometryFrame &&
-            type != nsGkAtoms::svgTextFrame &&
             type != nsGkAtoms::svgTextFrame2) {
           return false;
         }
@@ -268,7 +267,6 @@ nsSVGClipPathFrame::IsValid()
       continue;
     }
     if (type != nsGkAtoms::svgPathGeometryFrame &&
-        type != nsGkAtoms::svgTextFrame &&
         type != nsGkAtoms::svgTextFrame2) {
       return false;
     }
@@ -315,7 +313,7 @@ nsSVGClipPathFrame::GetType() const
 }
 
 gfxMatrix
-nsSVGClipPathFrame::GetCanvasTM(uint32_t aFor)
+nsSVGClipPathFrame::GetCanvasTM(uint32_t aFor, nsIFrame* aTransformRoot)
 {
   SVGClipPathElement *content = static_cast<SVGClipPathElement*>(mContent);
 

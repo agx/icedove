@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsHTMLEntities.h"
 
@@ -11,7 +11,6 @@
 
 #include "nsString.h"
 #include "nsCRT.h"
-#include "prtypes.h"
 #include "pldhash.h"
 
 using namespace mozilla;

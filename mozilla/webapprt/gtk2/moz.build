@@ -6,6 +6,10 @@
 
 PROGRAM = 'webapprt-stub'
 
-CPP_SOURCES += [
+SOURCES += [
     'webapprt.cpp',
 ]
+
+FAIL_ON_WARNINGS = True
+
+DEFINES['XPCOM_GLUE'] = True

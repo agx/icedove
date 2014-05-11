@@ -8,10 +8,15 @@
 
 #include "2D.h"
 
+// Skia uses cairo_scaled_font_t as the internal font type in ScaledFont
+#if defined(USE_SKIA) || defined(USE_CAIRO)
+#define USE_CAIRO_SCALED_FONT
+#endif
+
 #ifdef USE_SKIA
 #include "skia/SkTypeface.h"
 #endif
-#ifdef USE_CAIRO
+#ifdef USE_CAIRO_SCALED_FONT
 #include "cairo.h"
 #endif
 
@@ -28,7 +33,7 @@ public:
 
   virtual TemporaryRef<Path> GetPathForGlyphs(const GlyphBuffer &aBuffer, const DrawTarget *aTarget);
 
-  virtual void CopyGlyphsToBuilder(const GlyphBuffer &aBuffer, PathBuilder *aBuilder);
+  virtual void CopyGlyphsToBuilder(const GlyphBuffer &aBuffer, PathBuilder *aBuilder, const Matrix *aTransformHint);
 
   float GetSize() { return mSize; }
 
@@ -39,7 +44,7 @@ public:
   // Not true, but required to instantiate a ScaledFontBase.
   virtual FontType GetType() const { return FONT_SKIA; }
 
-#ifdef USE_CAIRO
+#ifdef USE_CAIRO_SCALED_FONT
   cairo_scaled_font_t* GetCairoScaledFont() { return mScaledFont; }
   void SetCairoScaledFont(cairo_scaled_font_t* font);
 #endif
@@ -49,7 +54,7 @@ protected:
 #ifdef USE_SKIA
   SkTypeface* mTypeface;
 #endif
-#ifdef USE_CAIRO
+#ifdef USE_CAIRO_SCALED_FONT
   cairo_scaled_font_t* mScaledFont;
 #endif
   Float mSize;

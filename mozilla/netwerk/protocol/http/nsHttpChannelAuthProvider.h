@@ -7,18 +7,18 @@
 #ifndef nsHttpChannelAuthProvider_h__
 #define nsHttpChannelAuthProvider_h__
 
-#include "nsHttp.h"
 #include "nsIHttpChannelAuthProvider.h"
 #include "nsIAuthPromptCallback.h"
 #include "nsString.h"
 #include "nsCOMPtr.h"
-#include "nsIHttpAuthenticableChannel.h"
-#include "nsIURI.h"
 #include "nsHttpAuthCache.h"
 #include "nsProxyInfo.h"
-#include "mozilla/Attributes.h"
+#include "nsCRT.h"
 
+class nsIHttpAuthenticableChannel;
 class nsIHttpAuthenticator;
+class nsHttpHandler;
+class nsIURI;
 
 class nsHttpChannelAuthProvider : public nsIHttpChannelAuthProvider
                                 , public nsIAuthPromptCallback
@@ -143,6 +143,8 @@ private:
     uint32_t                          mTriedProxyAuth           : 1;
     uint32_t                          mTriedHostAuth            : 1;
     uint32_t                          mSuppressDefensiveAuth    : 1;
+
+    nsRefPtr<nsHttpHandler>           mHttpHandler;  // keep gHttpHandler alive
 };
 
 #endif // nsHttpChannelAuthProvider_h__

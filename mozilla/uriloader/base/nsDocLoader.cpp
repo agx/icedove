@@ -116,7 +116,7 @@ nsDocLoader::nsDocLoader()
   }
 #endif /* PR_LOGGING */
 
-  static PLDHashTableOps hash_table_ops =
+  static const PLDHashTableOps hash_table_ops =
   {
     PL_DHashAllocTable,
     PL_DHashFreeTable,
@@ -973,6 +973,14 @@ nsDocLoader::GetIsLoadingDocument(bool *aIsLoadingDocument)
   *aIsLoadingDocument = mIsLoadingDocument;
 
   return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDocLoader::GetLoadType(uint32_t *aLoadType)
+{
+  *aLoadType = 0;
+
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 int64_t nsDocLoader::GetMaxTotalProgress()

@@ -8,7 +8,6 @@
 #include "nsObjCExceptions.h"
 #include "nsCOMPtr.h"
 #include "nsWidgetsCID.h"
-#include "nsGUIEvent.h"
 #include "nsIRollupListener.h"
 #include "nsChildView.h"
 #include "TextInputHandler.h"
@@ -36,6 +35,7 @@
 #include "gfxPlatform.h"
 #include "qcms.h"
 
+#include "mozilla/BasicEvents.h"
 #include "mozilla/Preferences.h"
 #include <algorithm>
 
@@ -96,7 +96,7 @@ static void RollUpPopups()
   nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
   if (!rollupWidget)
     return;
-  rollupListener->Rollup(0, nullptr);
+  rollupListener->Rollup(0, nullptr, nullptr);
 }
 
 nsCocoaWindow::nsCocoaWindow()
@@ -471,7 +471,14 @@ nsresult nsCocoaWindow::CreateNativeWindow(const NSRect &aRect,
   }
 
   [mWindow setBackgroundColor:[NSColor clearColor]];
+#ifdef MOZ_B2G
+  // In B2G, we don't create popups and we need OMTC to work (because out of
+  // process compositing depends on it). Therefore, we don't need our windows
+  // to be transparent.
+  [mWindow setOpaque:YES];
+#else
   [mWindow setOpaque:NO];
+#endif
   [mWindow setContentMinSize:NSMakeSize(60, 60)];
   [mWindow disableCursorRects];
 
@@ -512,16 +519,19 @@ NS_IMETHODIMP nsCocoaWindow::CreatePopupContentView(const nsIntRect &aRect,
 
 NS_IMETHODIMP nsCocoaWindow::Destroy()
 {
-  // The reference from a possible sibling widget will never get cleared because
-  // we don't implement GetParent so RemoveChild never removes us from the
-  // sibling widget list. So if we don't hide ourselves here we may stay on
-  // screen. This is gross. (Bug 891424)
+  // If we don't hide here we run into problems with panels, this is not ideal.
+  // (Bug 891424)
   Show(false);
 
   if (mPopupContentView)
     mPopupContentView->Destroy();
 
   nsBaseWidget::Destroy();
+  // nsBaseWidget::Destroy() calls GetParent()->RemoveChild(this). But we
+  // don't implement GetParent(), so we need to do the equivalent here.
+  if (mParent) {
+    mParent->RemoveChild(this);
+  }
   nsBaseWidget::OnDestroy();
 
   if (mFullScreen) {
@@ -681,6 +691,8 @@ NS_IMETHODIMP nsCocoaWindow::Show(bool bState)
   // windows forward.
   if (!mSheetNeedsShow && !bState && ![mWindow isVisible])
     return NS_OK;
+
+  [mWindow setBeingShown:bState];
 
   nsIWidget* parentWidget = mParent;
   nsCOMPtr<nsPIWidgetCocoa> piParentWidget(do_QueryInterface(parentWidget));
@@ -900,6 +912,8 @@ NS_IMETHODIMP nsCocoaWindow::Show(bool bState)
   
   if (mPopupContentView)
       mPopupContentView->Show(bState);
+
+  [mWindow setBeingShown:NO];
 
   return NS_OK;
 
@@ -1396,7 +1410,7 @@ NS_IMETHODIMP nsCocoaWindow::Resize(double aX, double aY,
 // Coordinates are global display pixels
 NS_IMETHODIMP nsCocoaWindow::Resize(double aWidth, double aHeight, bool aRepaint)
 {
-  double invScale = 1.0 / GetDefaultScale();
+  double invScale = 1.0 / GetDefaultScale().scale;
   return DoResize(mBounds.x * invScale, mBounds.y * invScale,
                   aWidth, aHeight, aRepaint, true);
 }
@@ -1557,6 +1571,15 @@ nsCocoaWindow::BackingScaleFactorChanged()
   }
 }
 
+int32_t
+nsCocoaWindow::RoundsWidgetCoordinatesTo()
+{
+  if (BackingScaleFactor() == 2.0) {
+    return 2;
+  }
+  return 1;
+}
+
 NS_IMETHODIMP nsCocoaWindow::SetCursor(nsCursor aCursor)
 {
   if (mPopupContentView)
@@ -1582,7 +1605,8 @@ NS_IMETHODIMP nsCocoaWindow::SetTitle(const nsAString& aTitle)
     return NS_OK;
 
   const nsString& strTitle = PromiseFlatString(aTitle);
-  NSString* title = [NSString stringWithCharacters:strTitle.get() length:strTitle.Length()];
+  NSString* title = [NSString stringWithCharacters:reinterpret_cast<const unichar*>(strTitle.get())
+                                            length:strTitle.Length()];
   [mWindow setTitle:title];
 
   return NS_OK;
@@ -1664,7 +1688,7 @@ NS_IMETHODIMP nsCocoaWindow::GetSheetWindowParent(NSWindow** sheetWindowParent)
 
 // Invokes callback and ProcessEvent methods on Event Listener object
 NS_IMETHODIMP 
-nsCocoaWindow::DispatchEvent(nsGUIEvent* event, nsEventStatus& aStatus)
+nsCocoaWindow::DispatchEvent(WidgetGUIEvent* event, nsEventStatus& aStatus)
 {
   aStatus = nsEventStatus_eIgnore;
 
@@ -1850,6 +1874,13 @@ NS_IMETHODIMP nsCocoaWindow::CaptureRollupEvents(nsIRollupListener* aListener, b
   gRollupListener = nullptr;
   
   if (aDoCapture) {
+    if (![NSApp isActive]) {
+      // We need to capture mouse event if we aren't
+      // the active application. We only set this up when needed
+      // because they cause spurious mouse event after crash
+      // and gdb sessions. See bug 699538.
+      nsToolkit::GetToolkit()->RegisterForAllProcessMouseEvents();
+    }
     gRollupListener = aListener;
 
     // Sometimes more than one popup window can be visible at the same time
@@ -1867,6 +1898,8 @@ NS_IMETHODIMP nsCocoaWindow::CaptureRollupEvents(nsIRollupListener* aListener, b
     if (mWindow && (mWindowType == eWindowType_popup))
       SetPopupWindowLevel();
   } else {
+    nsToolkit::GetToolkit()->UnregisterAllProcessMouseEventHandlers();
+
     // XXXndeakin this doesn't make sense.
     // Why is the new window assumed to be a modal panel?
     if (mWindow && (mWindowType == eWindowType_popup))
@@ -2104,15 +2137,21 @@ NS_IMETHODIMP_(void)
 nsCocoaWindow::SetInputContext(const InputContext& aContext,
                                const InputContextAction& aAction)
 {
-  // XXX Ideally, we should check if this instance has focus or not.
-  //     However, this is called only when this widget has focus, so,
-  //     it's not problem at least for now.
-  if (aContext.IsPasswordEditor()) {
-    TextInputHandler::EnableSecureEventInput();
-  } else {
-    TextInputHandler::EnsureSecureEventInputDisabled();
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
+
+  if (mWindow &&
+      [mWindow firstResponder] == mWindow &&
+      [mWindow isKeyWindow] &&
+      [[NSApplication sharedApplication] isActive]) {
+    if (aContext.IsPasswordEditor()) {
+      TextInputHandler::EnableSecureEventInput();
+    } else {
+      TextInputHandler::EnsureSecureEventInputDisabled();
+    }
   }
   mInputContext = aContext;
+
+  NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
 @implementation WindowDelegate
@@ -2500,9 +2539,20 @@ GetDPI(NSWindow* aWindow)
   mScheduledShadowInvalidation = NO;
   mDPI = GetDPI(self);
   mTrackingArea = nil;
+  mBeingShown = NO;
   [self updateTrackingArea];
 
   return self;
+}
+
+- (void)setBeingShown:(BOOL)aValue
+{
+  mBeingShown = aValue;
+}
+
+- (BOOL)isVisibleOrBeingShown
+{
+  return [super isVisible] || mBeingShown;
 }
 
 - (void)dealloc

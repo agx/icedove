@@ -1,4 +1,4 @@
-/* -*- Mode: js2; js2-basic-offset: 2; indent-tabs-mode: nil; -*- */
+/* -*- js2-basic-offset: 2; indent-tabs-mode: nil; -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -14,6 +14,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "console",
                                   "resource://gre/modules/devtools/Console.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "CommandUtils",
                                   "resource:///modules/devtools/DeveloperToolbar.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+                                  "resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "require", function() {
   let { require } = Cu.import("resource://gre/modules/devtools/Require.jsm", {});
@@ -46,9 +48,7 @@ GcliActor.prototype.getCommandSpecs = function(request) {
 };
 
 GcliActor.prototype.execute = function(request) {
-  let windowMediator = Cc["@mozilla.org/appshell/window-mediator;1"]
-                        .getService(Ci.nsIWindowMediator);
-  let chromeWindow = windowMediator.getMostRecentWindow("navigator:browser");
+  let chromeWindow = Services.wm.getMostRecentWindow(DebuggerServer.chromeWindowType);
   let contentWindow = chromeWindow.gBrowser.selectedTab.linkedBrowser.contentWindow;
 
   let environment = CommandUtils.createEnvironment(chromeWindow.document,

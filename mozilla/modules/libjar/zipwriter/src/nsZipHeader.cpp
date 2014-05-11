@@ -6,6 +6,7 @@
 #include "StreamFunctions.h"
 #include "nsZipHeader.h"
 #include "nsMemory.h"
+#include "prtime.h"
 
 #define ZIP_FILE_HEADER_SIGNATURE 0x04034b50
 #define ZIP_FILE_HEADER_SIZE 30
@@ -123,6 +124,16 @@ NS_IMETHODIMP nsZipHeader::GetIsSynthetic(bool *aIsSynthetic)
     NS_ASSERTION(mInited, "Not initalised");
 
     *aIsSynthetic = false;
+    return NS_OK;
+}
+
+/* readonly attribute unsigned long permissions; */
+NS_IMETHODIMP nsZipHeader::GetPermissions(uint32_t *aPermissions)
+{
+    NS_ASSERTION(mInited, "Not initalised");
+
+    // Always give user read access at least, this matches nsIZipReader's behaviour
+    *aPermissions = ((mEAttr >> 16) & 0xfff) | 0x100;
     return NS_OK;
 }
 
@@ -329,5 +340,5 @@ const uint8_t * nsZipHeader::GetExtraField(uint16_t aTag, bool aLocal, uint16_t 
       pos += blocksize;
     }
 
-    return NULL;
+    return nullptr;
 }

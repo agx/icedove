@@ -9,8 +9,7 @@
 
 #include "mozilla/Attributes.h"
 
-#include "jsapi.h"
-
+#include "ds/IdValuePair.h"
 #include "vm/String.h"
 
 namespace js {
@@ -103,8 +102,6 @@ class MOZ_STACK_CLASS JSONParser : private AutoGCRooter
 #ifdef DEBUG
     Token lastToken;
 #endif
-
-    JSONParser *thisDuringConstruction() { return this; }
 
   public:
     /* Public API */

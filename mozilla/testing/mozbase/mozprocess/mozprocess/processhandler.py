@@ -28,7 +28,25 @@ if mozinfo.isWin:
     JOBOBJECT_BASIC_LIMIT_INFORMATION, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, IO_COUNTERS
 
 class ProcessHandlerMixin(object):
-    """Class which represents a process to be executed."""
+    """
+    A class for launching and manipulating local processes.
+
+    :param cmd: command to run.
+    :param args: is a list of arguments to pass to the command (defaults to None).
+    :param cwd: working directory for command (defaults to None).
+    :param env: is the environment to use for the process (defaults to os.environ).
+    :param ignore_children: causes system to ignore child processes when True, defaults to False (which tracks child processes).
+    :param kill_on_timeout: when True, the process will be killed when a timeout is reached. When False, the caller is responsible for killing the process. Failure to do so could cause a call to wait() to hang indefinitely. (Defaults to True.)
+    :param processOutputLine: function to be called for each line of output produced by the process (defaults to None).
+    :param onTimeout: function to be called when the process times out.
+    :param onFinish: function to be called when the process terminates normally without timing out.
+    :param kwargs: additional keyword args to pass directly into Popen.
+
+    NOTE: Child processes will be tracked by default.  If for any reason
+    we are unable to track child processes and ignore_children is set to False,
+    then we will fall back to only tracking the root process.  The fallback
+    will be logged.
+    """
 
     class Process(subprocess.Popen):
         """
@@ -538,33 +556,20 @@ falling back to not using job objects for managing child processes"""
                  cwd=None,
                  env=None,
                  ignore_children = False,
+                 kill_on_timeout = True,
                  processOutputLine=(),
                  onTimeout=(),
                  onFinish=(),
                  **kwargs):
-        """
-        cmd = Command to run
-        args = array of arguments (defaults to None)
-        cwd = working directory for cmd (defaults to None)
-        env = environment to use for the process (defaults to os.environ)
-        ignore_children = when True, causes system to ignore child processes,
-        defaults to False (which tracks child processes)
-        processOutputLine = handlers to process the output line
-        onTimeout = handlers for timeout event
-        kwargs = keyword args to pass directly into Popen
-
-        NOTE: Child processes will be tracked by default.  If for any reason
-        we are unable to track child processes and ignore_children is set to False,
-        then we will fall back to only tracking the root process.  The fallback
-        will be logged.
-        """
         self.cmd = cmd
         self.args = args
         self.cwd = cwd
         self.didTimeout = False
         self._ignore_children = ignore_children
+        self._kill_on_timeout = kill_on_timeout
         self.keywordargs = kwargs
         self.outThread = None
+        self.read_buffer = ''
 
         if env is None:
             env = os.environ.copy()
@@ -590,7 +595,7 @@ falling back to not using job objects for managing child processes"""
 
     @property
     def commandline(self):
-        """the string value of the command line"""
+        """the string value of the command line (command + args)"""
         return subprocess.list2cmdline([self.cmd] + self.args)
 
     def run(self, timeout=None, outputTimeout=None):
@@ -598,7 +603,8 @@ falling back to not using job objects for managing child processes"""
         Starts the process.
 
         If timeout is not None, the process will be allowed to continue for
-        that number of seconds before being killed.
+        that number of seconds before being killed. If the process is killed
+        due to a timeout, the onTimeout handler will be called.
 
         If outputTimeout is not None, the process will be allowed to continue
         for that number of seconds without producing any output before
@@ -624,14 +630,15 @@ falling back to not using job objects for managing child processes"""
 
     def kill(self):
         """
-          Kills the managed process and if you created the process with
-          'ignore_children=False' (the default) then it will also
-          also kill all child processes spawned by it.
-          If you specified 'ignore_children=True' when creating the process,
-          only the root process will be killed.
+        Kills the managed process.
 
-          Note that this does not manage any state, save any output etc,
-          it immediately kills the process.
+        If you created the process with 'ignore_children=False' (the
+        default) then it will also also kill all child processes spawned by
+        it. If you specified 'ignore_children=True' when creating the
+        process, only the root process will be killed.
+
+        Note that this does not manage any state, save any output etc,
+        it immediately kills the process.
         """
         try:
             return self.proc.kill()
@@ -644,21 +651,21 @@ falling back to not using job objects for managing child processes"""
 
     def readWithTimeout(self, f, timeout):
         """
-          Try to read a line of output from the file object |f|.
-          |f| must be a  pipe, like the |stdout| member of a subprocess.Popen
-          object created with stdout=PIPE. If no output
-          is received within |timeout| seconds, return a blank line.
-          Returns a tuple (line, did_timeout), where |did_timeout| is True
-          if the read timed out, and False otherwise.
+        Try to read a line of output from the file object *f*.
 
-          Calls a private member because this is a different function based on
-          the OS
+        *f* must be a  pipe, like the *stdout* member of a subprocess.Popen
+        object created with stdout=PIPE. If no output
+        is received within *timeout* seconds, return a blank line.
+
+        Returns a tuple (line, did_timeout), where *did_timeout* is True
+        if the read timed out, and False otherwise.
         """
+        # Calls a private member because this is a different function based on
+        # the OS
         return self._readWithTimeout(f, timeout)
 
     def processOutputLine(self, line):
-        """Called for each line of output that a process sends to stdout/stderr.
-        """
+        """Called for each line of output that a process sends to stdout/stderr."""
         for handler in self.processOutputLineHandlers:
             handler(line)
 
@@ -693,15 +700,17 @@ falling back to not using job objects for managing child processes"""
             elif outputTimeout:
                 lineReadTimeout = outputTimeout
 
-            (line, self.didTimeout) = self.readWithTimeout(logsource, lineReadTimeout)
-            while line != "" and not self.didTimeout:
-                self.processOutputLine(line.rstrip())
+            (lines, self.didTimeout) = self.readWithTimeout(logsource, lineReadTimeout)
+            while lines != "" and not self.didTimeout:
+                for line in lines.splitlines():
+                    self.processOutputLine(line.rstrip())
                 if timeout:
                     lineReadTimeout = timeout - (datetime.now() - self.startTime).seconds
-                (line, self.didTimeout) = self.readWithTimeout(logsource, lineReadTimeout)
+                (lines, self.didTimeout) = self.readWithTimeout(logsource, lineReadTimeout)
 
             if self.didTimeout:
-                self.proc.kill()
+                if self._kill_on_timeout:
+                    self.proc.kill()
                 self.onTimeout()
             else:
                 self.onFinish()
@@ -717,7 +726,7 @@ falling back to not using job objects for managing child processes"""
 
     def wait(self, timeout=None):
         """
-        Waits until all output has been read and the process is 
+        Waits until all output has been read and the process is
         terminated.
 
         If timeout is not None, will return after timeout seconds.
@@ -732,7 +741,7 @@ falling back to not using job objects for managing child processes"""
                 self.outThread.join(timeout=1)
                 count += 1
                 if timeout and count > timeout:
-                    return
+                    return None
 
         return self.proc.wait()
 
@@ -774,15 +783,31 @@ falling back to not using job objects for managing child processes"""
     else:
         # Generic
         def _readWithTimeout(self, f, timeout):
-            try:
-                (r, w, e) = select.select([f], [], [], timeout)
-            except:
-                # return a blank line
-                return ('', True)
+            while True:
+                try:
+                    (r, w, e) = select.select([f], [], [], timeout)
+                except:
+                    # return a blank line
+                    return ('', True)
 
-            if len(r) == 0:
-                return ('', True)
-            return (f.readline(), False)
+                if len(r) == 0:
+                    return ('', True)
+
+                output = os.read(f.fileno(), 4096)
+                if not output:
+                    return (self.read_buffer, False)
+                self.read_buffer += output
+                if '\n' not in self.read_buffer:
+                    time.sleep(0.01)
+                    continue
+                tmp = self.read_buffer.split('\n')
+                lines, self.read_buffer = tmp[:-1], tmp[-1]
+                real_lines = [x for x in lines if x != '']
+                if not real_lines:
+                    time.sleep(0.01)
+                    continue
+                break
+            return ('\n'.join(lines), False)
 
     @property
     def pid(self):
@@ -824,16 +849,22 @@ class LogOutput(object):
 ### front end class with the default handlers
 
 class ProcessHandler(ProcessHandlerMixin):
+    """
+    Convenience class for handling processes with default output handlers.
+
+    If no processOutputLine keyword argument is specified, write all
+    output to stdout.  Otherwise, the function specified by this argument
+    will be called for each line of output; the output will not be written
+    to stdout automatically.
+
+    If storeOutput==True, the output produced by the process will be saved
+    as self.output.
+
+    If logfile is not None, the output produced by the process will be
+    appended to the given file.
+    """
 
     def __init__(self, cmd, logfile=None, storeOutput=True, **kwargs):
-        """
-        If storeOutput=True, the output produced by the process will be saved
-        as self.output.
-
-        If logfile is not None, the output produced by the process will be
-        appended to the given file.
-        """
-
         kwargs.setdefault('processOutputLine', [])
 
         # Print to standard output only if no outputline provided

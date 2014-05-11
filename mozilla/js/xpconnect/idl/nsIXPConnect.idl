@@ -7,46 +7,36 @@
 /* The core XPConnect public interfaces. */
 
 #include "nsISupports.idl"
-#include "nsIClassInfo.idl"
-#include "xpccomponents.idl"
-#include "xpcjsid.idl"
-#include "xpcexception.idl"
-#include "nsIInterfaceInfo.idl"
-#include "nsIInterfaceInfoManager.idl"
-#include "nsIExceptionService.idl"
-#include "nsIVariant.idl"
-#include "nsIObjectOutputStream.idl"
-#include "nsIObjectInputStream.idl"
 
 %{ C++
 #include "jspubtd.h"
-#include "xptinfo.h"
-#include "nsAXPCNativeCallContext.h"
+#include "js/TypeDecls.h"
+
+struct JSFreeOp;
 
 class nsWrapperCache;
+class nsAXPCNativeCallContext;
 %}
 
 /***************************************************************************/
 
-// NB: jsval and jsid are declared in nsIVariant.idl
+// NB: jsval and jsid are declared in nsrootidl.idl
 
 [ptr] native JSContextPtr(JSContext);
 [ptr] native JSClassPtr(JSClass);
 [ptr] native JSFreeOpPtr(JSFreeOp);
 [ptr] native JSObjectPtr(JSObject);
-[ptr] native JSValPtr(jsval);
-[ptr] native JSValConstPtr(const jsval);
+[ptr] native JSValPtr(JS::Value);
+[ptr] native JSValConstPtr(const JS::Value);
       native JSPropertyOp(JSPropertyOp);
       native JSEqualityOp(JSEqualityOp);
 [ptr] native JSScriptPtr(JSScript);
 [ptr] native voidPtrPtr(void*);
-[ptr] native nsScriptObjectTracerPtr(nsScriptObjectTracer);
-[ref] native nsCCTraversalCallbackRef(nsCycleCollectionTraversalCallback);
 [ptr] native nsAXPCNativeCallContextPtr(nsAXPCNativeCallContext);
 [ptr] native nsWrapperCachePtr(nsWrapperCache);
 [ref] native JSCompartmentOptions(JS::CompartmentOptions);
 [ref] native JSCallArgsRef(const JS::CallArgs);
-      native JSHandleId(JS::HandleId);
+      native JSHandleId(JS::Handle<jsid>);
 
 /***************************************************************************/
 
@@ -57,11 +47,11 @@ interface nsIXPConnectWrappedNative;
 interface nsIInterfaceInfo;
 interface nsIXPCSecurityManager;
 interface nsIPrincipal;
-
-%{C++
-class nsCycleCollectionTraversalCallback;
-class nsScriptObjectTracer;
-%}
+interface nsIClassInfo;
+interface nsIVariant;
+interface nsIStackFrame;
+interface nsIObjectInputStream;
+interface nsIObjectOutputStream;
 
 /***************************************************************************/
 [uuid(909e8641-7c54-4dff-9b94-ba631f057b33)]
@@ -283,6 +273,7 @@ interface nsIXPCFunctionThisTranslator : nsISupports
 
 /***************************************************************************/
 
+
 %{ C++
 // For use with the service manager
 // {CB6593E0-F9B2-11d2-BDD6-000064657374}
@@ -291,7 +282,7 @@ interface nsIXPCFunctionThisTranslator : nsISupports
     { 0xbd, 0xd6, 0x0, 0x0, 0x64, 0x65, 0x73, 0x74 } }
 %}
 
-[uuid(3bc074e6-2102-40a4-8c84-38b002c9e2f1)]
+[uuid(880be309-88a1-4e98-8621-7f7e42681b20)]
 interface nsIXPConnect : nsISupports
 {
 %{ C++
@@ -456,6 +447,7 @@ interface nsIXPConnect : nsISupports
 
 
     [noscript,notxpcom,nostdcall] JSContextPtr getCurrentJSContext();
+    [noscript,notxpcom,nostdcall] JSContextPtr initSafeJSContext();
     [noscript,notxpcom,nostdcall] JSContextPtr getSafeJSContext();
 
     readonly attribute nsIStackFrame                CurrentJSStack;
@@ -560,14 +552,6 @@ interface nsIXPConnect : nsISupports
                                          in boolean returnStringOnly);
 
     /**
-     * Note aJSContext as a child to the cycle collector.
-     * @param aJSContext The JSContext to note.
-     * @param aCb The cycle collection traversal callback.
-     */
-    [noscript,notxpcom] void noteJSContext(in JSContextPtr aJSContext,
-                                           in nsCCTraversalCallbackRef aCb);
-
-    /**
      * Whether or not XPConnect should report all JS exceptions when returning
      * from JS into C++. False by default, although any value set in the
      * MOZ_REPORT_ALL_JS_EXCEPTIONS environment variable will override the value
@@ -631,4 +615,11 @@ interface nsIXPConnect : nsISupports
 
     [noscript] JSObjectPtr readFunction(in nsIObjectInputStream aStream,
                                         in JSContextPtr aJSContext);
+
+    /**
+     * This function should be called in JavaScript error reporters
+     * to signal that they are ignoring the error. In this case,
+     * XPConnect can print a warning to the console.
+     */
+    [noscript] void markErrorUnreported(in JSContextPtr aJSContext);
 };

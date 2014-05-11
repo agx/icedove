@@ -14,6 +14,11 @@
 #include "SurfaceTypes.h"
 
 namespace mozilla {
+
+namespace gl {
+class GLContext;
+}
+
 namespace gfx {
 class SharedSurface;
 class SurfaceFactory;
@@ -31,6 +36,7 @@ public:
                                                 bool preserveBuffer);
 
     static SurfaceStream* CreateForType(SurfaceStreamType type,
+                                        mozilla::gl::GLContext* glContext,
                                         SurfaceStream* prevStream = nullptr);
 
     SurfaceStreamHandle GetShareHandle() {
@@ -42,6 +48,8 @@ public:
     }
 
     const SurfaceStreamType mType;
+
+    mozilla::gl::GLContext* GLContext() const { return mGLContext; }
 protected:
     // |mProd| is owned by us, but can be ripped away when
     // creating a new GLStream from this one.
@@ -50,6 +58,10 @@ protected:
     std::stack<SharedSurface*> mScraps;
     mutable Monitor mMonitor;
     bool mIsAlive;
+
+    // Do not use this. It exists solely so we can ref it in CanvasClientWebGL::Update()
+    // before sent up to the compositor. You have been warned (Bug 894405)
+    mozilla::gl::GLContext* mGLContext;
 
     // |previous| can be null, indicating this is the first one.
     // Otherwise, we pull in |mProd| from |previous| an our initial surface.

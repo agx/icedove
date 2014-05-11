@@ -6,10 +6,6 @@
 #endif
  */
 
-// One of the possible values for the mousewheel.* preferences.
-// From nsEventStateManager.cpp.
-const MOUSE_SCROLL_ZOOM = 3;
-
 /**
  * Controls the "full zoom" setting and its site-specific preferences.
  */
@@ -22,6 +18,10 @@ var FullZoom = {
 
   // browser.zoom.updateBackgroundTabs preference cache
   updateBackgroundTabs: undefined,
+
+  // One of the possible values for the mousewheel.* preferences.
+  // From nsEventStateManager.h.
+  ACTION_ZOOM: 3,
 
   // This maps browser outer window IDs to monotonically increasing integer
   // tokens.  _browserTokenMap[outerID] is increased each time the zoom is
@@ -120,7 +120,7 @@ var FullZoom = {
     // Don't do anything if this isn't a "zoom" scroll event.
     var isZoomEvent = false;
     try {
-      isZoomEvent = (gPrefService.getIntPref(pref) == MOUSE_SCROLL_ZOOM);
+      isZoomEvent = (gPrefService.getIntPref(pref) == this.ACTION_ZOOM);
     } catch (e) {}
     if (!isZoomEvent)
       return;
@@ -233,6 +233,10 @@ var FullZoom = {
    *        (optional) browser object displaying the document
    */
   onLocationChange: function FullZoom_onLocationChange(aURI, aIsTabSwitch, aBrowser) {
+    // Bug 691614 - zooming support for electrolysis
+    if (gMultiProcessBrowser)
+      return;
+
     // Ignore all pending async zoom accesses in the browser.  Pending accesses
     // that started before the location change will be prevented from applying
     // to the new location.
@@ -326,6 +330,11 @@ var FullZoom = {
       if (token.isCurrent) {
         ZoomManager.setZoomForBrowser(browser, value === undefined ? 1 : value);
         this._ignorePendingZoomAccesses(browser);
+        this._executeSoon(function () {
+          // _getGlobalValue may be either sync or async, so notify asyncly so
+          // observers are guaranteed consistent behavior.
+          Services.obs.notifyObservers(null, "browser-fullZoom:reset", "");
+        });
       }
     });
     this._removePref(browser);
@@ -538,14 +547,14 @@ var FullZoom = {
   },
 
   /**
-   * Asynchronously broadcasts a "browser-fullZoom:locationChange" notification
-   * so that tests can select tabs, load pages, etc. and be notified when the
-   * zoom levels on those pages change.  The notification is always asynchronous
-   * so that observers are guaranteed a consistent behavior.
+   * Asynchronously broadcasts "FullZoom:TESTS:location-change" so that tests
+   * can select tabs, load pages, etc. and be notified when the zoom levels on
+   * those pages change.  The notification is always asynchronous so that
+   * observers are guaranteed a consistent behavior.
    */
   _notifyOnLocationChange: function FullZoom__notifyOnLocationChange() {
     this._executeSoon(function () {
-      Services.obs.notifyObservers(null, "browser-fullZoom:locationChange", "");
+      Services.obs.notifyObservers(null, "FullZoom:TESTS:location-change", "");
     });
   },
 

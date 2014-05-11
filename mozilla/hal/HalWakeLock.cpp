@@ -153,7 +153,6 @@ void
 Init()
 {
   sLockTable = new LockTable();
-  sLockTable->Init();
   sInitialized = true;
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
@@ -218,7 +217,6 @@ ModifyWakeLock(const nsAString& aTopic,
   LockCount totalCount;
   if (!table) {
     table = new ProcessLockTable();
-    table->Init();
     sLockTable->Put(aTopic, table);
   } else {
     table->Get(aProcessID, &processCount);
@@ -256,7 +254,7 @@ ModifyWakeLock(const nsAString& aTopic,
        processWasLocked != (processCount.numLocks > 0))) {
 
     WakeLockInformation info;
-    GetWakeLockInfo(aTopic, &info);
+    hal::GetWakeLockInfo(aTopic, &info);
     NotifyWakeLockChange(info);
   }
 }

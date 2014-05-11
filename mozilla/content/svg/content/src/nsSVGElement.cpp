@@ -3,17 +3,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/Util.h"
 
 #include "nsSVGElement.h"
 
 #include "mozilla/dom/SVGSVGElement.h"
 #include "mozilla/dom/SVGTests.h"
+#include "nsContentUtils.h"
 #include "nsICSSDeclaration.h"
 #include "nsIDocument.h"
 #include "nsIDOMMutationEvent.h"
-#include "nsMutationEvent.h"
+#include "mozilla/MutationEvent.h"
 #include "nsError.h"
 #include "nsIPresShell.h"
 #include "nsGkAtoms.h"
@@ -35,6 +36,7 @@
 #include "nsSVGEnum.h"
 #include "nsSVGViewBox.h"
 #include "nsSVGString.h"
+#include "mozilla/dom/SVGAnimatedEnumeration.h"
 #include "SVGAnimatedNumberList.h"
 #include "SVGAnimatedLengthList.h"
 #include "SVGAnimatedPointList.h"
@@ -55,10 +57,11 @@ using namespace mozilla::dom;
 // vararg-list methods in this file:
 //   nsSVGElement::GetAnimated{Length,Number,Integer}Values
 // See bug 547964 for details:
-PR_STATIC_ASSERT(sizeof(void*) == sizeof(nullptr));
+static_assert(sizeof(void*) == sizeof(nullptr),
+              "nullptr should be the correct size");
 
 nsresult
-NS_NewSVGElement(nsIContent **aResult, already_AddRefed<nsINodeInfo> aNodeInfo) 
+NS_NewSVGElement(Element **aResult, already_AddRefed<nsINodeInfo> aNodeInfo) 
 {
   nsRefPtr<nsSVGElement> it = new nsSVGElement(aNodeInfo);
   nsresult rv = it->Init();
@@ -82,7 +85,6 @@ nsSVGEnumMapping nsSVGElement::sSVGUnitTypesMap[] = {
 nsSVGElement::nsSVGElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   : nsSVGElementBase(aNodeInfo)
 {
-  SetIsDOMBinding();
 }
 
 JSObject*
@@ -663,10 +665,10 @@ nsSVGElement::UnsetAttrInternal(int32_t aNamespaceID, nsIAtom* aName,
       mContentStyleRule = nullptr;
 
     if (IsEventAttributeName(aName)) {
-      nsEventListenerManager* manager = GetListenerManager(false);
+      nsEventListenerManager* manager = GetExistingListenerManager();
       if (manager) {
         nsIAtom* eventName = GetEventNameForAttr(aName);
-        manager->RemoveEventHandler(eventName);
+        manager->RemoveEventHandler(eventName, EmptyString());
       }
       return;
     }
@@ -1108,23 +1110,14 @@ NS_IMETHODIMP nsSVGElement::SetId(const nsAString & aId)
 NS_IMETHODIMP
 nsSVGElement::GetOwnerSVGElement(nsIDOMSVGElement * *aOwnerSVGElement)
 {
-  ErrorResult rv;
-  NS_IF_ADDREF(*aOwnerSVGElement = GetOwnerSVGElement(rv));
-  return rv.ErrorCode();
+  NS_IF_ADDREF(*aOwnerSVGElement = GetOwnerSVGElement());
+  return NS_OK;
 }
 
 SVGSVGElement*
-nsSVGElement::GetOwnerSVGElement(ErrorResult& rv)
+nsSVGElement::GetOwnerSVGElement()
 {
-  SVGSVGElement* ownerSVGElement = GetCtx();
-
-  // If we didn't find anything and we're not the outermost SVG element,
-  // we've got an invalid structure
-  if (!ownerSVGElement && Tag() != nsGkAtoms::svg) {
-    rv.Throw(NS_ERROR_FAILURE);
-  }
-
-  return ownerSVGElement;
+  return GetCtx(); // this may return nullptr
 }
 
 /* readonly attribute nsIDOMSVGElement viewportElement; */
@@ -1311,15 +1304,20 @@ ParseMappedAttrAnimValueCallback(void*    aObject,
                                  void*    aPropertyValue,
                                  void*    aData)
 {
-  NS_ABORT_IF_FALSE(aPropertyName != SMIL_MAPPED_ATTR_STYLERULE_ATOM,
-                    "animated content style rule should have been removed "
-                    "from properties table already (we're rebuilding it now)");
+  MOZ_ASSERT(aPropertyName != SMIL_MAPPED_ATTR_STYLERULE_ATOM,
+             "animated content style rule should have been removed "
+             "from properties table already (we're rebuilding it now)");
 
-  MappedAttrParser* mappedAttrParser =
-    static_cast<MappedAttrParser*>(aData);
+  MappedAttrParser* mappedAttrParser = static_cast<MappedAttrParser*>(aData);
+  MOZ_ASSERT(mappedAttrParser, "parser should be non-null");
 
-  nsStringBuffer* valueBuf = static_cast<nsStringBuffer*>(aPropertyValue);
-  mappedAttrParser->ParseMappedAttrValue(aPropertyName, nsCheapString(valueBuf));
+  nsStringBuffer* animValBuf = static_cast<nsStringBuffer*>(aPropertyValue);
+  MOZ_ASSERT(animValBuf, "animated value should be non-null");
+
+  nsString animValStr;
+  nsContentUtils::PopulateStringFromStringBuffer(animValBuf, animValStr);
+
+  mappedAttrParser->ParseMappedAttrValue(aPropertyName, animValStr);
 }
 
 // Callback for freeing animated content style rule, in property table.

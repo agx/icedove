@@ -2,6 +2,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+// IWYU pragma: private, include "nsString.h"
 
 #ifndef nsReadableUtils_h___
 #define nsReadableUtils_h___
@@ -51,6 +52,13 @@ bool AppendUTF8toUTF16( const nsACString& aSource, nsAString& aDest,
 
 void AppendUTF16toUTF8( const PRUnichar* aSource, nsACString& aDest );
 void AppendUTF8toUTF16( const char* aSource, nsAString& aDest );
+
+#ifdef MOZ_USE_CHAR16_WRAPPER
+inline void AppendUTF16toUTF8( char16ptr_t aSource, nsACString& aDest )
+  {
+    return AppendUTF16toUTF8(static_cast<const char16_t*>(aSource), aDest);
+  }
+#endif
 
   /**
    * Returns a new |char| buffer containing a zero-terminated copy of |aSource|.

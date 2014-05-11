@@ -10,18 +10,16 @@
 // This file declares the core data structures for LIR: storage allocations for
 // inputs and outputs, as well as the interface instructions must conform to.
 
-#include "jscntxt.h"
-#include "IonAllocPolicy.h"
-#include "InlineList.h"
-#include "FixedArityList.h"
-#include "LOpcodes.h"
-#include "Registers.h"
-#include "MIR.h"
-#include "MIRGraph.h"
-#include "shared/Assembler-shared.h"
-#include "Safepoints.h"
-#include "Bailouts.h"
-#include "VMFunctions.h"
+#include "mozilla/Array.h"
+
+#include "jit/Bailouts.h"
+#include "jit/InlineList.h"
+#include "jit/IonAllocPolicy.h"
+#include "jit/LOpcodes.h"
+#include "jit/MIR.h"
+#include "jit/MIRGraph.h"
+#include "jit/Registers.h"
+#include "jit/Safepoints.h"
 
 namespace js {
 namespace jit {
@@ -59,13 +57,14 @@ class LAllocation : public TempObject
 {
     uintptr_t bits_;
 
-  protected:
     static const uintptr_t TAG_BIT = 1;
     static const uintptr_t TAG_SHIFT = 0;
     static const uintptr_t TAG_MASK = 1 << TAG_SHIFT;
     static const uintptr_t KIND_BITS = 4;
     static const uintptr_t KIND_SHIFT = TAG_SHIFT + TAG_BIT;
     static const uintptr_t KIND_MASK = (1 << KIND_BITS) - 1;
+
+  protected:
     static const uintptr_t DATA_BITS = (sizeof(uint32_t) * 8) - KIND_BITS - TAG_BIT;
     static const uintptr_t DATA_SHIFT = KIND_SHIFT + KIND_BITS;
     static const uintptr_t DATA_MASK = (1 << DATA_BITS) - 1;
@@ -112,12 +111,12 @@ class LAllocation : public TempObject
     LAllocation() : bits_(0)
     { }
 
-    static LAllocation *New() {
-        return new LAllocation();
+    static LAllocation *New(TempAllocator &alloc) {
+        return new(alloc) LAllocation();
     }
     template <typename T>
-    static LAllocation *New(const T &other) {
-        return new LAllocation(other);
+    static LAllocation *New(TempAllocator &alloc, const T &other) {
+        return new(alloc) LAllocation(other);
     }
 
     // The value pointer must be rooted in MIR and have its low bit cleared.
@@ -164,6 +163,9 @@ class LAllocation : public TempObject
     bool isRegister() const {
         return isGeneralReg() || isFloatReg();
     }
+    bool isRegister(bool needFloat) const {
+        return needFloat ? isFloatReg() : isGeneralReg();
+    }
     bool isMemory() const {
         return isStackSlot() || isArgument();
     }
@@ -201,6 +203,8 @@ class LAllocation : public TempObject
 #else
     const char *toString() const { return "???"; }
 #endif
+
+    void dump() const;
 };
 
 class LUse : public LAllocation
@@ -441,6 +445,7 @@ class LDefinition
     enum Type {
         GENERAL,    // Generic, integer or pointer-width data (GPR).
         OBJECT,     // Pointer that may be collected as garbage (GPR).
+        SLOTS,      // Slots/elements pointer that may be moved by minor GCs (GPR).
         DOUBLE,     // 64-bit point value (FPU).
 #ifdef JS_NUNBOX32
         // A type virtual register must be followed by a payload virtual
@@ -535,6 +540,7 @@ class LDefinition
           case MIRType_Object:
             return LDefinition::OBJECT;
           case MIRType_Double:
+          case MIRType_Float32:
             return LDefinition::DOUBLE;
 #if defined(JS_PUNBOX64)
           case MIRType_Value:
@@ -542,16 +548,13 @@ class LDefinition
 #endif
           case MIRType_Slots:
           case MIRType_Elements:
-            // When we begin allocating slots vectors from the GC, this will
-            // need to change to ::OBJECT.
-            return LDefinition::GENERAL;
+            return LDefinition::SLOTS;
           case MIRType_Pointer:
             return LDefinition::GENERAL;
           case MIRType_ForkJoinSlice:
             return LDefinition::GENERAL;
           default:
-            JS_NOT_REACHED("unexpected type");
-            return LDefinition::GENERAL;
+            MOZ_ASSUME_UNREACHABLE("unexpected type");
         }
     }
 };
@@ -584,9 +587,9 @@ class LInstruction
 
     LInstruction()
       : id_(0),
-        snapshot_(NULL),
-        safepoint_(NULL),
-        mir_(NULL)
+        snapshot_(nullptr),
+        safepoint_(nullptr),
+        mir_(nullptr)
     { }
 
   public:
@@ -612,7 +615,7 @@ class LInstruction
     // Hook for opcodes to add extra high level detail about what code will be
     // emitted for the op.
     virtual const char *extraName() const {
-        return NULL;
+        return nullptr;
     }
 
   public:
@@ -666,7 +669,7 @@ class LInstruction
         return mir_;
     }
     void assignSnapshot(LSnapshot *snapshot);
-    void initSafepoint();
+    void initSafepoint(TempAllocator &alloc);
 
     // For an instruction which has a MUST_REUSE_INPUT output, whether that
     // output register will be restored to its original value when bailing out.
@@ -674,7 +677,8 @@ class LInstruction
         return false;
     }
 
-    virtual void print(FILE *fp);
+    virtual void dump(FILE *fp);
+    void dump();
     static void printName(FILE *fp, Opcode op);
     virtual void printName(FILE *fp);
     virtual void printOperands(FILE *fp);
@@ -712,12 +716,12 @@ class LInstructionVisitor
     }
 
     LInstructionVisitor()
-      : ins_(NULL),
-        lastPC_(NULL)
+      : ins_(nullptr),
+        lastPC_(nullptr)
     {}
 
   public:
-#define VISIT_INS(op) virtual bool visit##op(L##op *) { JS_NOT_REACHED("NYI: " #op); return false; }
+#define VISIT_INS(op) virtual bool visit##op(L##op *) { MOZ_ASSUME_UNREACHABLE("NYI: " #op); }
     LIR_OPCODE_LIST(VISIT_INS)
 #undef VISIT_INS
 };
@@ -734,16 +738,18 @@ class LBlock : public TempObject
     InlineList<LInstruction> instructions_;
     LMoveGroup *entryMoveGroup_;
     LMoveGroup *exitMoveGroup_;
+    Label label_;
 
-    LBlock(MBasicBlock *block)
+    LBlock(TempAllocator &alloc, MBasicBlock *block)
       : block_(block),
-        entryMoveGroup_(NULL),
-        exitMoveGroup_(NULL)
+        phis_(alloc),
+        entryMoveGroup_(nullptr),
+        exitMoveGroup_(nullptr)
     { }
 
   public:
-    static LBlock *New(MBasicBlock *from) {
-        return new LBlock(from);
+    static LBlock *New(TempAllocator &alloc, MBasicBlock *from) {
+        return new(alloc) LBlock(alloc, from);
     }
     void add(LInstruction *ins) {
         instructions_.pushBack(ins);
@@ -796,45 +802,47 @@ class LBlock : public TempObject
     }
     uint32_t firstId();
     uint32_t lastId();
-    Label *label();
-    LMoveGroup *getEntryMoveGroup();
-    LMoveGroup *getExitMoveGroup();
+    Label *label() {
+        return &label_;
+    }
+    LMoveGroup *getEntryMoveGroup(TempAllocator &alloc);
+    LMoveGroup *getExitMoveGroup(TempAllocator &alloc);
 };
 
 template <size_t Defs, size_t Operands, size_t Temps>
 class LInstructionHelper : public LInstruction
 {
-    FixedArityList<LDefinition, Defs> defs_;
-    FixedArityList<LAllocation, Operands> operands_;
-    FixedArityList<LDefinition, Temps> temps_;
+    mozilla::Array<LDefinition, Defs> defs_;
+    mozilla::Array<LAllocation, Operands> operands_;
+    mozilla::Array<LDefinition, Temps> temps_;
 
   public:
-    size_t numDefs() const {
+    size_t numDefs() const MOZ_FINAL MOZ_OVERRIDE {
         return Defs;
     }
-    LDefinition *getDef(size_t index) {
+    LDefinition *getDef(size_t index) MOZ_FINAL MOZ_OVERRIDE {
         return &defs_[index];
     }
-    size_t numOperands() const {
+    size_t numOperands() const MOZ_FINAL MOZ_OVERRIDE {
         return Operands;
     }
-    LAllocation *getOperand(size_t index) {
+    LAllocation *getOperand(size_t index) MOZ_FINAL MOZ_OVERRIDE {
         return &operands_[index];
     }
-    size_t numTemps() const {
+    size_t numTemps() const MOZ_FINAL MOZ_OVERRIDE {
         return Temps;
     }
-    LDefinition *getTemp(size_t index) {
+    LDefinition *getTemp(size_t index) MOZ_FINAL MOZ_OVERRIDE {
         return &temps_[index];
     }
 
-    void setDef(size_t index, const LDefinition &def) {
+    void setDef(size_t index, const LDefinition &def) MOZ_FINAL MOZ_OVERRIDE {
         defs_[index] = def;
     }
-    void setOperand(size_t index, const LAllocation &a) {
+    void setOperand(size_t index, const LAllocation &a) MOZ_FINAL MOZ_OVERRIDE {
         operands_[index] = a;
     }
-    void setTemp(size_t index, const LDefinition &a) {
+    void setTemp(size_t index, const LDefinition &a) MOZ_FINAL MOZ_OVERRIDE {
         temps_[index] = a;
     }
 
@@ -843,7 +851,7 @@ class LInstructionHelper : public LInstruction
     }
     MBasicBlock *getSuccessor(size_t i) const {
         JS_ASSERT(false);
-        return NULL;
+        return nullptr;
     }
     void setSuccessor(size_t i, MBasicBlock *successor) {
         JS_ASSERT(false);
@@ -983,6 +991,12 @@ class LSafepoint : public TempObject
     // The subset of liveRegs which contains gcthing pointers.
     GeneralRegisterSet gcRegs_;
 
+#ifdef CHECK_OSIPOINT_REGISTERS
+    // Temp regs of the current instruction. This set is never written to the
+    // safepoint; it's only used by assertions during compilation.
+    RegisterSet tempRegs_;
+#endif
+
     // Offset to a position in the safepoint stream, or
     // INVALID_SAFEPOINT_OFFSET.
     uint32_t safepointOffset_;
@@ -1007,13 +1021,23 @@ class LSafepoint : public TempObject
     GeneralRegisterSet valueRegs_;
 #endif
 
+    // The subset of liveRegs which contains pointers to slots/elements.
+    GeneralRegisterSet slotsOrElementsRegs_;
+
+    // List of stack slots which have slots/elements pointers.
+    SlotList slotsOrElementsSlots_;
+
   public:
-    LSafepoint()
+    LSafepoint(TempAllocator &alloc)
       : safepointOffset_(INVALID_SAFEPOINT_OFFSET)
       , osiCallPointOffset_(0)
+      , gcSlots_(alloc)
+      , valueSlots_(alloc)
 #ifdef JS_NUNBOX32
+      , nunboxParts_(alloc)
       , partialNunboxes_(0)
 #endif
+      , slotsOrElementsSlots_(alloc)
     { }
     void addLiveRegister(AnyRegister reg) {
         liveRegs_.addUnchecked(reg);
@@ -1021,6 +1045,14 @@ class LSafepoint : public TempObject
     const RegisterSet &liveRegs() const {
         return liveRegs_;
     }
+#ifdef CHECK_OSIPOINT_REGISTERS
+    void addTempRegister(AnyRegister reg) {
+        tempRegs_.addUnchecked(reg);
+    }
+    const RegisterSet &tempRegs() const {
+        return tempRegs_;
+    }
+#endif
     void addGcRegister(Register reg) {
         gcRegs_.addUnchecked(reg);
     }
@@ -1032,6 +1064,38 @@ class LSafepoint : public TempObject
     }
     SlotList &gcSlots() {
         return gcSlots_;
+    }
+
+    SlotList &slotsOrElementsSlots() {
+        return slotsOrElementsSlots_;
+    }
+    GeneralRegisterSet slotsOrElementsRegs() const {
+        return slotsOrElementsRegs_;
+    }
+    void addSlotsOrElementsRegister(Register reg) {
+        slotsOrElementsRegs_.addUnchecked(reg);
+    }
+    bool addSlotsOrElementsSlot(uint32_t slot) {
+        return slotsOrElementsSlots_.append(slot);
+    }
+    bool addSlotsOrElementsPointer(LAllocation alloc) {
+        if (alloc.isStackSlot())
+            return addSlotsOrElementsSlot(alloc.toStackSlot()->slot());
+        JS_ASSERT(alloc.isRegister());
+        addSlotsOrElementsRegister(alloc.toRegister().gpr());
+        return true;
+    }
+    bool hasSlotsOrElementsPointer(LAllocation alloc) {
+        if (alloc.isRegister())
+            return slotsOrElementsRegs().has(alloc.toRegister().gpr());
+        if (alloc.isStackSlot()) {
+            for (size_t i = 0; i < slotsOrElementsSlots_.length(); i++) {
+                if (slotsOrElementsSlots_[i] == alloc.toStackSlot()->slot())
+                    return true;
+            }
+            return false;
+        }
+        return false;
     }
 
     bool addGcPointer(LAllocation alloc) {
@@ -1290,7 +1354,7 @@ class LIRGraph
     // Snapshot taken before any LIR has been lowered.
     LSnapshot *entrySnapshot_;
 
-    // LBlock containing LOsrEntry, or NULL.
+    // LBlock containing LOsrEntry, or nullptr.
     LBlock *osrBlock_;
 
     MIRGraph &mir_;
@@ -1430,20 +1494,91 @@ LAllocation::toRegister() const
     }
 #endif
 
-#include "LIR-Common.h"
+#include "jit/LIR-Common.h"
 #if defined(JS_CPU_X86) || defined(JS_CPU_X64)
 # if defined(JS_CPU_X86)
-#  include "x86/LIR-x86.h"
+#  include "jit/x86/LIR-x86.h"
 # elif defined(JS_CPU_X64)
-#  include "x64/LIR-x64.h"
+#  include "jit/x64/LIR-x64.h"
 # endif
-# include "shared/LIR-x86-shared.h"
+# include "jit/shared/LIR-x86-shared.h"
 #elif defined(JS_CPU_ARM)
-# include "arm/LIR-arm.h"
+# include "jit/arm/LIR-arm.h"
 #endif
 
 #undef LIR_HEADER
 
-#include "LIR-inl.h"
+namespace js {
+namespace jit {
+
+#define LIROP(name)                                                         \
+    L##name *LInstruction::to##name()                                       \
+    {                                                                       \
+        JS_ASSERT(is##name());                                              \
+        return static_cast<L##name *>(this);                                \
+    }
+    LIR_OPCODE_LIST(LIROP)
+#undef LIROP
+
+#define LALLOC_CAST(type)                                                   \
+    L##type *LAllocation::to##type() {                                      \
+        JS_ASSERT(is##type());                                              \
+        return static_cast<L##type *>(this);                                \
+    }
+#define LALLOC_CONST_CAST(type)                                             \
+    const L##type *LAllocation::to##type() const {                          \
+        JS_ASSERT(is##type());                                              \
+        return static_cast<const L##type *>(this);                          \
+    }
+
+LALLOC_CAST(Use)
+LALLOC_CONST_CAST(Use)
+LALLOC_CONST_CAST(GeneralReg)
+LALLOC_CONST_CAST(FloatReg)
+LALLOC_CONST_CAST(StackSlot)
+LALLOC_CONST_CAST(Argument)
+LALLOC_CONST_CAST(ConstantIndex)
+
+#undef LALLOC_CAST
+
+#ifdef JS_NUNBOX32
+static inline signed
+OffsetToOtherHalfOfNunbox(LDefinition::Type type)
+{
+    JS_ASSERT(type == LDefinition::TYPE || type == LDefinition::PAYLOAD);
+    signed offset = (type == LDefinition::TYPE)
+                    ? PAYLOAD_INDEX - TYPE_INDEX
+                    : TYPE_INDEX - PAYLOAD_INDEX;
+    return offset;
+}
+
+static inline void
+AssertTypesFormANunbox(LDefinition::Type type1, LDefinition::Type type2)
+{
+    JS_ASSERT((type1 == LDefinition::TYPE && type2 == LDefinition::PAYLOAD) ||
+              (type2 == LDefinition::TYPE && type1 == LDefinition::PAYLOAD));
+}
+
+static inline unsigned
+OffsetOfNunboxSlot(LDefinition::Type type)
+{
+    if (type == LDefinition::PAYLOAD)
+        return NUNBOX32_PAYLOAD_OFFSET / STACK_SLOT_SIZE;
+    return NUNBOX32_TYPE_OFFSET / STACK_SLOT_SIZE;
+}
+
+// Note that stack indexes for LStackSlot are modelled backwards, so a
+// double-sized slot starting at 2 has its next word at 1, *not* 3.
+static inline unsigned
+BaseOfNunboxSlot(LDefinition::Type type, unsigned slot)
+{
+    if (type == LDefinition::PAYLOAD)
+        return slot + (NUNBOX32_PAYLOAD_OFFSET / STACK_SLOT_SIZE);
+    return slot + (NUNBOX32_TYPE_OFFSET / STACK_SLOT_SIZE);
+}
+#endif
+
+} // namespace jit
+} // namespace js
 
 #endif /* jit_LIR_h */

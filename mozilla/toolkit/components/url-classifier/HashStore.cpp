@@ -102,11 +102,15 @@ extern PRLogModuleInfo *gUrlClassifierDbServiceLog;
 #define LOG_ENABLED() (false)
 #endif
 
-// Either the return was successful or we call the Reset function.
-// Used while reading in the store.
+// Either the return was successful or we call the Reset function (unless we
+// hit an OOM).  Used while reading in the store.
 #define SUCCESS_OR_RESET(res)                                             \
   do {                                                                    \
     nsresult __rv = res; /* Don't evaluate |res| more than once */        \
+    if (__rv == NS_ERROR_OUT_OF_MEMORY) {                                 \
+      NS_WARNING("SafeBrowsing OOM.");                                    \
+      return __rv;                                                        \
+    }                                                                     \
     if (NS_FAILED(__rv)) {                                                \
       NS_WARNING("SafeBrowsing store corrupted or out of date.");         \
       Reset();                                                            \
@@ -142,7 +146,7 @@ TableUpdate::NewAddComplete(uint32_t aAddChunk, const Completion& aHash)
 {
   AddComplete *add = mAddCompletes.AppendElement();
   add->addChunk = aAddChunk;
-  add->hash.complete = aHash;
+  add->complete = aHash;
 }
 
 void
@@ -150,7 +154,7 @@ TableUpdate::NewSubComplete(uint32_t aAddChunk, const Completion& aHash, uint32_
 {
   SubComplete *sub = mSubCompletes.AppendElement();
   sub->addChunk = aAddChunk;
-  sub->hash.complete = aHash;
+  sub->complete = aHash;
   sub->subChunk = aSubChunk;
 }
 
@@ -319,6 +323,8 @@ HashStore::CalculateChecksum(nsAutoCString& aChecksum,
   // Size of MD5 hash in bytes
   const uint32_t CHECKSUM_SIZE = 16;
 
+  // MD5 is not a secure hash function, but since this is a filesystem integrity
+  // check, this usage is ok.
   rv = hash->Init(nsICryptoHash::MD5);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -358,9 +364,7 @@ HashStore::UpdateHeader()
 nsresult
 HashStore::ReadChunkNumbers()
 {
-  if (!mInputStream) {
-    return NS_OK;
-  }
+  NS_ENSURE_STATE(mInputStream);
 
   nsCOMPtr<nsISeekableStream> seekable = do_QueryInterface(mInputStream);
   nsresult rv = seekable->Seek(nsISeekableStream::NS_SEEK_SET,
@@ -381,6 +385,8 @@ nsresult
 HashStore::ReadHashes()
 {
   if (!mInputStream) {
+    // BeginUpdate has been called but Open hasn't initialized mInputStream,
+    // because the existing HashStore is empty.
     return NS_OK;
   }
 
@@ -670,7 +676,7 @@ ByteSliceWrite(nsIOutputStream* aOut, nsTArray<uint32_t>& aData)
 }
 
 static nsresult
-ByteSliceRead(nsIInputStream* aInStream, nsTArray<uint32_t>* aData, uint32_t count)
+ByteSliceRead(nsIInputStream* aInStream, FallibleTArray<uint32_t>* aData, uint32_t count)
 {
   nsTArray<uint8_t> slice1;
   nsTArray<uint8_t> slice2;
@@ -689,7 +695,9 @@ ByteSliceRead(nsIInputStream* aInStream, nsTArray<uint32_t>* aData, uint32_t cou
   rv = ReadTArray(aInStream, &slice4, count);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  aData->SetCapacity(count);
+  if (!aData->SetCapacity(count)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
 
   for (uint32_t i = 0; i < count; i++) {
     aData->AppendElement((slice1[i] << 24) | (slice2[i] << 16)
@@ -702,7 +710,7 @@ ByteSliceRead(nsIInputStream* aInStream, nsTArray<uint32_t>* aData, uint32_t cou
 nsresult
 HashStore::ReadAddPrefixes()
 {
-  nsTArray<uint32_t> chunks;
+  FallibleTArray<uint32_t> chunks;
   uint32_t count = mHeader.numAddPrefixes;
 
   nsresult rv = ByteSliceRead(mInputStream, &chunks, count);
@@ -721,9 +729,9 @@ HashStore::ReadAddPrefixes()
 nsresult
 HashStore::ReadSubPrefixes()
 {
-  nsTArray<uint32_t> addchunks;
-  nsTArray<uint32_t> subchunks;
-  nsTArray<uint32_t> prefixes;
+  FallibleTArray<uint32_t> addchunks;
+  FallibleTArray<uint32_t> subchunks;
+  FallibleTArray<uint32_t> prefixes;
   uint32_t count = mHeader.numSubPrefixes;
 
   nsresult rv = ByteSliceRead(mInputStream, &addchunks, count);
@@ -813,14 +821,14 @@ HashStore::WriteFile()
   rv = out->Write(reinterpret_cast<char*>(&mHeader), sizeof(mHeader), &written);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Write chunk numbers...
+  // Write chunk numbers.
   rv = mAddChunks.Write(out);
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = mSubChunks.Write(out);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  // Write hashes..
+  // Write hashes.
   rv = WriteAddPrefixes(out);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -996,7 +1004,7 @@ HashStore::ProcessSubs()
 
   // Remove any remaining subbed prefixes from both addprefixes
   // and addcompletes.
-  KnockoutSubs(&mSubPrefixes,  &mAddPrefixes);
+  KnockoutSubs(&mSubPrefixes, &mAddPrefixes);
   KnockoutSubs(&mSubCompletes, &mAddCompletes);
 
   // Remove any remaining subprefixes referring to addchunks that

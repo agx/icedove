@@ -11,9 +11,6 @@
 #include "mozilla/StartupTimeline.h"
 #include "nsTArray.h"
 #include "nsStringGlue.h"
-#if defined(MOZ_ENABLE_PROFILER_SPS)
-#include "shared-libraries.h"
-#endif
 
 namespace base {
   class Histogram;
@@ -41,6 +38,17 @@ void Init();
  * @param sample - value to record.
  */
 void Accumulate(ID id, uint32_t sample);
+
+/**
+ * Adds a sample to a histogram defined in TelemetryHistograms.h.
+ * This function is here to support telemetry measurements from Java,
+ * where we have only names and not numeric IDs.  You should almost
+ * certainly be using the by-enum-id version instead of this one.
+ *
+ * @param name - histogram name
+ * @param sample - value to record
+ */
+void Accumulate(const char* name, uint32_t sample);
 
 /**
  * Adds time delta in milliseconds to a histogram defined in TelemetryHistograms.h
@@ -166,6 +174,20 @@ class ProcessedStack;
 void RecordChromeHang(uint32_t duration,
                       ProcessedStack &aStack);
 #endif
+
+class ThreadHangStats;
+
+/**
+ * Move a ThreadHangStats to Telemetry storage. Normally Telemetry queries
+ * for active ThreadHangStats through BackgroundHangMonitor, but once a
+ * thread exits, the thread's copy of ThreadHangStats needs to be moved to
+ * inside Telemetry using this function.
+ *
+ * @param aStats ThreadHangStats to save; the data inside aStats
+ *               will be moved and aStats should be treated as
+ *               invalid after this function returns
+ */
+void RecordThreadHangStats(ThreadHangStats& aStats);
 
 /**
  * Record a failed attempt at locking the user's profile.

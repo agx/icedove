@@ -8,20 +8,16 @@
 #define vm_ThreadPool_h
 
 #include <stddef.h>
-#include "mozilla/StandardInteger.h"
-#include "js/Vector.h"
+#include <stdint.h>
+
 #include "jsalloc.h"
+#include "jslock.h"
+#include "jspubtd.h"
 
-#ifdef JS_THREADSAFE
-#  include "prtypes.h"
-#  include "prlock.h"
-#  include "prcvar.h"
-#endif
+#include "js/Vector.h"
 
-struct JSContext;
 struct JSRuntime;
 struct JSCompartment;
-class JSScript;
 
 namespace js {
 
@@ -48,14 +44,7 @@ class TaskExecutor
 // threads are disabled, or when manually specified for benchmarking
 // purposes).
 //
-// You can either submit jobs in one of two ways.  The first is
-// |submitOne()|, which submits a job to be executed by one worker
-// thread (this will fail if there are no worker threads).  The job
-// will be enqueued and executed by some worker (the current scheduler
-// uses round-robin load balancing; something more sophisticated,
-// e.g. a central queue or work stealing, might be better).
-//
-// The second way to submit a job is using |submitAll()|---in this
+// The way to submit a job is using |submitAll()|---in this
 // case, the job will be executed by all worker threads.  This does
 // not fail if there are no worker threads, it simply does nothing.
 // Of course, each thread may have any number of previously submitted
@@ -72,12 +61,6 @@ class ThreadPool
     JSRuntime *const runtime_;
     js::Vector<ThreadPoolWorker*, 8, SystemAllocPolicy> workers_;
 
-    // Number of workers we will start, when we actually start them
-    size_t numWorkers_;
-
-    // Next worker for |submitOne()|. Atomically modified.
-    uint32_t nextId_;
-
     bool lazyStartWorkers(JSContext *cx);
     void terminateWorkers();
     void terminateWorkersAndReportOOM(JSContext *cx);
@@ -86,13 +69,10 @@ class ThreadPool
     ThreadPool(JSRuntime *rt);
     ~ThreadPool();
 
-    bool init();
-
     // Return number of worker threads in the pool.
-    size_t numWorkers() { return numWorkers_; }
+    size_t numWorkers() const;
 
     // See comment on class:
-    bool submitOne(JSContext *cx, TaskExecutor *executor);
     bool submitAll(JSContext *cx, TaskExecutor *executor);
 
     // Wait until all worker threads have finished their current set

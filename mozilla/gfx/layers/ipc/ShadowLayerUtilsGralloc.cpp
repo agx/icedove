@@ -9,7 +9,7 @@
 
 #include "mozilla/layers/PGrallocBufferChild.h"
 #include "mozilla/layers/PGrallocBufferParent.h"
-#include "mozilla/layers/PLayerTransactionChild.h"
+#include "mozilla/layers/LayerTransactionChild.h"
 #include "mozilla/layers/ShadowLayers.h"
 #include "mozilla/layers/LayerManagerComposite.h"
 #include "mozilla/layers/CompositorTypes.h"
@@ -22,10 +22,13 @@
 
 #include "gfxImageSurface.h"
 #include "gfxPlatform.h"
+#include "GLContext.h"
 
 #include "GeckoProfiler.h"
 
 #include "cutils/properties.h"
+
+#include "MainThreadUtils.h"
 
 using namespace android;
 using namespace base;
@@ -112,40 +115,40 @@ MagicGrallocBufferHandle::MagicGrallocBufferHandle(const sp<GraphicBuffer>& aGra
 //-----------------------------------------------------------------------------
 // Parent process
 
-static gfxASurface::gfxImageFormat
+static gfxImageFormat
 ImageFormatForPixelFormat(android::PixelFormat aFormat)
 {
   switch (aFormat) {
   case PIXEL_FORMAT_RGBA_8888:
-    return gfxASurface::ImageFormatARGB32;
+    return gfxImageFormatARGB32;
   case PIXEL_FORMAT_RGBX_8888:
-    return gfxASurface::ImageFormatRGB24;
+    return gfxImageFormatRGB24;
   case PIXEL_FORMAT_RGB_565:
-    return gfxASurface::ImageFormatRGB16_565;
+    return gfxImageFormatRGB16_565;
   case PIXEL_FORMAT_A_8:
-    return gfxASurface::ImageFormatA8;
+    return gfxImageFormatA8;
   default:
-    MOZ_NOT_REACHED("Unknown gralloc pixel format");
+    MOZ_CRASH("Unknown gralloc pixel format");
   }
-  return gfxASurface::ImageFormatARGB32;
+  return gfxImageFormatARGB32;
 }
 
 static android::PixelFormat
-PixelFormatForImageFormat(gfxASurface::gfxImageFormat aFormat)
+PixelFormatForImageFormat(gfxImageFormat aFormat)
 {
   switch (aFormat) {
-  case gfxASurface::ImageFormatARGB32:
+  case gfxImageFormatARGB32:
     return android::PIXEL_FORMAT_RGBA_8888;
-  case gfxASurface::ImageFormatRGB24:
+  case gfxImageFormatRGB24:
     return android::PIXEL_FORMAT_RGBX_8888;
-  case gfxASurface::ImageFormatRGB16_565:
+  case gfxImageFormatRGB16_565:
     return android::PIXEL_FORMAT_RGB_565;
-  case gfxASurface::ImageFormatA8:
+  case gfxImageFormatA8:
     return android::PIXEL_FORMAT_A_8;
   default:
-    MOZ_NOT_REACHED("Unknown gralloc pixel format");
+    MOZ_CRASH("Unknown gralloc pixel format");
   }
-  return gfxASurface::ImageFormatARGB32;
+  return gfxImageFormatARGB32;
 }
 
 static size_t
@@ -171,35 +174,50 @@ BytesPerPixelForPixelFormat(android::PixelFormat aFormat)
 }
 
 static android::PixelFormat
-PixelFormatForContentType(gfxASurface::gfxContentType aContentType)
+PixelFormatForContentType(gfxContentType aContentType)
 {
   return PixelFormatForImageFormat(
     gfxPlatform::GetPlatform()->OptimalFormatForContent(aContentType));
 }
 
-static gfxASurface::gfxContentType
+static gfxContentType
 ContentTypeFromPixelFormat(android::PixelFormat aFormat)
 {
   return gfxASurface::ContentFromFormat(ImageFormatForPixelFormat(aFormat));
 }
 
-static size_t sCurrentAlloc;
-static int64_t GetGrallocSize() { return sCurrentAlloc; }
+class GrallocReporter MOZ_FINAL : public MemoryUniReporter
+{
+  friend class GrallocBufferActor;
 
-NS_MEMORY_REPORTER_IMPLEMENT(GrallocBufferActor,
-  "gralloc",
-  KIND_OTHER,
-  UNITS_BYTES,
-  GetGrallocSize,
-  "Special RAM that can be shared between processes and directly "
-  "accessed by both the CPU and GPU.  Gralloc memory is usually a "
-  "relatively precious resource, with much less available than generic "
-  "RAM.  When it's exhausted, graphics performance can suffer. "
-  "This value can be incorrect because of race conditions.");
+public:
+  GrallocReporter()
+    : MemoryUniReporter("gralloc", KIND_OTHER, UNITS_BYTES,
+"Special RAM that can be shared between processes and directly accessed by "
+"both the CPU and GPU.  Gralloc memory is usually a relatively precious "
+"resource, with much less available than generic RAM.  When it's exhausted, "
+"graphics performance can suffer. This value can be incorrect because of race "
+"conditions.")
+  {
+#ifdef DEBUG
+    // There must be only one instance of this class, due to |sAmount|
+    // being static.  Assert this.
+    static bool hasRun = false;
+    MOZ_ASSERT(!hasRun);
+    hasRun = true;
+#endif
+  }
+
+private:
+  int64_t Amount() MOZ_OVERRIDE { return sAmount; }
+
+  static int64_t sAmount;
+};
+
+int64_t GrallocReporter::sAmount = 0;
 
 GrallocBufferActor::GrallocBufferActor()
 : mAllocBytes(0)
-, mTextureHost(nullptr)
 {
   static bool registered;
   if (!registered) {
@@ -207,7 +225,7 @@ GrallocBufferActor::GrallocBufferActor()
     // the main thread.
     NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
 
-    NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(GrallocBufferActor));
+    RegisterStrongMemoryReporter(new GrallocReporter());
     registered = true;
   }
 }
@@ -215,7 +233,7 @@ GrallocBufferActor::GrallocBufferActor()
 GrallocBufferActor::~GrallocBufferActor()
 {
   if (mAllocBytes > 0) {
-    sCurrentAlloc -= mAllocBytes;
+    GrallocReporter::sAmount -= mAllocBytes;
   }
 }
 
@@ -242,7 +260,7 @@ GrallocBufferActor::Create(const gfxIntSize& aSize,
 
   size_t bpp = BytesPerPixelForPixelFormat(format);
   actor->mAllocBytes = aSize.width * aSize.height * bpp;
-  sCurrentAlloc += actor->mAllocBytes;
+  GrallocReporter::sAmount += actor->mAllocBytes;
 
   actor->mGraphicBuffer = buffer;
   *aOutHandle = MagicGrallocBufferHandle(buffer);
@@ -250,31 +268,27 @@ GrallocBufferActor::Create(const gfxIntSize& aSize,
   return actor;
 }
 
-// used only for hacky fix in gecko 23 for bug 862324
+// used only for hacky fix for bug 862324
 void GrallocBufferActor::ActorDestroy(ActorDestroyReason)
 {
-  if (mTextureHost) {
-    mTextureHost->ForgetBuffer();
+  for (size_t i = 0; i < mDeprecatedTextureHosts.Length(); i++) {
+    mDeprecatedTextureHosts[i]->ForgetBuffer();
   }
 }
 
-// used only for hacky fix in gecko 23 for bug 862324
-void GrallocBufferActor::SetTextureHost(TextureHost* aTextureHost)
+// used only for hacky fix for bug 862324
+void GrallocBufferActor::AddDeprecatedTextureHost(DeprecatedTextureHost* aDeprecatedTextureHost)
 {
-  mTextureHost = aTextureHost;
+  mDeprecatedTextureHosts.AppendElement(aDeprecatedTextureHost);
 }
 
-/*static*/ already_AddRefed<TextureImage>
-LayerManagerComposite::OpenDescriptorForDirectTexturing(GLContext* aGL,
-                                                        const SurfaceDescriptor& aDescriptor,
-                                                        GLenum aWrapMode)
+// used only for hacky fix for bug 862324
+void GrallocBufferActor::RemoveDeprecatedTextureHost(DeprecatedTextureHost* aDeprecatedTextureHost)
 {
-  PROFILER_LABEL("LayerManagerComposite", "OpenDescriptorForDirectTexturing");
-  if (SurfaceDescriptor::TSurfaceDescriptorGralloc != aDescriptor.type()) {
-    return nullptr;
-  }
-  sp<GraphicBuffer> buffer = GrallocBufferActor::GetFrom(aDescriptor);
-  return aGL->CreateDirectTextureImage(buffer.get(), aWrapMode);
+  mDeprecatedTextureHosts.RemoveElement(aDeprecatedTextureHost);
+  // that should be the only occurence, otherwise we'd leak this TextureHost...
+  // assert that that's not happening.
+  MOZ_ASSERT(!mDeprecatedTextureHosts.Contains(aDeprecatedTextureHost));
 }
 
 /*static*/ bool
@@ -341,18 +355,30 @@ ShadowLayerForwarder::AllocGrallocBuffer(const gfxIntSize& aSize,
 
 bool
 ISurfaceAllocator::PlatformAllocSurfaceDescriptor(const gfxIntSize& aSize,
-                                                  gfxASurface::gfxContentType aContent,
+                                                  gfxContentType aContent,
                                                   uint32_t aCaps,
                                                   SurfaceDescriptor* aBuffer)
 {
 
-  // Check for Nexus S to disable gralloc. We only check for this on ICS or
-  // earlier, in hopes that JB will work.
+  // Check for devices that have problems with gralloc. We only check for
+  // this on ICS or earlier, in hopes that JB will work.
 #if ANDROID_VERSION <= 15
-  char propValue[PROPERTY_VALUE_MAX];
-  property_get("ro.product.device", propValue, "None");
-  if (strcmp("crespo",propValue) == 0) {
-    NS_WARNING("Nexus S has issues with gralloc, falling back to shmem");
+  static bool checkedDevice = false;
+  static bool disableGralloc = false;
+
+  if (!checkedDevice) {
+    char propValue[PROPERTY_VALUE_MAX];
+    property_get("ro.product.device", propValue, "None");
+
+    if (strcmp("crespo",propValue) == 0) {
+      NS_WARNING("Nexus S has issues with gralloc, falling back to shmem");
+      disableGralloc = true;
+    }
+
+    checkedDevice = true;
+  }
+
+  if (disableGralloc) {
     return false;
   }
 #endif
@@ -426,6 +452,11 @@ GrallocBufferActor::GetFrom(const SurfaceDescriptorGralloc& aDescriptor)
   return gba->mGraphicBuffer;
 }
 
+android::GraphicBuffer*
+GrallocBufferActor::GetGraphicBuffer()
+{
+  return mGraphicBuffer.get();
+}
 
 /*static*/ already_AddRefed<gfxASurface>
 ShadowLayerForwarder::PlatformOpenDescriptor(OpenMode aMode,
@@ -486,6 +517,23 @@ ShadowLayerForwarder::PlatformGetDescriptorSurfaceSize(
   sp<GraphicBuffer> buffer =
     GrallocBufferActor::GetFrom(aDescriptor.get_SurfaceDescriptorGralloc());
   *aSize = aDescriptor.get_SurfaceDescriptorGralloc().size();
+  return true;
+}
+
+/*static*/ bool
+ShadowLayerForwarder::PlatformGetDescriptorSurfaceImageFormat(
+  const SurfaceDescriptor& aDescriptor,
+  OpenMode aMode,
+  gfxImageFormat* aImageFormat,
+  gfxASurface** aSurface)
+{
+  if (SurfaceDescriptor::TSurfaceDescriptorGralloc != aDescriptor.type()) {
+    return false;
+  }
+
+  sp<GraphicBuffer> buffer =
+    GrallocBufferActor::GetFrom(aDescriptor.get_SurfaceDescriptorGralloc());
+  *aImageFormat = ImageFormatForPixelFormat(buffer->getPixelFormat());
   return true;
 }
 

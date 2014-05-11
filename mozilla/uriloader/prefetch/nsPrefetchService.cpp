@@ -3,8 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsPrefetchService.h"
-#include "nsICacheSession.h"
-#include "nsICacheService.h"
+#include "nsICacheEntry.h"
 #include "nsIServiceManager.h"
 #include "nsICategoryManager.h"
 #include "nsIObserverService.h"
@@ -45,7 +44,11 @@ using namespace mozilla;
 //
 static PRLogModuleInfo *gPrefetchLog;
 #endif
+
+#undef LOG
 #define LOG(args) PR_LOG(gPrefetchLog, 4, args)
+
+#undef LOG_ENABLED
 #define LOG_ENABLED() PR_LOG_TEST(gPrefetchLog, 4)
 
 #define PREFETCH_PREF "network.prefetch-next"
@@ -264,7 +267,7 @@ nsPrefetchNode::OnStartRequest(nsIRequest *aRequest,
     if (!cacheToken)
         return NS_ERROR_ABORT; // bail, no cache entry
 
-    nsCOMPtr<nsICacheEntryInfo> entryInfo =
+    nsCOMPtr<nsICacheEntry> entryInfo =
         do_QueryInterface(cacheToken, &rv);
     if (NS_FAILED(rv)) return rv;
 

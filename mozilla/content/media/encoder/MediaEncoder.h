@@ -51,9 +51,10 @@ class MediaEncoder : public MediaStreamListener
 {
 public :
   enum {
-    ENCODE_HEADER,
+    ENCODE_METADDATA,
     ENCODE_TRACK,
     ENCODE_DONE,
+    ENCODE_ERROR,
   };
 
   MediaEncoder(ContainerWriter* aWriter,
@@ -64,7 +65,7 @@ public :
     , mAudioEncoder(aAudioEncoder)
     , mVideoEncoder(aVideoEncoder)
     , mMIMEType(aMIMEType)
-    , mState(MediaEncoder::ENCODE_HEADER)
+    , mState(MediaEncoder::ENCODE_METADDATA)
     , mShutdown(false)
   {}
 
@@ -119,6 +120,11 @@ public :
     if (mAudioEncoder) {
       mAudioEncoder->NotifyCancel();
     }
+  }
+
+  bool HasError()
+  {
+    return mState == ENCODE_ERROR;
   }
 
 private:

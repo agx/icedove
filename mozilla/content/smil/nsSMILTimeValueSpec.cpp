@@ -12,7 +12,7 @@
 #include "nsSMILInstanceTime.h"
 #include "nsSMILParserUtils.h"
 #include "nsEventListenerManager.h"
-#include "nsGUIEvent.h"
+#include "nsIDOMKeyEvent.h"
 #include "nsIDOMTimeEvent.h"
 #include "nsString.h"
 #include <limits>
@@ -68,11 +68,9 @@ nsSMILTimeValueSpec::SetSpec(const nsAString& aStringSpec,
                              Element* aContextNode)
 {
   nsSMILTimeValueSpecParams params;
-  nsresult rv =
-    nsSMILParserUtils::ParseTimeValueSpecParams(aStringSpec, params);
 
-  if (NS_FAILED(rv))
-    return rv;
+  if (!nsSMILParserUtils::ParseTimeValueSpecParams(aStringSpec, params))
+    return NS_ERROR_FAILURE;
 
   mParams = params;
 
@@ -94,7 +92,7 @@ nsSMILTimeValueSpec::SetSpec(const nsAString& aStringSpec,
 
   ResolveReferences(aContextNode);
 
-  return rv;
+  return NS_OK;
 }
 
 void
@@ -372,7 +370,7 @@ nsSMILTimeValueSpec::GetEventListenerManager(Element* aTarget)
   if (!target)
     return nullptr;
 
-  return target->GetListenerManager(true);
+  return target->GetOrCreateListenerManager();
 }
 
 void

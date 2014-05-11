@@ -2,10 +2,6 @@
   padding: 0px;
 }
 
-.click-to-play-plugins-notification-content {
-  width: 28em;
-}
-
 .click-to-play-plugins-notification-center-box {
   border: 1px solid ThreeDShadow;
   margin: 10px;
@@ -50,4 +46,20 @@
 .click-to-play-plugins-notification-link,
 .center-item-link {
   margin: 0;
+}
+
+.messageImage[value="plugin-hidden"] {
+  list-style-image: url("chrome://browser/skin/notification-pluginNormal.png");
+  -moz-image-region: rect(0, 16px, 16px, 0);
+}
+
+/* Keep any changes to this style in sync with pluginProblem.css */
+notification.pluginVulnerable {
+  background-color: rgb(72,72,72);
+  background-image: url(chrome://mozapps/skin/plugins/contentPluginStripe.png);
+  color: white;
+}
+
+notification.pluginVulnerable .messageImage {
+  list-style-image: url("chrome://browser/skin/notification-pluginBlocked.png");
 }

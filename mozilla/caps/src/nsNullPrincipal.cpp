@@ -9,7 +9,7 @@
  * same-origin with anything but themselves.
  */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsNullPrincipal.h"
 #include "nsNullPrincipalURI.h"
@@ -22,6 +22,7 @@
 #include "nsError.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsScriptSecurityManager.h"
+#include "pratom.h"
 
 using namespace mozilla;
 
@@ -34,11 +35,11 @@ NS_IMPL_CI_INTERFACE_GETTER2(nsNullPrincipal,
                              nsIPrincipal,
                              nsISerializable)
 
-NS_IMETHODIMP_(nsrefcnt) 
+NS_IMETHODIMP_(nsrefcnt)
 nsNullPrincipal::AddRef()
 {
   NS_PRECONDITION(int32_t(refcount) >= 0, "illegal refcnt");
-  nsrefcnt count = PR_ATOMIC_INCREMENT(&refcount);
+  nsrefcnt count = ++refcount;
   NS_LOG_ADDREF(this, count, "nsNullPrincipal", sizeof(*this));
   return count;
 }
@@ -47,7 +48,7 @@ NS_IMETHODIMP_(nsrefcnt)
 nsNullPrincipal::Release()
 {
   NS_PRECONDITION(0 != refcount, "dup release");
-  nsrefcnt count = PR_ATOMIC_DECREMENT(&refcount);
+  nsrefcnt count = --refcount;
   NS_LOG_RELEASE(this, count, "nsNullPrincipal");
   if (count == 0) {
     delete this;
@@ -148,8 +149,11 @@ nsNullPrincipal::GetHashValue(uint32_t *aResult)
 NS_IMETHODIMP
 nsNullPrincipal::GetSecurityPolicy(void** aSecurityPolicy)
 {
-  // We don't actually do security policy caching.  And it's not like anyone
-  // can set a security policy for us anyway.
+  // Leftover from old security model, a "security policy" is a set of
+  // rules for property access that can override the SOP. Policies are
+  // associated with origins and since nsNullPinricipals never get the
+  // same origin twice, it's not possible to specify a "security
+  // policy" for it.  Hence, we do not cache the security policy.
   *aSecurityPolicy = nullptr;
   return NS_OK;
 }
@@ -157,8 +161,11 @@ nsNullPrincipal::GetSecurityPolicy(void** aSecurityPolicy)
 NS_IMETHODIMP
 nsNullPrincipal::SetSecurityPolicy(void* aSecurityPolicy)
 {
-  // We don't actually do security policy caching.  And it's not like anyone
-  // can set a security policy for us anyway.
+  // Leftover from old security model, a "security policy" is a set of
+  // rules for property access that can override the SOP. Policies are
+  // associated with origins and since nsNullPinricipals never get the
+  // same origin twice, it's not possible to specify a "security
+  // policy" for it.  Hence, we do not cache the security policy.
   return NS_OK;
 }
 
@@ -171,16 +178,20 @@ nsNullPrincipal::GetURI(nsIURI** aURI)
 NS_IMETHODIMP
 nsNullPrincipal::GetCsp(nsIContentSecurityPolicy** aCsp)
 {
-  // CSP on a null principal makes no sense
-  *aCsp = nullptr;
+  NS_IF_ADDREF(*aCsp = mCSP);
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsNullPrincipal::SetCsp(nsIContentSecurityPolicy* aCsp)
 {
-  // CSP on a null principal makes no sense
-  return NS_ERROR_NOT_AVAILABLE;
+  // If CSP was already set, it should not be destroyed!  Instead, it should
+  // get set anew when a new principal is created.
+  if (mCSP)
+    return NS_ERROR_ALREADY_INITIALIZED;
+
+  mCSP = aCsp;
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -258,9 +269,10 @@ nsNullPrincipal::CheckMayLoad(nsIURI* aURI, bool aReport, bool aAllowIfInheritsP
 }
 
 NS_IMETHODIMP
-nsNullPrincipal::GetExtendedOrigin(nsACString& aExtendedOrigin)
+nsNullPrincipal::GetJarPrefix(nsACString& aJarPrefix)
 {
-  return GetOrigin(getter_Copies(aExtendedOrigin));
+  aJarPrefix.Truncate();
+  return NS_OK;
 }
 
 NS_IMETHODIMP

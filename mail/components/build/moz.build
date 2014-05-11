@@ -3,9 +3,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'mailcomps'
-
-CPP_SOURCES += [
+SOURCES += [
     'nsMailComps.cpp',
 ]
+
+LIBXUL_LIBRARY = True
+EXPORT_LIBRARY = True
+
+LIBRARY_NAME = 'mailcomps'
 

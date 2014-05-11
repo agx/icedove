@@ -16,7 +16,6 @@
 #include "nsIDOMElement.h"
 #include "nsINativeKeyBindings.h"
 #include "nsIController.h"
-#include "nsIControllers.h"
 #include "nsFocusManager.h"
 #include "nsPIWindowRoot.h"
 #include "nsIURI.h"
@@ -27,8 +26,8 @@
 #include "nsIDocShell.h"
 #include "nsIPresShell.h"
 #include "nsISelectionController.h"
-#include "nsGUIEvent.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/TextEvents.h"
 #include "mozilla/dom/Element.h"
 #include "nsEventStateManager.h"
 
@@ -287,13 +286,22 @@ GetEditorKeyBindings()
 static void
 DoCommandCallback(const char *aCommand, void *aData)
 {
-  nsIControllers *controllers = static_cast<nsIControllers*>(aData);
-  if (controllers) {
-    nsCOMPtr<nsIController> controller;
-    controllers->GetControllerForCommand(aCommand, getter_AddRefs(controller));
-    if (controller) {
-      controller->DoCommand(aCommand);
-    }
+  nsCOMPtr<nsPIWindowRoot> root = do_QueryInterface(static_cast<EventTarget*>(aData));
+  if (!root) {
+    return;
+  }
+
+  nsCOMPtr<nsIController> controller;
+  root->GetControllerForCommand(aCommand, getter_AddRefs(controller));
+  if (!controller) {
+    return;
+  }
+
+  bool commandEnabled;
+  nsresult rv = controller->IsCommandEnabled(aCommand, &commandEnabled);
+  NS_ENSURE_SUCCESS_VOID(rv);
+  if (commandEnabled) {
+    controller->DoCommand(aCommand);
   }
 }
 
@@ -335,29 +343,38 @@ nsXBLWindowKeyHandler::WalkHandlers(nsIDOMKeyEvent* aKeyEvent, nsIAtom* aEventTy
 
   WalkHandlersInternal(aKeyEvent, aEventType, mHandler);
 
-  if (isEditor && GetEditorKeyBindings()) {
-    nsNativeKeyEvent nativeEvent;
-    // get the DOM window we're attached to
-    nsCOMPtr<nsIControllers> controllers;
-    nsCOMPtr<nsPIWindowRoot> root = do_QueryInterface(mTarget);
-    if (root) {
-      root->GetControllers(getter_AddRefs(controllers));
-    }
+  aKeyEvent->GetDefaultPrevented(&prevent);
+  if (prevent) {
+    return NS_OK;
+  }
 
+  // XXX Shouldn't we prefer the native key binding rather than our key
+  //     bindings?  I.e., should we call WalkHandlersInternal() after this
+  //     block?
+  if (isEditor && GetEditorKeyBindings()) {
+    WidgetKeyboardEvent* keyEvent =
+      aKeyEvent->GetInternalNSEvent()->AsKeyboardEvent();
+    MOZ_ASSERT(keyEvent,
+               "DOM key event's internal event must be WidgetKeyboardEvent");
     bool handled = false;
-    if (aEventType == nsGkAtoms::keypress) {
-      if (nsContentUtils::DOMEventToNativeKeyEvent(aKeyEvent, &nativeEvent, true))
-        handled = sNativeEditorBindings->KeyPress(nativeEvent,
-                                                  DoCommandCallback, controllers);
-    } else if (aEventType == nsGkAtoms::keyup) {
-      if (nsContentUtils::DOMEventToNativeKeyEvent(aKeyEvent, &nativeEvent, false))
-        handled = sNativeEditorBindings->KeyUp(nativeEvent,
-                                               DoCommandCallback, controllers);
-    } else {
-      NS_ASSERTION(aEventType == nsGkAtoms::keydown, "unknown key event type");
-      if (nsContentUtils::DOMEventToNativeKeyEvent(aKeyEvent, &nativeEvent, false))
-        handled = sNativeEditorBindings->KeyDown(nativeEvent,
-                                                 DoCommandCallback, controllers);
+    switch (keyEvent->message) {
+      case NS_KEY_PRESS:
+        handled = sNativeEditorBindings->KeyPress(*keyEvent,
+                                                  DoCommandCallback,
+                                                  mTarget);
+        break;
+      case NS_KEY_UP:
+        handled = sNativeEditorBindings->KeyUp(*keyEvent,
+                                               DoCommandCallback,
+                                               mTarget);
+        break;
+      case NS_KEY_DOWN:
+        handled = sNativeEditorBindings->KeyDown(*keyEvent,
+                                                 DoCommandCallback,
+                                                 mTarget);
+        break;
+      default:
+        MOZ_CRASH("Unknown key message");
     }
 
     if (handled)

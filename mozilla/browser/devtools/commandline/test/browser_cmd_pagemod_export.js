@@ -185,7 +185,7 @@ function test() {
         setup: 'pagemod remove',
         check: {
           input:  'pagemod remove',
-          hints:                '',
+          hints:                ' attribute',
           markup: 'IIIIIIIVIIIIII',
           status: 'ERROR'
         },
@@ -309,7 +309,7 @@ function test() {
           }
         },
         post: function() {
-          let deferred = Promise.defer();
+          let deferred = promise.defer();
           executeSoon(function() {
             deferred.resolve();
           });

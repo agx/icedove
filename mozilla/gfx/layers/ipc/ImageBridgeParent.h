@@ -3,15 +3,31 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/layers/PImageBridgeParent.h"
+#ifndef gfx_layers_ipc_ImageBridgeParent_h_
+#define gfx_layers_ipc_ImageBridgeParent_h_
+
+#include <stddef.h>                     // for size_t
+#include <stdint.h>                     // for uint32_t, uint64_t
 #include "CompositableTransactionParent.h"
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/ipc/ProtocolUtils.h"
+#include "mozilla/ipc/SharedMemory.h"   // for SharedMemory, etc
+#include "mozilla/layers/PImageBridgeParent.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsISupportsImpl.h"
+#include "nsTArrayForwardDeclare.h"     // for InfallibleTArray
 
 class MessageLoop;
 
 namespace mozilla {
+namespace ipc {
+class Shmem;
+}
+
 namespace layers {
 
-class CompositorParent;
 /**
  * ImageBridgeParent is the manager Protocol of ImageContainerParent.
  * It's purpose is mainly to setup the IPDL connection. Most of the
@@ -20,8 +36,6 @@ class CompositorParent;
 class ImageBridgeParent : public PImageBridgeParent,
                           public CompositableParentManager
 {
-  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ImageBridgeParent)
-
 public:
   typedef InfallibleTArray<CompositableOperation> EditArray;
   typedef InfallibleTArray<EditReply> EditReplyArray;
@@ -35,19 +49,21 @@ public:
   Create(Transport* aTransport, ProcessId aOtherProcess);
 
   virtual PGrallocBufferParent*
-  AllocPGrallocBuffer(const gfxIntSize&, const uint32_t&, const uint32_t&,
-                      MaybeMagicGrallocBufferHandle*) MOZ_OVERRIDE;
+  AllocPGrallocBufferParent(const gfxIntSize&, const uint32_t&, const uint32_t&,
+                            MaybeMagicGrallocBufferHandle*) MOZ_OVERRIDE;
 
   virtual bool
-  DeallocPGrallocBuffer(PGrallocBufferParent* actor) MOZ_OVERRIDE;
+  DeallocPGrallocBufferParent(PGrallocBufferParent* actor) MOZ_OVERRIDE;
 
   // PImageBridge
   virtual bool RecvUpdate(const EditArray& aEdits, EditReplyArray* aReply);
   virtual bool RecvUpdateNoSwap(const EditArray& aEdits);
 
-  PCompositableParent* AllocPCompositable(const TextureInfo& aInfo,
-                                          uint64_t*) MOZ_OVERRIDE;
-  bool DeallocPCompositable(PCompositableParent* aActor) MOZ_OVERRIDE;
+  virtual bool IsAsync() const MOZ_OVERRIDE { return true; }
+
+  PCompositableParent* AllocPCompositableParent(const TextureInfo& aInfo,
+                                                uint64_t*) MOZ_OVERRIDE;
+  bool DeallocPCompositableParent(PCompositableParent* aActor) MOZ_OVERRIDE;
 
   bool RecvStop() MOZ_OVERRIDE;
 
@@ -75,6 +91,12 @@ public:
     PImageBridgeParent::DeallocShmem(aShmem);
   }
 
+  // Overriden from IToplevelProtocol
+  IToplevelProtocol*
+  CloneToplevel(const InfallibleTArray<ProtocolFdMapping>& aFds,
+                base::ProcessHandle aPeerProcess,
+                mozilla::ipc::ProtocolCloneContext* aCtx) MOZ_OVERRIDE;
+
 private:
   void DeferredDestroy();
 
@@ -88,3 +110,4 @@ private:
 } // layers
 } // mozilla
 
+#endif // gfx_layers_ipc_ImageBridgeParent_h_

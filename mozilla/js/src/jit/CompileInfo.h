@@ -7,43 +7,67 @@
 #ifndef jit_CompileInfo_h
 #define jit_CompileInfo_h
 
-#include "Registers.h"
+#include "jsfun.h"
+
+#include "jit/Registers.h"
 
 namespace js {
 namespace jit {
 
 inline unsigned
-StartArgSlot(JSScript *script, JSFunction *fun)
+StartArgSlot(JSScript *script)
 {
-    // First slot is for scope chain.
-    // Second one may be for arguments object.
-    return 1 + (script->argumentsHasVarBinding() ? 1 : 0);
+    // Reserved slots:
+    // Slot 0: Scope chain.
+    // Slot 1: Return value.
+
+    // When needed:
+    // Slot 2: Argumentsobject.
+
+    // Note: when updating this, please also update the assert in SnapshotWriter::startFrame
+    return 2 + (script->argumentsHasVarBinding() ? 1 : 0);
 }
 
 inline unsigned
 CountArgSlots(JSScript *script, JSFunction *fun)
 {
-    return StartArgSlot(script, fun) + (fun ? fun->nargs + 1 : 0);
+    // Slot x + 0: This value.
+    // Slot x + 1: Argument 1.
+    // ...
+    // Slot x + n: Argument n.
+
+    // Note: when updating this, please also update the assert in SnapshotWriter::startFrame
+    return StartArgSlot(script) + (fun ? fun->nargs + 1 : 0);
 }
-
-enum ExecutionMode {
-    // Normal JavaScript execution
-    SequentialExecution = 0,
-
-    // JavaScript code to be executed in parallel worker threads,
-    // e.g. by ParallelArray
-    ParallelExecution
-};
 
 // Contains information about the compilation source for IR being generated.
 class CompileInfo
 {
   public:
     CompileInfo(JSScript *script, JSFunction *fun, jsbytecode *osrPc, bool constructing,
-                ExecutionMode executionMode);
+                ExecutionMode executionMode)
+      : script_(script), fun_(fun), osrPc_(osrPc), constructing_(constructing),
+        executionMode_(executionMode)
+    {
+        JS_ASSERT_IF(osrPc, JSOp(*osrPc) == JSOP_LOOPENTRY);
+
+        // The function here can flow in from anywhere so look up the canonical function to ensure that
+        // we do not try to embed a nursery pointer in jit-code.
+        if (fun_) {
+            fun_ = fun_->nonLazyScript()->function();
+            JS_ASSERT(fun_->isTenured());
+        }
+
+        nimplicit_ = StartArgSlot(script)                   /* scope chain and argument obj */
+                   + (fun ? 1 : 0);                         /* this */
+        nargs_ = fun ? fun->nargs : 0;
+        nlocals_ = script->nfixed;
+        nstack_ = script->nslots - script->nfixed;
+        nslots_ = nimplicit_ + nargs_ + nlocals_ + nstack_;
+    }
 
     CompileInfo(unsigned nlocals, ExecutionMode executionMode)
-      : script_(NULL), fun_(NULL), osrPc_(NULL), constructing_(false),
+      : script_(nullptr), fun_(nullptr), osrPc_(nullptr), constructing_(false),
         executionMode_(executionMode)
     {
         nimplicit_ = 0;
@@ -72,39 +96,64 @@ class CompileInfo
     }
 
     jsbytecode *startPC() const {
-        return script_->code;
+        return script_->code();
     }
     jsbytecode *limitPC() const {
-        return script_->code + script_->length;
+        return script_->codeEnd();
     }
 
-    inline const char *filename() const;
+    const char *filename() const {
+        return script_->filename();
+    }
 
     unsigned lineno() const {
         return script_->lineno;
     }
-    unsigned lineno(JSContext *cx, jsbytecode *pc) const {
+    unsigned lineno(jsbytecode *pc) const {
         return PCToLineNumber(script_, pc);
     }
 
     // Script accessors based on PC.
 
-    inline JSAtom *getAtom(jsbytecode *pc) const;
-    inline PropertyName *getName(jsbytecode *pc) const;
+    JSAtom *getAtom(jsbytecode *pc) const {
+        return script_->getAtom(GET_UINT32_INDEX(pc));
+    }
+
+    PropertyName *getName(jsbytecode *pc) const {
+        return script_->getName(GET_UINT32_INDEX(pc));
+    }
+
     inline RegExpObject *getRegExp(jsbytecode *pc) const;
-    inline JSObject *getObject(jsbytecode *pc) const;
+
+    JSObject *getObject(jsbytecode *pc) const {
+        return script_->getObject(GET_UINT32_INDEX(pc));
+    }
+
     inline JSFunction *getFunction(jsbytecode *pc) const;
-    inline const Value &getConst(jsbytecode *pc) const;
-    inline jssrcnote *getNote(JSContext *cx, jsbytecode *pc) const;
+
+    const Value &getConst(jsbytecode *pc) const {
+        return script_->getConst(GET_UINT32_INDEX(pc));
+    }
+
+    jssrcnote *getNote(GSNCache &gsn, jsbytecode *pc) const {
+        return GetSrcNote(gsn, script(), pc);
+    }
 
     // Total number of slots: args, locals, and stack.
     unsigned nslots() const {
         return nslots_;
     }
 
+    // Number of slots needed for Scope chain, return value,
+    // maybe argumentsobject and this value.
+    unsigned nimplicit() const {
+        return nimplicit_;
+    }
+    // Number of arguments (without counting this value).
     unsigned nargs() const {
         return nargs_;
     }
+    // Number of slots needed for local variables.
     unsigned nlocals() const {
         return nlocals_;
     }
@@ -116,13 +165,18 @@ class CompileInfo
         JS_ASSERT(script());
         return 0;
     }
+    uint32_t returnValueSlot() const {
+        JS_ASSERT(script());
+        return 1;
+    }
     uint32_t argsObjSlot() const {
         JS_ASSERT(hasArguments());
-        return 1;
+        return 2;
     }
     uint32_t thisSlot() const {
         JS_ASSERT(fun());
-        return hasArguments() ? 2 : 1;
+        JS_ASSERT(nimplicit_ > 0);
+        return nimplicit_ - 1;
     }
     uint32_t firstArgSlot() const {
         return nimplicit_;
@@ -154,20 +208,46 @@ class CompileInfo
     }
 
     uint32_t startArgSlot() const {
-        JS_ASSERT(scopeChainSlot() == 0);
-        return StartArgSlot(script(), fun());
+        JS_ASSERT(script());
+        return StartArgSlot(script());
     }
     uint32_t endArgSlot() const {
-        JS_ASSERT(scopeChainSlot() == 0);
+        JS_ASSERT(script());
         return CountArgSlots(script(), fun());
     }
 
     uint32_t totalSlots() const {
-        return 2 + (hasArguments() ? 1 : 0) + nargs() + nlocals();
+        JS_ASSERT(script() && fun());
+        return nimplicit() + nargs() + nlocals();
+    }
+
+    bool isSlotAliased(uint32_t index) const {
+        if (fun() && index == thisSlot())
+            return false;
+
+        uint32_t arg = index - firstArgSlot();
+        if (arg < nargs()) {
+            if (script()->formalIsAliased(arg))
+                return true;
+            return false;
+        }
+
+        uint32_t var = index - firstLocalSlot();
+        if (var < nlocals()) {
+            if (script()->varIsAliased(var))
+                return true;
+            return false;
+        }
+
+        JS_ASSERT(index >= firstStackSlot());
+        return false;
     }
 
     bool hasArguments() const {
         return script()->argumentsHasVarBinding();
+    }
+    bool argumentsAliasesFormals() const {
+        return script()->argumentsAliasesFormals();
     }
     bool needsArgsObj() const {
         return script()->needsArgsObj();

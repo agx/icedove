@@ -1,7 +1,4 @@
-// |jit-test| no-ion
-//
-// We can't guarantee error identity when functions are Ion-compiled due to
-// optimization.
+load(libdir + "asserts.js");
 
 function check_one(expected, f, err) {
     var failed = true;
@@ -11,7 +8,7 @@ function check_one(expected, f, err) {
     } catch (ex) {
         var s = ex.toString();
         assertEq(s.slice(0, 11), "TypeError: ");
-        assertEq(s.slice(-err.length), err);
+        assertEq(s.slice(-err.length), err, "" + f);
         assertEq(s.slice(11, -err.length), expected);
     }
     if (!failed)
@@ -81,6 +78,9 @@ check("o[4 + 'h']", "o['4h']");
 check("this.x");
 check("ieval(undef)", "ieval(...)");
 check("ieval.call()", "ieval.call(...)");
+check("ieval(...[])", "ieval(...)");
+check("ieval(...[undef])", "ieval(...)");
+check("ieval(...[undef, undef])", "ieval(...)");
 
 for (let tok of ["|", "^", "&", "==", "!==", "===", "!==", "<", "<=", ">", ">=",
                  ">>", "<<", ">>>", "+", "-", "*", "/", "%"]) {
@@ -99,4 +99,4 @@ check_one("null", function () { var [{ x }] = [null, {}]; }, " has no properties
 check_one("x", function () { ieval("let (x) { var [a, b, [c0, c1]] = [x, x, x]; }") }, " is undefined");
 
 // Check fallback behavior
-check_one("undefined", (function () { for (let x of undefined) {} }), " has no properties");
+assertThrowsInstanceOf(function () { for (let x of undefined) {} }, TypeError);

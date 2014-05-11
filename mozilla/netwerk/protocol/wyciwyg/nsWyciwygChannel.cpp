@@ -6,14 +6,21 @@
 
 #include "nsWyciwyg.h"
 #include "nsWyciwygChannel.h"
-#include "nsIServiceManager.h"
 #include "nsILoadGroup.h"
-#include "nsIScriptSecurityManager.h"
 #include "nsNetUtil.h"
 #include "nsICacheService.h"
 #include "nsICacheSession.h"
 #include "nsCharsetSource.h"
 #include "nsProxyRelease.h"
+#include "nsThreadUtils.h"
+#include "nsICacheEntryDescriptor.h"
+#include "nsIEventTarget.h"
+#include "nsIInputStream.h"
+#include "nsIInputStreamPump.h"
+#include "nsIOutputStream.h"
+#include "nsIProgressEventSink.h"
+#include "nsIURI.h"
+#include "nsWyciwygProtocolHandler.h"
 
 // Must release mChannel on the main thread
 class nsWyciwygAsyncEvent : public nsRunnable {
@@ -95,14 +102,14 @@ nsWyciwygChannel::~nsWyciwygChannel()
 {
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS7(nsWyciwygChannel,
-                              nsIChannel,
-                              nsIRequest,
-                              nsIStreamListener,
-                              nsIRequestObserver,
-                              nsICacheListener,
-                              nsIWyciwygChannel,
-                              nsIPrivateBrowsingChannel)
+NS_IMPL_ISUPPORTS7(nsWyciwygChannel,
+                   nsIChannel,
+                   nsIRequest,
+                   nsIStreamListener,
+                   nsIRequestObserver,
+                   nsICacheListener,
+                   nsIWyciwygChannel,
+                   nsIPrivateBrowsingChannel)
 
 nsresult
 nsWyciwygChannel::Init(nsIURI* uri)
@@ -466,7 +473,7 @@ nsWyciwygChannel::WriteToCacheEntryInternal(const nsAString &aData, const nsACSt
     if (NS_FAILED(rv)) return rv;
   }
 
-  return mCacheOutputStream->Write((char *)PromiseFlatString(aData).get(),
+  return mCacheOutputStream->Write((const char *)PromiseFlatString(aData).get(),
                                    aData.Length() * sizeof(PRUnichar), &out);
 }
 

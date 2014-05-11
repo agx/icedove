@@ -27,7 +27,7 @@ function testSteps()
   let request = indexedDB.open(this.window ? window.location.pathname : "Splendid Test", 1);
   request.onerror = errorHandler;
   request.onupgradeneeded = grabEventAndContinueHandler;
-  let event = yield;
+  let event = yield undefined;
 
   let db = event.target.result;
   event.target.onsuccess = continueToNextStep;
@@ -35,10 +35,15 @@ function testSteps()
   let objectStore = db.createObjectStore("foo", { keyPath: "ss" });
   objectStore.createIndex("name", "name", { unique: true });
 
+  // This direct eval causes locals to be aliased, and thus allocated on
+  // the scope chain.  Comment it out (and the workarounds below) and
+  // the test passes.  Bug 943409.
+  eval('');
+
   for (let i = 0; i < objectStoreData.length - 1; i++) {
     objectStore.add(objectStoreData[i]);
   }
-  yield;
+  yield undefined;
 
   let count = 0;
 
@@ -61,7 +66,7 @@ function testSteps()
         count++;
       }
     };
-  yield;
+  yield undefined;
 
   is(count, objectStoreData.length - 1, "Good initial count");
   is(sawAdded, false, "Didn't see item that is about to be added");
@@ -104,12 +109,15 @@ function testSteps()
         }
       }
     };
-  yield;
+  yield undefined;
 
   is(count, objectStoreData.length - 1, "Good final count");
   is(sawAdded, true, "Saw item that was added");
   is(sawRemoved, false, "Didn't see item that was removed");
 
   finishTest();
-  yield;
+
+  objectStore = null; // Bug 943409 workaround.
+
+  yield undefined;
 }

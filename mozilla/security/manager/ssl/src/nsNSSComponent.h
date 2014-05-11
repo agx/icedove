@@ -13,11 +13,9 @@
 #include "nsISignatureVerifier.h"
 #include "nsIEntropyCollector.h"
 #include "nsIStringBundle.h"
-#include "nsIPrefBranch.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #ifndef MOZ_DISABLE_CRYPTOLEGACY
-#include "nsIDOMEventTarget.h"
 #endif
 #include "nsINSSErrorsService.h"
 #include "nsNSSCallbacks.h"
@@ -26,6 +24,7 @@
 #include "nsClientAuthRemember.h"
 #include "prerror.h"
 
+class nsIDOMWindow;
 class nsIPrompt;
 class SmartCardThreadList;
 
@@ -133,7 +132,7 @@ public:
   nsNSSComponent();
   virtual ~nsNSSComponent();
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSISIGNATUREVERIFIER
   NS_DECL_NSIENTROPYCOLLECTOR
   NS_DECL_NSIOBSERVER
@@ -179,14 +178,14 @@ public:
                   mozilla::RefPtr<mozilla::psm::CertVerifier> &out);
 private:
 
-  nsresult InitializeNSS(bool showWarningBox);
+  nsresult InitializeNSS();
   void ShutdownNSS();
 
   void InstallLoadableRoots();
   void UnloadLoadableRoots();
   void CleanupIdentityInfo();
-  void setValidationOptions(nsIPrefBranch * pref);
-  nsresult setEnabledTLSVersions(nsIPrefBranch * pref);
+  void setValidationOptions(bool isInitialSetting);
+  nsresult setEnabledTLSVersions();
   nsresult InitializePIPNSSBundle();
   nsresult ConfigureInternalPKCS11Token();
   nsresult RegisterObservers();
@@ -203,7 +202,6 @@ private:
   
   nsCOMPtr<nsIStringBundle> mPIPNSSBundle;
   nsCOMPtr<nsIStringBundle> mNSSErrorsBundle;
-  nsCOMPtr<nsIPrefBranch> mPrefBranch;
   bool mNSSInitialized;
   bool mObserversRegistered;
   static int mInstanceCount;

@@ -6,9 +6,24 @@
 #ifndef GFX_GLXLIBRARY_H
 #define GFX_GLXLIBRARY_H
 
-#include "GLContext.h"
+#include "GLContextTypes.h"
 typedef realGLboolean GLboolean;
-#include <GL/glx.h>
+
+// stuff from glx.h
+#include "X11/Xlib.h"
+typedef struct __GLXcontextRec *GLXContext;
+typedef XID GLXPixmap;
+typedef XID GLXDrawable;
+/* GLX 1.3 and later */
+typedef struct __GLXFBConfigRec *GLXFBConfig;
+typedef XID GLXFBConfigID;
+typedef XID GLXContextID;
+typedef XID GLXWindow;
+typedef XID GLXPbuffer;
+// end of stuff from glx.h
+
+struct PRLibrary;
+class gfxASurface;
 
 namespace mozilla {
 namespace gl {
@@ -18,7 +33,7 @@ class GLXLibrary
 public:
     GLXLibrary() : mInitialized(false), mTriedInitializing(false),
                    mUseTextureFromPixmap(false), mDebug(false),
-                   mHasRobustness(false), mIsATI(false),
+                   mHasRobustness(false), mIsATI(false), mIsNVIDIA(false),
                    mClientIsMesa(false), mGLXMajorVersion(0),
                    mGLXMinorVersion(0), mLibType(OPENGL_LIB),
                    mOGLLibrary(nullptr) {}
@@ -99,7 +114,7 @@ public:
     bool SupportsTextureFromPixmap(gfxASurface* aSurface);
     bool IsATI() { return mIsATI; }
     bool GLXVersionCheck(int aMajor, int aMinor);
-    static LibraryType SelectLibrary(const GLContext::ContextFlags& aFlags);
+    static LibraryType SelectLibrary(const ContextFlags& aFlags);
 
 private:
     
@@ -202,6 +217,7 @@ private:
     bool mDebug;
     bool mHasRobustness;
     bool mIsATI;
+    bool mIsNVIDIA;
     bool mClientIsMesa;
     int mGLXMajorVersion;
     int mGLXMinorVersion;

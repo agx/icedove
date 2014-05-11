@@ -9,6 +9,7 @@ chrome.jar:
 
 * content/about.xhtml                  (content/about.xhtml)
   content/config.xhtml                 (content/config.xhtml)
+  content/config.js                    (content/config.js)
   content/aboutAddons.xhtml            (content/aboutAddons.xhtml)
   content/aboutAddons.js               (content/aboutAddons.js)
   content/aboutCertError.xhtml         (content/aboutCertError.xhtml)
@@ -36,7 +37,6 @@ chrome.jar:
   content/netError.xhtml               (content/netError.xhtml)
   content/SelectHelper.js              (content/SelectHelper.js)
   content/SelectionHandler.js          (content/SelectionHandler.js)
-  content/HelperApps.js                (content/HelperApps.js)
   content/dbg-browser-actors.js        (content/dbg-browser-actors.js)
   content/WebAppRT.js                  (content/WebAppRT.js)
   content/InputWidgetHelper.js         (content/InputWidgetHelper.js)
@@ -50,6 +50,7 @@ chrome.jar:
   content/PermissionsHelper.js         (content/PermissionsHelper.js)
   content/FeedHandler.js               (content/FeedHandler.js)
   content/Feedback.js                  (content/Feedback.js)
+  content/Linkify.js                   (content/Linkify.js)
 #ifdef MOZ_SERVICES_HEALTHREPORT
   content/aboutHealthReport.xhtml      (content/aboutHealthReport.xhtml)
 * content/aboutHealthReport.js         (content/aboutHealthReport.js)

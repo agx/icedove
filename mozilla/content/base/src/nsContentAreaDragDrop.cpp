@@ -51,7 +51,11 @@
 #include "imgIContainer.h"
 #include "imgIRequest.h"
 #include "nsDOMDataTransfer.h"
+#include "nsIMIMEInfo.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/HTMLAreaElement.h"
+
+using mozilla::dom::HTMLAreaElement;
 
 class MOZ_STACK_CLASS DragDataProducer
 {
@@ -505,10 +509,11 @@ DragDataProducer::Produce(nsDOMDataTransfer* aDataTransfer,
 
       if (area) {
         // use the alt text (or, if missing, the href) as the title
-        area->GetAttribute(NS_LITERAL_STRING("alt"), mTitleString);
+        HTMLAreaElement* areaElem = static_cast<HTMLAreaElement*>(area.get());
+        areaElem->GetAttribute(NS_LITERAL_STRING("alt"), mTitleString);
         if (mTitleString.IsEmpty()) {
           // this can be a relative link
-          area->GetAttribute(NS_LITERAL_STRING("href"), mTitleString);
+          areaElem->GetAttribute(NS_LITERAL_STRING("href"), mTitleString);
         }
 
         // we'll generate HTML like <a href="absurl">alt text</a>

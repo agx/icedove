@@ -4,6 +4,8 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "MediaEncoder.h"
 #include "MediaDecoder.h"
+#include "nsIPrincipal.h"
+
 #ifdef MOZ_OGG
 #include "OggWriter.h"
 #endif
@@ -127,17 +129,15 @@ MediaEncoder::CreateEncoder(const nsAString& aMIMEType)
 
 /**
  * GetEncodedData() runs as a state machine, starting with mState set to
- * ENCODE_HEADER, the procedure should be as follow:
+ * GET_METADDATA, the procedure should be as follow:
  *
  * While non-stop
- *   If mState is ENCODE_HEADER
- *     Create the header from audio/video encoder
- *     If a header is generated
- *       Insert header data into the container stream of writer
- *       Force copied the final container data from writer
- *       Return the copy of final container data
- *     Else
+ *   If mState is GET_METADDATA
+ *     Get the meta data from audio/video encoder
+ *     If a meta data is generated
+ *       Get meta data from audio/video encoder
  *       Set mState to ENCODE_TRACK
+ *       Return the final container data
  *
  *   If mState is ENCODE_TRACK
  *     Get encoded track data from audio/video encoder
@@ -148,7 +148,7 @@ MediaEncoder::CreateEncoder(const nsAString& aMIMEType)
  *       If this is the last packet of input stream
  *         Set mState to ENCODE_DONE
  *
- *   If mState is ENCODE_DONE
+ *   If mState is ENCODE_DONE or ENCODE_ERROR
  *     Stop the loop
  */
 void
@@ -162,54 +162,47 @@ MediaEncoder::GetEncodedData(nsTArray<nsTArray<uint8_t> >* aOutputBufs,
   bool reloop = true;
   while (reloop) {
     switch (mState) {
-    case ENCODE_HEADER: {
-      nsTArray<uint8_t> buffer;
-      nsresult rv = mAudioEncoder->GetHeader(&buffer);
-      if (NS_FAILED(rv)) {
-        // Encoding might be canceled.
-        mState = ENCODE_DONE;
+    case ENCODE_METADDATA: {
+      nsRefPtr<TrackMetadataBase> meta = mAudioEncoder->GetMetadata();
+      if (meta == nullptr) {
+        LOG("ERROR! AudioEncoder get null Metadata!");
+        mState = ENCODE_ERROR;
         break;
       }
-
-      if (!buffer.IsEmpty()) {
-        rv = mWriter->WriteEncodedTrack(buffer, 0);
-        if (NS_FAILED(rv)) {
-          LOG("ERROR! Fail to write header to the media container.");
-          mState = ENCODE_DONE;
-          break;
-        }
-
-        rv = mWriter->GetContainerData(aOutputBufs,
-                                       ContainerWriter::FLUSH_NEEDED);
-        if (NS_SUCCEEDED(rv)) {
-          // Successfully get the copy of final container data from writer.
-          reloop = false;
-          break;
-        }
-      } else {
-        // No more headers, starts to encode tracks.
-        mState = ENCODE_TRACK;
+      nsresult rv = mWriter->SetMetadata(meta);
+      if (NS_FAILED(rv)) {
+       LOG("ERROR! writer can't accept audio metadata!");
+       mState = ENCODE_ERROR;
+       break;
       }
+
+      rv = mWriter->GetContainerData(aOutputBufs,
+                                     ContainerWriter::GET_HEADER);
+      if (NS_FAILED(rv)) {
+       LOG("ERROR! writer fail to generate header!");
+       mState = ENCODE_ERROR;
+       break;
+      }
+
+      mState = ENCODE_TRACK;
       break;
     }
 
     case ENCODE_TRACK: {
-      nsTArray<uint8_t> buffer;
-      int encodedDuration = 0;
-      nsresult rv = mAudioEncoder->GetEncodedTrack(&buffer, encodedDuration);
+      EncodedFrameContainer encodedData;
+      nsresult rv = mAudioEncoder->GetEncodedTrack(encodedData);
       if (NS_FAILED(rv)) {
         // Encoding might be canceled.
         LOG("ERROR! Fail to get encoded data from encoder.");
-        mState = ENCODE_DONE;
+        mState = ENCODE_ERROR;
         break;
       }
-
-      rv = mWriter->WriteEncodedTrack(buffer, encodedDuration,
+      rv = mWriter->WriteEncodedTrack(encodedData,
                                       mAudioEncoder->IsEncodingComplete() ?
                                       ContainerWriter::END_OF_STREAM : 0);
       if (NS_FAILED(rv)) {
         LOG("ERROR! Fail to write encoded track to the media container.");
-        mState = ENCODE_DONE;
+        mState = ENCODE_ERROR;
         break;
       }
 
@@ -219,7 +212,6 @@ MediaEncoder::GetEncodedData(nsTArray<nsTArray<uint8_t> >* aOutputBufs,
       if (NS_SUCCEEDED(rv)) {
         // Successfully get the copy of final container data from writer.
         reloop = false;
-        break;
       }
 
       mState = (mAudioEncoder->IsEncodingComplete()) ? ENCODE_DONE : ENCODE_TRACK;
@@ -231,10 +223,13 @@ MediaEncoder::GetEncodedData(nsTArray<nsTArray<uint8_t> >* aOutputBufs,
       mShutdown = true;
       reloop = false;
       break;
-
-    default:
-      MOZ_NOT_REACHED("Invalid encode state");
+    case ENCODE_ERROR:
+      LOG("ERROR! MediaEncoder got error!");
+      mShutdown = true;
+      reloop = false;
       break;
+    default:
+      MOZ_CRASH("Invalid encode state");
     }
   }
 }

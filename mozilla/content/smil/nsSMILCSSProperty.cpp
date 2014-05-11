@@ -13,6 +13,7 @@
 #include "nsStyleAnimation.h"
 #include "mozilla/dom/Element.h"
 #include "nsIDOMElement.h"
+#include "nsIDocument.h"
 
 using namespace mozilla::dom;
 
@@ -245,7 +246,6 @@ nsSMILCSSProperty::IsPropertyAnimatable(nsCSSProperty aPropID)
     case eCSSProperty_stroke_opacity:
     case eCSSProperty_stroke_width:
     case eCSSProperty_text_anchor:
-    case eCSSProperty_text_blink:
     case eCSSProperty_text_decoration:
     case eCSSProperty_text_decoration_line:
     case eCSSProperty_text_rendering:

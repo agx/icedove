@@ -18,7 +18,8 @@ public:
     NS_DECL_ISUPPORTS_INHERITED
     NS_DECL_NSIINPUTSTREAMCHANNEL
 
-    nsInputStreamChannel() {}
+    nsInputStreamChannel() :
+      mIsSrcdocChannel(false) {}
 
 protected:
     virtual ~nsInputStreamChannel() {}
@@ -26,8 +27,14 @@ protected:
     virtual nsresult OpenContentStream(bool async, nsIInputStream **result,
                                        nsIChannel** channel);
 
+    virtual void OnChannelDone() MOZ_OVERRIDE {
+        mContentStream = nullptr;
+    }
+
 private:
     nsCOMPtr<nsIInputStream> mContentStream;
+    nsString mSrcdocData;
+    bool mIsSrcdocChannel;
 };
 
 #endif // !nsInputStreamChannel_h__

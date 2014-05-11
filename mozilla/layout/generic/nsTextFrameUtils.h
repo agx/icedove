@@ -6,9 +6,7 @@
 #ifndef NSTEXTFRAMEUTILS_H_
 #define NSTEXTFRAMEUTILS_H_
 
-#include "gfxFont.h"
 #include "gfxSkipChars.h"
-#include "nsTextFragment.h"
 
 class nsIContent;
 struct nsStyleText;
@@ -18,11 +16,6 @@ struct nsStyleText;
 #define CH_NBSP   160
 #define CH_SHY    173
 #define CH_CJKSP  12288 // U+3000 IDEOGRAPHIC SPACE (CJK Full-Width Space)
-
-#define CH_LRM  8206  //<!ENTITY lrm     CDATA "&#8206;" -- left-to-right mark, U+200E NEW RFC 2070 -->
-#define CH_RLM  8207  //<!ENTITY rlm     CDATA "&#8207;" -- right-to-left mark, U+200F NEW RFC 2070 -->
-#define CH_LRE  8234  //<!CDATA "&#8234;" -- left-to-right embedding, U+202A -->
-#define CH_RLO  8238  //<!CDATA "&#8238;" -- right-to-left override, U+202E -->
 
 class nsTextFrameUtils {
 public:
@@ -49,7 +42,13 @@ public:
     // We normally don't use this break opportunity because the following text
     // will have a break opportunity at the start, but it's useful for line
     // layout to know about it in case the following content is not text
-    TEXT_HAS_TRAILING_BREAK  = 0x4000000
+    TEXT_HAS_TRAILING_BREAK  = 0x4000000,
+
+    // This is set if the textrun was created for a textframe whose
+    // TEXT_IS_IN_SINGLE_CHAR_MI flag is set.  This occurs if the textframe
+    // belongs to a MathML <mi> element whose embedded text consists of a
+    // single character.
+    TEXT_IS_SINGLE_CHAR_MI   = 0x8000000
 
     // The following are defined by gfxTextRunWordCache rather than here,
     // so that it also has access to the _INCOMING flag

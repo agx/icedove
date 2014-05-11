@@ -22,6 +22,23 @@
 #include <unistd.h>
 #endif
 
+#ifdef ANDROID
+#include <android/log.h>
+extern "C" char* PrintJSStack();
+static void LogFunctionAndJSStack(const char* funcname) {
+  char *jsstack = PrintJSStack();
+  __android_log_print(ANDROID_LOG_INFO, "PowerManagerService", \
+                      "Call to %s. The JS stack is:\n%s\n",
+                      funcname,
+                      jsstack ? jsstack : "<no JS stack>");
+}
+// bug 839452
+#define LOG_FUNCTION_AND_JS_STACK() \
+  LogFunctionAndJSStack(__PRETTY_FUNCTION__);
+#else
+#define LOG_FUNCTION_AND_JS_STACK()
+#endif
+
 namespace mozilla {
 namespace dom {
 namespace power {
@@ -115,28 +132,32 @@ PowerManagerService::SyncProfile()
 NS_IMETHODIMP
 PowerManagerService::Reboot()
 {
+  LOG_FUNCTION_AND_JS_STACK() // bug 839452
+
   StartForceQuitWatchdog(eHalShutdownMode_Reboot, mWatchdogTimeoutSecs);
   // To synchronize any unsaved user data before rebooting.
   SyncProfile();
   hal::Reboot();
-  MOZ_NOT_REACHED("hal::Reboot() shouldn't return");
-  return NS_OK;
+  MOZ_CRASH("hal::Reboot() shouldn't return");
 }
 
 NS_IMETHODIMP
 PowerManagerService::PowerOff()
 {
+  LOG_FUNCTION_AND_JS_STACK() // bug 839452
+
   StartForceQuitWatchdog(eHalShutdownMode_PowerOff, mWatchdogTimeoutSecs);
   // To synchronize any unsaved user data before powering off.
   SyncProfile();
   hal::PowerOff();
-  MOZ_NOT_REACHED("hal::PowerOff() shouldn't return");
-  return NS_OK;
+  MOZ_CRASH("hal::PowerOff() shouldn't return");
 }
 
 NS_IMETHODIMP
 PowerManagerService::Restart()
 {
+  LOG_FUNCTION_AND_JS_STACK() // bug 839452
+
   // FIXME/bug 796826 this implementation is currently gonk-specific,
   // because it relies on the Gonk to initialize the Gecko processes to
   // restart B2G. It's better to do it here to have a real "restart".
@@ -153,8 +174,7 @@ PowerManagerService::Restart()
   sync();
 #endif
   _exit(0);
-  MOZ_NOT_REACHED("_exit() shouldn't return");
-  return NS_OK;
+  MOZ_CRASH("_exit() shouldn't return");
 }
 
 NS_IMETHODIMP

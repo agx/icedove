@@ -25,8 +25,8 @@
 #include "nsCOMArray.h"
 #include "nsArrayEnumerator.h"
 #include "prmem.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Services.h"
-#include "mozilla/Util.h"
 using namespace mozilla;
 
 #define PREF_MAIL_ADDR_BOOK_LASTNAMEFIRST "mail.addr_book.lastnamefirst"
@@ -107,8 +107,6 @@ static const AppendItem CHAT_ATTRS_ARRAY[] = {
 nsAbCardProperty::nsAbCardProperty()
   : m_IsMailList(false)
 {
-  m_properties.Init();
-
   // Initialize some default properties
   SetPropertyAsUint32(kPreferMailFormatProperty, nsIAbPreferMailFormat::unknown);
   SetPropertyAsUint32(kPopularityIndexProperty, 0);

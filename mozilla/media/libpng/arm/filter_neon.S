@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2013 Glenn Randers-Pehrson
  * Written by Mans Rullgard, 2011.
- * Last changed in libpng 1.5.16 [May 23, 2013]
+ * Last changed in libpng 1.6.7 [November 14, 2013]
  *
  * This code is released under the libpng license.
  * For conditions of distribution and use, see the disclaimer
@@ -11,7 +11,7 @@
  */
 
 /* This is required to get the symbol renames, which are #defines, and also
- * includes the definition (or not) of PNG_ARM_NEON_SUPPORTED.
+ * includes the definition (or not) of PNG_ARM_NEON_OPT.
  */
 #define PNG_VERSION_INFO_ONLY
 #include "../pngpriv.h"
@@ -20,7 +20,15 @@
 .section .note.GNU-stack,"",%progbits /* mark stack as non-executable */
 #endif
 
-#ifdef PNG_ARM_NEON_SUPPORTED
+/* Assembler NEON support - only works for 32-bit ARM (i.e. it does not work for
+ * ARM64).  The code in arm/filter_neon_intrinsics.c supports ARM64, however it
+ * only works if -mfpu=neon is specified on the GCC command line.  See pngpriv.h
+ * for the logic which sets PNG_USE_ARM_NEON_ASM:
+ */
+#if PNG_ARM_NEON_IMPLEMENTATION == 2 /* hand-coded assembler */
+
+#ifdef PNG_READ_SUPPORTED
+#if PNG_ARM_NEON_OPT > 0
 
 #ifdef __ELF__
 #   define ELF
@@ -232,4 +240,6 @@ func    png_read_filter_row_paeth3_neon, export=1
 
         pop             {r4,pc}
 endfunc
-#endif /* PNG_ARM_NEON_SUPPORTED */
+#endif /* PNG_ARM_NEON_OPT > 0 */
+#endif /* PNG_READ_SUPPORTED */
+#endif /* PNG_ARM_NEON_IMPLEMENTATION == 2 (assembler) */

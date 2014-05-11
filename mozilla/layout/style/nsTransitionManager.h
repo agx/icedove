@@ -9,6 +9,7 @@
 #define nsTransitionManager_h_
 
 #include "mozilla/Attributes.h"
+#include "mozilla/MemoryReporting.h"
 #include "AnimationCommon.h"
 #include "nsCSSPseudoElements.h"
 
@@ -90,16 +91,12 @@ struct ElementTransitions MOZ_FINAL
 
   // Either zero or one for each CSS property:
   nsTArray<ElementPropertyTransition> mPropertyTransitions;
-
-  // Generation counter for flushes of throttled transitions.
-  // Used to prevent updating the styles twice for a given element during
-  // UpdateAllThrottledStyles.
-  mozilla::TimeStamp mFlushGeneration;
 };
 
 
 
-class nsTransitionManager : public mozilla::css::CommonAnimationManager
+class nsTransitionManager MOZ_FINAL
+  : public mozilla::css::CommonAnimationManager
 {
 public:
   nsTransitionManager(nsPresContext *aPresContext)
@@ -170,9 +167,9 @@ public:
 #ifdef MOZ_XUL
   virtual void RulesMatching(XULTreeRuleProcessorData* aData) MOZ_OVERRIDE;
 #endif
-  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+  virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
     MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
-  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
     MOZ_MUST_OVERRIDE MOZ_OVERRIDE;
 
   // nsARefreshObserver
@@ -201,6 +198,14 @@ public:
   // other than primary frames.
   void UpdateAllThrottledStyles();
 
+  ElementTransitions* GetElementTransitions(mozilla::dom::Element *aElement,
+                                          nsCSSPseudoElements::Type aPseudoType,
+                                          bool aCreateIfNeeded);
+
+protected:
+  virtual void ElementDataRemoved() MOZ_OVERRIDE;
+  virtual void AddElementData(mozilla::css::CommonElementAnimationData* aData) MOZ_OVERRIDE;
+
 private:
   void ConsiderStartingTransition(nsCSSProperty aProperty,
                                   const nsTransition& aTransition,
@@ -210,24 +215,15 @@ private:
                                   nsStyleContext *aNewStyleContext,
                                   bool *aStartedAny,
                                   nsCSSPropertySet *aWhichStarted);
-  ElementTransitions* GetElementTransitions(mozilla::dom::Element *aElement,
-                                            nsCSSPseudoElements::Type aPseudoType,
-                                            bool aCreateIfNeeded);
   void WalkTransitionRule(ElementDependentRuleProcessorData* aData,
                           nsCSSPseudoElements::Type aPseudoType);
-
   // Update the animated styles of an element and its descendants.
   // If the element has a transition, it is flushed back to its primary frame.
   // If the element does not have a transition, then its style is reparented.
   void UpdateThrottledStylesForSubtree(nsIContent* aContent,
                                        nsStyleContext* aParentStyle,
                                        nsStyleChangeList &aChangeList);
-  // Update the style on aElement from the transition stored in this manager and
-  // the new parent style - aParentStyle. aElement must be transitioning or
-  // animated. Returns the updated style.
-  nsStyleContext* UpdateThrottledStyle(mozilla::dom::Element* aElement,
-                                       nsStyleContext* aParentStyle,
-                                       nsStyleChangeList &aChangeList);
+  void UpdateAllThrottledStylesInternal();
 };
 
 #endif /* !defined(nsTransitionManager_h_) */

@@ -34,12 +34,6 @@
                        //we always write out to our own
                        //file.
 
-namespace {
-
-static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
-
-} // unnamed namespace
-
 namespace mozilla { namespace psm {
 
 TransportSecurityInfo::TransportSecurityInfo()
@@ -68,13 +62,13 @@ TransportSecurityInfo::virtualDestroyNSSReference()
 {
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS6(TransportSecurityInfo,
-                              nsITransportSecurityInfo,
-                              nsIInterfaceRequestor,
-                              nsISSLStatusProvider,
-                              nsIAssociatedContentSecurity,
-                              nsISerializable,
-                              nsIClassInfo)
+NS_IMPL_ISUPPORTS6(TransportSecurityInfo,
+                   nsITransportSecurityInfo,
+                   nsIInterfaceRequestor,
+                   nsISSLStatusProvider,
+                   nsIAssociatedContentSecurity,
+                   nsISerializable,
+                   nsIClassInfo)
 
 nsresult
 TransportSecurityInfo::SetHostName(const char* host)
@@ -563,6 +557,8 @@ formatPlainErrorMessage(const nsXPIDLCString &host, int32_t port,
                         bool suppressPort443,
                         nsString &returnedMessage)
 {
+  static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+
   const PRUnichar *params[1];
   nsresult rv;
 
@@ -964,6 +960,8 @@ formatOverridableCertErrorMessage(nsISSLStatus & sslStatus,
                                   bool wantsHtml,
                                   nsString & returnedMessage)
 {
+  static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+
   const PRUnichar *params[1];
   nsresult rv;
   nsAutoString hostWithPort;
@@ -1033,9 +1031,9 @@ formatOverridableCertErrorMessage(nsISSLStatus & sslStatus,
 RememberCertErrorsTable::sInstance = nullptr;
 
 RememberCertErrorsTable::RememberCertErrorsTable()
-  : mMutex("RememberCertErrorsTable::mMutex")
+  : mErrorHosts(16)
+  , mMutex("RememberCertErrorsTable::mMutex")
 {
-  mErrorHosts.Init(16);
 }
 
 static nsresult

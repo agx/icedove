@@ -7,6 +7,7 @@ package org.mozilla.gecko;
 
 import org.mozilla.gecko.db.BrowserContract;
 import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.favicons.Favicons;
 import org.mozilla.gecko.util.ThreadUtils;
 
 import android.content.BroadcastReceiver;
@@ -151,10 +152,10 @@ class MemoryMonitor extends BroadcastReceiver {
         if (level >= MEMORY_PRESSURE_MEDIUM) {
             //Only send medium or higher events because that's all that is used right now
             if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
-                GeckoAppShell.sendEventToGecko(GeckoEvent.createLowMemoryEvent(level));
+                GeckoAppShell.dispatchMemoryPressure();
             }
 
-            Favicons.getInstance().clearMemCache();
+            Favicons.clearMemCache();
         }
         return true;
     }

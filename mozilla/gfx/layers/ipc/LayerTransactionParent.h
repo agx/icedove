@@ -8,12 +8,23 @@
 #ifndef MOZILLA_LAYERS_LAYERTRANSACTIONPARENT_H
 #define MOZILLA_LAYERS_LAYERTRANSACTIONPARENT_H
 
-#include "mozilla/layers/PLayerTransactionParent.h"
-#include "ShadowLayers.h"
-#include "ShadowLayersManager.h"
+#include <stddef.h>                     // for size_t
+#include <stdint.h>                     // for uint64_t, uint32_t
 #include "CompositableTransactionParent.h"
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/ipc/SharedMemory.h"   // for SharedMemory, etc
+#include "mozilla/layers/PLayerTransactionParent.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsTArrayForwardDeclare.h"     // for InfallibleTArray
+
+class gfx3DMatrix;
 
 namespace mozilla {
+
+namespace ipc {
+class Shmem;
+}
 
 namespace layout {
 class RenderFrameParent;
@@ -25,6 +36,7 @@ class Layer;
 class LayerManagerComposite;
 class ShadowLayerParent;
 class CompositableParent;
+class ShadowLayersManager;
 
 class LayerTransactionParent : public PLayerTransactionParent,
                                public CompositableParentManager
@@ -44,7 +56,7 @@ public:
   LayerManagerComposite* layer_manager() const { return mLayerManager; }
 
   uint64_t GetId() const { return mId; }
-  ContainerLayer* GetRoot() const { return mRoot; }
+  Layer* GetRoot() const { return mRoot; }
 
   // ISurfaceAllocator
   virtual bool AllocShmem(size_t aSize,
@@ -82,26 +94,42 @@ protected:
                                 gfx3DMatrix* aTransform) MOZ_OVERRIDE;
 
   virtual PGrallocBufferParent*
-  AllocPGrallocBuffer(const gfxIntSize& aSize,
+  AllocPGrallocBufferParent(const gfxIntSize& aSize,
                       const uint32_t& aFormat, const uint32_t& aUsage,
                       MaybeMagicGrallocBufferHandle* aOutHandle) MOZ_OVERRIDE;
   virtual bool
-  DeallocPGrallocBuffer(PGrallocBufferParent* actor) MOZ_OVERRIDE;
+  DeallocPGrallocBufferParent(PGrallocBufferParent* actor) MOZ_OVERRIDE;
 
-  virtual PLayerParent* AllocPLayer() MOZ_OVERRIDE;
-  virtual bool DeallocPLayer(PLayerParent* actor) MOZ_OVERRIDE;
+  virtual PLayerParent* AllocPLayerParent() MOZ_OVERRIDE;
+  virtual bool DeallocPLayerParent(PLayerParent* actor) MOZ_OVERRIDE;
 
-  virtual PCompositableParent* AllocPCompositable(const TextureInfo& aInfo) MOZ_OVERRIDE;
-  virtual bool DeallocPCompositable(PCompositableParent* actor) MOZ_OVERRIDE;
+  virtual PCompositableParent* AllocPCompositableParent(const TextureInfo& aInfo) MOZ_OVERRIDE;
+  virtual bool DeallocPCompositableParent(PCompositableParent* actor) MOZ_OVERRIDE;
 
-  void Attach(ShadowLayerParent* aLayerParent, CompositableParent* aCompositable);
+  void Attach(ShadowLayerParent* aLayerParent,
+              CompositableParent* aCompositable,
+              bool aIsAsyncVideo);
+
+  void AddIPDLReference() {
+    MOZ_ASSERT(mIPCOpen == false);
+    mIPCOpen = true;
+    AddRef();
+  }
+  void ReleaseIPDLReference() {
+    MOZ_ASSERT(mIPCOpen == true);
+    mIPCOpen = false;
+    Release();
+  }
+  friend class CompositorParent;
+  friend class CrossProcessCompositorParent;
+  friend class layout::RenderFrameParent;
 
 private:
   nsRefPtr<LayerManagerComposite> mLayerManager;
   ShadowLayersManager* mShadowLayersManager;
   // Hold the root because it might be grafted under various
   // containers in the "real" layer tree
-  nsRefPtr<ContainerLayer> mRoot;
+  nsRefPtr<Layer> mRoot;
   // When this is nonzero, it refers to a layer tree owned by the
   // compositor thread.  It is always true that
   //   mId != 0 => mRoot == null
@@ -121,6 +149,8 @@ private:
   // vice versa.  In both cases though, we want to ignore shadow-layer
   // transactions posted by the child.
   bool mDestroyed;
+
+  bool mIPCOpen;
 };
 
 } // namespace layers

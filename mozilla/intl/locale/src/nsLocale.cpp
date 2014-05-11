@@ -4,13 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsString.h"
-#include "nsReadableUtils.h"
 #include "nsISupports.h"
 #include "nsILocale.h"
 #include "nsLocale.h"
-#include "nsLocaleCID.h"
-#include "nsCOMPtr.h"
-#include "nsVoidArray.h"
 #include "nsMemory.h"
 #include "nsCRT.h"
 
@@ -18,7 +14,7 @@
 
 
 /* nsILocale */
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsLocale, nsILocale)
+NS_IMPL_ISUPPORTS1(nsLocale, nsILocale)
 
 nsLocale::nsLocale(void)
 :  fHashtable(nullptr), fCategoryCount(0)

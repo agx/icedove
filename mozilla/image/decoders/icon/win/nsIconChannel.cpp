@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsIconChannel.h"
 #include "nsIIconURI.h"
@@ -75,7 +75,7 @@ nsIconChannel::nsIconChannel()
 nsIconChannel::~nsIconChannel() 
 {}
 
-NS_IMPL_THREADSAFE_ISUPPORTS4(nsIconChannel, 
+NS_IMPL_ISUPPORTS4(nsIconChannel, 
                               nsIChannel, 
                               nsIRequest,
                               nsIRequestObserver,
@@ -230,15 +230,15 @@ static DWORD GetSpecialFolderIcon(nsIFile* aFile, int aFolder, SHFILEINFOW* aSFI
   if (!aFile)
     return shellResult;
 
-  PRUnichar fileNativePath[MAX_PATH];
+  wchar_t fileNativePath[MAX_PATH];
   nsAutoString fileNativePathStr;
   aFile->GetPath(fileNativePathStr);
   ::GetShortPathNameW(fileNativePathStr.get(), fileNativePath, ArrayLength(fileNativePath));
 
   LPITEMIDLIST idList;
-  HRESULT hr = ::SHGetSpecialFolderLocation(NULL, aFolder, &idList);
+  HRESULT hr = ::SHGetSpecialFolderLocation(nullptr, aFolder, &idList);
   if (SUCCEEDED(hr)) {
-    PRUnichar specialNativePath[MAX_PATH];
+    wchar_t specialNativePath[MAX_PATH];
     ::SHGetPathFromIDListW(idList, specialNativePath);
     ::GetShortPathNameW(specialNativePath, specialNativePath, ArrayLength(specialNativePath));
   
@@ -456,7 +456,7 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval, bool nonBlocki
   nsresult rv = NS_ERROR_NOT_AVAILABLE;
 
   // GetDIBits does not exist on windows mobile.
-  HICON hIcon = NULL;
+  HICON hIcon = nullptr;
 
   nsCOMPtr<nsIMozIconURI> iconURI(do_QueryInterface(mUrl, &rv));
   NS_ENSURE_SUCCESS(rv, rv);
@@ -477,12 +477,12 @@ nsresult nsIconChannel::MakeInputStream(nsIInputStream** _retval, bool nonBlocki
     if (GetIconInfo(hIcon, &iconInfo))
     {
       // we got the bitmaps, first find out their size
-      HDC hDC = CreateCompatibleDC(NULL); // get a device context for the screen.
+      HDC hDC = CreateCompatibleDC(nullptr); // get a device context for the screen.
       BITMAPINFOHEADER maskHeader  = {sizeof(BITMAPINFOHEADER)};
       BITMAPINFOHEADER colorHeader = {sizeof(BITMAPINFOHEADER)};
       int colorTableSize, maskTableSize;
-      if (GetDIBits(hDC, iconInfo.hbmMask,  0, 0, NULL, (BITMAPINFO*)&maskHeader,  DIB_RGB_COLORS) &&
-          GetDIBits(hDC, iconInfo.hbmColor, 0, 0, NULL, (BITMAPINFO*)&colorHeader, DIB_RGB_COLORS) &&
+      if (GetDIBits(hDC, iconInfo.hbmMask,  0, 0, nullptr, (BITMAPINFO*)&maskHeader,  DIB_RGB_COLORS) &&
+          GetDIBits(hDC, iconInfo.hbmColor, 0, 0, nullptr, (BITMAPINFO*)&colorHeader, DIB_RGB_COLORS) &&
           maskHeader.biHeight == colorHeader.biHeight &&
           maskHeader.biWidth  == colorHeader.biWidth  &&
           colorHeader.biBitCount > 8 &&

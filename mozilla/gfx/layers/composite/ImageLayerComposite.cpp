@@ -3,19 +3,29 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "gfxSharedImageSurface.h"
-
-#include "ipc/AutoOpenSurface.h"
 #include "ImageLayerComposite.h"
-#include "ImageHost.h"
-#include "gfxImageSurface.h"
-#include "gfx2DGlue.h"
-#include "gfxUtils.h"
-
-#include "mozilla/layers/Compositor.h"
-#include "mozilla/layers/CompositorTypes.h" // for TextureInfo
-#include "mozilla/layers/Effects.h"
-#include "CompositableHost.h"
+#include "CompositableHost.h"           // for CompositableHost
+#include "Layers.h"                     // for WriteSnapshotToDumpFile, etc
+#include "gfx2DGlue.h"                  // for ToFilter, ToMatrix4x4
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "gfxRect.h"                    // for gfxRect
+#include "gfxUtils.h"                   // for gfxUtils, etc
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/gfx/Matrix.h"         // for Matrix4x4
+#include "mozilla/gfx/Point.h"          // for IntSize, Point
+#include "mozilla/gfx/Rect.h"           // for Rect
+#include "mozilla/layers/Compositor.h"  // for Compositor
+#include "mozilla/layers/Effects.h"     // for EffectChain
+#include "mozilla/layers/TextureHost.h"  // for DeprecatedTextureHost, etc
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsAString.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRect.h"                     // for nsIntRect
+#include "nsString.h"                   // for nsAutoCString
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 
 using namespace mozilla::gfx;
 
@@ -42,7 +52,7 @@ ImageLayerComposite::~ImageLayerComposite()
 void
 ImageLayerComposite::SetCompositableHost(CompositableHost* aHost)
 {
-  mImageHost = static_cast<ImageHost*>(aHost);
+  mImageHost = aHost;
 }
 
 void
@@ -54,7 +64,7 @@ ImageLayerComposite::Disconnect()
 LayerRenderState
 ImageLayerComposite::GetRenderState()
 {
-  if (mImageHost) {
+  if (mImageHost && mImageHost->IsAttached()) {
     return mImageHost->GetRenderState();
   }
   return LayerRenderState();
@@ -67,16 +77,21 @@ ImageLayerComposite::GetLayer()
 }
 
 void
-ImageLayerComposite::RenderLayer(const nsIntPoint& aOffset,
-                                 const nsIntRect& aClipRect)
+ImageLayerComposite::RenderLayer(const nsIntRect& aClipRect)
 {
-  if (!mImageHost) {
+  if (!mImageHost || !mImageHost->IsAttached()) {
     return;
   }
 
 #ifdef MOZ_DUMP_PAINTING
   if (gfxUtils::sDumpPainting) {
-    nsRefPtr<gfxImageSurface> surf = mImageHost->GetAsSurface();
+    RefPtr<gfx::DataSourceSurface> dSurf = mImageHost->GetAsSurface();
+    gfxPlatform *platform = gfxPlatform::GetPlatform();
+    RefPtr<gfx::DrawTarget> dt = platform->CreateDrawTargetForData(dSurf->GetData(),
+                                                                   dSurf->GetSize(),
+                                                                   dSurf->Stride(),
+                                                                   dSurf->GetFormat());
+    nsRefPtr<gfxASurface> surf = platform->GetThebesSurfaceForDrawTarget(dt);
     WriteSnapshotToDumpFile(this, surf);
   }
 #endif
@@ -84,7 +99,7 @@ ImageLayerComposite::RenderLayer(const nsIntPoint& aOffset,
   mCompositor->MakeCurrent();
 
   EffectChain effectChain;
-  LayerManagerComposite::AddMaskEffect(mMaskLayer, effectChain);
+  LayerManagerComposite::AutoAddMaskEffect autoMaskEffect(mMaskLayer, effectChain);
 
   gfx::Matrix4x4 transform;
   ToMatrix4x4(GetEffectiveTransform(), transform);
@@ -93,7 +108,6 @@ ImageLayerComposite::RenderLayer(const nsIntPoint& aOffset,
   mImageHost->Composite(effectChain,
                         GetEffectiveOpacity(),
                         transform,
-                        gfx::Point(aOffset.x, aOffset.y),
                         gfx::ToFilter(mFilter),
                         clipRect);
 }
@@ -105,8 +119,12 @@ ImageLayerComposite::ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToS
 
   // Snap image edges to pixel boundaries
   gfxRect sourceRect(0, 0, 0, 0);
-  if (mImageHost && mImageHost->GetTextureHost()) {
-    IntSize size = mImageHost->GetTextureHost()->GetSize();
+  if (mImageHost &&
+      mImageHost->IsAttached() &&
+      (mImageHost->GetDeprecatedTextureHost() || mImageHost->GetAsTextureHost())) {
+    IntSize size =
+      mImageHost->GetAsTextureHost() ? mImageHost->GetAsTextureHost()->GetSize()
+                                     : mImageHost->GetDeprecatedTextureHost()->GetSize();
     sourceRect.SizeTo(size.width, size.height);
     if (mScaleMode != SCALE_NONE &&
         sourceRect.width != 0.0 && sourceRect.height != 0.0) {
@@ -127,33 +145,36 @@ ImageLayerComposite::ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToS
 }
 
 CompositableHost*
-ImageLayerComposite::GetCompositableHost() {
-  return mImageHost.get();
+ImageLayerComposite::GetCompositableHost()
+{
+  if (mImageHost && mImageHost->IsAttached()) {
+    return mImageHost.get();
+  }
+
+  return nullptr;
 }
 
 void
 ImageLayerComposite::CleanupResources()
 {
   if (mImageHost) {
-    mImageHost->Detach();
+    mImageHost->Detach(this);
   }
   mImageHost = nullptr;
 }
 
-#ifdef MOZ_LAYERS_HAVE_LOG
 nsACString&
 ImageLayerComposite::PrintInfo(nsACString& aTo, const char* aPrefix)
 {
   ImageLayer::PrintInfo(aTo, aPrefix);
   aTo += "\n";
-  if (mImageHost) {
+  if (mImageHost && mImageHost->IsAttached()) {
     nsAutoCString pfx(aPrefix);
     pfx += "  ";
     mImageHost->PrintInfo(aTo, pfx.get());
   }
   return aTo;
 }
-#endif
 
 } /* layers */
 } /* mozilla */

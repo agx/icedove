@@ -5,29 +5,22 @@
 
 #include "nsXMLElement.h"
 #include "mozilla/dom/ElementBinding.h"
+#include "mozilla/dom/ElementInlines.h"
 #include "nsContentUtils.h" // nsAutoScriptBlocker
 
 using namespace mozilla::dom;
 
 nsresult
-NS_NewXMLElement(nsIContent** aInstancePtrResult, already_AddRefed<nsINodeInfo> aNodeInfo)
+NS_NewXMLElement(Element** aInstancePtrResult,
+                 already_AddRefed<nsINodeInfo> aNodeInfo)
 {
   nsXMLElement* it = new nsXMLElement(aNodeInfo);
   NS_ADDREF(*aInstancePtrResult = it);
   return NS_OK;
 }
 
-DOMCI_NODE_DATA(Element, nsXMLElement)
-
-// QueryInterface implementation for nsXMLElement
-NS_INTERFACE_TABLE_HEAD(nsXMLElement)
-  NS_INTERFACE_TABLE_INHERITED2(nsXMLElement, nsIDOMNode, nsIDOMElement)
-  NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(Element)
-NS_ELEMENT_INTERFACE_MAP_END
-
-NS_IMPL_ADDREF_INHERITED(nsXMLElement, Element)
-NS_IMPL_RELEASE_INHERITED(nsXMLElement, Element)
+NS_IMPL_ISUPPORTS_INHERITED2(nsXMLElement, Element,
+                             nsIDOMNode, nsIDOMElement)
 
 JSObject*
 nsXMLElement::WrapNode(JSContext *aCx, JS::Handle<JSObject*> aScope)

@@ -67,15 +67,13 @@ let TabView = {
 
     if (this.firstUseExperienced) {
       // ___ visibility
-      let sessionstore =
-        Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
 
-      let data = sessionstore.getWindowValue(window, this.VISIBILITY_IDENTIFIER);
+      let data = SessionStore.getWindowValue(window, this.VISIBILITY_IDENTIFIER);
       if (data && data == "true") {
         this.show();
       } else {
         try {
-          data = sessionstore.getWindowValue(window, this.GROUPS_IDENTIFIER);
+          data = SessionStore.getWindowValue(window, this.GROUPS_IDENTIFIER);
           if (data) {
             let parsedData = JSON.parse(data);
             this.updateGroupNumberBroadcaster(parsedData.totalNumber || 1);
@@ -153,6 +151,15 @@ let TabView = {
         "SSWindowStateReady", this._SSWindowStateReadyListener, false);
 
     this._initialized = false;
+
+    if (this._window) {
+      this._window = null;
+    }
+
+    if (this._iframe) {
+      this._iframe.remove();
+      this._iframe = null;
+    }
   },
 
   // ----------
@@ -255,10 +262,9 @@ let TabView = {
 
   // ----------
   hide: function TabView_hide() {
-    if (!this.isVisible())
-      return;
-
-    this._window.UI.exit();
+    if (this.isVisible() && this._window) {
+      this._window.UI.exit();
+    }
   },
 
   // ----------

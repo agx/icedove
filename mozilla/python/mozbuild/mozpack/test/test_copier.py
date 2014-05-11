@@ -14,9 +14,8 @@ import mozpack.path
 import unittest
 import mozunit
 import os
-import shutil
+import stat
 from mozpack.errors import ErrorMessage
-from tempfile import mkdtemp
 from mozpack.test.test_files import (
     MockDest,
     MatchTestTemplate,
@@ -90,13 +89,7 @@ class TestFileRegistry(MatchTestTemplate, unittest.TestCase):
         self.assertTrue(self.registry.contains('foo/.foo'))
 
 
-class TestFileCopier(unittest.TestCase):
-    def setUp(self):
-        self.tmpdir = mkdtemp()
-
-    def tearDown(self):
-        shutil.rmtree(self.tmpdir)
-
+class TestFileCopier(TestWithTmpDir):
     def all_dirs(self, base):
         all_dirs = set()
         for root, dirs, files in os.walk(base):
@@ -121,16 +114,94 @@ class TestFileCopier(unittest.TestCase):
         copier.add('qux/foo', GeneratedFile('quxfoo'))
         copier.add('qux/bar', GeneratedFile(''))
 
-        copier.copy(self.tmpdir)
+        result = copier.copy(self.tmpdir)
         self.assertEqual(self.all_files(self.tmpdir), set(copier.paths()))
         self.assertEqual(self.all_dirs(self.tmpdir),
                          set(['foo/deep/nested/directory', 'qux']))
 
+        self.assertEqual(result.updated_files, set(self.tmppath(p) for p in
+            self.all_files(self.tmpdir)))
+        self.assertEqual(result.existing_files, set())
+        self.assertEqual(result.removed_files, set())
+        self.assertEqual(result.removed_directories, set())
+
         copier.remove('foo')
         copier.add('test', GeneratedFile('test'))
-        copier.copy(self.tmpdir)
+        result = copier.copy(self.tmpdir)
         self.assertEqual(self.all_files(self.tmpdir), set(copier.paths()))
         self.assertEqual(self.all_dirs(self.tmpdir), set(['qux']))
+        self.assertEqual(result.removed_files, set(self.tmppath(p) for p in
+            ('foo/bar', 'foo/qux', 'foo/deep/nested/directory/file')))
+
+    def test_symlink_directory(self):
+        """Directory symlinks in destination are deleted."""
+        if not self.symlink_supported:
+            return
+
+        dest = self.tmppath('dest')
+
+        copier = FileCopier()
+        copier.add('foo/bar/baz', GeneratedFile('foobarbaz'))
+
+        os.makedirs(self.tmppath('dest/foo'))
+        dummy = self.tmppath('dummy')
+        os.mkdir(dummy)
+        link = self.tmppath('dest/foo/bar')
+        os.symlink(dummy, link)
+
+        result = copier.copy(dest)
+
+        st = os.lstat(link)
+        self.assertFalse(stat.S_ISLNK(st.st_mode))
+        self.assertTrue(stat.S_ISDIR(st.st_mode))
+
+        self.assertEqual(self.all_files(dest), set(copier.paths()))
+
+        self.assertEqual(result.removed_directories, set())
+        self.assertEqual(len(result.updated_files), 1)
+
+    def test_permissions(self):
+        """Ensure files without write permission can be deleted."""
+        with open(self.tmppath('dummy'), 'a'):
+            pass
+
+        p = self.tmppath('no_perms')
+        with open(p, 'a'):
+            pass
+
+        # Make file and directory unwritable. Reminder: making a directory
+        # unwritable prevents modifications (including deletes) from the list
+        # of files in that directory.
+        os.chmod(p, 0400)
+        os.chmod(self.tmpdir, 0400)
+
+        copier = FileCopier()
+        copier.add('dummy', GeneratedFile('content'))
+        result = copier.copy(self.tmpdir)
+        self.assertEqual(result.removed_files_count, 1)
+        self.assertFalse(os.path.exists(p))
+
+    def test_no_remove(self):
+        copier = FileCopier()
+        copier.add('foo', GeneratedFile('foo'))
+
+        with open(self.tmppath('bar'), 'a'):
+            pass
+
+        os.mkdir(self.tmppath('emptydir'))
+        d = self.tmppath('populateddir')
+        os.mkdir(d)
+
+        with open(self.tmppath('populateddir/foo'), 'a'):
+            pass
+
+        result = copier.copy(self.tmpdir, remove_unaccounted=False)
+
+        self.assertEqual(self.all_files(self.tmpdir), set(['foo', 'bar',
+            'populateddir/foo']))
+        self.assertEqual(result.removed_files, set())
+        self.assertEqual(result.removed_directories,
+            set([self.tmppath('emptydir')]))
 
 
 class TestFilePurger(TestWithTmpDir):
@@ -155,6 +226,8 @@ class TestFilePurger(TestWithTmpDir):
         purger = FilePurger()
         purger.add('existing')
         result = purger.purge(self.tmpdir)
+        self.assertEqual(result.removed_files, set(self.tmppath(p) for p in
+            ('extra', 'dir/foo')))
         self.assertEqual(result.removed_files_count, 2)
         self.assertEqual(result.removed_directories_count, 1)
 

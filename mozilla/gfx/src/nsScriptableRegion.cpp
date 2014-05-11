@@ -5,10 +5,19 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsScriptableRegion.h"
-#include "nsCOMPtr.h"
-#include "nsIXPConnect.h"
-#include "nsServiceManagerUtils.h"
-#include "jsapi.h"
+#include <stdint.h>                     // for uint32_t
+#include <sys/types.h>                  // for int32_t
+#include "js/RootingAPI.h"              // for Rooted
+#include "js/Value.h"                   // for INT_TO_JSVAL, etc
+#include "jsapi.h"                      // for JS_DefineElement, etc
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "nsError.h"                    // for NS_OK, NS_ERROR_FAILURE, etc
+#include "nsID.h"
+#include "nsRect.h"                     // for nsIntRect
+#include "nscore.h"                     // for NS_IMETHODIMP
+
+class JSObject;
+struct JSContext;
 
 nsScriptableRegion::nsScriptableRegion()
 {
@@ -139,10 +148,10 @@ NS_IMETHODIMP nsScriptableRegion::GetRects(JSContext* aCx, JS::Value* aRects)
   const nsIntRect *rect;
 
   while ((rect = iter.Next())) {
-    if (!JS_DefineElement(aCx, destArray, n, INT_TO_JSVAL(rect->x), NULL, NULL, JSPROP_ENUMERATE) ||
-        !JS_DefineElement(aCx, destArray, n + 1, INT_TO_JSVAL(rect->y), NULL, NULL, JSPROP_ENUMERATE) ||
-        !JS_DefineElement(aCx, destArray, n + 2, INT_TO_JSVAL(rect->width), NULL, NULL, JSPROP_ENUMERATE) ||
-        !JS_DefineElement(aCx, destArray, n + 3, INT_TO_JSVAL(rect->height), NULL, NULL, JSPROP_ENUMERATE)) {
+    if (!JS_DefineElement(aCx, destArray, n, INT_TO_JSVAL(rect->x), nullptr, nullptr, JSPROP_ENUMERATE) ||
+        !JS_DefineElement(aCx, destArray, n + 1, INT_TO_JSVAL(rect->y), nullptr, nullptr, JSPROP_ENUMERATE) ||
+        !JS_DefineElement(aCx, destArray, n + 2, INT_TO_JSVAL(rect->width), nullptr, nullptr, JSPROP_ENUMERATE) ||
+        !JS_DefineElement(aCx, destArray, n + 3, INT_TO_JSVAL(rect->height), nullptr, nullptr, JSPROP_ENUMERATE)) {
       return NS_ERROR_FAILURE;
     }
     n += 4;

@@ -43,6 +43,7 @@
 #include "mozilla/dom/battery/Constants.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/Monitor.h"
+#include "mozilla/RefPtr.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/Preferences.h"
@@ -125,7 +126,7 @@ public:
     os->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, false);
   }
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIRUNNABLE
   NS_DECL_NSIOBSERVER
 
@@ -150,7 +151,7 @@ private:
   static bool sShuttingDown;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(VibratorRunnable, nsIRunnable, nsIObserver);
+NS_IMPL_ISUPPORTS2(VibratorRunnable, nsIRunnable, nsIObserver);
 
 bool VibratorRunnable::sShuttingDown = false;
 
@@ -183,7 +184,7 @@ VibratorRunnable::Run()
       mMonitor.Wait();
     }
   }
-  sVibratorRunnable = NULL;
+  sVibratorRunnable = nullptr;
   return NS_OK;
 }
 
@@ -345,7 +346,7 @@ UnregisterBatteryObserverIOThread()
   MOZ_ASSERT(sBatteryObserver);
 
   UnregisterUeventListener(sBatteryObserver);
-  sBatteryObserver = NULL;
+  sBatteryObserver = nullptr;
 }
 
 void
@@ -435,7 +436,7 @@ GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo)
     aBatteryInfo->charging() = true;
   }
 
-  if (aBatteryInfo->charging() && (aBatteryInfo->level() < 1.0)) {
+  if (!aBatteryInfo->charging() || (aBatteryInfo->level() < 1.0)) {
     aBatteryInfo->remainingTime() = dom::battery::kUnknownRemainingTime;
   } else {
     aBatteryInfo->remainingTime() = dom::battery::kDefaultRemainingTime;
@@ -593,7 +594,7 @@ SetCpuSleepAllowed(bool aAllowed)
   UpdateCpuSleepState();
 }
 
-static light_device_t* sLights[hal::eHalLightID_Count];	// will be initialized to NULL
+static light_device_t* sLights[hal::eHalLightID_Count];	// will be initialized to nullptr
 
 light_device_t* GetDevice(hw_module_t* module, char const* name)
 {
@@ -603,14 +604,14 @@ light_device_t* GetDevice(hw_module_t* module, char const* name)
   if (err == 0) {
     return (light_device_t*)device;
   } else {
-    return NULL;
+    return nullptr;
   }
 }
 
 void
 InitLights()
 {
-  // assume that if backlight is NULL, nothing has been set yet
+  // assume that if backlight is nullptr, nothing has been set yet
   // if this is not true, the initialization will occur everytime a light is read or set!
   if (!sLights[hal::eHalLightID_Backlight]) {
     int err;
@@ -651,7 +652,8 @@ SetLight(hal::LightType light, const hal::LightConfiguration& aConfig)
 
   InitLights();
 
-  if (light < 0 || light >= hal::eHalLightID_Count || sLights[light] == NULL) {
+  if (light < 0 || light >= hal::eHalLightID_Count ||
+      sLights[light] == nullptr) {
     return false;
   }
 
@@ -676,7 +678,8 @@ GetLight(hal::LightType light, hal::LightConfiguration* aConfig)
   InitLights();
 #endif
 
-  if (light < 0 || light >= hal::eHalLightID_Count || sLights[light] == NULL) {
+  if (light < 0 || light >= hal::eHalLightID_Count ||
+      sLights[light] == nullptr) {
     return false;
   }
 
@@ -734,13 +737,12 @@ AdjustSystemClock(int64_t aDeltaMilliseconds)
 
   if (ioctl(fd, ANDROID_ALARM_SET_RTC, &now) < 0) {
     HAL_LOG(("ANDROID_ALARM_SET_RTC failed: %s", strerror(errno)));
-    return;
   }
 
   hal::NotifySystemClockChange(aDeltaMilliseconds);
 }
 
-static int32_t
+int32_t
 GetTimezoneOffset()
 {
   PRExplodedTime prTime;
@@ -849,7 +851,7 @@ public:
 
 int AlarmData::sNextGeneration = 0;
 
-AlarmData* sAlarmData = NULL;
+AlarmData* sAlarmData = nullptr;
 
 class AlarmFiredEvent : public nsRunnable {
 public:
@@ -883,7 +885,7 @@ DestroyAlarmData(void* aData)
 // Runs on alarm-watcher thread.
 void ShutDownAlarm(int aSigno)
 {
-  if (aSigno == SIGUSR1) {
+  if (aSigno == SIGUSR1 && sAlarmData) {
     sAlarmData->mShuttingDown = true;
   }
   return;
@@ -921,7 +923,7 @@ WaitForAlarm(void* aData)
   }
 
   pthread_cleanup_pop(1);
-  return NULL;
+  return nullptr;
 }
 
 bool
@@ -942,7 +944,7 @@ EnableAlarm()
   sigemptyset(&actions.sa_mask);
   actions.sa_flags = 0;
   actions.sa_handler = ShutDownAlarm;
-  if (sigaction(SIGUSR1, &actions, NULL)) {
+  if (sigaction(SIGUSR1, &actions, nullptr)) {
     HAL_LOG(("Failed to set SIGUSR1 signal for alarm-watcher thread."));
     return false;
   }
@@ -957,7 +959,7 @@ EnableAlarm()
   int status = pthread_create(&sAlarmFireWatcherThread, &attr, WaitForAlarm,
                               alarmData.get());
   if (status) {
-    alarmData = NULL;
+    alarmData = nullptr;
     delete sInternalLockCpuMonitor;
     HAL_LOG(("Failed to create alarm-watcher thread. Status: %d.", status));
     return false;
@@ -976,7 +978,7 @@ DisableAlarm()
   MOZ_ASSERT(sAlarmData);
 
   // NB: this must happen-before the thread cancellation.
-  sAlarmData = NULL;
+  sAlarmData = nullptr;
 
   // The cancel will interrupt the thread and destroy it, freeing the
   // data pointed at by sAlarmData.
@@ -1028,6 +1030,15 @@ OomAdjOfOomScoreAdj(int aOomScoreAdj)
 }
 
 static void
+RoundOomScoreAdjUpWithBackroundLRU(int& aOomScoreAdj, uint32_t aBackgroundLRU)
+{
+  // We want to add minimum value to round OomScoreAdj up according to
+  // the steps by aBackgroundLRU.
+  aOomScoreAdj +=
+    ceil(((float)OOM_SCORE_ADJ_MAX / OOM_ADJUST_MAX) * aBackgroundLRU);
+}
+
+static void
 EnsureKernelLowMemKillerParamsSet()
 {
   static bool kernelLowMemKillerParamsSet;
@@ -1057,7 +1068,11 @@ EnsureKernelLowMemKillerParamsSet()
   nsAutoCString adjParams;
   nsAutoCString minfreeParams;
 
-  for (int i = 0; i < NUM_PROCESS_PRIORITY; i++) {
+  int32_t lowerBoundOfNextOomScoreAdj = OOM_SCORE_ADJ_MIN - 1;
+  int32_t lowerBoundOfNextKillUnderMB = 0;
+  int32_t countOfLowmemorykillerParametersSets = 0;
+
+  for (int i = NUM_PROCESS_PRIORITY - 1; i >= 0; i--) {
     // The system doesn't function correctly if we're missing these prefs, so
     // crash loudly.
 
@@ -1076,14 +1091,26 @@ EnsureKernelLowMemKillerParamsSet()
           nsPrintfCString("hal.processPriorityManager.gonk.%s.KillUnderMB",
                           ProcessPriorityToString(priority)).get(),
           &killUnderMB))) {
-      MOZ_CRASH();
+      continue;
     }
+
+    // The LMK in kernel silently malfunctions if we assign the parameters
+    // in non-increasing order, so we add this assertion here. See bug 887192.
+    MOZ_ASSERT(oomScoreAdj > lowerBoundOfNextOomScoreAdj);
+    MOZ_ASSERT(killUnderMB > lowerBoundOfNextKillUnderMB);
+
+    // The LMK in kernel only accept 6 sets of LMK parameters. See bug 914728.
+    MOZ_ASSERT(countOfLowmemorykillerParametersSets < 6);
 
     // adj is in oom_adj units.
     adjParams.AppendPrintf("%d,", OomAdjOfOomScoreAdj(oomScoreAdj));
 
     // minfree is in pages.
     minfreeParams.AppendPrintf("%d,", killUnderMB * 1024 * 1024 / PAGE_SIZE);
+
+    lowerBoundOfNextOomScoreAdj = oomScoreAdj;
+    lowerBoundOfNextKillUnderMB = killUnderMB;
+    countOfLowmemorykillerParametersSets++;
   }
 
   // Strip off trailing commas.
@@ -1186,10 +1213,11 @@ SetNiceForPid(int aPid, int aNice)
 void
 SetProcessPriority(int aPid,
                    ProcessPriority aPriority,
-                   ProcessCPUPriority aCPUPriority)
+                   ProcessCPUPriority aCPUPriority,
+                   uint32_t aBackgroundLRU)
 {
-  HAL_LOG(("SetProcessPriority(pid=%d, priority=%d, cpuPriority=%d)",
-           aPid, aPriority, aCPUPriority));
+  HAL_LOG(("SetProcessPriority(pid=%d, priority=%d, cpuPriority=%d, LRU=%u)",
+           aPid, aPriority, aCPUPriority, aBackgroundLRU));
 
   // If this is the first time SetProcessPriority was called, set the kernel's
   // OOM parameters according to our prefs.
@@ -1204,6 +1232,8 @@ SetProcessPriority(int aPid,
   nsresult rv = Preferences::GetInt(nsPrintfCString(
     "hal.processPriorityManager.gonk.%s.OomScoreAdjust",
     ProcessPriorityToString(aPriority)).get(), &oomScoreAdj);
+
+  RoundOomScoreAdjUpWithBackroundLRU(oomScoreAdj, aBackgroundLRU);
 
   if (NS_SUCCEEDED(rv)) {
     int clampedOomScoreAdj = clamped<int>(oomScoreAdj, OOM_SCORE_ADJ_MIN,

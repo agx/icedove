@@ -11,14 +11,14 @@
 /* Threadsafe. */
 
 #include "nsMemory.h"
-#include "nsIServiceManager.h"
 #include "nsCOMArray.h"
 #include "nsThreadUtils.h"
 
 #include "nsConsoleService.h"
 #include "nsConsoleMessage.h"
 #include "nsIClassInfoImpl.h"
-#include "nsThreadUtils.h"
+#include "nsIConsoleListener.h"
+#include "nsPrintfCString.h"
 
 #include "mozilla/Preferences.h"
 
@@ -31,9 +31,9 @@
 
 using namespace mozilla;
 
-NS_IMPL_THREADSAFE_ADDREF(nsConsoleService)
-NS_IMPL_THREADSAFE_RELEASE(nsConsoleService)
-NS_IMPL_CLASSINFO(nsConsoleService, NULL, nsIClassInfo::THREADSAFE | nsIClassInfo::SINGLETON, NS_CONSOLESERVICE_CID)
+NS_IMPL_ADDREF(nsConsoleService)
+NS_IMPL_RELEASE(nsConsoleService)
+NS_IMPL_CLASSINFO(nsConsoleService, nullptr, nsIClassInfo::THREADSAFE | nsIClassInfo::SINGLETON, NS_CONSOLESERVICE_CID)
 NS_IMPL_QUERY_INTERFACE1_CI(nsConsoleService, nsIConsoleService)
 NS_IMPL_CI_INTERFACE_GETTER1(nsConsoleService, nsIConsoleService)
 
@@ -95,7 +95,6 @@ nsConsoleService::Init()
     // Array elements should be 0 initially for circular buffer algorithm.
     memset(mMessages, 0, mBufferSize * sizeof(nsIConsoleMessage *));
 
-    mListeners.Init();
     NS_DispatchToMainThread(new AddConsolePrefWatchers(this));
 
     return NS_OK;
@@ -169,7 +168,12 @@ nsConsoleService::LogMessageWithMode(nsIConsoleMessage *message, nsConsoleServic
     }
 
     if (NS_IsMainThread() && mDeliveringMessage) {
-        NS_WARNING("Some console listener threw an error while inside itself. Discarding this message");
+        nsString msg;
+        message->GetMessageMoz(getter_Copies(msg));
+        NS_WARNING(nsPrintfCString("Reentrancy error: some client attempted "
+            "to display a message to the console while in a console listener. "
+            "The following message was discarded: \"%s\"",
+            NS_ConvertUTF16toUTF8(msg).get()).get());
         return NS_ERROR_FAILURE;
     }
 

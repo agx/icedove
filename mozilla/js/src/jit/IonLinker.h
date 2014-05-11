@@ -10,10 +10,11 @@
 #include "jscntxt.h"
 #include "jscompartment.h"
 #include "jsgc.h"
-#include "jit/IonCode.h"
-#include "jit/IonCompartment.h"
+
 #include "assembler/jit/ExecutableAllocator.h"
+#include "jit/IonCode.h"
 #include "jit/IonMacroAssembler.h"
+#include "jit/JitCompartment.h"
 
 namespace js {
 namespace jit {
@@ -24,13 +25,16 @@ class Linker
 
     IonCode *fail(JSContext *cx) {
         js_ReportOutOfMemory(cx);
-        return NULL;
+        return nullptr;
     }
 
-    IonCode *newCode(JSContext *cx, IonCompartment *comp, JSC::CodeKind kind) {
+    template <AllowGC allowGC>
+    IonCode *newCode(JSContext *cx, JSC::ExecutableAllocator *execAlloc, JSC::CodeKind kind) {
         JS_ASSERT(kind == JSC::ION_CODE ||
                   kind == JSC::BASELINE_CODE ||
                   kind == JSC::OTHER_CODE);
+        JS_ASSERT(masm.numAsmJSAbsoluteLinks() == 0);
+
         gc::AutoSuppressGC suppressGC(cx);
         if (masm.oom())
             return fail(cx);
@@ -40,7 +44,7 @@ class Linker
         if (bytesNeeded >= MAX_BUFFER_SIZE)
             return fail(cx);
 
-        uint8_t *result = (uint8_t *)comp->execAlloc()->alloc(bytesNeeded, &pool, kind);
+        uint8_t *result = (uint8_t *)execAlloc->alloc(bytesNeeded, &pool, kind);
         if (!result)
             return fail(cx);
 
@@ -50,10 +54,10 @@ class Linker
         // Bump the code up to a nice alignment.
         codeStart = (uint8_t *)AlignBytes((uintptr_t)codeStart, CodeAlignment);
         uint32_t headerSize = codeStart - result;
-        IonCode *code = IonCode::New(cx, codeStart,
-                                     bytesNeeded - headerSize, pool);
+        IonCode *code = IonCode::New<allowGC>(cx, codeStart,
+                                              bytesNeeded - headerSize, pool);
         if (!code)
-            return NULL;
+            return nullptr;
         if (masm.oom())
             return fail(cx);
         code->copyFrom(masm);
@@ -72,8 +76,26 @@ class Linker
         masm.finish();
     }
 
+    template <AllowGC allowGC>
     IonCode *newCode(JSContext *cx, JSC::CodeKind kind) {
-        return newCode(cx, cx->compartment()->ionCompartment(), kind);
+        return newCode<allowGC>(cx, cx->compartment()->jitCompartment()->execAlloc(), kind);
+    }
+
+    IonCode *newCodeForIonScript(JSContext *cx) {
+#ifdef JS_CPU_ARM
+        // ARM does not yet use implicit interrupt checks, see bug 864220.
+        return newCode<CanGC>(cx, JSC::ION_CODE);
+#else
+        // The caller must lock the runtime against operation callback triggers,
+        // as the triggering thread may use the executable allocator below.
+        JS_ASSERT(cx->runtime()->currentThreadOwnsOperationCallbackLock());
+
+        JSC::ExecutableAllocator *alloc = cx->runtime()->jitRuntime()->getIonAlloc(cx);
+        if (!alloc)
+            return nullptr;
+
+        return newCode<CanGC>(cx, alloc, JSC::ION_CODE);
+#endif
     }
 };
 

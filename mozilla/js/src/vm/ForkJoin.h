@@ -8,8 +8,9 @@
 #define vm_ForkJoin_h
 
 #include "jscntxt.h"
-#include "vm/ThreadPool.h"
-#include "jsgc.h"
+
+#include "gc/GCInternals.h"
+
 #include "jit/Ion.h"
 
 ///////////////////////////////////////////////////////////////////////////
@@ -98,7 +99,7 @@
 //   get interesting.  In that case, the semantics of parallel
 //   execution guarantee us that no visible side effects have occurred
 //   (unless they were performed with the intrinsic
-//   |UnsafeSetElement()|, which can only be used in self-hosted
+//   |UnsafePutElements()|, which can only be used in self-hosted
 //   code).  We therefore reinvoke |func()| but with warmup set to
 //   true.  The idea here is that often parallel bailouts result from
 //   a failed type guard or other similar assumption, so rerunning the
@@ -200,7 +201,22 @@
 
 namespace js {
 
-struct ForkJoinSlice;
+class ForkJoinActivation : public Activation
+{
+    uint8_t *prevIonTop_;
+
+    // We ensure that incremental GC be finished before we enter into a fork
+    // join section, but the runtime/zone might still be marked as needing
+    // barriers due to being in the middle of verifying barriers. Pause
+    // verification during the fork join section.
+    gc::AutoStopVerifyingBarriers av_;
+
+  public:
+    ForkJoinActivation(JSContext *cx);
+    ~ForkJoinActivation();
+};
+
+class ForkJoinSlice;
 
 bool ForkJoin(JSContext *cx, CallArgs &args);
 
@@ -208,24 +224,15 @@ bool ForkJoin(JSContext *cx, CallArgs &args);
 // executed.
 uint32_t ForkJoinSlices(JSContext *cx);
 
-#ifdef DEBUG
 struct IonLIRTraceData {
-    uint32_t bblock;
-    uint32_t lir;
+    uint32_t blockIndex;
+    uint32_t lirIndex;
     uint32_t execModeInt;
     const char *lirOpName;
     const char *mirOpName;
     JSScript *script;
     jsbytecode *pc;
 };
-#endif
-
-// Parallel operations in general can have one of three states.  They may
-// succeed, fail, or "bail", where bail indicates that the code encountered an
-// unexpected condition and should be re-run sequentially.
-// Different subcategories of the "bail" state are encoded as variants of
-// TP_RETRY_*.
-enum ParallelResult { TP_SUCCESS, TP_RETRY_SEQUENTIALLY, TP_RETRY_AFTER_GC, TP_FATAL };
 
 ///////////////////////////////////////////////////////////////////////////
 // Bailout tracking
@@ -233,17 +240,17 @@ enum ParallelResult { TP_SUCCESS, TP_RETRY_SEQUENTIALLY, TP_RETRY_AFTER_GC, TP_F
 enum ParallelBailoutCause {
     ParallelBailoutNone,
 
-    // compiler returned Method_Skipped
+    // Compiler returned Method_Skipped
     ParallelBailoutCompilationSkipped,
 
-    // compiler returned Method_CantCompile
+    // Compiler returned Method_CantCompile
     ParallelBailoutCompilationFailure,
 
-    // the periodic interrupt failed, which can mean that either
+    // The periodic interrupt failed, which can mean that either
     // another thread canceled, the user interrupted us, etc
     ParallelBailoutInterrupt,
 
-    // an IC update failed
+    // An IC update failed
     ParallelBailoutFailedIC,
 
     // Heap busy flag was set during interrupt
@@ -256,8 +263,8 @@ enum ParallelBailoutCause {
     ParallelBailoutOverRecursed,
     ParallelBailoutOutOfMemory,
     ParallelBailoutUnsupported,
+    ParallelBailoutUnsupportedVM,
     ParallelBailoutUnsupportedStringComparison,
-    ParallelBailoutUnsupportedSparseArray,
     ParallelBailoutRequestedGC,
     ParallelBailoutRequestedZoneGC,
 };
@@ -281,16 +288,20 @@ struct ParallelBailoutRecord {
     void init(JSContext *cx);
     void reset(JSContext *cx);
     void setCause(ParallelBailoutCause cause,
-                  JSScript *outermostScript,   // inliner (if applicable)
-                  JSScript *currentScript,     // inlinee (if applicable)
-                  jsbytecode *currentPc);
+                  JSScript *outermostScript = nullptr,   // inliner (if applicable)
+                  JSScript *currentScript = nullptr,     // inlinee (if applicable)
+                  jsbytecode *currentPc = nullptr);
+    void updateCause(ParallelBailoutCause cause,
+                     JSScript *outermostScript,
+                     JSScript *currentScript,
+                     jsbytecode *currentPc);
     void addTrace(JSScript *script,
                   jsbytecode *pc);
 };
 
 struct ForkJoinShared;
 
-struct ForkJoinSlice : ThreadSafeContext
+class ForkJoinSlice : public ThreadSafeContext
 {
   public:
     // Which slice should you process? Ranges from 0 to |numSlices|.
@@ -324,6 +335,18 @@ struct ForkJoinSlice : ThreadSafeContext
     // parallel section.
     void requestGC(JS::gcreason::Reason reason);
     void requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason);
+
+    // Set the fatal flag for the next abort. Used to distinguish retry or
+    // fatal aborts from VM functions.
+    bool setPendingAbortFatal(ParallelBailoutCause cause);
+
+    // Reports an unsupported operation, returning false if we are reporting
+    // an error. Otherwise drop the warning on the floor.
+    bool reportError(ParallelBailoutCause cause, unsigned report) {
+        if (report & JSREPORT_ERROR)
+            return setPendingAbortFatal(cause);
+        return true;
+    }
 
     // During the parallel phase, this method should be invoked
     // periodically, for example on every backedge, similar to the
@@ -367,6 +390,10 @@ struct ForkJoinSlice : ThreadSafeContext
     ForkJoinShared *const shared;
 
     bool acquiredContext_;
+
+    // ForkJoinSlice is allocated on the stack. It would be dangerous to GC
+    // with it live because of the GC pointer fields stored in the context.
+    JS::AutoAssertNoGC nogc_;
 };
 
 // Locks a JSContext for its scope. Be very careful, because locking a
@@ -391,7 +418,7 @@ class LockedJSContext
       : slice_(slice),
         cx_(slice->acquireContext())
 #else
-      : cx_(NULL)
+      : cx_(nullptr)
 #endif
     { }
 
@@ -410,18 +437,22 @@ InParallelSection()
 {
 #ifdef JS_THREADSAFE
     ForkJoinSlice *current = ForkJoinSlice::Current();
-    return current != NULL;
+    return current != nullptr;
 #else
     return false;
 #endif
 }
 
-bool InSequentialOrExclusiveParallelSection();
+bool InExclusiveParallelSection();
 
 bool ParallelTestsShouldPass(JSContext *cx);
 
 ///////////////////////////////////////////////////////////////////////////
 // Debug Spew
+
+namespace jit {
+    class MDefinition;
+}
 
 namespace parallel {
 
@@ -457,8 +488,7 @@ ExecutionStatus SpewEndOp(ExecutionStatus status);
 void SpewBeginCompile(HandleScript script);
 jit::MethodStatus SpewEndCompile(jit::MethodStatus status);
 void SpewMIR(jit::MDefinition *mir, const char *fmt, ...);
-void SpewBailoutIR(uint32_t bblockId, uint32_t lirId,
-                   const char *lir, const char *mir, JSScript *script, jsbytecode *pc);
+void SpewBailoutIR(IonLIRTraceData *data);
 
 #else
 
@@ -473,9 +503,7 @@ static inline void SpewBeginCompile(HandleScript script) { }
 static inline jit::MethodStatus SpewEndCompile(jit::MethodStatus status) { return status; }
 static inline void SpewMIR(jit::MDefinition *mir, const char *fmt, ...) { }
 #endif
-static inline void SpewBailoutIR(uint32_t bblockId, uint32_t lirId,
-                                 const char *lir, const char *mir,
-                                 JSScript *script, jsbytecode *pc) { }
+static inline void SpewBailoutIR(IonLIRTraceData *data) { }
 
 #endif // DEBUG && JS_THREADSAFE && JS_ION
 
@@ -488,7 +516,7 @@ js::ForkJoinSlice::Current()
 #if defined(JS_THREADSAFE) && defined(JS_ION)
     return (ForkJoinSlice*) PR_GetThreadPrivate(ThreadPrivateIndex);
 #else
-    return NULL;
+    return nullptr;
 #endif
 }
 

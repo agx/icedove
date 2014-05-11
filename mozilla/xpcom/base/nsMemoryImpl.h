@@ -6,9 +6,10 @@
 #ifndef nsMemoryImpl_h__
 #define nsMemoryImpl_h__
 
+#include "mozilla/Atomics.h"
+
 #include "nsIMemory.h"
 #include "nsIRunnable.h"
-#include "prtime.h"
 
 // nsMemoryImpl is a static object. We can do this because it doesn't have
 // a constructor/destructor or any instance members. Please don't add
@@ -37,7 +38,7 @@ protected:
         const PRUnichar* mReason;
     };
 
-    static int32_t    sIsFlushing;
+    static mozilla::Atomic<int32_t> sIsFlushing;
     static FlushEvent sFlushEvent;
     static PRIntervalTime sLastFlushTime;
 };

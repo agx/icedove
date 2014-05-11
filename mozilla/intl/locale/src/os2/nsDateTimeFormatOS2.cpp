@@ -5,7 +5,7 @@
 #include <unidef.h>
 #include "nsDateTimeFormatOS2.h"
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsDateTimeFormatOS2,nsIDateTimeFormat)
+NS_IMPL_ISUPPORTS1(nsDateTimeFormatOS2,nsIDateTimeFormat)
 
 #define NSDATETIME_FORMAT_BUFFER_LEN  80
 
@@ -34,7 +34,7 @@ nsresult nsDateTimeFormatOS2::FormatTMTime(nsILocale* locale,
   UniChar uFmtD[NSDATETIME_FORMAT_BUFFER_LEN] = { 0 };
   UniChar uFmtT[NSDATETIME_FORMAT_BUFFER_LEN] = { 0 };
   UniChar *pString = nullptr;
-  LocaleObject locObj = NULL;
+  LocaleObject locObj = nullptr;
   int ret = UniCreateLocaleObject(UNI_UCS_STRING_POINTER, (UniChar *)L"", &locObj);
   if (ret != ULS_SUCCESS)
     UniCreateLocaleObject(UNI_UCS_STRING_POINTER, (UniChar *)L"C", &locObj);

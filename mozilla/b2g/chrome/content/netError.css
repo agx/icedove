@@ -110,7 +110,7 @@ div[collapsed] {
   background-image: url("chrome://browser/skin/images/arrowright-16.png");
   background-size: 11px 11px;
   background-repeat: no-repeat;
-  background-position: left 0.3em;  
+  background-position: left 0.3em;
 }
 
 div[collapsed="true"] {

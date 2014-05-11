@@ -10,13 +10,11 @@
 #include "nsIDOMCanvasRenderingContext2D.h"
 
 #include "mozilla/Attributes.h"
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 
 #include "nsCycleCollectionParticipant.h"
 #include "nsTraceRefcnt.h"
-#include "xpcpublic.h"
-
-#include "jsapi.h"
+#include "js/GCAPI.h"
 
 namespace mozilla {
 namespace dom {
@@ -56,7 +54,7 @@ public:
   }
   JSObject* GetDataObject() const
   {
-    xpc_UnmarkGrayObject(mData);
+    JS::ExposeObjectToActiveJS(mData);
     return mData;
   }
 

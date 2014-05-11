@@ -12,27 +12,9 @@
  * implementation of this interface for non-Windows systems, for testing and
  * development purposes only.
  */
-[scriptable, uuid(ac813696-3b0a-4259-bce1-1d078021ebbe)]
+[scriptable, uuid(b6cbef4a-eec1-470b-8e74-9f4120f678c6)]
 interface nsIWinMetroUtils : nsISupports
 {
-  /* Fullscreen landscape orientation */
-  const long fullScreenLandscape = 0;
-  /* Larger snapped state */
-  const long filled = 1;
-  /* Smaller snapped state */
-  const long snapped = 2;
-  /* Fullscreen portrait orientation */
-  const long fullScreenPortrait = 3;
-
-  /* return constants for the handPreference property */
-  const long handPreferenceLeft = 0;
-  const long handPreferenceRight = 1;
-
-  /**
-   * Determines the current snapped state.
-   */
-  readonly attribute long snappedState;
-
   /**
    * Determine if the current browser is running in the metro immersive
    * environment.
@@ -40,20 +22,23 @@ interface nsIWinMetroUtils : nsISupports
   readonly attribute boolean immersive;
 
   /**
-   * Determine if the user prefers left handed or right handed input.
-   */
-  readonly attribute long handPreference;
-
-  /**
    * Determine the activation URI
    */
   readonly attribute AString activationURI;
 
   /**
-   * Attempts to unsnap the application from snapped state to filled state
+   * Determine the previous execution state. The possible values of this
+   * attribute are exactly those values in the
+   * Windows::ApplicationModel::Activation enumeration.
    */
-   void unsnap();
+  readonly attribute long previousExecutionState;
 
+  /**
+   * Helper for our restart logic up in the about flyout. We set this
+   * right before we restart for an update so that MetroAppShell can
+   * communicate this to the ceh.
+   */
+  attribute boolean updatePending;
 
    /**
     * Show the settings flyout
@@ -65,6 +50,11 @@ interface nsIWinMetroUtils : nsISupports
    * switches to Desktop mode if in metro mode.
    */
    void launchInDesktop(in AString aPath, in AString aArguments); 
+
+  /**
+   * Displays a native Windows 8 toast.
+   */
+   void showNativeToast(in AString aTitle, in AString aMessage, in AString anImage, in AString aCookie);
 
   /**
    * Secondary tiles are a Windows 8 specific feature for pinning new tiles
@@ -107,29 +97,6 @@ interface nsIWinMetroUtils : nsISupports
    * @return true if the tile is pinned
    */
   bool isTilePinned(in AString aTileID);
-
-  /**
-   * Stores the sync info securely
-   *
-   * @param aEmail The sync account email
-   * @param aPassword The sync account password
-   * @param aKey The sync account key
-   */
-  void storeSyncInfo(in AString aEmail, in AString aPassword, in AString aKey);
-
-  /**
-   * Loads the sync info
-   *
-   * @param aEmail The sync account email
-   * @param aPassword The sync account password
-   * @param aKey The sync account key
-   */
-  void loadSyncInfo(out AString aEmail, out AString aPassword, out AString aKey);
-
-  /**
-   * Clears the stored sync info if any.
-   */
-  void clearSyncInfo();
 
   /**
    * Soft keyboard attributes. Used in unison with shown/hidden observer

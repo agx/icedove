@@ -2,8 +2,8 @@
 
 "use strict";
 
-load('utility.js');
-load('annotations.js');
+loadRelativeToScript('utility.js');
+loadRelativeToScript('annotations.js');
 
 function processCSU(csu, body)
 {
@@ -67,12 +67,12 @@ function addGCType(name)
 
     print("GCThing: " + name);
     if (name in structureParents) {
-        for (var nested of structureParents[name])
-            addGCType(nested);
+        for (var holder of structureParents[name])
+            addGCType(holder);
     }
     if (name in pointerParents) {
-        for (var nested of pointerParents[name])
-            addGCPointer(nested);
+        for (var holder of pointerParents[name])
+            addGCPointer(holder);
     }
 }
 
@@ -84,8 +84,8 @@ function addGCPointer(name)
 
     print("GCPointer: " + name);
     if (name in structureParents) {
-        for (var nested of structureParents[name])
-            addGCPointer(nested);
+        for (var holder of structureParents[name])
+            addGCPointer(holder);
     }
 }
 
@@ -94,6 +94,7 @@ addGCType('JSString');
 addGCType('js::Shape');
 addGCType('js::BaseShape');
 addGCType('JSScript');
+addGCType('js::LazyScript');
 addGCType('js::ion::IonCode');
 addGCPointer('JS::Value');
 addGCPointer('jsid');

@@ -6,7 +6,6 @@
 #ifndef GFX_UNISCRIBESHAPER_H
 #define GFX_UNISCRIBESHAPER_H
 
-#include "prtypes.h"
 #include "gfxTypes.h"
 #include "gfxGDIFont.h"
 
@@ -19,7 +18,7 @@ class gfxUniscribeShaper : public gfxFontShaper
 public:
     gfxUniscribeShaper(gfxGDIFont *aFont)
         : gfxFontShaper(aFont)
-        , mScriptCache(NULL)
+        , mScriptCache(nullptr)
     {
         MOZ_COUNT_CTOR(gfxUniscribeShaper);
     }

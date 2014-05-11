@@ -7,7 +7,7 @@
 #ifndef jit_StupidAllocator_h
 #define jit_StupidAllocator_h
 
-#include "RegisterAllocator.h"
+#include "jit/RegisterAllocator.h"
 
 // Simple register allocator that only carries registers within basic blocks.
 
@@ -31,7 +31,7 @@ class StupidAllocator : public RegisterAllocator
         // Whether the physical register is not synced with the backing stack slot.
         bool dirty;
 
-        void set(uint32_t vreg, LInstruction *ins = NULL, bool dirty = false) {
+        void set(uint32_t vreg, LInstruction *ins = nullptr, bool dirty = false) {
             this->vreg = vreg;
             this->age = ins ? ins->id() : 0;
             this->dirty = dirty;
@@ -75,6 +75,9 @@ class StupidAllocator : public RegisterAllocator
     void loadRegister(LInstruction *ins, uint32_t vreg, RegisterIndex index);
 
     RegisterIndex findExistingRegister(uint32_t vreg);
+
+    bool allocationRequiresRegister(const LAllocation *alloc, AnyRegister reg);
+    bool registerIsReserved(LInstruction *ins, AnyRegister reg);
 };
 
 } // namespace jit

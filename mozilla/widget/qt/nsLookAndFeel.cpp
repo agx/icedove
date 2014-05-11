@@ -364,17 +364,11 @@ nsLookAndFeel::GetIntImpl(IntID aID, int32_t &aResult)
       break;
 
     case eIntID_TouchEnabled:
-#ifdef MOZ_PLATFORM_MAEMO
-      // All known Maemo devices are touch enabled.
-      aResult = 1;
-#else
       aResult = 0;
       res = NS_ERROR_NOT_IMPLEMENTED;
-#endif
       break;
 
     case eIntID_WindowsDefaultTheme:
-    case eIntID_MaemoClassic:
       aResult = 0;
       res = NS_ERROR_NOT_IMPLEMENTED;
       break;
@@ -457,10 +451,10 @@ nsLookAndFeel::GetFontImpl(FontID aID, nsString& aFontName,
                            gfxFontStyle& aFontStyle,
                            float aDevPixPerCSSPixel)
 {
-  const char *className = NULL;
-  nsString *cachedFontName = NULL;
-  gfxFontStyle *cachedFontStyle = NULL;
-  bool *isCached = NULL;
+  const char *className = nullptr;
+  nsString *cachedFontName = nullptr;
+  gfxFontStyle *cachedFontStyle = nullptr;
+  bool *isCached = nullptr;
 
   switch (aID) {
     case eFont_Menu:         // css2

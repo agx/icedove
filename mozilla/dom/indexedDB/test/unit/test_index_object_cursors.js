@@ -27,12 +27,15 @@ function testSteps()
   let request = indexedDB.open(this.window ? window.location.pathname : "Splendid Test", 1);
   request.onerror = errorHandler;
   request.onupgradeneeded = grabEventAndContinueHandler;
-  let event = yield;
+  let event = yield undefined;
 
   let db = event.target.result;
   db.onerror = errorHandler;
 
   event.target.onsuccess = continueToNextStep;
+
+  // Bug 943409.
+  eval('');
 
   for (let objectStoreIndex in objectStoreData) {
     const objectStoreInfo = objectStoreData[objectStoreIndex];
@@ -45,7 +48,7 @@ function testSteps()
                                           indexInfo.options);
     }
   }
-  yield;
+  yield undefined;
 
   ok(true, "Initial setup");
 
@@ -106,7 +109,7 @@ function testSteps()
           keyIndex++
         }
       };
-      yield;
+      yield undefined;
 
       is(keyIndex, 2, "Saw all the items");
 
@@ -129,17 +132,19 @@ function testSteps()
         cursor.continue();
         keyIndex++;
       };
-      yield;
+      yield undefined;
 
       is(keyIndex, 1, "Saw all the items");
 
       db.transaction(objectStoreName, "readwrite")
         .objectStore(objectStoreName).clear()
         .onsuccess = continueToNextStep;
-      yield;
+      yield undefined;
+
+      objectStore = index = null; // Bug 943409 workaround.
     }
   }
 
   finishTest();
-  yield;
+  yield undefined;
 }

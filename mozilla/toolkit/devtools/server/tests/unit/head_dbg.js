@@ -15,9 +15,21 @@ Services.prefs.setBoolPref("devtools.debugger.log", true);
 // Enable remote debugging for the relevant tests.
 Services.prefs.setBoolPref("devtools.debugger.remote-enabled", true);
 
-Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
-Cu.import("resource://gre/modules/devtools/dbg-client.jsm");
-Cu.import("resource://gre/modules/devtools/Loader.jsm");
+Cu.import("resource://gre/modules/devtools/DevToolsUtils.jsm");
+
+function tryImport(url) {
+  try {
+    Cu.import(url);
+  } catch (e) {
+    dump("Error importing " + url + "\n");
+    dump(DevToolsUtils.safeErrorString(e) + "\n");
+    throw e;
+  }
+}
+
+tryImport("resource://gre/modules/devtools/dbg-server.jsm");
+tryImport("resource://gre/modules/devtools/dbg-client.jsm");
+tryImport("resource://gre/modules/devtools/Loader.jsm");
 
 function testExceptionHook(ex) {
   try {
@@ -25,6 +37,7 @@ function testExceptionHook(ex) {
   } catch(ex) {
     return {throw: ex}
   }
+  return undefined;
 }
 
 // Convert an nsIScriptError 'aFlags' value into an appropriate string.
@@ -43,13 +56,19 @@ function scriptErrorFlagsToKind(aFlags) {
   return kind;
 }
 
+// Redeclare dbg_assert with a fatal behavior.
+function dbg_assert(cond, e) {
+  if (!cond) {
+    throw e;
+  }
+}
+
 // Register a console listener, so console messages don't just disappear
 // into the ether.
 let errorCount = 0;
 let listener = {
   observe: function (aMessage) {
     errorCount++;
-    var shouldThrow = true;
     try {
       // If we've been given an nsIScriptError, then we can print out
       // something nicely formatted, for tools like Emacs to pick up.
@@ -58,7 +77,6 @@ let listener = {
            scriptErrorFlagsToKind(aMessage.flags) + ": " +
            aMessage.errorMessage + "\n");
       var string = aMessage.errorMessage;
-      shouldThrow = !aMessage.flags;
     } catch (x) {
       // Be a little paranoid with message, as the whole goal here is to lose
       // no information.
@@ -73,8 +91,7 @@ let listener = {
     while (DebuggerServer.xpcInspector.eventLoopNestLevel > 0) {
       DebuggerServer.xpcInspector.exitNestedEventLoop();
     }
-    if (shouldThrow)
-      do_throw("head_dbg.js got console message: " + string + "\n");
+    do_throw("head_dbg.js got console message: " + string + "\n");
   }
 };
 
@@ -98,7 +115,7 @@ function testGlobal(aName) {
     .createInstance(Ci.nsIPrincipal);
 
   let sandbox = Cu.Sandbox(systemPrincipal);
-  Cu.evalInSandbox("this.__name = '" + aName + "'", sandbox);
+  sandbox.__name = aName;
   return sandbox;
 }
 
@@ -160,8 +177,19 @@ function attachTestTabAndResume(aClient, aTitle, aCallback) {
  */
 function initTestDebuggerServer()
 {
+  DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/root.js");
   DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/script.js");
   DebuggerServer.addActors("resource://test/testactors.js");
+  // Allow incoming connections.
+  DebuggerServer.init(function () { return true; });
+}
+
+function initTestTracerServer()
+{
+  DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/root.js");
+  DebuggerServer.addActors("resource://gre/modules/devtools/server/actors/script.js");
+  DebuggerServer.addActors("resource://test/testactors.js");
+  DebuggerServer.registerModule("devtools/server/actors/tracer");
   // Allow incoming connections.
   DebuggerServer.init(function () { return true; });
 }
@@ -185,8 +213,8 @@ function finishClient(aClient)
 /**
  * Takes a relative file path and returns the absolute file url for it.
  */
-function getFileUrl(aName) {
-  let file = do_get_file(aName);
+function getFileUrl(aName, aAllowMissing=false) {
+  let file = do_get_file(aName, aAllowMissing);
   return Services.io.newFileURI(file).spec;
 }
 
@@ -194,9 +222,9 @@ function getFileUrl(aName) {
  * Returns the full path of the file with the specified name in a
  * platform-independent and URL-like form.
  */
-function getFilePath(aName)
+function getFilePath(aName, aAllowMissing=false)
 {
-  let file = do_get_file(aName);
+  let file = do_get_file(aName, aAllowMissing);
   let path = Services.io.newFileURI(file).spec;
   let filePrePath = "file://";
   if ("nsILocalFileWin" in Ci &&
@@ -326,3 +354,14 @@ TracingTransport.prototype = {
     }
   }
 };
+
+function StubTransport() { }
+StubTransport.prototype.ready = function () {};
+StubTransport.prototype.send  = function () {};
+StubTransport.prototype.close = function () {};
+
+function executeSoon(aFunc) {
+  Services.tm.mainThread.dispatch({
+    run: DevToolsUtils.makeInfallible(aFunc)
+  }, Ci.nsIThread.DISPATCH_NORMAL);
+}

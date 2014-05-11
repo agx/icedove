@@ -10,10 +10,12 @@
 /*
  * JS bytecode definitions.
  */
-#include <stddef.h>
-#include "jsprvtd.h"
-#include "jspubtd.h"
-#include "jsutil.h"
+
+#include "jsbytecode.h"
+#include "jstypes.h"
+#include "NamespaceImports.h"
+
+#include "frontend/SourceNotes.h"
 
 /*
  * JS operation bytecodes.
@@ -78,7 +80,8 @@ typedef enum JSOp {
 /* (1U<<18) is unused */
 /* (1U<<19) is unused*/
 /* (1U<<20) is unused*/
-#define JOF_INVOKE       (1U<<21) /* JSOP_CALL, JSOP_NEW, JSOP_EVAL */
+#define JOF_INVOKE       (1U<<21) /* JSOP_CALL, JSOP_FUNCALL, JSOP_FUNAPPLY,
+                                     JSOP_NEW, JSOP_EVAL */
 #define JOF_TMPSLOT      (1U<<22) /* interpreter uses extra temporary slot
                                      to root intermediate objects besides
                                      the slots opcode uses */
@@ -166,7 +169,7 @@ SET_UINT32_INDEX(jsbytecode *pc, uint32_t index)
 #define UINT24_HI(i)            ((jsbytecode)((i) >> 16))
 #define UINT24_MID(i)           ((jsbytecode)((i) >> 8))
 #define UINT24_LO(i)            ((jsbytecode)(i))
-#define GET_UINT24(pc)          ((jsatomid)(((pc)[1] << 16) |                 \
+#define GET_UINT24(pc)          ((unsigned)(((pc)[1] << 16) |                 \
                                             ((pc)[2] << 8) |                  \
                                             (pc)[3]))
 #define SET_UINT24(pc,i)        ((pc)[1] = UINT24_HI(i),                      \
@@ -231,9 +234,116 @@ extern const char       js_EscapeMap[];
  * with the quote character at the beginning and end of the result string.
  */
 extern JSString *
-js_QuoteString(JSContext *cx, JSString *str, jschar quote);
+js_QuoteString(js::ExclusiveContext *cx, JSString *str, jschar quote);
 
 namespace js {
+
+static inline bool
+IsJumpOpcode(JSOp op)
+{
+    uint32_t type = JOF_TYPE(js_CodeSpec[op].format);
+
+    /*
+     * LABEL opcodes have type JOF_JUMP but are no-ops, don't treat them as
+     * jumps to avoid degrading precision.
+     */
+    return type == JOF_JUMP && op != JSOP_LABEL;
+}
+
+static inline bool
+BytecodeFallsThrough(JSOp op)
+{
+    switch (op) {
+      case JSOP_GOTO:
+      case JSOP_DEFAULT:
+      case JSOP_RETURN:
+      case JSOP_RETRVAL:
+      case JSOP_THROW:
+      case JSOP_TABLESWITCH:
+        return false;
+      case JSOP_GOSUB:
+        /* These fall through indirectly, after executing a 'finally'. */
+        return true;
+      default:
+        return true;
+    }
+}
+
+class SrcNoteLineScanner
+{
+    /* offset of the current JSOp in the bytecode */
+    ptrdiff_t offset;
+
+    /* next src note to process */
+    jssrcnote *sn;
+
+    /* line number of the current JSOp */
+    uint32_t lineno;
+
+    /*
+     * Is the current op the first one after a line change directive? Note that
+     * multiple ops may be "first" if a line directive is used to return to a
+     * previous line (eg, with a for loop increment expression.)
+     */
+    bool lineHeader;
+
+public:
+    SrcNoteLineScanner(jssrcnote *sn, uint32_t lineno)
+        : offset(0), sn(sn), lineno(lineno)
+    {
+    }
+
+    /*
+     * This is called repeatedly with always-advancing relpc values. The src
+     * notes are tuples of <PC offset from prev src note, type, args>. Scan
+     * through, updating the lineno, until the next src note is for a later
+     * bytecode.
+     *
+     * When looking at the desired PC offset ('relpc'), the op is first in that
+     * line iff there is a SRC_SETLINE or SRC_NEWLINE src note for that exact
+     * bytecode.
+     *
+     * Note that a single bytecode may have multiple line-modifying notes (even
+     * though only one should ever be needed.)
+     */
+    void advanceTo(ptrdiff_t relpc) {
+        // Must always advance! If the same or an earlier PC is erroneously
+        // passed in, we will already be past the relevant src notes
+        JS_ASSERT_IF(offset > 0, relpc > offset);
+
+        // Next src note should be for after the current offset
+        JS_ASSERT_IF(offset > 0, SN_IS_TERMINATOR(sn) || SN_DELTA(sn) > 0);
+
+        // The first PC requested is always considered to be a line header
+        lineHeader = (offset == 0);
+
+        if (SN_IS_TERMINATOR(sn))
+            return;
+
+        ptrdiff_t nextOffset;
+        while ((nextOffset = offset + SN_DELTA(sn)) <= relpc && !SN_IS_TERMINATOR(sn)) {
+            offset = nextOffset;
+            SrcNoteType type = (SrcNoteType) SN_TYPE(sn);
+            if (type == SRC_SETLINE || type == SRC_NEWLINE) {
+                if (type == SRC_SETLINE)
+                    lineno = js_GetSrcNoteOffset(sn, 0);
+                else
+                    lineno++;
+
+                if (offset == relpc)
+                    lineHeader = true;
+            }
+
+            sn = SN_NEXT(sn);
+        }
+    }
+
+    bool isLineHeader() const {
+        return lineHeader;
+    }
+
+    uint32_t getLine() const { return lineno; }
+};
 
 extern unsigned
 StackUses(JSScript *script, jsbytecode *pc);
@@ -241,14 +351,17 @@ StackUses(JSScript *script, jsbytecode *pc);
 extern unsigned
 StackDefs(JSScript *script, jsbytecode *pc);
 
-}  /* namespace js */
-
+#ifdef DEBUG
 /*
- * Given bytecode address pc in script's main program code, return the operand
- * stack depth just before (JSOp) *pc executes.
+ * Given bytecode address pc in script's main program code, compute the operand
+ * stack depth just before (JSOp) *pc executes.  If *pc is not reachable, return
+ * false.
  */
-extern unsigned
-js_ReconstructStackDepth(JSContext *cx, JSScript *script, jsbytecode *pc);
+extern bool
+ReconstructStackDepth(JSContext *cx, JSScript *script, jsbytecode *pc, uint32_t *depth, bool *reachablePC);
+#endif
+
+}  /* namespace js */
 
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -312,7 +425,7 @@ class Sprinter
         }
     };
 
-    JSContext               *context;       /* context executing the decompiler */
+    ExclusiveContext        *context;       /* context executing the decompiler */
 
   private:
     static const size_t     DefaultSize;
@@ -327,7 +440,7 @@ class Sprinter
     bool realloc_(size_t newSize);
 
   public:
-    explicit Sprinter(JSContext *cx);
+    explicit Sprinter(ExclusiveContext *cx);
     ~Sprinter();
 
     /* Initialize this sprinter, returns false on error */
@@ -341,17 +454,13 @@ class Sprinter
     char *stringAt(ptrdiff_t off) const;
     /* Returns the char at offset |off| */
     char &operator[](size_t off);
-    /* Test if this Sprinter is empty */
-    bool empty() const;
 
     /*
-     * Attempt to reserve len + 1 space (for a trailing NULL byte). If the
+     * Attempt to reserve len + 1 space (for a trailing nullptr byte). If the
      * attempt succeeds, return a pointer to the start of that space and adjust the
      * internal content. The caller *must* completely fill this space on success.
      */
     char *reserve(size_t len);
-    /* Like reserve, but memory is initialized to 0 */
-    char *reserveAndClear(size_t len);
 
     /*
      * Puts |len| characters from |s| at the current position and return an offset to
@@ -364,13 +473,7 @@ class Sprinter
     /* Prints a formatted string into the buffer */
     int printf(const char *fmt, ...);
 
-    /* Change the offset */
-    void setOffset(const char *end);
-    void setOffset(ptrdiff_t off);
-
-    /* Get the offset */
     ptrdiff_t getOffset() const;
-    ptrdiff_t getOffsetOf(const char *string) const;
 
     /*
      * Report that a string operation failed to get the memory it requested. The
@@ -456,7 +559,7 @@ inline bool
 FlowsIntoNext(JSOp op)
 {
     /* JSOP_YIELD is considered to flow into the next instruction, like JSOP_CALL. */
-    return op != JSOP_STOP && op != JSOP_RETURN && op != JSOP_RETRVAL && op != JSOP_THROW &&
+    return op != JSOP_RETRVAL && op != JSOP_RETURN && op != JSOP_THROW &&
            op != JSOP_GOTO && op != JSOP_RETSUB;
 }
 
@@ -491,17 +594,37 @@ IsEqualityOp(JSOp op)
 }
 
 inline bool
-IsGetterPC(jsbytecode *pc)
+IsGetPropPC(jsbytecode *pc)
 {
     JSOp op = JSOp(*pc);
     return op == JSOP_LENGTH  || op == JSOP_GETPROP || op == JSOP_CALLPROP;
 }
 
 inline bool
-IsSetterPC(jsbytecode *pc)
+IsSetPropPC(jsbytecode *pc)
 {
     JSOp op = JSOp(*pc);
     return op == JSOP_SETPROP || op == JSOP_SETNAME || op == JSOP_SETGNAME;
+}
+
+inline bool
+IsGetElemPC(jsbytecode *pc)
+{
+    JSOp op = JSOp(*pc);
+    return op == JSOP_GETELEM || op == JSOP_CALLELEM;
+}
+
+inline bool
+IsSetElemPC(jsbytecode *pc)
+{
+    JSOp op = JSOp(*pc);
+    return op == JSOP_SETELEM;
+}
+
+inline bool
+IsCallPC(jsbytecode *pc)
+{
+    return js_CodeSpec[*pc].format & JOF_INVOKE;
 }
 
 static inline int32_t
@@ -515,8 +638,7 @@ GetBytecodeInteger(jsbytecode *pc)
       case JSOP_INT8:   return GET_INT8(pc);
       case JSOP_INT32:  return GET_INT32(pc);
       default:
-        JS_NOT_REACHED("Bad op");
-        return 0;
+        MOZ_ASSUME_UNREACHABLE("Bad op");
     }
 }
 
@@ -539,11 +661,6 @@ class PCCounts
 
     enum BaseCounts {
         BASE_INTERP = 0,
-        BASE_METHODJIT,
-
-        BASE_METHODJIT_STUBS,
-        BASE_METHODJIT_CODE,
-        BASE_METHODJIT_PICS,
 
         BASE_LIMIT
     };
@@ -657,8 +774,13 @@ JS_STATIC_ASSERT(sizeof(PCCounts) % sizeof(Value) == 0);
 static inline jsbytecode *
 GetNextPc(jsbytecode *pc)
 {
-    return pc + js_CodeSpec[JSOp(*pc)].length;
+    return pc + GetBytecodeLength(pc);
 }
+
+class StaticBlockObject;
+
+StaticBlockObject *
+GetBlockChainAtPC(JSScript *script, jsbytecode *pc);
 
 } /* namespace js */
 
@@ -666,12 +788,14 @@ GetNextPc(jsbytecode *pc)
 /*
  * Disassemblers, for debugging only.
  */
-JSBool
-js_Disassemble(JSContext *cx, JS::Handle<JSScript*> script, JSBool lines, js::Sprinter *sp);
+bool
+js_Disassemble(JSContext *cx, JS::Handle<JSScript*> script, bool lines, js::Sprinter *sp);
 
 unsigned
 js_Disassemble1(JSContext *cx, JS::Handle<JSScript*> script, jsbytecode *pc, unsigned loc,
-                JSBool lines, js::Sprinter *sp);
+                bool lines, js::Sprinter *sp);
+
+#endif
 
 void
 js_DumpPCCounts(JSContext *cx, JS::Handle<JSScript*> script, js::Sprinter *sp);
@@ -682,8 +806,6 @@ namespace jit { struct IonScriptCounts; }
 void
 DumpIonScriptCounts(js::Sprinter *sp, jit::IonScriptCounts *ionCounts);
 }
-#endif
-
 #endif
 
 #endif /* jsopcode_h */

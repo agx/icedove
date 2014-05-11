@@ -28,8 +28,8 @@
  * Please edit TreeBuilder.java instead and regenerate.
  */
 
-#ifndef nsHtml5TreeBuilder_h__
-#define nsHtml5TreeBuilder_h__
+#ifndef nsHtml5TreeBuilder_h
+#define nsHtml5TreeBuilder_h
 
 #include "nsIAtom.h"
 #include "nsHtml5AtomTable.h"
@@ -98,6 +98,7 @@ class nsHtml5TreeBuilder : public nsAHtml5TreeBuilderState
     int32_t charBufferLen;
   private:
     bool quirks;
+    bool isSrcdocDocument;
   public:
     void startTokenization(nsHtml5Tokenizer* self);
     void doctype(nsIAtom* name, nsString* publicIdentifier, nsString* systemIdentifier, bool forceQuirks);
@@ -108,10 +109,12 @@ class nsHtml5TreeBuilder : public nsAHtml5TreeBuilderState
     void endTokenization();
     void startTag(nsHtml5ElementName* elementName, nsHtml5HtmlAttributes* attributes, bool selfClosing);
   private:
+    void startTagTitleInHead(nsHtml5ElementName* elementName, nsHtml5HtmlAttributes* attributes);
     void startTagGenericRawText(nsHtml5ElementName* elementName, nsHtml5HtmlAttributes* attributes);
     void startTagScriptInHead(nsHtml5ElementName* elementName, nsHtml5HtmlAttributes* attributes);
     void startTagTemplateInHead(nsHtml5ElementName* elementName, nsHtml5HtmlAttributes* attributes);
     bool isTemplateContents();
+    bool isTemplateModeStackEmpty();
     bool isSpecialParentInForeign(nsHtml5StackNode* stackNode);
   public:
     static nsString* extractCharsetFromContent(nsString* attributeValue);
@@ -120,7 +123,7 @@ class nsHtml5TreeBuilder : public nsAHtml5TreeBuilderState
   public:
     void endTag(nsHtml5ElementName* elementName);
   private:
-    void endTagTemplateInHead(nsIAtom* name);
+    void endTagTemplateInHead();
     int32_t findLastInTableScopeOrRootTemplateTbodyTheadTfoot();
     int32_t findLast(nsIAtom* name);
     int32_t findLastInTableScope(nsIAtom* name);
@@ -153,7 +156,7 @@ class nsHtml5TreeBuilder : public nsAHtml5TreeBuilderState
     void clearTheListOfActiveFormattingElementsUpToTheLastMarker();
     inline bool isCurrent(nsIAtom* name)
     {
-      return name == stack[currentPtr]->name;
+      return stack[currentPtr]->ns == kNameSpaceID_XHTML && name == stack[currentPtr]->name;
     }
 
     void removeFromStack(int32_t pos);
@@ -235,6 +238,7 @@ class nsHtml5TreeBuilder : public nsAHtml5TreeBuilderState
   public:
     bool isScriptingEnabled();
     void setScriptingEnabled(bool scriptingEnabled);
+    void setIsSrcdocDocument(bool isSrcdocDocument);
     void flushCharacters();
   private:
     bool charBufferContainsNonWhitespace();
@@ -318,7 +322,6 @@ class nsHtml5TreeBuilder : public nsAHtml5TreeBuilderState
 #define NS_HTML5TREE_BUILDER_ADDRESS_OR_ARTICLE_OR_ASIDE_OR_DETAILS_OR_DIR_OR_FIGCAPTION_OR_FIGURE_OR_FOOTER_OR_HEADER_OR_HGROUP_OR_MAIN_OR_NAV_OR_SECTION_OR_SUMMARY 51
 #define NS_HTML5TREE_BUILDER_RUBY_OR_SPAN_OR_SUB_OR_SUP_OR_VAR 52
 #define NS_HTML5TREE_BUILDER_RT_OR_RP 53
-#define NS_HTML5TREE_BUILDER_COMMAND 54
 #define NS_HTML5TREE_BUILDER_PARAM_OR_SOURCE_OR_TRACK 55
 #define NS_HTML5TREE_BUILDER_MGLYPH_OR_MALIGNMARK 56
 #define NS_HTML5TREE_BUILDER_MI_MO_MN_MS_MTEXT 57
@@ -355,7 +358,7 @@ class nsHtml5TreeBuilder : public nsAHtml5TreeBuilderState
 #define NS_HTML5TREE_BUILDER_AFTER_AFTER_BODY 19
 #define NS_HTML5TREE_BUILDER_AFTER_AFTER_FRAMESET 20
 #define NS_HTML5TREE_BUILDER_TEXT 21
-#define NS_HTML5TREE_BUILDER_TEMPLATE_CONTENTS 22
+#define NS_HTML5TREE_BUILDER_IN_TEMPLATE 22
 #define NS_HTML5TREE_BUILDER_CHARSET_INITIAL 0
 #define NS_HTML5TREE_BUILDER_CHARSET_C 1
 #define NS_HTML5TREE_BUILDER_CHARSET_H 2

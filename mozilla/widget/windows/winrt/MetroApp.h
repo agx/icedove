@@ -42,10 +42,12 @@ public:
   // nsIWinMetroUtils tile related async callbacks
   HRESULT OnAsyncTileCreated(ABI::Windows::Foundation::IAsyncOperation<bool>* aOperation, AsyncStatus aStatus);
 
-  void Initialize();
+  void Run();
   void CoreExit();
+  void Shutdown();
 
-  void ShutdownXPCOM();
+  // Set when gecko enters xpcom shutdown.
+  static bool sGeckoShuttingDown;
 
   // Shared pointers between framework and widget
   static void SetBaseWidget(MetroWidget* aPtr);

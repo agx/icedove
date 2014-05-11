@@ -18,7 +18,14 @@ function waitForCondition(condition, nextTest, errorMsg) {
       ok(false, errorMsg);
       moveOn();
     }
-    if (condition()) {
+    var conditionPassed;
+    try {
+      conditionPassed = condition();
+    } catch (e) {
+      ok(false, e + "\n" + e.stack);
+      conditionPassed = false;
+    }
+    if (conditionPassed) {
       moveOn();
     }
     tries++;
@@ -177,7 +184,7 @@ function runSocialTests(tests, cbPreTest, cbPostTest, cbFinish) {
         cbPostTest(runNextTest);
       }
       cbPreTest(function() {
-        is(providersAtStart, Social.providers.length, "pre-test: no new providers left enabled");
+        info("pre-test: starting with " + Social.providers.length + " providers");
         info("sub-test " + name + " starting");
         try {
           func.call(tests, cleanupAndRunNextTest);
@@ -194,6 +201,7 @@ function runSocialTests(tests, cbPreTest, cbPostTest, cbFinish) {
 // A fairly large hammer which checks all aspects of the SocialUI for
 // internal consistency.
 function checkSocialUI(win) {
+  let SocialService = Cu.import("resource://gre/modules/SocialService.jsm", {}).SocialService;
   win = win || window;
   let doc = win.document;
   let provider = Social.provider;
@@ -201,42 +209,108 @@ function checkSocialUI(win) {
   let active = Social.providers.length > 0 && !win.SocialUI._chromeless &&
                !PrivateBrowsingUtils.isWindowPrivate(win);
 
+  // if we have enabled providers, we should also have instances of those
+  // providers
+  if (SocialService.hasEnabledProviders) {
+    ok(Social.providers.length > 0, "providers are enabled");
+  } else {
+    is(Social.providers.length, 0, "providers are not enabled");
+  }
+
+  // some local helpers to avoid log-spew for the many checks made here.
+  let numGoodTests = 0, numTests = 0;
+  function _ok(what, msg) {
+    numTests++;
+    if (!ok)
+      ok(what, msg)
+    else
+      ++numGoodTests;
+  }
+  function _is(a, b, msg) {
+    numTests++;
+    if (a != b)
+      is(a, b, msg)
+    else
+      ++numGoodTests;
+  }
   function isbool(a, b, msg) {
-    is(!!a, !!b, msg);
+    _is(!!a, !!b, msg);
   }
   isbool(win.SocialSidebar.canShow, enabled, "social sidebar active?");
   if (enabled)
     isbool(win.SocialSidebar.opened, enabled, "social sidebar open?");
-  isbool(win.SocialChatBar.isAvailable, enabled && Social.haveLoggedInUser(), "chatbar available?");
-  isbool(!win.SocialChatBar.chatbar.hidden, enabled && Social.haveLoggedInUser(), "chatbar visible?");
+  isbool(win.SocialChatBar.isAvailable, enabled, "chatbar available?");
+  isbool(!win.SocialChatBar.chatbar.hidden, enabled, "chatbar visible?");
 
-  let markVisible = enabled && provider.pageMarkInfo;
-  let canMark = markVisible && win.SocialMark.canMarkPage(win.gBrowser.currentURI);
-  isbool(!win.SocialMark.button.hidden, markVisible, "SocialMark button visible?");
-  isbool(!win.SocialMark.button.disabled, canMark, "SocialMark button enabled?");
   isbool(!doc.getElementById("social-toolbar-item").hidden, active, "toolbar items visible?");
   if (active) {
-    if (!enabled) {
-      ok(!win.SocialToolbar.button.style.listStyleImage, "toolbar button is default icon");
+    if (!enabled || (Social.defaultProvider.statusURL && Social.allowMultipleWorkers)) {
+      _ok(!win.SocialToolbar.button.style.listStyleImage, "toolbar button is default icon");
     } else {
-      is(win.SocialToolbar.button.style.listStyleImage, 'url("' + Social.defaultProvider.iconURL + '")', "toolbar button has provider icon");
+      _is(win.SocialToolbar.button.style.listStyleImage, 'url("' + Social.defaultProvider.iconURL + '")', "toolbar button has provider icon");
     }
   }
   // the menus should always have the provider name
   if (provider) {
     for (let id of ["menu_socialSidebar", "menu_socialAmbientMenu"])
-      is(document.getElementById(id).getAttribute("label"), Social.provider.name, "element has the provider name");
+      _is(document.getElementById(id).getAttribute("label"), Social.provider.name, "element has the provider name");
+
+    let contextMenus = [
+      {
+        type: "link",
+        id: "context-marklinkMenu",
+        label: "social.marklinkMenu.label"
+      },
+      {
+        type: "page",
+        id: "context-markpageMenu",
+        label: "social.markpageMenu.label"
+      }
+    ];
+
+    for (let c of contextMenus) {
+      let leMenu = document.getElementById(c.id);
+      let parent, menus;
+      let markProviders = SocialMarks.getProviders();
+      if (markProviders.length > SocialMarks.MENU_LIMIT) {
+        // menus should be in a submenu, not in the top level of the context menu
+        parent = leMenu.firstChild;
+        menus = document.getElementsByClassName("context-mark" + c.type);
+        _is(menus.length, 0, "menu's are not in main context menu\n");
+        menus = parent.childNodes;
+        _is(menus.length, markProviders.length, c.id + " menu exists for each mark provider");
+      } else {
+        // menus should be in the top level of the context menu, not in a submenu
+        parent = leMenu.parentNode;
+        menus = document.getElementsByClassName("context-mark" + c.type);
+        _is(menus.length, markProviders.length, c.id + " menu exists for each mark provider");
+        menus = leMenu.firstChild.childNodes;
+        _is(menus.length, 0, "menu's are not in context submenu\n");
+      }
+      for (let m of menus)
+        _is(m.parentNode, parent, "menu has correct parent");
+    }
   }
 
   // and for good measure, check all the social commands.
   isbool(!doc.getElementById("Social:Toggle").hidden, active, "Social:Toggle visible?");
+  isbool(!doc.getElementById("Social:ToggleSidebar").hidden, enabled, "Social:ToggleSidebar visible?");
   isbool(!doc.getElementById("Social:ToggleNotifications").hidden, enabled, "Social:ToggleNotifications visible?");
-  isbool(!doc.getElementById("Social:FocusChat").hidden, enabled && Social.haveLoggedInUser(), "Social:FocusChat visible?");
+  isbool(!doc.getElementById("Social:FocusChat").hidden, enabled, "Social:FocusChat visible?");
   isbool(doc.getElementById("Social:FocusChat").getAttribute("disabled"), enabled ? "false" : "true", "Social:FocusChat disabled?");
-  is(doc.getElementById("Social:TogglePageMark").getAttribute("disabled"), canMark ? "false" : "true", "Social:TogglePageMark enabled?");
 
   // broadcasters.
   isbool(!doc.getElementById("socialActiveBroadcaster").hidden, active, "socialActiveBroadcaster hidden?");
+  // and report on overall success of failure of the various checks here.
+  is(numGoodTests, numTests, "The Social UI tests succeeded.")
+}
+
+function waitForNotification(topic, cb) {
+  function observer(subject, topic, data) {
+    Services.obs.removeObserver(observer, topic);
+    cb();
+  }
+  Services.obs.addObserver(observer, topic, false);
 }
 
 // blocklist testing
@@ -252,14 +326,24 @@ function updateBlocklist(aCallback) {
   blocklistNotifier.notify(null);
 }
 
+var _originalTestBlocklistURL = null;
 function setAndUpdateBlocklist(aURL, aCallback) {
+  if (!_originalTestBlocklistURL)
+    _originalTestBlocklistURL = Services.prefs.getCharPref("extensions.blocklist.url");
   Services.prefs.setCharPref("extensions.blocklist.url", aURL);
   updateBlocklist(aCallback);
 }
 
 function resetBlocklist(aCallback) {
-  Services.prefs.clearUserPref("extensions.blocklist.url");
-  updateBlocklist(aCallback);
+  // XXX - this has "forked" from the head.js helpers in our parent directory :(
+  // But let's reuse their blockNoPlugins.xml.  Later, we should arrange to
+  // use their head.js helpers directly
+  let noBlockedURL = "http://example.com/browser/browser/base/content/test/general/blockNoPlugins.xml";
+  setAndUpdateBlocklist(noBlockedURL, function() {
+    Services.prefs.setCharPref("extensions.blocklist.url", _originalTestBlocklistURL);
+    if (aCallback)
+      aCallback();
+  });
 }
 
 function setManifestPref(name, manifest) {
@@ -380,8 +464,8 @@ function get3ChatsForCollapsing(mode, cb) {
 
 function makeChat(mode, uniqueid, cb) {
   info("making a chat window '" + uniqueid +"'");
-  const chatUrl = "https://example.com/browser/browser/base/content/test/social/social_chat.html";
   let provider = Social.provider;
+  const chatUrl = provider.origin + "/browser/browser/base/content/test/social/social_chat.html";
   let isOpened = window.SocialChatBar.openChat(provider, chatUrl + "?id=" + uniqueid, function(chat) {
     info("chat window has opened");
     // we can't callback immediately or we might close the chat during
@@ -514,4 +598,3 @@ function closeAllChats() {
   let chatbar = window.SocialChatBar.chatbar;
   chatbar.removeAll();
 }
-

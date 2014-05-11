@@ -33,6 +33,7 @@
 #include "TextInputHandler.h"
 #include "mozilla/HangMonitor.h"
 #include "GeckoProfiler.h"
+#include "pratom.h"
 
 #include "npapi.h"
 
@@ -734,7 +735,7 @@ NS_IMETHODIMP
 nsAppShell::Run(void)
 {
   NS_ASSERTION(!mStarted, "nsAppShell::Run() called multiple times");
-  if (mStarted)
+  if (mStarted || mTerminated)
     return NS_OK;
 
   mStarted = true;
@@ -951,7 +952,7 @@ nsAppShell::AfterProcessNextEvent(nsIThreadInternal *aThread,
     nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
     nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
     if (rollupWidget)
-      rollupListener->Rollup(0, nullptr);
+      rollupListener->Rollup(0, nullptr, nullptr);
   }
 
   NS_OBJC_END_TRY_ABORT_BLOCK;

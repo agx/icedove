@@ -14,11 +14,16 @@
 #include "nsCRT.h"
 #include "prlog.h"
 #include "nsIClassInfoImpl.h"
-#include "nsAtomicRefcnt.h"
 #include "nsAlgorithm.h"
+#include "nsMemory.h"
+#include "nsIAsyncInputStream.h"
+#include "nsIAsyncOutputStream.h"
 
 using namespace mozilla;
 
+#ifdef LOG
+#undef LOG
+#endif
 #if defined(PR_LOGGING)
 //
 // set NSPR_LOG_MODULES=nsPipe:5
@@ -128,7 +133,7 @@ private:
     nsPipe                        *mPipe;
 
     // separate refcnt so that we know when to close the consumer
-    nsrefcnt                       mReaderRefCnt;
+    mozilla::ThreadSafeAutoRefCnt  mReaderRefCnt;
     int64_t                        mLogicalOffset;
     bool                           mBlocking;
 
@@ -182,7 +187,7 @@ private:
     nsPipe                         *mPipe;
 
     // separate refcnt so that we know when to close the producer
-    nsrefcnt                        mWriterRefCnt;
+    mozilla::ThreadSafeAutoRefCnt   mWriterRefCnt;
     int64_t                         mLogicalOffset;
     bool                            mBlocking;
 
@@ -201,7 +206,7 @@ public:
     friend class nsPipeInputStream;
     friend class nsPipeOutputStream;
 
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSIPIPE
 
     // nsPipe methods:
@@ -294,8 +299,8 @@ protected:
 //-----------------------------------------------------------------------------
 
 nsPipe::nsPipe()
-    : mInput(this)
-    , mOutput(this)
+    : mInput(MOZ_THIS_IN_INITIALIZER_LIST())
+    , mOutput(MOZ_THIS_IN_INITIALIZER_LIST())
     , mReentrantMonitor("nsPipe.mReentrantMonitor")
     , mReadCursor(nullptr)
     , mReadLimit(nullptr)
@@ -311,7 +316,7 @@ nsPipe::~nsPipe()
 {
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsPipe, nsIPipe)
+NS_IMPL_ISUPPORTS1(nsPipe, nsIPipe)
 
 NS_IMETHODIMP
 nsPipe::Init(bool nonBlockingIn,
@@ -351,7 +356,8 @@ nsPipe::GetInputStream(nsIAsyncInputStream **aInputStream)
 NS_IMETHODIMP
 nsPipe::GetOutputStream(nsIAsyncOutputStream **aOutputStream)
 {
-    NS_ENSURE_TRUE(mInited, NS_ERROR_NOT_INITIALIZED);
+    if (NS_WARN_IF(!mInited))
+	return NS_ERROR_NOT_INITIALIZED;
     NS_ADDREF(*aOutputStream = &mOutput);
     return NS_OK;
 }
@@ -680,14 +686,14 @@ nsPipeInputStream::OnInputException(nsresult reason, nsPipeEvents &events)
 NS_IMETHODIMP_(nsrefcnt)
 nsPipeInputStream::AddRef(void)
 {
-    NS_AtomicIncrementRefcnt(mReaderRefCnt);
+    ++mReaderRefCnt;
     return mPipe->AddRef();
 }
 
 NS_IMETHODIMP_(nsrefcnt)
 nsPipeInputStream::Release(void)
 {
-    if (NS_AtomicDecrementRefcnt(mReaderRefCnt) == 0)
+    if (--mReaderRefCnt == 0)
         Close();
     return mPipe->Release();
 }
@@ -1035,14 +1041,14 @@ nsPipeOutputStream::OnOutputException(nsresult reason, nsPipeEvents &events)
 NS_IMETHODIMP_(nsrefcnt)
 nsPipeOutputStream::AddRef()
 {
-    NS_AtomicIncrementRefcnt(mWriterRefCnt);
+    ++mWriterRefCnt;
     return mPipe->AddRef();
 }
 
 NS_IMETHODIMP_(nsrefcnt)
 nsPipeOutputStream::Release()
 {
-    if (NS_AtomicDecrementRefcnt(mWriterRefCnt) == 0)
+    if (--mWriterRefCnt == 0)
         Close();
     return mPipe->Release();
 }

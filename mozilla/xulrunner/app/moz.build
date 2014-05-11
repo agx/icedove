@@ -8,6 +8,12 @@ DIRS += ['profile']
 
 PROGRAM = 'xulrunner'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsXULRunnerApp.cpp',
 ]
+
+DEFINES['XULRUNNER_PROGNAME'] = '"xulrunner"'
+DEFINES['XPCOM_GLUE'] = True
+
+if CONFIG['TARGET_XPCOM_ABI']:
+    DEFINES['TARGET_XPCOM_ABI'] = '"%s"' % CONFIG['TARGET_XPCOM_ABI']

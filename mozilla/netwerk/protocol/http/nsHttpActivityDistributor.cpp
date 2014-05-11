@@ -6,10 +6,8 @@
 #include "HttpLog.h"
 
 #include "nsHttpActivityDistributor.h"
-#include "nsIChannel.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
-#include "nsNetUtil.h"
 #include "nsThreadUtils.h"
 
 using namespace mozilla;
@@ -61,9 +59,9 @@ private:
     ObserverArray mObservers;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsHttpActivityDistributor,
-                              nsIHttpActivityDistributor,
-                              nsIHttpActivityObserver)
+NS_IMPL_ISUPPORTS2(nsHttpActivityDistributor,
+                   nsIHttpActivityDistributor,
+                   nsIHttpActivityObserver)
 
 nsHttpActivityDistributor::nsHttpActivityDistributor()
     : mLock("nsHttpActivityDistributor.mLock")

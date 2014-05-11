@@ -20,9 +20,6 @@ namespace storage {
 nsresult
 Row::initialize(sqlite3_stmt *aStatement)
 {
-  // Initialize the hash table
-  mNameHashtable.Init();
-
   // Get the number of results
   mNumCols = ::sqlite3_column_count(aStatement);
 
@@ -78,7 +75,7 @@ Row::initialize(sqlite3_stmt *aStatement)
  * Note:  This object is only ever accessed on one thread at a time.  It it not
  *        threadsafe, but it does need threadsafe AddRef and Release.
  */
-NS_IMPL_THREADSAFE_ISUPPORTS2(
+NS_IMPL_ISUPPORTS2(
   Row,
   mozIStorageRow,
   mozIStorageValueArray

@@ -9,10 +9,7 @@
 
 #ifdef JS_ION
 
-#include "jscntxt.h"
-#include "jscompartment.h"
-
-#include "IonFrames.h"
+#include "jit/IonFrames.h"
 #include "vm/Stack.h"
 
 namespace js {
@@ -60,7 +57,10 @@ class BaselineFrame
         HAS_HOOK_DATA    = 1 << 7,
 
         // Frame has profiler entry pushed.
-        HAS_PUSHED_SPS_FRAME = 1 << 8
+        HAS_PUSHED_SPS_FRAME = 1 << 8,
+
+        // Frame has over-recursed on an early check.
+        OVER_RECURSED    = 1 << 9
     };
 
   protected: // Silence Clang warning about unused private fields.
@@ -128,7 +128,7 @@ class BaselineFrame
         return CalleeTokenToFunction(calleeToken());
     }
     JSFunction *maybeFun() const {
-        return isFunctionFrame() ? fun() : NULL;
+        return isFunctionFrame() ? fun() : nullptr;
     }
     JSFunction *callee() const {
         return CalleeTokenToFunction(calleeToken());
@@ -158,8 +158,8 @@ class BaselineFrame
 
     Value &unaliasedFormal(unsigned i, MaybeCheckAliasing checkAliasing = CHECK_ALIASING) const {
         JS_ASSERT(i < numFormalArgs());
-        JS_ASSERT_IF(checkAliasing, !script()->argsObjAliasesFormals());
-        JS_ASSERT_IF(checkAliasing, !script()->formalIsAliased(i));
+        JS_ASSERT_IF(checkAliasing, !script()->argsObjAliasesFormals() &&
+                                    !script()->formalIsAliased(i));
         return argv()[i];
     }
 
@@ -220,7 +220,7 @@ class BaselineFrame
         return *blockChain_;
     }
     StaticBlockObject *maybeBlockChain() const {
-        return hasBlockChain() ? blockChain_ : NULL;
+        return hasBlockChain() ? blockChain_ : nullptr;
     }
     void setBlockChain(StaticBlockObject &block) {
         flags_ |= HAS_BLOCKCHAIN;
@@ -228,7 +228,7 @@ class BaselineFrame
     }
     void setBlockChainNull() {
         JS_ASSERT(!hasBlockChain());
-        blockChain_ = NULL;
+        blockChain_ = nullptr;
     }
     StaticBlockObject **addressOfBlockChain() {
         return &blockChain_;
@@ -288,7 +288,7 @@ class BaselineFrame
     }
 
     void *maybeHookData() const {
-        return hasHookData() ? hookData_ : NULL;
+        return hasHookData() ? hookData_ : nullptr;
     }
 
     void setHookData(void *v) {
@@ -306,6 +306,14 @@ class BaselineFrame
 
     void unsetPushedSPSFrame() {
         flags_ &= ~HAS_PUSHED_SPS_FRAME;
+    }
+
+    bool overRecursed() const {
+        return flags_ & OVER_RECURSED;
+    }
+
+    void setOverRecursed() {
+        flags_ |= OVER_RECURSED;
     }
 
     void trace(JSTracer *trc);

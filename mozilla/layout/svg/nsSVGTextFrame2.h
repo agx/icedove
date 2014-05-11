@@ -7,13 +7,14 @@
 #define NS_SVGTEXTFRAME2_H
 
 #include "mozilla/Attributes.h"
-#include "gfxFont.h"
+#include "mozilla/RefPtr.h"
+#include "mozilla/gfx/2D.h"
 #include "gfxMatrix.h"
 #include "gfxRect.h"
 #include "gfxSVGGlyphs.h"
+#include "nsIContent.h"
 #include "nsStubMutationObserver.h"
-#include "nsSVGGlyphFrame.h" // for SVGTextObjectPaint
-#include "nsSVGTextContainerFrame.h"
+#include "nsSVGPaintServerFrame.h"
 
 class nsDisplaySVGText;
 class nsRenderingContext;
@@ -24,6 +25,8 @@ typedef nsSVGDisplayContainerFrame nsSVGTextFrame2Base;
 
 namespace mozilla {
 
+class CharIterator;
+class nsISVGPoint;
 class TextFrameIterator;
 class TextNodeCorrespondenceRecorder;
 struct TextRenderedRun;
@@ -134,7 +137,72 @@ private:
   nsSVGTextFrame2* mFrame;
 };
 
-}
+// Slightly horrible callback for deferring application of opacity
+struct SVGTextContextPaint : public gfxTextContextPaint {
+  already_AddRefed<gfxPattern> GetFillPattern(float aOpacity,
+                                              const gfxMatrix& aCTM) MOZ_OVERRIDE;
+  already_AddRefed<gfxPattern> GetStrokePattern(float aOpacity,
+                                                const gfxMatrix& aCTM) MOZ_OVERRIDE;
+
+  void SetFillOpacity(float aOpacity) { mFillOpacity = aOpacity; }
+  float GetFillOpacity() MOZ_OVERRIDE { return mFillOpacity; }
+
+  void SetStrokeOpacity(float aOpacity) { mStrokeOpacity = aOpacity; }
+  float GetStrokeOpacity() MOZ_OVERRIDE { return mStrokeOpacity; }
+
+  struct Paint {
+    Paint() : mPaintType(eStyleSVGPaintType_None) {}
+
+    void SetPaintServer(nsIFrame *aFrame, const gfxMatrix& aContextMatrix,
+                        nsSVGPaintServerFrame *aPaintServerFrame) {
+      mPaintType = eStyleSVGPaintType_Server;
+      mPaintDefinition.mPaintServerFrame = aPaintServerFrame;
+      mFrame = aFrame;
+      mContextMatrix = aContextMatrix;
+    }
+
+    void SetColor(const nscolor &aColor) {
+      mPaintType = eStyleSVGPaintType_Color;
+      mPaintDefinition.mColor = aColor;
+    }
+
+    void SetContextPaint(gfxTextContextPaint *aContextPaint,
+                         nsStyleSVGPaintType aPaintType) {
+      NS_ASSERTION(aPaintType == eStyleSVGPaintType_ContextFill ||
+                   aPaintType == eStyleSVGPaintType_ContextStroke,
+                   "Invalid context paint type");
+      mPaintType = aPaintType;
+      mPaintDefinition.mContextPaint = aContextPaint;
+    }
+
+    union {
+      nsSVGPaintServerFrame *mPaintServerFrame;
+      gfxTextContextPaint *mContextPaint;
+      nscolor mColor;
+    } mPaintDefinition;
+
+    nsIFrame *mFrame;
+    // CTM defining the user space for the pattern we will use.
+    gfxMatrix mContextMatrix;
+    nsStyleSVGPaintType mPaintType;
+
+    // Device-space-to-pattern-space
+    gfxMatrix mPatternMatrix;
+    nsRefPtrHashtable<nsFloatHashKey, gfxPattern> mPatternCache;
+
+    already_AddRefed<gfxPattern> GetPattern(float aOpacity,
+                                            nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
+                                            const gfxMatrix& aCTM);
+  };
+
+  Paint mFillPaint;
+  Paint mStrokePaint;
+
+  float mFillOpacity;
+  float mStrokeOpacity;
+};
+
+} // namespace mozilla
 
 /**
  * Frame class for SVG <text> elements, used when the
@@ -175,20 +243,24 @@ class nsSVGTextFrame2 : public nsSVGTextFrame2Base
   friend nsIFrame*
   NS_NewSVGTextFrame2(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
+  friend class mozilla::CharIterator;
   friend class mozilla::GlyphMetricsUpdater;
   friend class mozilla::TextFrameIterator;
   friend class mozilla::TextNodeCorrespondenceRecorder;
   friend struct mozilla::TextRenderedRun;
   friend class mozilla::TextRenderedRunIterator;
-  friend class AutoCanvasTMForMarker;
   friend class MutationObserver;
   friend class nsDisplaySVGText;
+
+  typedef mozilla::gfx::Path Path;
+  typedef mozilla::SVGTextContextPaint SVGTextContextPaint;
 
 protected:
   nsSVGTextFrame2(nsStyleContext* aContext)
     : nsSVGTextFrame2Base(aContext),
       mFontSizeScaleFactor(1.0f),
-      mGetCanvasTMForFlag(FOR_OUTERSVG_TM)
+      mLastContextScale(1.0f),
+      mLengthAdjustScaleFactor(1.0f)
   {
     AddStateBits(NS_STATE_SVG_POSITIONING_DIRTY);
   }
@@ -243,7 +315,8 @@ public:
   // nsISVGChildFrame interface:
   virtual void NotifySVGChanged(uint32_t aFlags) MOZ_OVERRIDE;
   NS_IMETHOD PaintSVG(nsRenderingContext* aContext,
-                      const nsIntRect* aDirtyRect) MOZ_OVERRIDE;
+                      const nsIntRect* aDirtyRect,
+                      nsIFrame* aTransformRoot = nullptr) MOZ_OVERRIDE;
   NS_IMETHOD_(nsIFrame*) GetFrameForPoint(const nsPoint& aPoint) MOZ_OVERRIDE;
   virtual void ReflowSVG() MOZ_OVERRIDE;
   NS_IMETHOD_(nsRect) GetCoveredRegion() MOZ_OVERRIDE;
@@ -251,7 +324,8 @@ public:
                                       uint32_t aFlags) MOZ_OVERRIDE;
 
   // nsSVGContainerFrame methods:
-  virtual gfxMatrix GetCanvasTM(uint32_t aFor) MOZ_OVERRIDE;
+  virtual gfxMatrix GetCanvasTM(uint32_t aFor,
+                                nsIFrame* aTransformRoot = nullptr) MOZ_OVERRIDE;
   
   // SVG DOM text methods:
   uint32_t GetNumberOfChars(nsIContent* aContent);
@@ -315,8 +389,10 @@ public:
   /**
    * Updates the mFontSizeScaleFactor value by looking at the range of
    * font-sizes used within the <text>.
+   *
+   * @return Whether mFontSizeScaleFactor changed.
    */
-  void UpdateFontSizeScaleFactor();
+  bool UpdateFontSizeScaleFactor();
 
   double GetFontSizeScaleFactor() const;
 
@@ -347,28 +423,6 @@ public:
                                           nsIFrame* aChildFrame);
 
 private:
-  /**
-   * This class exists purely because it would be too messy to pass the "for"
-   * flag for GetCanvasTM through the call chains to the GetCanvasTM() call in
-   * UpdateFontSizeScaleFactor.
-   */
-  class AutoCanvasTMForMarker {
-  public:
-    AutoCanvasTMForMarker(nsSVGTextFrame2* aFrame, uint32_t aFor)
-      : mFrame(aFrame)
-    {
-      mOldFor = mFrame->mGetCanvasTMForFlag;
-      mFrame->mGetCanvasTMForFlag = aFor;
-    }
-    ~AutoCanvasTMForMarker()
-    {
-      mFrame->mGetCanvasTMForFlag = mOldFor;
-    }
-  private:
-    nsSVGTextFrame2* mFrame;
-    uint32_t mOldFor;
-  };
-
   /**
    * Mutation observer used to watch for text positioning attribute changes
    * on descendent text content elements (like <tspan>s).
@@ -467,9 +521,11 @@ private:
    * was not given for that character.  Also fills aDeltas with values based on
    * dx/dy attributes.
    *
+   * @param aRunPerGlyph Whether mPositions should record that a new run begins
+   *   at each glyph.
    * @return True if we recorded any positions.
    */
-  bool ResolvePositions(nsTArray<gfxPoint>& aDeltas);
+  bool ResolvePositions(nsTArray<gfxPoint>& aDeltas, bool aRunPerGlyph);
 
   /**
    * Determines the position, in app units, of each character in the <text> as
@@ -531,49 +587,49 @@ private:
 
   // Methods to get information for a <textPath> frame.
   nsIFrame* GetTextPathPathFrame(nsIFrame* aTextPathFrame);
-  already_AddRefed<gfxFlattenedPath> GetFlattenedTextPath(nsIFrame* aTextPathFrame);
+  mozilla::TemporaryRef<Path> GetTextPath(nsIFrame* aTextPathFrame);
   gfxFloat GetOffsetScale(nsIFrame* aTextPathFrame);
   gfxFloat GetStartOffset(nsIFrame* aTextPathFrame);
 
-  gfxFont::DrawMode SetupCairoState(gfxContext* aContext,
-                                    nsIFrame* aFrame,
-                                    gfxTextObjectPaint* aOuterObjectPaint,
-                                    gfxTextObjectPaint** aThisObjectPaint);
+  DrawMode SetupCairoState(gfxContext* aContext,
+                           nsIFrame* aFrame,
+                           gfxTextContextPaint* aOuterContextPaint,
+                           gfxTextContextPaint** aThisContextPaint);
 
   /**
    * Sets up the stroke style for |aFrame| in |aContext| and stores stroke
-   * pattern information in |aThisObjectPaint|.
+   * pattern information in |aThisContextPaint|.
    */
   bool SetupCairoStroke(gfxContext* aContext,
                         nsIFrame* aFrame,
-                        gfxTextObjectPaint* aOuterObjectPaint,
-                        SVGTextObjectPaint* aThisObjectPaint);
+                        gfxTextContextPaint* aOuterContextPaint,
+                        SVGTextContextPaint* aThisContextPaint);
 
   /**
    * Sets up the fill style for |aFrame| in |aContext| and stores fill pattern
-   * information in |aThisObjectPaint|.
+   * information in |aThisContextPaint|.
    */
   bool SetupCairoFill(gfxContext* aContext,
                       nsIFrame* aFrame,
-                      gfxTextObjectPaint* aOuterObjectPaint,
-                      SVGTextObjectPaint* aThisObjectPaint);
+                      gfxTextContextPaint* aOuterContextPaint,
+                      SVGTextContextPaint* aThisContextPaint);
 
   /**
    * Sets the current pattern for |aFrame| to the fill or stroke style of the
-   * outer text object. Will also set the paint opacity to transparent if the
+   * outer text context. Will also set the paint opacity to transparent if the
    * paint is set to "none".
    */
-  bool SetupObjectPaint(gfxContext* aContext,
+  bool SetupContextPaint(gfxContext* aContext,
                         nsIFrame* aFrame,
                         nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
                         float& aOpacity,
-                        gfxTextObjectPaint* aObjectPaint);
+                        gfxTextContextPaint* aContextPaint);
 
   /**
    * Stores in |aTargetPaint| information on how to reconstruct the current
    * fill or stroke pattern. Will also set the paint opacity to transparent if
    * the paint is set to "none".
-   * @param aOuterObjectPaint pattern information from the outer text object
+   * @param aOuterContextPaint pattern information from the outer text context
    * @param aTargetPaint where to store the current pattern information
    * @param aFillOrStroke member pointer to the paint we are setting up
    * @param aProperty the frame property descriptor of the fill or stroke paint
@@ -582,8 +638,8 @@ private:
   void SetupInheritablePaint(gfxContext* aContext,
                              nsIFrame* aFrame,
                              float& aOpacity,
-                             gfxTextObjectPaint* aOuterObjectPaint,
-                             SVGTextObjectPaint::Paint& aTargetPaint,
+                             gfxTextContextPaint* aOuterContextPaint,
+                             SVGTextContextPaint::Paint& aTargetPaint,
                              nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
                              const FramePropertyDescriptor* aProperty);
 
@@ -637,18 +693,17 @@ private:
   float mFontSizeScaleFactor;
 
   /**
-   * The flag to pass to GetCanvasTM from UpdateFontSizeScaleFactor.  This is
-   * normally FOR_OUTERSVG_TM, but while painting or hit testing a pattern or
-   * marker, we set it to FOR_PAINTING or FOR_HIT_TESTING appropriately.
-   *
-   * This flag is also used to determine whether in UpdateFontSizeScaleFactor
-   * GetCanvasTM should be called at all.  When the nsSVGTextFrame2 is a
-   * non-display child, and we are not painting or hit testing, there is
-   * no sensible CTM stack to use.  Additionally, when inside a <marker>,
-   * calling GetCanvasTM on the nsSVGMarkerFrame would crash due to not
-   * having a current mMarkedFrame.
+   * The scale of the context that we last used to compute mFontSizeScaleFactor.
+   * We record this so that we can tell when our scale transform has changed
+   * enough to warrant reflowing the text.
    */
-  uint32_t mGetCanvasTMForFlag;
+  float mLastContextScale;
+
+  /**
+   * The amount that we need to scale each rendered run to account for
+   * lengthAdjust="spacingAndGlyphs".
+   */
+  float mLengthAdjustScaleFactor;
 };
 
 #endif

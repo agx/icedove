@@ -36,8 +36,8 @@
 #include "nsComponentManagerUtils.h"
 #include "nsIIOService.h"
 #include "nsAbQueryStringToExpression.h"
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Services.h"
-#include "mozilla/Util.h"
 using namespace mozilla;
 
 struct ExportAttributesTableStruct
@@ -122,19 +122,14 @@ const ExportAttributesTableStruct EXPORT_ATTRIBUTES_TABLE[] = {
 //
 nsAbManager::nsAbManager()
 {
-  mAbStore.Init();
 }
 
 nsAbManager::~nsAbManager()
 {
 }
 
-NS_IMPL_THREADSAFE_ADDREF(nsAbManager)
-NS_IMPL_THREADSAFE_RELEASE(nsAbManager)
-NS_IMPL_QUERY_INTERFACE3(nsAbManager,
-                         nsIAbManager,
-                         nsICommandLineHandler,
-                         nsIObserver)
+NS_IMPL_ISUPPORTS3(nsAbManager, nsIAbManager, nsICommandLineHandler,
+  nsIObserver)
 
 nsresult nsAbManager::Init()
 {

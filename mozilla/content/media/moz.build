@@ -4,9 +4,12 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-PARALLEL_DIRS += ['encoder']
-
-PARALLEL_DIRS += ['webaudio']
+PARALLEL_DIRS += [
+  'encoder',
+  'mediasource',
+  'webaudio',
+  'webvtt'
+]
 
 if CONFIG['MOZ_RAW']:
     PARALLEL_DIRS += ['raw']
@@ -23,8 +26,8 @@ if CONFIG['MOZ_WEBM']:
 if CONFIG['MOZ_GSTREAMER']:
     PARALLEL_DIRS += ['gstreamer']
 
-if CONFIG['MOZ_DASH']:
-    PARALLEL_DIRS += ['dash']
+if CONFIG['MOZ_DIRECTSHOW']:
+    PARALLEL_DIRS += ['directshow']
 
 if CONFIG['MOZ_MEDIA_PLUGINS']:
     PARALLEL_DIRS += ['plugins']
@@ -32,18 +35,21 @@ if CONFIG['MOZ_MEDIA_PLUGINS']:
 if CONFIG['MOZ_WMF']:
     PARALLEL_DIRS += ['wmf']
 
+if CONFIG['MOZ_FMP4']:
+    PARALLEL_DIRS += ['fmp4']
+
+if CONFIG['MOZ_APPLEMEDIA']:
+    PARALLEL_DIRS += ['apple']
+
 PARALLEL_DIRS += ['webrtc']
 
 if CONFIG['MOZ_OMX_DECODER']:
     PARALLEL_DIRS += ['omx']
     PARALLEL_DIRS += ['omx/mediaresourcemanager']
 
-if CONFIG['MOZ_WEBSPEECH']:
-    PARALLEL_DIRS += ['webspeech']
+PARALLEL_DIRS += ['webspeech']
 
 TEST_DIRS += ['test']
-
-MODULE = 'content'
 
 EXPORTS += [
     'AbstractMediaDecoder.h',
@@ -51,23 +57,30 @@ EXPORTS += [
     'AudioChannelFormat.h',
     'AudioEventTimeline.h',
     'AudioNodeEngine.h',
+    'AudioNodeExternalInputStream.h',
     'AudioNodeStream.h',
     'AudioSampleFormat.h',
     'AudioSegment.h',
     'AudioStream.h',
+    'BufferDecoder.h',
     'BufferMediaResource.h',
-    'DOMMediaStream.h',
     'DecoderTraits.h',
+    'DOMMediaStream.h',
+    'EncodedBufferCache.h',
     'FileBlockCache.h',
+    'Latency.h',
     'MediaCache.h',
     'MediaDecoder.h',
     'MediaDecoderOwner.h',
     'MediaDecoderReader.h',
     'MediaDecoderStateMachine.h',
     'MediaMetadataManager.h',
+    'MediaRecorder.h',
     'MediaResource.h',
     'MediaSegment.h',
     'MediaStreamGraph.h',
+    'MP3FrameParser.h',
+    'RtspMediaResource.h',
     'SharedBuffer.h',
     'StreamBuffer.h',
     'TimeVarying.h',
@@ -85,35 +98,83 @@ EXPORTS.mozilla.dom += [
     'TextTrackCue.h',
     'TextTrackCueList.h',
     'TextTrackList.h',
+    'TextTrackRegion.h',
+    'TextTrackRegionList.h',
+    'VideoPlaybackQuality.h',
     'VideoStreamTrack.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'AudioAvailableEventManager.cpp',
     'AudioChannelFormat.cpp',
     'AudioNodeEngine.cpp',
+    'AudioNodeExternalInputStream.cpp',
     'AudioNodeStream.cpp',
     'AudioSegment.cpp',
     'AudioStream.cpp',
     'AudioStreamTrack.cpp',
+    'BufferDecoder.cpp',
     'DOMMediaStream.cpp',
-    'DecoderTraits.cpp',
+    'EncodedBufferCache.cpp',
     'FileBlockCache.cpp',
     'MediaCache.cpp',
     'MediaDecoder.cpp',
     'MediaDecoderReader.cpp',
     'MediaDecoderStateMachine.cpp',
+    'MediaRecorder.cpp',
     'MediaResource.cpp',
+    'MediaShutdownManager.cpp',
     'MediaStreamGraph.cpp',
     'MediaStreamTrack.cpp',
+    'MP3FrameParser.cpp',
+    'RtspMediaResource.cpp',
     'StreamBuffer.cpp',
     'TextTrack.cpp',
     'TextTrackCue.cpp',
     'TextTrackCueList.cpp',
     'TextTrackList.cpp',
+    'TextTrackRegion.cpp',
+    'TextTrackRegionList.cpp',
     'VideoFrameContainer.cpp',
+    'VideoPlaybackQuality.cpp',
     'VideoSegment.cpp',
     'VideoStreamTrack.cpp',
     'VideoUtils.cpp',
-    'WebVTTLoadListener.cpp',
+    'WebVTTListener.cpp',
 ]
+
+# DecoderTraits.cpp needs to be built separately because of Mac OS X headers.
+# Latency.cpp needs to be built separately because it forces NSPR logging.
+SOURCES += [
+    'DecoderTraits.cpp',
+    'Latency.cpp',
+]
+
+FAIL_ON_WARNINGS = True
+
+if CONFIG['CPU_ARCH'] == 'arm' and CONFIG['BUILD_ARM_NEON']:
+    SOURCES += [
+        'AudioNodeEngineNEON.cpp',
+    ]
+
+MSVC_ENABLE_PGO = True
+
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'gklayout'
+LOCAL_INCLUDES += [
+    '/content/base/src',
+    '/layout/generic',
+    '/layout/xul',
+]
+
+if CONFIG['MOZ_DIRECTSHOW']:
+    LOCAL_INCLUDES += [
+        '/media/webrtc/trunk/webrtc/modules/video_capture/windows',
+    ]
+
+DEFINES['MOZILLA_INTERNAL_API'] = True
+
+if CONFIG['MOZ_OMX_DECODER']:
+    DEFINES['MOZ_OMX_DECODER'] = True
+

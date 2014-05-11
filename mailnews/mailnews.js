@@ -310,6 +310,7 @@ pref("mailnews.reuse_message_window", true);
 #endif
 
 pref("mailnews.open_window_warning", 10); // warn user if they attempt to open more than this many messages at once
+pref("mailnews.open_tab_warning", 20); // warn user if they attempt to open more than this many messages at once
 
 pref("mailnews.start_page.enabled", true);
 
@@ -748,10 +749,10 @@ pref("mail.password_protect_local_cache", false);
 // the users last used preference.
 pref("mailnews.import.text.skipfirstrecord", true);
 
+#ifdef MOZ_SUITE
 // automatically scale attached images that are displayed inline
 pref("mail.enable_automatic_image_resizing", true);
 
-#ifdef MOZ_SUITE
 #ifdef XP_WIN
 pref("ldap_2.servers.oe.uri", "moz-aboutlookdirectory://oe/");
 pref("ldap_2.servers.oe.description", "chrome://messenger/locale/addressbook/addressBook.properties");

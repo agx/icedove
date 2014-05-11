@@ -7,22 +7,22 @@
 #define nsIJSEventListener_h__
 
 #include "nsIScriptContext.h"
-#include "jsapi.h"
 #include "xpcpublic.h"
 #include "nsIDOMEventListener.h"
 #include "nsIAtom.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/EventHandlerBinding.h"
 
 #define NS_IJSEVENTLISTENER_IID \
-{ 0x92f9212b, 0xa6aa, 0x4867, \
-  { 0x93, 0x8a, 0x56, 0xbe, 0x17, 0x67, 0x4f, 0xd4 } }
+{ 0x5077b12a, 0x5a1f, 0x4583, \
+  { 0xbb, 0xa7, 0x78, 0x84, 0x94, 0x0e, 0x5e, 0xff } }
 
 class nsEventHandler
 {
 public:
   typedef mozilla::dom::EventHandlerNonNull EventHandlerNonNull;
-  typedef mozilla::dom::BeforeUnloadEventHandlerNonNull
-    BeforeUnloadEventHandlerNonNull;
+  typedef mozilla::dom::OnBeforeUnloadEventHandlerNonNull
+    OnBeforeUnloadEventHandlerNonNull;
   typedef mozilla::dom::OnErrorEventHandlerNonNull OnErrorEventHandlerNonNull;
   typedef mozilla::dom::CallbackFunction CallbackFunction;
 
@@ -48,7 +48,7 @@ public:
     Assign(aHandler, eOnError);
   }
 
-  nsEventHandler(BeforeUnloadEventHandlerNonNull* aHandler)
+  nsEventHandler(OnBeforeUnloadEventHandlerNonNull* aHandler)
   {
     Assign(aHandler, eOnBeforeUnload);
   }
@@ -99,13 +99,13 @@ public:
     Assign(aHandler, eNormal);
   }
 
-  BeforeUnloadEventHandlerNonNull* BeforeUnloadEventHandler() const
+  OnBeforeUnloadEventHandlerNonNull* OnBeforeUnloadEventHandler() const
   {
     MOZ_ASSERT(Type() == eOnBeforeUnload);
-    return reinterpret_cast<BeforeUnloadEventHandlerNonNull*>(Ptr());
+    return reinterpret_cast<OnBeforeUnloadEventHandlerNonNull*>(Ptr());
   }
 
-  void SetHandler(BeforeUnloadEventHandlerNonNull* aHandler)
+  void SetHandler(OnBeforeUnloadEventHandlerNonNull* aHandler)
   {
     ReleaseHandler();
     Assign(aHandler, eOnBeforeUnload);
@@ -172,20 +172,13 @@ class nsIJSEventListener : public nsIDOMEventListener
 public:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_IJSEVENTLISTENER_IID)
 
-  nsIJSEventListener(nsIScriptContext* aContext, JSObject* aScopeObject,
+  nsIJSEventListener(JSObject* aScopeObject,
                      nsISupports *aTarget, nsIAtom* aType,
                      const nsEventHandler& aHandler)
-  : mContext(aContext), mScopeObject(aScopeObject), mEventName(aType),
-    mHandler(aHandler)
+  : mScopeObject(aScopeObject), mEventName(aType), mHandler(aHandler)
   {
     nsCOMPtr<nsISupports> base = do_QueryInterface(aTarget);
     mTarget = base.get();
-  }
-
-  // Can return null if we already have a handler.
-  nsIScriptContext *GetEventContext() const
-  {
-    return mContext;
   }
 
   nsISupports *GetEventTarget() const
@@ -201,7 +194,12 @@ public:
   // Can return null if we already have a handler.
   JSObject* GetEventScope() const
   {
-    return xpc_UnmarkGrayObject(mScopeObject);
+    if (!mScopeObject) {
+      return nullptr;
+    }
+
+    JS::ExposeObjectToActiveJS(mScopeObject);
+    return mScopeObject;
   }
 
   const nsEventHandler& GetHandler() const
@@ -221,18 +219,17 @@ public:
 
   // Set a handler for this event listener.  The handler must already
   // be bound to the right target.
-  void SetHandler(const nsEventHandler& aHandler, nsIScriptContext* aContext,
+  void SetHandler(const nsEventHandler& aHandler,
                   JS::Handle<JSObject*> aScopeObject)
   {
     mHandler.SetHandler(aHandler);
-    mContext = aContext;
     UpdateScopeObject(aScopeObject);
   }
   void SetHandler(mozilla::dom::EventHandlerNonNull* aHandler)
   {
     mHandler.SetHandler(aHandler);
   }
-  void SetHandler(mozilla::dom::BeforeUnloadEventHandlerNonNull* aHandler)
+  void SetHandler(mozilla::dom::OnBeforeUnloadEventHandlerNonNull* aHandler)
   {
     mHandler.SetHandler(aHandler);
   }
@@ -241,13 +238,12 @@ public:
     mHandler.SetHandler(aHandler);
   }
 
-  virtual size_t SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+  virtual size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
     return 0;
 
     // Measurement of the following members may be added later if DMD finds it
     // is worthwhile:
-    // - mContext
     // - mTarget
     //
     // The following members are not measured:
@@ -257,7 +253,7 @@ public:
     // - mEventName: shared with others
   }
 
-  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
@@ -272,7 +268,6 @@ protected:
   // the hold/drop stuff, so have to do it in nsJSEventListener.
   virtual void UpdateScopeObject(JS::Handle<JSObject*> aScopeObject) = 0;
 
-  nsCOMPtr<nsIScriptContext> mContext;
   JS::Heap<JSObject*> mScopeObject;
   nsISupports* mTarget;
   nsCOMPtr<nsIAtom> mEventName;
@@ -284,8 +279,7 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsIJSEventListener, NS_IJSEVENTLISTENER_IID)
 /* factory function.  aHandler must already be bound to aTarget.
    aContext is allowed to be null if aHandler is already set up.
  */
-nsresult NS_NewJSEventListener(nsIScriptContext *aContext,
-                               JSObject* aScopeObject, nsISupports* aTarget,
+nsresult NS_NewJSEventListener(JSObject* aScopeObject, nsISupports* aTarget,
                                nsIAtom* aType, const nsEventHandler& aHandler,
                                nsIJSEventListener **aReturn);
 

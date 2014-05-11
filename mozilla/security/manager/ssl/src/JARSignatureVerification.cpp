@@ -92,7 +92,7 @@ FindAndLoadOneEntry(nsIZipReader * zip,
   // Also, keep in mind bug 164695 and that we must leave room for
   // null-terminating the buffer.
   static const uint32_t MAX_LENGTH = 1024 * 1024;
-  MOZ_STATIC_ASSERT(MAX_LENGTH < UINT32_MAX, "MAX_LENGTH < UINT32_MAX");
+  static_assert(MAX_LENGTH < UINT32_MAX, "MAX_LENGTH < UINT32_MAX");
   NS_ENSURE_TRUE(len64 < MAX_LENGTH, NS_ERROR_FILE_CORRUPTED);
   NS_ENSURE_TRUE(len64 < UINT32_MAX, NS_ERROR_FILE_CORRUPTED); // bug 164695
   SECITEM_AllocItem(buf, static_cast<uint32_t>(len64 + 1));
@@ -254,8 +254,8 @@ ReadLine(/*in/out*/ const char* & nextLineStart, /*out*/ nsCString & line,
 #define JAR_MF_SEARCH_STRING "(M|/M)ETA-INF/(M|m)(ANIFEST|anifest).(MF|mf)$"
 #define JAR_SF_SEARCH_STRING "(M|/M)ETA-INF/*.(SF|sf)$"
 #define JAR_RSA_SEARCH_STRING "(M|/M)ETA-INF/*.(RSA|rsa)$"
-#define JAR_MF_HEADER (const char*)"Manifest-Version: 1.0"
-#define JAR_SF_HEADER (const char*)"Signature-Version: 1.0"
+#define JAR_MF_HEADER "Manifest-Version: 1.0"
+#define JAR_SF_HEADER "Signature-Version: 1.0"
 
 nsresult
 ParseAttribute(const nsAutoCString & curLine,
@@ -339,7 +339,7 @@ ParseSF(const char* filebuf, /*out*/ SECItem & mfDigest)
   nsresult rv;
 
   const char* nextLineStart = filebuf;
-  rv = CheckManifestVersion(nextLineStart, nsLiteralCString(JAR_SF_HEADER));
+  rv = CheckManifestVersion(nextLineStart, NS_LITERAL_CSTRING(JAR_SF_HEADER));
   if (NS_FAILED(rv))
     return rv;
 
@@ -399,7 +399,7 @@ ParseMF(const char* filebuf, nsIZipReader * zip,
 
   const char* nextLineStart = filebuf;
 
-  rv = CheckManifestVersion(nextLineStart, nsLiteralCString(JAR_MF_HEADER));
+  rv = CheckManifestVersion(nextLineStart, NS_LITERAL_CSTRING(JAR_MF_HEADER));
   if (NS_FAILED(rv)) {
     return rv;
   }
@@ -633,7 +633,6 @@ OpenSignedJARFile(nsIFile * aJarFile,
   ScopedAutoSECItem buf(128 * 1024);
 
   nsTHashtable<nsCStringHashKey> items;
-  items.Init();
 
   rv = ParseMF(char_ptr_cast(manifestBuffer.data), zip, items, buf);
   if (NS_FAILED(rv)) {
@@ -642,7 +641,7 @@ OpenSignedJARFile(nsIFile * aJarFile,
 
   // Verify every entry in the file.
   nsCOMPtr<nsIUTF8StringEnumerator> entries;
-  rv = zip->FindEntries(NS_LITERAL_CSTRING(""), getter_AddRefs(entries));
+  rv = zip->FindEntries(EmptyCString(), getter_AddRefs(entries));
   if (NS_SUCCEEDED(rv) && !entries) {
     rv = NS_ERROR_UNEXPECTED;
   }

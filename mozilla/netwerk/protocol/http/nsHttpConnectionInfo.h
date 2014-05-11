@@ -10,11 +10,7 @@
 #include "nsHttp.h"
 #include "nsProxyInfo.h"
 #include "nsCOMPtr.h"
-#include "nsDependentString.h"
-#include "nsString.h"
-#include "plstr.h"
-#include "nsCRT.h"
-#include "nsIProtocolProxyService.h"
+#include "nsStringFwd.h"
 
 extern PRLogModuleInfo *gHttpLog;
 
@@ -36,14 +32,14 @@ public:
 
     nsrefcnt AddRef()
     {
-        nsrefcnt n = NS_AtomicIncrementRefcnt(mRef);
+        nsrefcnt n = ++mRef;
         NS_LOG_ADDREF(this, n, "nsHttpConnectionInfo", sizeof(*this));
         return n;
     }
 
     nsrefcnt Release()
     {
-        nsrefcnt n = NS_AtomicDecrementRefcnt(mRef);
+        nsrefcnt n = --mRef;
         NS_LOG_RELEASE(this, n, "nsHttpConnectionInfo");
         if (n == 0)
             delete this;
@@ -96,8 +92,11 @@ public:
     // Returns true for any kind of proxy (http, socks, etc..)
     bool UsingProxy();
 
+    // Returns true when mHost is an RFC1918 literal.
+    bool HostIsLocalIPLiteral() const;
+
 private:
-    nsrefcnt               mRef;
+    mozilla::ThreadSafeAutoRefCnt mRef;
     nsCString              mHashKey;
     nsCString              mHost;
     int32_t                mPort;

@@ -4,8 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsAtomService.h"
+#include "nsIAtom.h"
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsAtomService, nsIAtomService)
+NS_IMPL_ISUPPORTS1(nsAtomService, nsIAtomService)
 
 nsAtomService::nsAtomService()
 {

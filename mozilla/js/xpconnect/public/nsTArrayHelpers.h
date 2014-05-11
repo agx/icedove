@@ -5,6 +5,10 @@
 #ifndef __NSTARRAYHELPERS_H__
 #define __NSTARRAYHELPERS_H__
 
+#include "jsapi.h"
+#include "nsContentUtils.h"
+#include "nsTArray.h"
+
 template <class T>
 inline nsresult
 nsTArrayToJSArray(JSContext* aCx, const nsTArray<T>& aSourceArray,
@@ -19,7 +23,7 @@ nsTArrayToJSArray(JSContext* aCx, const nsTArray<T>& aSourceArray,
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  JS::Rooted<JSObject*> global(aCx, JS_GetGlobalForScopeChain(aCx));
+  JS::Rooted<JSObject*> global(aCx, JS::CurrentGlobalOrNull(aCx));
   MOZ_ASSERT(global);
 
   for (uint32_t index = 0; index < aSourceArray.Length(); index++) {
@@ -27,12 +31,12 @@ nsTArrayToJSArray(JSContext* aCx, const nsTArray<T>& aSourceArray,
     nsresult rv = aSourceArray[index]->QueryInterface(NS_GET_IID(nsISupports), getter_AddRefs(obj));
     NS_ENSURE_SUCCESS(rv, rv);
 
-    JS::Rooted<JS::Value> wrappedVal(aCx);
-    rv = nsContentUtils::WrapNative(aCx, global, obj, wrappedVal.address(),
+    JS::RootedValue wrappedVal(aCx);
+    rv = nsContentUtils::WrapNative(aCx, global, obj, &wrappedVal,
                                     nullptr, true);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    if (!JS_SetElement(aCx, arrayObj, index, wrappedVal.address())) {
+    if (!JS_SetElement(aCx, arrayObj, index, &wrappedVal)) {
       NS_WARNING("JS_SetElement failed!");
       return NS_ERROR_FAILURE;
     }
@@ -73,7 +77,7 @@ nsTArrayToJSArray<nsString>(JSContext* aCx,
 
     JS::Rooted<JS::Value> wrappedVal(aCx, STRING_TO_JSVAL(s));
 
-    if (!JS_SetElement(aCx, arrayObj, index, wrappedVal.address())) {
+    if (!JS_SetElement(aCx, arrayObj, index, &wrappedVal)) {
       NS_WARNING("JS_SetElement failed!");
       return NS_ERROR_FAILURE;
     }

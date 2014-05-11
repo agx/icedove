@@ -14,7 +14,7 @@
 #include "nsPresContext.h"
 #include "nsStyleStruct.h"
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 
 class nsStyleContext;
 struct nsRuleData;
@@ -125,6 +125,10 @@ struct nsCachedStyleData
     NS_ABORT_IF_FALSE(0 <= aSID && aSID < nsStyleStructID_Length,
                       "must be an inherited or reset SID");
     return nsStyleStructID_Reset_Start <= aSID;
+  }
+
+  static bool IsInherited(const nsStyleStructID aSID) {
+    return !IsReset(aSID);
   }
 
   static uint32_t GetBitForSID(const nsStyleStructID aSID) {
@@ -304,7 +308,7 @@ private:
                          const PLDHashEntryHdr *aHdr,
                          const void *aKey);
 
-  static PLDHashTableOps ChildrenHashOps;
+  static const PLDHashTableOps ChildrenHashOps;
 
   static PLDHashOperator
   EnqueueRuleNodeChildren(PLDHashTable *table, PLDHashEntryHdr *hdr,
@@ -627,7 +631,12 @@ protected:
               GetShadowData(const nsCSSValueList* aList,
                             nsStyleContext* aContext,
                             bool aIsBoxShadow,
-                            bool& inherited);
+                            bool& aCanStoreInRuleTree);
+  bool SetStyleFilterToCSSValue(nsStyleFilter* aStyleFilter,
+                                const nsCSSValue& aValue,
+                                nsStyleContext* aStyleContext,
+                                nsPresContext* aPresContext,
+                                bool& aCanStoreInRuleTree);
 
 private:
   nsRuleNode(nsPresContext* aPresContext, nsRuleNode* aParent,

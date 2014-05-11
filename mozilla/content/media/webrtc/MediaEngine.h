@@ -45,6 +45,7 @@ public:
   static const int DEFAULT_VIDEO_WIDTH = 640;
   static const int DEFAULT_VIDEO_HEIGHT = 480;
   static const int DEFAULT_AUDIO_TIMER_MS = 10;
+  static const bool DEFAULT_LOAD_ADAPT = false;
 
   /* Populate an array of video sources in the nsTArray. Also include devices
    * that are currently unavailable. */
@@ -101,6 +102,11 @@ public:
                           bool aAgcOn, uint32_t aAGC,
                           bool aNoiseOn, uint32_t aNoise) = 0;
 
+  /* Returns true if a source represents a fake capture device and
+   * false otherwise
+   */
+  virtual bool IsFake() = 0;
+
   /* Return false if device is currently allocated or started */
   bool IsAvailable() {
     if (mState == kAllocated || mState == kStarted) {
@@ -125,6 +131,7 @@ struct MediaEnginePrefs {
   int32_t mHeight;
   int32_t mFPS;
   int32_t mMinFPS;
+  bool mLoadAdapt;
 };
 
 class MediaEngineVideoSource : public MediaEngineSource

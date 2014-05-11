@@ -6,11 +6,10 @@
 #include "nsJSInspector.h"
 #include "nsIXPConnect.h"
 #include "nsThreadUtils.h"
-#include "nsContentUtils.h"
 #include "nsCxPusher.h"
-#include "jsapi.h"
 #include "jsfriendapi.h"
-#include "jsdbgapi.h"
+#include "js/OldDebugAPI.h"
+#include "mozilla/HoldDropJSObjects.h"
 #include "mozilla/ModuleUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsMemory.h"
@@ -28,16 +27,41 @@ namespace jsinspector {
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsJSInspector)
 
-NS_IMPL_ISUPPORTS1(nsJSInspector, nsIJSInspector)
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsJSInspector)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+  NS_INTERFACE_MAP_ENTRY(nsIJSInspector)
+NS_INTERFACE_MAP_END
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsJSInspector)
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsJSInspector)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsJSInspector)
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsJSInspector)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsJSInspector)
+  tmp->mRequestors.Clear();
+  tmp->mLastRequestor = JS::NullValue();
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
+NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsJSInspector)
+  for (uint32_t i = 0; i < tmp->mRequestors.Length(); ++i) {
+    NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mRequestors[i])
+  }
+  NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mLastRequestor)
+NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 nsJSInspector::nsJSInspector() : mNestedLoopLevel(0), mRequestors(1), mLastRequestor(JSVAL_NULL)
 {
-  nsTArray<JS::Value> mRequestors;
 }
 
 nsJSInspector::~nsJSInspector()
 {
-  mRequestors.Clear();
+  MOZ_ASSERT(mRequestors.Length() == 0);
+  MOZ_ASSERT(mLastRequestor.isNull());
+  mozilla::DropJSObjects(this);
 }
 
 NS_IMETHODIMP
@@ -47,6 +71,7 @@ nsJSInspector::EnterNestedEventLoop(const JS::Value& requestor, uint32_t *out)
 
   mLastRequestor = requestor;
   mRequestors.AppendElement(requestor);
+  mozilla::HoldJSObjects(this);
 
   nsCxPusher pusher;
   pusher.PushNull();
@@ -106,13 +131,13 @@ nsJSInspector::GetLastNestRequestor(JS::Value *out)
 NS_DEFINE_NAMED_CID(JSINSPECTOR_CID);
 
 static const mozilla::Module::CIDEntry kJSInspectorCIDs[] = {
-  { &kJSINSPECTOR_CID, false, NULL, mozilla::jsinspector::nsJSInspectorConstructor },
-  { NULL }
+  { &kJSINSPECTOR_CID, false, nullptr, mozilla::jsinspector::nsJSInspectorConstructor },
+  { nullptr }
 };
 
 static const mozilla::Module::ContractIDEntry kJSInspectorContracts[] = {
   { JSINSPECTOR_CONTRACTID, &kJSINSPECTOR_CID },
-  { NULL }
+  { nullptr }
 };
 
 static const mozilla::Module kJSInspectorModule = {

@@ -13,6 +13,7 @@
 #include "nsIAccessibleRelation.h"
 #include "nsIAccessibleText.h"
 #include "nsIAccessibleEditableText.h"
+#include "nsIPersistentProperties2.h"
 #include "Relation.h"
 #include "Role.h"
 #include "RootAccessible.h"
@@ -192,7 +193,7 @@ GetClosestInterestingAccessible(id anObject)
   if ([attribute isEqualToString:NSAccessibilityTitleAttribute])
     return [self title];
   if ([attribute isEqualToString:NSAccessibilityTitleUIElementAttribute]) {
-    Relation rel = mGeckoAccessible->RelationByType(nsIAccessibleRelation::RELATION_LABELLED_BY);
+    Relation rel = mGeckoAccessible->RelationByType(RelationType::LABELLED_BY);
     Accessible* tempAcc = rel.Next();
     return tempAcc ? GetNativeFromGeckoAccessible(tempAcc) : nil;
   }
@@ -539,7 +540,8 @@ GetClosestInterestingAccessible(id anObject)
 
   nsAutoString value;
   mGeckoAccessible->GetValue (value);
-  return value.IsEmpty() ? nil : [NSString stringWithCharacters:value.BeginReading() length:value.Length()];
+  return value.IsEmpty() ? nil : [NSString stringWithCharacters:reinterpret_cast<const unichar*>(value.BeginReading())
+                                                         length:value.Length()];
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
 }
@@ -583,7 +585,8 @@ GetClosestInterestingAccessible(id anObject)
 
   nsAutoString helpText;
   mGeckoAccessible->GetHelp (helpText);
-  return helpText.IsEmpty() ? nil : [NSString stringWithCharacters:helpText.BeginReading() length:helpText.Length()];
+  return helpText.IsEmpty() ? nil : [NSString stringWithCharacters:reinterpret_cast<const unichar*>(helpText.BeginReading())
+                                                            length:helpText.Length()];
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
 }

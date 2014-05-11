@@ -31,6 +31,7 @@
 #include "mozilla/plugins/PPluginModuleChild.h"
 #include "mozilla/plugins/PluginInstanceChild.h"
 #include "mozilla/plugins/PluginIdentifierChild.h"
+#include "mozilla/plugins/PluginMessageUtils.h"
 
 // NOTE: stolen from nsNPAPIPlugin.h
 
@@ -74,8 +75,8 @@ class PluginModuleChild : public PPluginModuleChild
 {
     typedef mozilla::dom::PCrashReporterChild PCrashReporterChild;
 protected:
-    virtual mozilla::ipc::RPCChannel::RacyRPCPolicy
-    MediateRPCRace(const Message& parent, const Message& child) MOZ_OVERRIDE
+    virtual mozilla::ipc::RacyInterruptPolicy
+    MediateInterruptRace(const Message& parent, const Message& child) MOZ_OVERRIDE
     {
         return MediateRace(parent, child);
     }
@@ -87,9 +88,9 @@ protected:
     virtual bool AnswerNP_Initialize(const uint32_t& aFlags, NPError* rv);
 
     virtual PPluginIdentifierChild*
-    AllocPPluginIdentifier(const nsCString& aString,
-                           const int32_t& aInt,
-                           const bool& aTemporary);
+    AllocPPluginIdentifierChild(const nsCString& aString,
+                                const int32_t& aInt,
+                                const bool& aTemporary);
 
     virtual bool
     RecvPPluginIdentifierConstructor(PPluginIdentifierChild* actor,
@@ -98,17 +99,17 @@ protected:
                                      const bool& aTemporary);
 
     virtual bool
-    DeallocPPluginIdentifier(PPluginIdentifierChild* aActor);
+    DeallocPPluginIdentifierChild(PPluginIdentifierChild* aActor);
 
     virtual PPluginInstanceChild*
-    AllocPPluginInstance(const nsCString& aMimeType,
-                         const uint16_t& aMode,
-                         const InfallibleTArray<nsCString>& aNames,
-                         const InfallibleTArray<nsCString>& aValues,
-                         NPError* rv);
+    AllocPPluginInstanceChild(const nsCString& aMimeType,
+                              const uint16_t& aMode,
+                              const InfallibleTArray<nsCString>& aNames,
+                              const InfallibleTArray<nsCString>& aValues,
+                              NPError* rv);
 
     virtual bool
-    DeallocPPluginInstance(PPluginInstanceChild* aActor);
+    DeallocPPluginInstanceChild(PPluginInstanceChild* aActor);
 
     virtual bool
     AnswerPPluginInstanceConstructor(PPluginInstanceChild* aActor,
@@ -143,10 +144,10 @@ protected:
     RecvSetParentHangTimeout(const uint32_t& aSeconds);
 
     virtual PCrashReporterChild*
-    AllocPCrashReporter(mozilla::dom::NativeThreadId* id,
-                        uint32_t* processType);
+    AllocPCrashReporterChild(mozilla::dom::NativeThreadId* id,
+                             uint32_t* processType);
     virtual bool
-    DeallocPCrashReporter(PCrashReporterChild* actor);
+    DeallocPCrashReporterChild(PCrashReporterChild* actor);
     virtual bool
     AnswerPCrashReporterConstructor(PCrashReporterChild* actor,
                                     mozilla::dom::NativeThreadId* id,
@@ -158,7 +159,7 @@ protected:
     MOZ_NORETURN void QuickExit();
 
     virtual bool
-    RecvProcessNativeEventsInRPCCall() MOZ_OVERRIDE;
+    RecvProcessNativeEventsInInterruptCall() MOZ_OVERRIDE;
 
     virtual bool
     AnswerGeckoGetProfile(nsCString* aProfile);
@@ -384,14 +385,14 @@ private:
     {
         NPObjectData(const NPObject* key)
             : nsPtrHashKey<NPObject>(key)
-            , instance(NULL)
-            , actor(NULL)
+            , instance(nullptr)
+            , actor(nullptr)
         { }
 
-        // never NULL
+        // never nullptr
         PluginInstanceChild* instance;
 
-        // sometimes NULL (no actor associated with an NPObject)
+        // sometimes nullptr (no actor associated with an NPObject)
         PluginScriptableObjectChild* actor;
     };
     /**
@@ -431,7 +432,7 @@ private:
     virtual void ExitedCall() MOZ_OVERRIDE;
 
     // Entered/ExitedCall notifications keep track of whether the plugin has
-    // entered a nested event loop within this RPC call.
+    // entered a nested event loop within this interrupt call.
     struct IncallFrame
     {
         IncallFrame()

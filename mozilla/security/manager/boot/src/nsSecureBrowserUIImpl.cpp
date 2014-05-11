@@ -86,7 +86,7 @@ RequestMapInitEntry(PLDHashTable *table, PLDHashEntryHdr *hdr,
   return true;
 }
 
-static PLDHashTableOps gMapOps = {
+static const PLDHashTableOps gMapOps = {
   PL_DHashAllocTable,
   PL_DHashFreeTable,
   PL_DHashVoidPtrKeyStub,
@@ -100,17 +100,17 @@ static PLDHashTableOps gMapOps = {
 #ifdef DEBUG
 class nsAutoAtomic {
   public:
-    nsAutoAtomic(int32_t &i)
+    nsAutoAtomic(Atomic<int32_t> &i)
     :mI(i) {
-      PR_ATOMIC_INCREMENT(&mI);
+      mI++;
     }
 
     ~nsAutoAtomic() {
-      PR_ATOMIC_DECREMENT(&mI);
+      mI--;
     }
 
   protected:
-    int32_t &mI;
+    Atomic<int32_t> &mI;
 
   private:
     nsAutoAtomic(); // not accessible
@@ -150,13 +150,13 @@ nsSecureBrowserUIImpl::~nsSecureBrowserUIImpl()
   }
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS6(nsSecureBrowserUIImpl,
-                              nsISecureBrowserUI,
-                              nsIWebProgressListener,
-                              nsIFormSubmitObserver,
-                              nsIObserver,
-                              nsISupportsWeakReference,
-                              nsISSLStatusProvider)
+NS_IMPL_ISUPPORTS6(nsSecureBrowserUIImpl,
+                   nsISecureBrowserUI,
+                   nsIWebProgressListener,
+                   nsIFormSubmitObserver,
+                   nsIObserver,
+                   nsISupportsWeakReference,
+                   nsISSLStatusProvider)
 
 NS_IMETHODIMP
 nsSecureBrowserUIImpl::Init(nsIDOMWindow *aWindow)

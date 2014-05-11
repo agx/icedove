@@ -14,7 +14,6 @@
 
 #include "nsXULContentSink.h"
 
-#include "jsapi.h"
 #include "jsfriendapi.h"
 
 #include "nsCOMPtr.h"
@@ -30,7 +29,6 @@
 #include "nsINodeInfo.h"
 #include "nsIScriptContext.h"
 #include "nsIScriptGlobalObject.h"
-#include "nsIScriptRuntime.h"
 #include "nsIServiceManager.h"
 #include "nsIURL.h"
 #include "nsParserBase.h"
@@ -57,9 +55,10 @@
 #include "nsXMLContentSink.h"
 #include "nsIConsoleService.h"
 #include "nsIScriptError.h"
+#include "nsContentTypeParser.h"
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo* gLog;
+static PRLogModuleInfo* gContentSinkLog;
 #endif
 
 //----------------------------------------------------------------------
@@ -170,8 +169,8 @@ XULContentSinkImpl::XULContentSinkImpl()
 {
 
 #ifdef PR_LOGGING
-    if (! gLog)
-        gLog = PR_NewLogModule("nsXULContentSink");
+    if (! gContentSinkLog)
+        gContentSinkLog = PR_NewLogModule("nsXULContentSink");
 #endif
 }
 
@@ -189,6 +188,8 @@ XULContentSinkImpl::~XULContentSinkImpl()
 
 //----------------------------------------------------------------------
 // nsISupports interface
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(XULContentSinkImpl)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(XULContentSinkImpl)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mNodeInfoManager)
@@ -495,7 +496,7 @@ XULContentSinkImpl::HandleStartElement(const PRUnichar *aName,
 
   case eInEpilog:
   case eInScript:
-      PR_LOG(gLog, PR_LOG_WARNING,
+      PR_LOG(gContentSinkLog, PR_LOG_WARNING,
              ("xul: warning: unexpected tags in epilog at line %d",
              aLineNumber));
       rv = NS_ERROR_UNEXPECTED; // XXX
@@ -565,8 +566,7 @@ XULContentSinkImpl::HandleEndElement(const PRUnichar *aName)
             script->mOutOfLine = false;
             if (doc)
                 script->Compile(mText, mTextLength, mDocumentURL,
-                                script->mLineNo, doc,
-                                mPrototype->GetScriptGlobalObject());
+                                script->mLineNo, doc, mPrototype);
         }
 
         FlushText(false);
@@ -759,7 +759,7 @@ XULContentSinkImpl::OpenRoot(const PRUnichar** aAttributes,
 
     if (aNodeInfo->Equals(nsGkAtoms::script, kNameSpaceID_XHTML) || 
         aNodeInfo->Equals(nsGkAtoms::script, kNameSpaceID_XUL)) {
-        PR_LOG(gLog, PR_LOG_ERROR,
+        PR_LOG(gContentSinkLog, PR_LOG_ERROR,
                ("xul: script tag not allowed as root content element"));
 
         return NS_ERROR_UNEXPECTED;
@@ -771,10 +771,10 @@ XULContentSinkImpl::OpenRoot(const PRUnichar** aAttributes,
 
     if (NS_FAILED(rv)) {
 #ifdef PR_LOGGING
-        if (PR_LOG_TEST(gLog, PR_LOG_ERROR)) {
+        if (PR_LOG_TEST(gContentSinkLog, PR_LOG_ERROR)) {
             nsAutoString anodeC;
             aNodeInfo->GetName(anodeC);
-            PR_LOG(gLog, PR_LOG_ERROR,
+            PR_LOG(gContentSinkLog, PR_LOG_ERROR,
                    ("xul: unable to create element '%s' at line %d",
                     NS_ConvertUTF16toUTF8(anodeC).get(),
                     -1)); // XXX pass in line number
@@ -814,10 +814,10 @@ XULContentSinkImpl::OpenTag(const PRUnichar** aAttributes,
 
     if (NS_FAILED(rv)) {
 #ifdef PR_LOGGING
-        if (PR_LOG_TEST(gLog, PR_LOG_ERROR)) {
+        if (PR_LOG_TEST(gContentSinkLog, PR_LOG_ERROR)) {
             nsAutoString anodeC;
             aNodeInfo->GetName(anodeC);
-            PR_LOG(gLog, PR_LOG_ERROR,
+            PR_LOG(gContentSinkLog, PR_LOG_ERROR,
                    ("xul: unable to create element '%s' at line %d",
                     NS_ConvertUTF16toUTF8(anodeC).get(),
                     aLineNumber));
@@ -984,8 +984,7 @@ XULContentSinkImpl::OpenScript(const PRUnichar** aAttributes,
           // file right away.  Otherwise we'll end up reloading the script and
           // corrupting the FastLoad file trying to serialize it, in the case
           // where it's already there.
-          if (globalObject)
-                script->DeserializeOutOfLine(nullptr, globalObject);
+          script->DeserializeOutOfLine(nullptr, mPrototype);
       }
 
       nsPrototypeArray* children = nullptr;
@@ -1035,7 +1034,7 @@ XULContentSinkImpl::AddAttributes(const PRUnichar** aAttributes,
       NS_ENSURE_SUCCESS(rv, rv);
 
 #ifdef PR_LOGGING
-      if (PR_LOG_TEST(gLog, PR_LOG_DEBUG)) {
+      if (PR_LOG_TEST(gContentSinkLog, PR_LOG_DEBUG)) {
           nsAutoString extraWhiteSpace;
           int32_t cnt = mContextStack.Depth();
           while (--cnt >= 0)
@@ -1043,7 +1042,7 @@ XULContentSinkImpl::AddAttributes(const PRUnichar** aAttributes,
           nsAutoString qnameC,valueC;
           qnameC.Assign(aAttributes[0]);
           valueC.Assign(aAttributes[1]);
-          PR_LOG(gLog, PR_LOG_DEBUG,
+          PR_LOG(gContentSinkLog, PR_LOG_DEBUG,
                  ("xul: %.5d. %s    %s=%s",
                   -1, // XXX pass in line number
                   NS_ConvertUTF16toUTF8(extraWhiteSpace).get(),

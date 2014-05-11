@@ -36,7 +36,8 @@ protected:
   ~DeviceStorageRequestParent();
 
 private:
-  nsAutoRefCnt mRefCnt;
+  ThreadSafeAutoRefCnt mRefCnt;
+  NS_DECL_OWNINGTHREAD
   DeviceStorageParams mParams;
 
   class CancelableRunnable : public nsRunnable
@@ -221,6 +222,16 @@ private:
     public:
       PostAvailableResultEvent(DeviceStorageRequestParent* aParent, DeviceStorageFile* aFile);
       virtual ~PostAvailableResultEvent();
+      virtual nsresult CancelableRun();
+    private:
+      nsRefPtr<DeviceStorageFile> mFile;
+ };
+
+ class PostFormatResultEvent : public CancelableRunnable
+ {
+    public:
+      PostFormatResultEvent(DeviceStorageRequestParent* aParent, DeviceStorageFile* aFile);
+      virtual ~PostFormatResultEvent();
       virtual nsresult CancelableRun();
     private:
       nsRefPtr<DeviceStorageFile> mFile;

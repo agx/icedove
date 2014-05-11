@@ -5,16 +5,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "LayerTransactionParent.h"
 #include "ShadowLayerParent.h"
-#include "ShadowLayers.h"
-
-#include "BasicLayers.h"
+#include "Layers.h"                     // for Layer, ContainerLayer
+#include "nsDebug.h"                    // for NS_RUNTIMEABORT
+#include "nsISupportsImpl.h"            // for Layer::AddRef, etc
 
 namespace mozilla {
 namespace layers {
 
-ShadowLayerParent::ShadowLayerParent() : mLayer(NULL)
+ShadowLayerParent::ShadowLayerParent() : mLayer(nullptr)
 {
 }
 
@@ -77,7 +76,7 @@ ShadowLayerParent::ActorDestroy(ActorDestroyReason why)
     return;                     // unreached
   }
 
-  mLayer = NULL;
+  mLayer = nullptr;
 }
 
 } // namespace layers

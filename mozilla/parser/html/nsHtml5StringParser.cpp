@@ -19,7 +19,6 @@ nsHtml5StringParser::nsHtml5StringParser()
   , mTokenizer(new nsHtml5Tokenizer(mTreeBuilder, false))
 {
   MOZ_COUNT_CTOR(nsHtml5StringParser);
-  mAtomTable.Init();
   mTokenizer->setInterner(&mAtomTable);
 }
 
@@ -102,6 +101,7 @@ nsHtml5StringParser::Tokenize(const nsAString& aSourceBuffer,
   NS_PRECONDITION(!mExecutor->HasStarted(),
                   "Tried to start parse without initializing the parser.");
   mTreeBuilder->setScriptingEnabled(aScriptingEnabledForNoscriptParsing);
+  mTreeBuilder->setIsSrcdocDocument(aDocument->IsSrcdocDocument()); 
   mTokenizer->start();
   mExecutor->Start(); // Don't call WillBuildModel in fragment case
   if (!aSourceBuffer.IsEmpty()) {

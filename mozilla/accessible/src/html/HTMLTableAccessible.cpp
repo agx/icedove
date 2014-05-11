@@ -28,6 +28,7 @@
 #include "nsIDOMHTMLCollection.h"
 #include "nsIDocument.h"
 #include "nsIMutableArray.h"
+#include "nsIPersistentProperties2.h"
 #include "nsIPresShell.h"
 #include "nsITableCellLayout.h"
 #include "nsFrameSelection.h"
@@ -48,6 +49,7 @@ HTMLTableCellAccessible::
   HTMLTableCellAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   HyperTextAccessibleWrap(aContent, aDoc), xpcAccessibleTableCell(this)
 {
+  mGenericTypes |= eTableCell;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -314,6 +316,7 @@ HTMLTableHeaderCellAccessible::NativeRole()
 
   // Assume it's columnheader if there are headers in siblings, otherwise
   // rowheader.
+  // This should iterate the flattened tree
   nsIContent* parentContent = mContent->GetParent();
   if (!parentContent) {
     NS_ERROR("Deattached content on alive accessible?");
@@ -362,7 +365,7 @@ NS_IMPL_ISUPPORTS_INHERITED1(HTMLTableAccessible, Accessible,
                              nsIAccessibleTable)
 
 ////////////////////////////////////////////////////////////////////////////////
-//nsAccessNode
+// HTMLTableAccessible: Accessible
 
 void
 HTMLTableAccessible::Shutdown()
@@ -370,10 +373,6 @@ HTMLTableAccessible::Shutdown()
   mTable = nullptr;
   AccessibleWrap::Shutdown();
 }
-
-
-////////////////////////////////////////////////////////////////////////////////
-// HTMLTableAccessible: Accessible implementation
 
 void
 HTMLTableAccessible::CacheChildren()
@@ -448,10 +447,10 @@ HTMLTableAccessible::NativeAttributes()
 // HTMLTableAccessible: nsIAccessible implementation
 
 Relation
-HTMLTableAccessible::RelationByType(uint32_t aType)
+HTMLTableAccessible::RelationByType(RelationType aType)
 {
   Relation rel = AccessibleWrap::RelationByType(aType);
-  if (aType == nsIAccessibleRelation::RELATION_LABELLED_BY)
+  if (aType == RelationType::LABELLED_BY)
     rel.AppendTarget(Caption());
 
   return rel;
@@ -1115,10 +1114,10 @@ HTMLTableAccessible::IsProbablyLayoutTable()
 ////////////////////////////////////////////////////////////////////////////////
 
 Relation
-HTMLCaptionAccessible::RelationByType(uint32_t aType)
+HTMLCaptionAccessible::RelationByType(RelationType aType)
 {
   Relation rel = HyperTextAccessible::RelationByType(aType);
-  if (aType == nsIAccessibleRelation::RELATION_LABEL_FOR)
+  if (aType == RelationType::LABEL_FOR)
     rel.AppendTarget(Parent());
 
   return rel;

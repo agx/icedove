@@ -10,10 +10,11 @@
 #ifndef nsDocument_h___
 #define nsDocument_h___
 
+#include "nsIDocument.h"
+
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsCRT.h"
-#include "nsIDocument.h"
 #include "nsWeakReference.h"
 #include "nsWeakPtr.h"
 #include "nsVoidArray.h"
@@ -24,8 +25,6 @@
 #include "nsIDOMStyleSheetList.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIContent.h"
-#include "nsEventListenerManager.h"
-#include "nsIDOMNodeSelector.h"
 #include "nsIPrincipal.h"
 #include "nsIParser.h"
 #include "nsBindingManager.h"
@@ -53,7 +52,6 @@
 #include "pldhash.h"
 #include "nsAttrAndChildArray.h"
 #include "nsDOMAttributeMap.h"
-#include "nsThreadUtils.h"
 #include "nsIContentViewer.h"
 #include "nsIDOMXPathNSResolver.h"
 #include "nsIInterfaceRequestor.h"
@@ -62,12 +60,14 @@
 #include "nsISecurityEventSink.h"
 #include "nsIChannelEventSink.h"
 #include "imgIRequest.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/DOMImplementation.h"
 #include "nsIDOMTouchEvent.h"
-#include "nsIInlineEventHandlers.h"
 #include "nsDataHashtable.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Attributes.h"
+#include "nsIDOMXPathEvaluator.h"
+#include "jsfriendapi.h"
 
 #define XML_DECLARATION_BITS_DECLARATION_EXISTS   (1 << 0)
 #define XML_DECLARATION_BITS_ENCODING_EXISTS      (1 << 1)
@@ -94,6 +94,7 @@ class nsWindowSizes;
 class nsHtml5TreeOpExecutor;
 class nsDocumentOnStack;
 class nsPointerLockPermissionRequest;
+class nsISecurityConsoleMessage;
 
 namespace mozilla {
 namespace dom {
@@ -133,7 +134,7 @@ public:
   }
   ~nsIdentifierMapEntry();
 
-  void AddNameElement(nsIDocument* aDocument, Element* aElement);
+  void AddNameElement(nsINode* aDocument, Element* aElement);
   void RemoveNameElement(Element* aElement);
   bool IsEmpty();
   nsBaseContentList* GetNameContentList() {
@@ -224,7 +225,7 @@ public:
   };
 
   static size_t SizeOfExcludingThis(nsIdentifierMapEntry* aEntry,
-                                    nsMallocSizeOfFun aMallocSizeOf,
+                                    mozilla::MallocSizeOf aMallocSizeOf,
                                     void* aArg);
 
 private:
@@ -277,22 +278,6 @@ public:
   NS_DECL_NSIMUTATIONOBSERVER_NODEWILLBEDESTROYED
 
   nsIStyleSheet* GetItemAt(uint32_t aIndex);
-
-  static nsDOMStyleSheetList* FromSupports(nsISupports* aSupports)
-  {
-    nsIDOMStyleSheetList* list = static_cast<nsIDOMStyleSheetList*>(aSupports);
-#ifdef DEBUG
-    {
-      nsCOMPtr<nsIDOMStyleSheetList> list_qi = do_QueryInterface(aSupports);
-
-      // If this assertion fires the QI implementation for the object in
-      // question doesn't use the nsIDOMStyleSheetList pointer as the
-      // nsISupports pointer. That must be fixed, or we'll crash...
-      NS_ASSERTION(list_qi == list, "Uh, fix QI!");
-    }
-#endif
-    return static_cast<nsDOMStyleSheetList*>(list);
-  }
 
 protected:
   int32_t       mLength;
@@ -503,9 +488,8 @@ class nsDocument : public nsIDocument,
                    public nsIRadioGroupContainer,
                    public nsIApplicationCacheContainer,
                    public nsStubMutationObserver,
-                   public nsIDOMDocumentTouch,
-                   public nsIInlineEventHandlers,
-                   public nsIObserver
+                   public nsIObserver,
+                   public nsIDOMXPathEvaluator
 {
 public:
   typedef mozilla::dom::Element Element;
@@ -728,13 +712,16 @@ public:
   NS_IMETHOD WalkRadioGroup(const nsAString& aName,
                             nsIRadioVisitor* aVisitor,
                             bool aFlushContent) MOZ_OVERRIDE;
-  virtual void SetCurrentRadioButton(const nsAString& aName,
-                                     nsIDOMHTMLInputElement* aRadio) MOZ_OVERRIDE;
-  virtual nsIDOMHTMLInputElement* GetCurrentRadioButton(const nsAString& aName) MOZ_OVERRIDE;
-  NS_IMETHOD GetNextRadioButton(const nsAString& aName,
-                                const bool aPrevious,
-                                nsIDOMHTMLInputElement*  aFocusedRadio,
-                                nsIDOMHTMLInputElement** aRadioOut) MOZ_OVERRIDE;
+  virtual void
+    SetCurrentRadioButton(const nsAString& aName,
+                          mozilla::dom::HTMLInputElement* aRadio) MOZ_OVERRIDE;
+  virtual mozilla::dom::HTMLInputElement*
+    GetCurrentRadioButton(const nsAString& aName) MOZ_OVERRIDE;
+  NS_IMETHOD
+    GetNextRadioButton(const nsAString& aName,
+                       const bool aPrevious,
+                       mozilla::dom::HTMLInputElement*  aFocusedRadio,
+                       mozilla::dom::HTMLInputElement** aRadioOut) MOZ_OVERRIDE;
   virtual void AddToRadioGroup(const nsAString& aName,
                                nsIFormControl* aRadio) MOZ_OVERRIDE;
   virtual void RemoveFromRadioGroup(const nsAString& aName,
@@ -749,12 +736,11 @@ public:
   nsRadioGroupStruct* GetRadioGroup(const nsAString& aName) const;
   nsRadioGroupStruct* GetOrCreateRadioGroup(const nsAString& aName);
 
-  virtual nsViewportInfo GetViewportInfo(uint32_t aDisplayWidth,
-                                         uint32_t aDisplayHeight) MOZ_OVERRIDE;
-
+  virtual nsViewportInfo GetViewportInfo(const mozilla::ScreenIntSize& aDisplaySize) MOZ_OVERRIDE;
 
 private:
   nsRadioGroupStruct* GetRadioGroupInternal(const nsAString& aName) const;
+  void SendToConsole(nsCOMArray<nsISecurityConsoleMessage>& aMessages);
 
 public:
   // nsIDOMNode
@@ -771,8 +757,8 @@ public:
 
   // nsIDOMEventTarget
   virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor) MOZ_OVERRIDE;
-  virtual nsEventListenerManager*
-    GetListenerManager(bool aCreateIfNotFound) MOZ_OVERRIDE;
+  virtual nsEventListenerManager* GetOrCreateListenerManager() MOZ_OVERRIDE;
+  virtual nsEventListenerManager* GetExistingListenerManager() const MOZ_OVERRIDE;
 
   // nsIScriptObjectPrincipal
   virtual nsIPrincipal* GetPrincipal() MOZ_OVERRIDE;
@@ -780,17 +766,10 @@ public:
   // nsIApplicationCacheContainer
   NS_DECL_NSIAPPLICATIONCACHECONTAINER
 
-  // nsITouchEventReceiver
-  NS_DECL_NSITOUCHEVENTRECEIVER
-
-  // nsIDOMDocumentTouch
-  NS_DECL_NSIDOMDOCUMENTTOUCH
-
-  // nsIInlineEventHandlers
-  NS_DECL_NSIINLINEEVENTHANDLERS
-
   // nsIObserver
   NS_DECL_NSIOBSERVER
+
+  NS_DECL_NSIDOMXPATHEVALUATOR
 
   virtual nsresult Init();
 
@@ -818,10 +797,6 @@ public:
   already_AddRefed<nsIBoxObject> GetBoxObjectFor(mozilla::dom::Element* aElement,
                                                  mozilla::ErrorResult& aRv) MOZ_OVERRIDE;
 
-  virtual NS_HIDDEN_(nsresult) GetXBLChildNodesFor(nsIContent* aContent,
-                                                   nsIDOMNodeList** aResult);
-  virtual NS_HIDDEN_(nsresult) GetContentListFor(nsIContent* aContent,
-                                                 nsIDOMNodeList** aResult);
   virtual NS_HIDDEN_(Element*)
     GetAnonymousElementByAttribute(nsIContent* aElement,
                                    nsIAtom* aAttrName,
@@ -1020,8 +995,8 @@ public:
   // Posts an event to call UpdateVisibilityState
   virtual void PostVisibilityUpdateEvent() MOZ_OVERRIDE;
 
-  virtual void DocSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const MOZ_OVERRIDE;
-  // DocSizeOfIncludingThis is inherited from nsIDocument.
+  virtual void DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const MOZ_OVERRIDE;
+  // DocAddSizeOfIncludingThis is inherited from nsIDocument.
 
   virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
@@ -1165,6 +1140,8 @@ protected:
 
   void EnsureOnloadBlocker();
 
+  void NotifyStyleSheetApplicableStateChanged();
+
   nsTArray<nsIObserver*> mCharSetObservers;
 
   PLDHashTable *mSubDocuments;
@@ -1288,14 +1265,15 @@ protected:
 
   bool mAsyncFullscreenPending:1;
 
+  // Keeps track of whether we have a pending
+  // 'style-sheet-applicable-state-changed' notification.
+  bool mSSApplicableStateNotificationPending:1;
+
   uint32_t mCancelledPointerLockRequests;
 
   uint8_t mXMLDeclarationBits;
 
   nsInterfaceHashtable<nsPtrHashKey<nsIContent>, nsPIBoxObject> *mBoxObjectTable;
-
-  // The channel that got passed to StartDocumentLoad(), if any
-  nsCOMPtr<nsIChannel> mChannel;
 
   // A document "without a browsing context" that owns the content of
   // HTMLTemplateElement.
@@ -1358,8 +1336,6 @@ private:
   nsDocument(const nsDocument& aOther);
   nsDocument& operator=(const nsDocument& aOther);
 
-  nsCOMPtr<nsISupports> mXPathEvaluatorTearoff;
-
   // The layout history state that should be used by nodes in this
   // document.  We only actually store a pointer to it when:
   // 1)  We have no script global object.
@@ -1414,6 +1390,7 @@ private:
 
   enum ViewportType {
     DisplayWidthHeight,
+    DisplayWidthHeightNoZoom,
     Specified,
     Unknown
   };
@@ -1423,9 +1400,12 @@ private:
   // These member variables cache information about the viewport so we don't have to
   // recalculate it each time.
   bool mValidWidth, mValidHeight;
-  float mScaleMinFloat, mScaleMaxFloat, mScaleFloat, mPixelRatio;
+  mozilla::LayoutDeviceToScreenScale mScaleMinFloat;
+  mozilla::LayoutDeviceToScreenScale mScaleMaxFloat;
+  mozilla::LayoutDeviceToScreenScale mScaleFloat;
+  mozilla::CSSToLayoutDeviceScale mPixelRatio;
   bool mAutoSize, mAllowZoom, mValidScaleFloat, mValidMaxScale, mScaleStrEmpty, mWidthStrEmpty;
-  uint32_t mViewportWidth, mViewportHeight;
+  mozilla::CSSIntSize mViewportSize;
 
   nsrefcnt mStackRefCnt;
   bool mNeedsReleaseAfterStackRefCntRelease;

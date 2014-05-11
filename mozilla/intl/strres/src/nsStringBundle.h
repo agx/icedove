@@ -9,10 +9,11 @@
 #include "mozilla/ReentrantMonitor.h"
 #include "nsIStringBundle.h"
 #include "nsCOMPtr.h"
-#include "nsIPersistentProperties2.h"
 #include "nsString.h"
 #include "nsCOMArray.h"
-#include "nsIStringBundleOverride.h"
+
+class nsIPersistentProperties;
+class nsIStringBundleOverride;
 
 class nsStringBundle : public nsIStringBundle
 {
@@ -22,7 +23,7 @@ public:
     nsresult LoadProperties();
     virtual ~nsStringBundle();
   
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSISTRINGBUNDLE
 
     nsCOMPtr<nsIPersistentProperties> mProps;

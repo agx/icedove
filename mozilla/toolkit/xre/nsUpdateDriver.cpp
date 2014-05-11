@@ -300,6 +300,19 @@ IsOlderVersion(nsIFile *versionFile, const char *appVersion)
   return false;
 }
 
+#if defined(XP_WIN) && defined(MOZ_METRO)
+static bool
+IsWindowsMetroUpdateRequest(int appArgc, char **appArgv)
+{
+  for (int index = 0; index < appArgc; index++) {
+    if (!strcmp(appArgv[index], "--metro-update")) {
+      return true;
+    }
+  }
+  return false;
+}
+#endif
+
 static bool
 CopyFileIntoUpdateDir(nsIFile *parentDir, const char *leafName, nsIFile *updateDir)
 {
@@ -535,8 +548,10 @@ SwitchToUpdatedApp(nsIFile *greDir, nsIFile *updateDir, nsIFile *statusFile,
   pid.AppendLiteral("/replace");
 
   int immersiveArgc = 0;
-#ifdef XP_WIN
-  if (IsRunningInWindowsMetro()) {
+#if defined(XP_WIN) && defined(MOZ_METRO)
+  // If this is desktop doing an update for metro, or if we're the metro browser
+  // we want to launch the metro browser after we're finished.
+  if (IsWindowsMetroUpdateRequest(appArgc, appArgv) || IsRunningInWindowsMetro()) {
     immersiveArgc = 1;
   }
 #endif
@@ -558,10 +573,10 @@ SwitchToUpdatedApp(nsIFile *greDir, nsIFile *updateDir, nsIFile *statusFile,
       argv[argc - 1] = "-ServerName:DefaultBrowserServer";
     }
 #endif
-    argv[argc] = NULL;
+    argv[argc] = nullptr;
   } else {
     argc = 4;
-    argv[4] = NULL;
+    argv[4] = nullptr;
   }
 
   if (gSafeMode) {
@@ -592,7 +607,7 @@ SwitchToUpdatedApp(nsIFile *greDir, nsIFile *updateDir, nsIFile *statusFile,
   LaunchChildMac(argc, argv);
   exit(0);
 #else
-  PR_CreateProcessDetached(updaterPath.get(), argv, NULL, NULL);
+  PR_CreateProcessDetached(updaterPath.get(), argv, nullptr, nullptr);
   exit(0);
 #endif
 }
@@ -606,9 +621,12 @@ GetOSApplyToDir(nsACString& applyToDir)
   NS_ASSERTION(ds, "Can't get directory service");
 
   nsCOMPtr<nsIFile> osApplyToDir;
-  DebugOnly<nsresult> rv = ds->Get(XRE_OS_UPDATE_APPLY_TO_DIR, NS_GET_IID(nsIFile),
+  nsresult rv = ds->Get(XRE_OS_UPDATE_APPLY_TO_DIR, NS_GET_IID(nsIFile),
                                    getter_AddRefs(osApplyToDir));
-  NS_ASSERTION(NS_SUCCEEDED(rv), "Can't get the OS applyTo dir");
+  if (NS_FAILED(rv)) {
+    LOG(("Can't get the OS applyTo dir"));
+    return rv;
+  }
 
   return osApplyToDir->GetNativePath(applyToDir);
 }
@@ -819,8 +837,10 @@ ApplyUpdate(nsIFile *greDir, nsIFile *updateDir, nsIFile *statusFile,
   }
 
   int immersiveArgc = 0;
-#ifdef XP_WIN
-  if (IsRunningInWindowsMetro()) {
+#if defined(XP_WIN) && defined(MOZ_METRO)
+  // If this is desktop doing an update for metro, or if we're the metro browser
+  // we want to launch the metro browser after we're finished.
+  if (IsWindowsMetroUpdateRequest(appArgc, appArgv) || IsRunningInWindowsMetro()) {
     immersiveArgc = 1;
   }
 #endif
@@ -842,10 +862,10 @@ ApplyUpdate(nsIFile *greDir, nsIFile *updateDir, nsIFile *statusFile,
       argv[argc - 1] = "-ServerName:DefaultBrowserServer";
     }
 #endif
-    argv[argc] = NULL;
+    argv[argc] = nullptr;
   } else {
     argc = 4;
-    argv[4] = NULL;
+    argv[4] = nullptr;
   }
 
   if (gSafeMode) {
@@ -880,11 +900,11 @@ ApplyUpdate(nsIFile *greDir, nsIFile *updateDir, nsIFile *statusFile,
   if (restart) {
     execv(updaterPath.get(), argv);
   } else {
-    *outpid = PR_CreateProcess(updaterPath.get(), argv, NULL, NULL);
+    *outpid = PR_CreateProcess(updaterPath.get(), argv, nullptr, nullptr);
   }
 #elif defined(XP_WIN)
   // Launch the update using updater.exe
-  if (!WinLaunchChild(updaterPathW.get(), argc, argv, NULL, outpid)) {
+  if (!WinLaunchChild(updaterPathW.get(), argc, argv, nullptr, outpid)) {
     return;
   }
 
@@ -902,7 +922,7 @@ ApplyUpdate(nsIFile *greDir, nsIFile *updateDir, nsIFile *statusFile,
     exit(0);
   }
 #else
-  *outpid = PR_CreateProcess(updaterPath.get(), argv, NULL, NULL);
+  *outpid = PR_CreateProcess(updaterPath.get(), argv, nullptr, nullptr);
   if (restart) {
     exit(0);
   }
@@ -1019,7 +1039,7 @@ ProcessUpdates(nsIFile *greDir, nsIFile *appDir, nsIFile *updRootDir,
 
 
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsUpdateProcessor, nsIUpdateProcessor)
+NS_IMPL_ISUPPORTS1(nsUpdateProcessor, nsIUpdateProcessor)
 
 nsUpdateProcessor::nsUpdateProcessor()
   : mUpdaterPID(0)
@@ -1140,14 +1160,20 @@ nsUpdateProcessor::ProcessUpdate(nsIUpdate* aUpdate)
     // This needs to be done on the main thread, so we pass it along in
     // BackgroundThreadInfo
     nsresult rv = GetOSApplyToDir(osApplyToDir);
-    NS_ASSERTION(NS_SUCCEEDED(rv), "Can't get the OS apply to dir");
+    if (NS_FAILED(rv)) {
+      LOG(("Can't get the OS apply to dir"));
+      return rv;
+    }
 
     SetOSApplyToDir(aUpdate, osApplyToDir);
 
     mInfo.mIsOSUpdate = true;
     rv = NS_NewNativeLocalFile(osApplyToDir, false,
                                getter_AddRefs(mInfo.mOSApplyToDir));
-    NS_ASSERTION(NS_SUCCEEDED(rv), "Can't create nsIFile for OS apply to dir");
+    if (NS_FAILED(rv)) {
+      LOG(("Can't create nsIFile for OS apply to dir"));
+      return rv;
+    }
   }
 #endif
 

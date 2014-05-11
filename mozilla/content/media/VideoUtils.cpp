@@ -6,8 +6,11 @@
 #include "MediaResource.h"
 #include "mozilla/dom/TimeRanges.h"
 #include "nsMathUtils.h"
+#include "nsSize.h"
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
+
+namespace mozilla {
 
 // Converts from number of audio frames to microseconds, given the specified
 // audio rate.
@@ -88,3 +91,14 @@ void GetEstimatedBufferedTimeRanges(mozilla::MediaResource* aStream,
   return;
 }
 
+bool
+IsVideoContentType(const nsCString& aContentType)
+{
+  NS_NAMED_LITERAL_CSTRING(video, "video");
+  if (FindInReadable(video, aContentType)) {
+    return true;
+  }
+  return false;
+}
+
+} // end namespace mozilla

@@ -4,11 +4,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Assembler-x64.h"
-#include "gc/Marking.h"
-#include "jit/LIR.h"
+#include "jit/x64/Assembler-x64.h"
 
-#include "jsscriptinlines.h"
+#include "gc/Marking.h"
 
 using namespace js;
 using namespace js::jit;
@@ -45,7 +43,7 @@ ABIArgGenerator::next(MIRType type)
         current_ = ABIArg(FloatArgRegs[regIndex_++]);
         break;
       default:
-        JS_NOT_REACHED("Unexpected argument type");
+        MOZ_ASSUME_UNREACHABLE("Unexpected argument type");
     }
     return current_;
 #else
@@ -68,15 +66,16 @@ ABIArgGenerator::next(MIRType type)
         current_ = ABIArg(FloatArgRegs[floatRegIndex_++]);
         break;
       default:
-        JS_NOT_REACHED("Unexpected argument type");
+        MOZ_ASSUME_UNREACHABLE("Unexpected argument type");
     }
     return current_;
 #endif
 }
 
+// Avoid r11, which is the MacroAssembler's ScratchReg.
 const Register ABIArgGenerator::NonArgReturnVolatileReg0 = r10;
-const Register ABIArgGenerator::NonArgReturnVolatileReg1 = r11;
-const Register ABIArgGenerator::NonVolatileReg = r12;
+const Register ABIArgGenerator::NonArgReturnVolatileReg1 = r12;
+const Register ABIArgGenerator::NonVolatileReg = r13;
 
 void
 Assembler::writeRelocation(JmpSrc src, Relocation::Kind reloc)
@@ -95,15 +94,15 @@ Assembler::writeRelocation(JmpSrc src, Relocation::Kind reloc)
 }
 
 void
-Assembler::addPendingJump(JmpSrc src, void *target, Relocation::Kind reloc)
+Assembler::addPendingJump(JmpSrc src, ImmPtr target, Relocation::Kind reloc)
 {
-    JS_ASSERT(target);
+    JS_ASSERT(target.value != nullptr);
 
     // Emit reloc before modifying the jump table, since it computes a 0-based
     // index. This jump is not patchable at runtime.
     if (reloc == Relocation::IONCODE)
         writeRelocation(src, reloc);
-    enoughMemory_ &= jumps_.append(RelativePatch(src.offset(), target, reloc));
+    enoughMemory_ &= jumps_.append(RelativePatch(src.offset(), target.value, reloc));
 }
 
 size_t
@@ -114,7 +113,7 @@ Assembler::addPatchableJump(JmpSrc src, Relocation::Kind reloc)
     writeRelocation(src, reloc);
 
     size_t index = jumps_.length();
-    enoughMemory_ &= jumps_.append(RelativePatch(src.offset(), NULL, reloc));
+    enoughMemory_ &= jumps_.append(RelativePatch(src.offset(), nullptr, reloc));
     return index;
 }
 
@@ -146,7 +145,7 @@ Assembler::finish()
         return;
 
     // Emit the jump table.
-    masm.align(16);
+    masm.align(SizeOfJumpTableEntry);
     extendedJumpTable_ = masm.size();
 
     // Now that we know the offset to the jump table, squirrel it into the
@@ -161,9 +160,14 @@ Assembler::finish()
 #ifdef DEBUG
         size_t oldSize = masm.size();
 #endif
-        masm.jmp_rip(0);
+        masm.jmp_rip(2);
+        JS_ASSERT(masm.size() - oldSize == 6);
+        // Following an indirect branch with ud2 hints to the hardware that
+        // there's no fall-through. This also aligns the 64-bit immediate.
+        masm.ud2();
+        JS_ASSERT(masm.size() - oldSize == 8);
         masm.immediate64(0);
-        masm.align(SizeOfJumpTableEntry);
+        JS_ASSERT(masm.size() - oldSize == SizeOfExtendedJump);
         JS_ASSERT(masm.size() - oldSize == SizeOfJumpTableEntry);
     }
 }
@@ -177,9 +181,9 @@ Assembler::executableCopy(uint8_t *buffer)
         RelativePatch &rp = jumps_[i];
         uint8_t *src = buffer + rp.offset;
         if (!rp.target) {
-            // The patch target is NULL for jumps that have been linked to a
-            // label within the same code block, but may be repatched later to
-            // jump to a different code block.
+            // The patch target is nullptr for jumps that have been linked to
+            // a label within the same code block, but may be repatched later
+            // to jump to a different code block.
             continue;
         }
         if (JSC::X86Assembler::canRelinkJump(src, rp.target)) {

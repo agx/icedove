@@ -4,10 +4,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/layers/YCbCrImageDataSerializer.h"
+#include <string.h>                     // for memcpy
+#include "gfx2DGlue.h"                  // for ToIntSize
+#include "mozilla/gfx/2D.h"             // for DataSourceSurface, Factory
+#include "mozilla/gfx/BaseSize.h"       // for BaseSize
+#include "mozilla/gfx/Types.h"
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "yuv_convert.h"                // for ConvertYCbCrToRGB32, etc
 
 #define MOZ_ALIGN_WORD(x) (((x) + 3) & ~3)
-
-using namespace mozilla::ipc;
 
 namespace mozilla {
 namespace layers {
@@ -38,6 +43,7 @@ struct YCbCrBufferInfo
   uint32_t mYHeight;
   uint32_t mCbCrWidth;
   uint32_t mCbCrHeight;
+  StereoMode mStereoMode;
 };
 
 static YCbCrBufferInfo* GetYCbCrBufferInfo(uint8_t* aData)
@@ -101,6 +107,12 @@ gfxIntSize YCbCrImageDataDeserializerBase::GetCbCrSize()
   return gfxIntSize(info->mCbCrWidth, info->mCbCrHeight);
 }
 
+StereoMode YCbCrImageDataDeserializerBase::GetStereoMode()
+{
+  YCbCrBufferInfo* info = GetYCbCrBufferInfo(mData);
+  return info->mStereoMode;
+}
+
 // Offset in bytes
 static size_t ComputeOffset(uint32_t aHeight, uint32_t aStride)
 {
@@ -142,7 +154,8 @@ YCbCrImageDataSerializer::ComputeMinBufferSize(uint32_t aSize)
 
 void
 YCbCrImageDataSerializer::InitializeBufferInfo(const gfx::IntSize& aYSize,
-                                               const gfx::IntSize& aCbCrSize)
+                                               const gfx::IntSize& aCbCrSize,
+                                               StereoMode aStereoMode)
 {
   YCbCrBufferInfo* info = GetYCbCrBufferInfo(mData);
   info->mYOffset = MOZ_ALIGN_WORD(sizeof(YCbCrBufferInfo));
@@ -155,14 +168,17 @@ YCbCrImageDataSerializer::InitializeBufferInfo(const gfx::IntSize& aYSize,
   info->mYHeight = aYSize.height;
   info->mCbCrWidth = aCbCrSize.width;
   info->mCbCrHeight = aCbCrSize.height;
+  info->mStereoMode = aStereoMode;
 }
 
 void
 YCbCrImageDataSerializer::InitializeBufferInfo(const gfxIntSize& aYSize,
-                                               const gfxIntSize& aCbCrSize)
+                                               const gfxIntSize& aCbCrSize,
+                                               StereoMode aStereoMode)
 {
   InitializeBufferInfo(gfx::IntSize(aYSize.width, aYSize.height),
-                       gfx::IntSize(aCbCrSize.width, aCbCrSize.height));
+                       gfx::IntSize(aCbCrSize.width, aCbCrSize.height),
+                       aStereoMode);
 }
 
 static void CopyLineWithSkip(const uint8_t* src, uint8_t* dst, uint32_t len, uint32_t skip) {
@@ -216,6 +232,23 @@ YCbCrImageDataSerializer::CopyData(const uint8_t* aYData,
     }
   }
   return true;
+}
+
+TemporaryRef<gfx::DataSourceSurface>
+YCbCrImageDataDeserializer::ToDataSourceSurface()
+{
+  RefPtr<gfx::DataSourceSurface> result =
+    gfx::Factory::CreateDataSourceSurface(ToIntSize(GetYSize()), gfx::FORMAT_R8G8B8X8);
+
+  gfx::ConvertYCbCrToRGB32(GetYData(), GetCbData(), GetCrData(),
+                           result->GetData(),
+                           0, 0, //pic x and y
+                           GetYSize().width, GetYSize().height,
+                           GetYStride(), GetCbCrStride(),
+                           result->Stride(),
+                           gfx::YV12);
+  result->MarkDirty();
+  return result.forget();
 }
 
 

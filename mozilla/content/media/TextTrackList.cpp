@@ -5,11 +5,16 @@
 
 #include "mozilla/dom/TextTrackList.h"
 #include "mozilla/dom/TextTrackListBinding.h"
+#include "mozilla/dom/TrackEvent.h"
+#include "nsThreadUtils.h"
 
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_2(TextTrackList, mGlobal, mTextTracks)
+NS_IMPL_CYCLE_COLLECTION_INHERITED_2(TextTrackList,
+                                     nsDOMEventTargetHelper,
+                                     mGlobal,
+                                     mTextTracks)
 
 NS_IMPL_ADDREF_INHERITED(TextTrackList, nsDOMEventTargetHelper)
 NS_IMPL_RELEASE_INHERITED(TextTrackList, nsDOMEventTargetHelper)
@@ -44,20 +49,87 @@ TextTrackList::IndexedGetter(uint32_t aIndex, bool& aFound)
 }
 
 already_AddRefed<TextTrack>
-TextTrackList::AddTextTrack(TextTrackKind aKind,
+TextTrackList::AddTextTrack(HTMLMediaElement* aMediaElement,
+                            TextTrackKind aKind,
                             const nsAString& aLabel,
                             const nsAString& aLanguage)
 {
-  nsRefPtr<TextTrack> track = new TextTrack(mGlobal, aKind, aLabel, aLanguage);
-  mTextTracks.AppendElement(track);
-  // TODO: dispatch addtrack event
+  nsRefPtr<TextTrack> track = new TextTrack(mGlobal, aMediaElement, aKind,
+                                            aLabel, aLanguage);
+  if (mTextTracks.AppendElement(track)) {
+    CreateAndDispatchTrackEventRunner(track, NS_LITERAL_STRING("addtrack"));
+  }
+
   return track.forget();
 }
 
-void
-TextTrackList::RemoveTextTrack(const TextTrack& aTrack)
+TextTrack*
+TextTrackList::GetTrackById(const nsAString& aId)
 {
-  mTextTracks.RemoveElement(&aTrack);
+  nsAutoString id;
+  for (uint32_t i = 0; i < Length(); i++) {
+    mTextTracks[i]->GetId(id);
+    if (aId.Equals(id)) {
+      return mTextTracks[i];
+    }
+  }
+  return nullptr;
+}
+
+void
+TextTrackList::RemoveTextTrack(TextTrack* aTrack)
+{
+  if (mTextTracks.RemoveElement(aTrack)) {
+    CreateAndDispatchTrackEventRunner(aTrack, NS_LITERAL_STRING("removetrack"));
+  }
+}
+
+void
+TextTrackList::DidSeek()
+{
+  for (uint32_t i = 0; i < mTextTracks.Length(); i++) {
+    mTextTracks[i]->SetDirty();
+  }
+}
+
+class TrackEventRunner MOZ_FINAL: public nsRunnable
+{
+public:
+  TrackEventRunner(TextTrackList* aList, TrackEvent* aEvent)
+    : mList(aList)
+    , mEvent(aEvent)
+  {}
+
+  NS_IMETHOD Run() MOZ_OVERRIDE
+  {
+    return mList->DispatchTrackEvent(mEvent);
+  }
+
+private:
+  nsRefPtr<TextTrackList> mList;
+  nsRefPtr<TrackEvent> mEvent;
+};
+
+nsresult
+TextTrackList::DispatchTrackEvent(TrackEvent* aEvent)
+{
+  return DispatchTrustedEvent(aEvent);
+}
+
+void
+TextTrackList::CreateAndDispatchTrackEventRunner(TextTrack* aTrack,
+                                                 const nsAString& aEventName)
+{
+  TrackEventInit eventInit;
+  eventInit.mBubbles = false;
+  eventInit.mCancelable = false;
+  eventInit.mTrack = aTrack;
+  nsRefPtr<TrackEvent> trackEvent =
+    TrackEvent::Constructor(this, aEventName, eventInit);
+
+  // Dispatch the TrackEvent asynchronously.
+  nsCOMPtr<nsIRunnable> event = new TrackEventRunner(this, trackEvent);
+  NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
 }
 
 } // namespace dom

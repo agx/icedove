@@ -4,15 +4,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'layout'
-
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsMathMLChar.cpp',
     'nsMathMLContainerFrame.cpp',
     'nsMathMLFrame.cpp',
-    'nsMathMLOperators.cpp',
-    'nsMathMLSelectedFrame.cpp',
-    'nsMathMLTokenFrame.cpp',
     'nsMathMLmactionFrame.cpp',
     'nsMathMLmencloseFrame.cpp',
     'nsMathMLmfencedFrame.cpp',
@@ -26,11 +21,28 @@ CPP_SOURCES += [
     'nsMathMLmspaceFrame.cpp',
     'nsMathMLmsqrtFrame.cpp',
     'nsMathMLmstyleFrame.cpp',
-    'nsMathMLmsubFrame.cpp',
-    'nsMathMLmsubsupFrame.cpp',
-    'nsMathMLmsupFrame.cpp',
     'nsMathMLmtableFrame.cpp',
     'nsMathMLmunderoverFrame.cpp',
+    'nsMathMLOperators.cpp',
+    'nsMathMLSelectedFrame.cpp',
     'nsMathMLsemanticsFrame.cpp',
+    'nsMathMLTokenFrame.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'gklayout'
+LOCAL_INCLUDES += [
+    '../base',
+    '../generic',
+    '../style',
+    '../tables',
+    '../xul',
+    '/content/base/src',
+    '/content/mathml/content/src',
+]
+
+if CONFIG['ENABLE_TESTS']:
+    PARALLEL_DIRS += [
+        'tests',
+    ]

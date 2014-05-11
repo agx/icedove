@@ -4,14 +4,18 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ImageLayers.h"
-#include "ImageContainer.h"
+#include "ImageContainer.h"             // for ImageContainer
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxRect.h"                    // for gfxRect
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for ImageContainer::Release, etc
 
 namespace mozilla {
 namespace layers {
 
 ImageLayer::ImageLayer(LayerManager* aManager, void* aImplData)
-: Layer(aManager, aImplData), mFilter(gfxPattern::FILTER_GOOD)
-, mScaleMode(SCALE_NONE), mForceSingleTile(false) 
+: Layer(aManager, aImplData), mFilter(GraphicsFilter::FILTER_GOOD)
+, mScaleMode(SCALE_NONE), mDisallowBigImage(false)
 {}
 
 ImageLayer::~ImageLayer()

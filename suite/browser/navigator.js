@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource:///modules/DownloadTaskbarIntegration.jsm");
+Components.utils.import("resource://gre/modules/DownloadTaskbarProgress.jsm");
 Components.utils.import("resource:///modules/WindowsPreviewPerTab.jsm");
 
 __defineGetter__("PluralForm", function() {
@@ -20,7 +20,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
   "resource://gre/modules/SafeBrowsing.jsm");
 
 const REMOTESERVICE_CONTRACTID = "@mozilla.org/toolkit/remote-service;1";
-const XUL_NAMESPACE = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 var gURLBar = null;
 var gProxyButton = null;
 var gProxyFavIcon = null;
@@ -279,7 +279,7 @@ function updateHomeButtonTooltip()
     tooltip.removeChild(tooltip.firstChild);
 
   for (var i in homePage) {
-    var label = document.createElementNS(XUL_NAMESPACE, "label");
+    var label = document.createElementNS(XUL_NS, "label");
     label.setAttribute("value", homePage[i]);
     tooltip.appendChild(label);
   }
@@ -521,17 +521,6 @@ function Startup()
       setTimeout(pageShowEventHandlers, 0, aEvent);
   }, true);
 
-  // set default character set if provided
-  if ("arguments" in window && window.arguments.length > 1 && window.arguments[1]) {
-    if (window.arguments[1].indexOf("charset=") != -1) {
-      var arrayArgComponents = window.arguments[1].split("=");
-      if (arrayArgComponents) {
-        //we should "inherit" the charset menu setting in a new window
-        getMarkupDocumentViewer().defaultCharacterSet = arrayArgComponents[1];
-      }
-    }
-  }
-
   // Set a sane starting width/height for all resolutions on new profiles.
   if (!document.documentElement.hasAttribute("width")) {
     var defaultHeight = screen.availHeight;
@@ -675,7 +664,7 @@ function Startup()
   AeroPeek.onOpenWindow(window);
 
   if (!gPrivate) {
-    DownloadTaskbarIntegration.onBrowserWindowLoad(window);
+    DownloadTaskbarProgress.onBrowserWindowLoad(window);
 
     // initialize the sync UI
     gSyncUI.init();
@@ -992,7 +981,7 @@ function SetGroupHistory(popupMenu, direction)
   while (popupMenu.firstChild)
     popupMenu.removeChild(popupMenu.firstChild);
 
-  var menuItem = document.createElementNS(XUL_NAMESPACE, "menuitem");
+  var menuItem = document.createElementNS(XUL_NS, "menuitem");
   var label = gNavigatorBundle.getString("tabs.historyItem");
   menuItem.setAttribute("label", label);
   menuItem.setAttribute("index", direction);
@@ -1926,7 +1915,10 @@ function checkForDirectoryListing()
 {
   if ( "HTTPIndex" in content &&
        content.HTTPIndex instanceof Components.interfaces.nsIHTTPIndex ) {
-    content.defaultCharacterset = getMarkupDocumentViewer().defaultCharacterSet;
+    var forced = getBrowser().docShell.forcedCharset;
+    if (forced) {
+      content.defaultCharacterset = forced;
+    }
   }
 }
 

@@ -58,17 +58,15 @@ mozPersonalDictionary::~mozPersonalDictionary()
 
 nsresult mozPersonalDictionary::Init()
 {
-  mDictionaryTable.Init();
-  mIgnoreTable.Init();
+  nsCOMPtr<nsIObserverService> svc =
+    do_GetService("@mozilla.org/observer-service;1");
 
-  nsresult rv;
-  nsCOMPtr<nsIObserverService> svc = 
-           do_GetService("@mozilla.org/observer-service;1", &rv);
-   
-  if (NS_SUCCEEDED(rv) && svc) 
-    rv = svc->AddObserver(this, "profile-do-change", true); // we want to reload the dictionary if the profile switches
-
-  if (NS_FAILED(rv)) return rv;
+  NS_ENSURE_STATE(svc);
+  // we want to reload the dictionary if the profile switches
+  nsresult rv = svc->AddObserver(this, "profile-do-change", true);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = svc->AddObserver(this, "profile-before-change", true);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   Load();
   
@@ -155,7 +153,7 @@ NS_IMETHODIMP mozPersonalDictionary::Save()
   if(NS_FAILED(res)) return res;
 
   nsCOMPtr<nsIOutputStream> outStream;
-  NS_NewLocalFileOutputStream(getter_AddRefs(outStream), theFile, PR_CREATE_FILE | PR_WRONLY | PR_TRUNCATE ,0664);
+  NS_NewSafeLocalFileOutputStream(getter_AddRefs(outStream), theFile, PR_CREATE_FILE | PR_WRONLY | PR_TRUNCATE ,0664);
 
   // get a buffered output stream 4096 bytes big, to optimize writes
   nsCOMPtr<nsIOutputStream> bufferedOutputStream;
@@ -172,6 +170,14 @@ NS_IMETHODIMP mozPersonalDictionary::Save()
 
     bufferedOutputStream->Write(utf8Key.get(), utf8Key.Length(), &bytesWritten);
     bufferedOutputStream->Write("\n", 1, &bytesWritten);
+  }
+  nsCOMPtr<nsISafeOutputStream> safeStream = do_QueryInterface(bufferedOutputStream);
+  NS_ASSERTION(safeStream, "expected a safe output stream!");
+  if (safeStream) {
+    res = safeStream->Finish();
+    if (NS_FAILED(res)) {
+      NS_WARNING("failed to save personal dictionary file! possible data loss");
+    }
   }
   return res;
 }
@@ -259,6 +265,8 @@ NS_IMETHODIMP mozPersonalDictionary::Observe(nsISupports *aSubject, const char *
 {
   if (!nsCRT::strcmp(aTopic, "profile-do-change")) {
     Load();  // load automatically clears out the existing dictionary table
+  } else if (!nsCRT::strcmp(aTopic, "profile-before-change")) {
+    Save();
   }
 
   return NS_OK;

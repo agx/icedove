@@ -7,7 +7,9 @@
 #ifndef jit_BitSet_h
 #define jit_BitSet_h
 
-#include "IonAllocPolicy.h"
+#include "mozilla/MathAlgorithms.h"
+
+#include "jit/IonAllocPolicy.h"
 
 namespace js {
 namespace jit {
@@ -25,7 +27,7 @@ class BitSet : private TempObject
   private:
     BitSet(unsigned int max) :
         max_(max),
-        bits_(NULL) {}
+        bits_(nullptr) {}
 
     unsigned int max_;
     uint32_t *bits_;
@@ -42,12 +44,12 @@ class BitSet : private TempObject
         return RawLengthForBits(max_);
     }
 
-    bool init();
+    bool init(TempAllocator &alloc);
 
   public:
     class Iterator;
 
-    static BitSet *New(unsigned int max);
+    static BitSet *New(TempAllocator &alloc, unsigned int max);
 
     unsigned int getMax() const {
         return max_;
@@ -150,10 +152,9 @@ class BitSet::Iterator
             value_ = set_.bits_[word_];
         }
 
-        // The result of js_bitscan_ctz32 is undefined if the input is 0.
-        JS_ASSERT(value_ != 0);
-
-        int numZeros = js_bitscan_ctz32(value_);
+        // Be careful: the result of CountTrailingZeroes32 is undefined if the
+        // input is 0.
+        int numZeros = mozilla::CountTrailingZeroes32(value_);
         index_ += numZeros;
         value_ >>= numZeros;
 

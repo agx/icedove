@@ -12,7 +12,7 @@
  **********************************************************************/
 
 gfxOS2Surface::gfxOS2Surface(const gfxIntSize& aSize,
-                             gfxASurface::gfxImageFormat aImageFormat)
+                             gfxImageFormat aImageFormat)
     : mWnd(0), mSize(aSize)
 {
 #ifdef DEBUG_thebes_2
@@ -149,7 +149,7 @@ gfxOS2Surface::~gfxOS2Surface()
         }
     } else {
         if (mBitmap) {
-            GpiSetBitmap(mPS, NULL);
+            GpiSetBitmap(mPS, nullptr);
             GpiDeleteBitmap(mBitmap);
         }
         if (mPS) {

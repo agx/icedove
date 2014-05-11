@@ -6,10 +6,7 @@
 #ifndef GFX_GRAPHITESHAPER_H
 #define GFX_GRAPHITESHAPER_H
 
-#include "gfxTypes.h"
 #include "gfxFont.h"
-#include "nsDataHashtable.h"
-#include "nsHashKeys.h"
 
 struct gr_face;
 struct gr_font;
@@ -53,7 +50,7 @@ protected:
 
     // Convert HTML 'lang' (BCP47) to Graphite language code
     static uint32_t GetGraphiteTagForLang(const nsCString& aLang);
-    static nsTHashtable<nsUint32HashKey> sLanguageTags;
+    static nsTHashtable<nsUint32HashKey> *sLanguageTags;
 };
 
 #endif /* GFX_GRAPHITESHAPER_H */

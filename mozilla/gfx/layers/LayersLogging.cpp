@@ -6,6 +6,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "LayersLogging.h"
+#include <stdint.h>                     // for uint8_t
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxColor.h"                   // for gfxRGBA
+#include "gfxMatrix.h"                  // for gfxMatrix
+#include "mozilla/gfx/Matrix.h"         // for Matrix4x4, Matrix
+#include "nsDebug.h"                    // for NS_ERROR
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRect.h"                     // for nsIntRect
+#include "nsSize.h"                     // for nsIntSize
 
 using namespace mozilla::gfx;
 
@@ -22,17 +31,17 @@ AppendToString(nsACString& s, const void* p,
 }
 
 nsACString&
-AppendToString(nsACString& s, const gfxPattern::GraphicsFilter& f,
+AppendToString(nsACString& s, const GraphicsFilter& f,
                const char* pfx, const char* sfx)
 {
   s += pfx;
   switch (f) {
-  case gfxPattern::FILTER_FAST:      s += "fast"; break;
-  case gfxPattern::FILTER_GOOD:      s += "good"; break;
-  case gfxPattern::FILTER_BEST:      s += "best"; break;
-  case gfxPattern::FILTER_NEAREST:   s += "nearest"; break;
-  case gfxPattern::FILTER_BILINEAR:  s += "bilinear"; break;
-  case gfxPattern::FILTER_GAUSSIAN:  s += "gaussian"; break;
+  case GraphicsFilter::FILTER_FAST:      s += "fast"; break;
+  case GraphicsFilter::FILTER_GOOD:      s += "good"; break;
+  case GraphicsFilter::FILTER_BEST:      s += "best"; break;
+  case GraphicsFilter::FILTER_NEAREST:   s += "nearest"; break;
+  case GraphicsFilter::FILTER_BILINEAR:  s += "bilinear"; break;
+  case GraphicsFilter::FILTER_GAUSSIAN:  s += "gaussian"; break;
   default:
     NS_ERROR("unknown filter type");
     s += "???";
@@ -184,6 +193,7 @@ AppendToString(nsACString& s, const Filter filter,
   s += pfx;
 
   switch (filter) {
+    case FILTER_GOOD: s += "FILTER_GOOD"; break;
     case FILTER_LINEAR: s += "FILTER_LINEAR"; break;
     case FILTER_POINT: s += "FILTER_POINT"; break;
   }
@@ -210,12 +220,11 @@ AppendToString(nsACString& s, TextureFlags flags,
   } \
 }
     bool previous = false;
-    AppendFlag(UseNearestFilter);
-    AppendFlag(NeedsYFlip);
-    AppendFlag(ForceSingleTile);
-    AppendFlag(AllowRepeat);
-    AppendFlag(NewTile);
-    AppendFlag(HostRelease);
+    AppendFlag(TEXTURE_USE_NEAREST_FILTER);
+    AppendFlag(TEXTURE_NEEDS_Y_FLIP);
+    AppendFlag(TEXTURE_DISALLOW_BIGIMAGE);
+    AppendFlag(TEXTURE_ALLOW_REPEAT);
+    AppendFlag(TEXTURE_NEW_TILE);
 
 #undef AppendFlag
   }

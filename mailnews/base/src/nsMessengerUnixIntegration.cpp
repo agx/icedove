@@ -103,7 +103,6 @@ nsMessengerUnixIntegration::nsMessengerUnixIntegration()
   mBiffStateAtom = MsgGetAtom("BiffState");
   mNewMailReceivedAtom = MsgGetAtom("NewMailReceived");
   mAlertInProgress = false;
-  mLastMRUTimes.Init();
   mFoldersWithNewMail = do_CreateInstance(NS_ARRAY_CONTRACTID);
 }
 
@@ -360,7 +359,8 @@ nsresult nsMessengerUnixIntegration::ShowAlertMessage(const nsAString& aAlertTit
                                                 this,
                                                 EmptyString(),
                                                 NS_LITERAL_STRING("auto"),
-                                                EmptyString());
+                                                EmptyString(),
+                                                nullptr);
       if (NS_SUCCEEDED(rv))
         return rv;
     }

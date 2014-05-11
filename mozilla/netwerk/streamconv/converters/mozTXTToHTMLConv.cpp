@@ -4,15 +4,11 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozTXTToHTMLConv.h"
-#include "nsIServiceManager.h"
-#include "nsNetCID.h"
 #include "nsNetUtil.h"
-#include "nsReadableUtils.h"
 #include "nsUnicharUtils.h"
 #include "nsCRT.h"
 #include "nsIExternalProtocolHandler.h"
-
-static NS_DEFINE_CID(kIOServiceCID, NS_IOSERVICE_CID);
+#include "nsIIOService.h"
 
 #ifdef DEBUG_BenB_Perf
 #include "prtime.h"
@@ -1347,7 +1343,7 @@ mozTXTToHTMLConv::ScanTXT(const PRUnichar *text, uint32_t whattodo,
   // need to reallocate and re-copy the characters already in the out String.
   NS_ASSERTION(inLength, "ScanTXT passed 0 length string");
   if (inLength == 0) {
-    *_retval = nsCRT::strdup(text);
+    *_retval = NS_strdup(text);
     return NS_OK;
   }
 

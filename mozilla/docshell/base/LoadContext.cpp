@@ -5,14 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/LoadContext.h"
-#include "nsIScriptSecurityManager.h"
-#include "nsServiceManagerUtils.h"
-#include "nsContentUtils.h"
-#include "mozIApplication.h"
 
 namespace mozilla {
 
-NS_IMPL_ISUPPORTS1(LoadContext, nsILoadContext)
+NS_IMPL_ISUPPORTS2(LoadContext, nsILoadContext, nsIInterfaceRequestor)
 
 //-----------------------------------------------------------------------------
 // LoadContext::nsILoadContext
@@ -113,6 +109,24 @@ LoadContext::GetAppId(uint32_t* aAppId)
 
   *aAppId = mAppId;
   return NS_OK;
+}
+
+//-----------------------------------------------------------------------------
+// LoadContext::nsIInterfaceRequestor
+//-----------------------------------------------------------------------------
+NS_IMETHODIMP
+LoadContext::GetInterface(const nsIID &aIID, void **aResult)
+{
+  NS_ENSURE_ARG_POINTER(aResult);
+  *aResult = nullptr;
+
+  if (aIID.Equals(NS_GET_IID(nsILoadContext))) {
+    *aResult = static_cast<nsILoadContext*>(this);
+    NS_ADDREF_THIS();
+    return NS_OK;
+  }
+
+  return NS_NOINTERFACE;
 }
 
 } // namespace mozilla

@@ -6,20 +6,34 @@
 #ifndef GFX_BASICTHEBESLAYER_H
 #define GFX_BASICTHEBESLAYER_H
 
-#include "mozilla/layers/PLayerTransactionParent.h"
-#include "BasicLayersImpl.h"
-#include "mozilla/layers/ContentClient.h"
+#include "Layers.h"                     // for ThebesLayer, LayerManager, etc
+#include "RotatedBuffer.h"              // for RotatedContentBuffer, etc
+#include "BasicImplData.h"              // for BasicImplData
+#include "BasicLayers.h"                // for BasicLayerManager
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxPoint.h"                   // for gfxPoint
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/gfx/BasePoint.h"      // for BasePoint
+#include "mozilla/layers/ContentClient.h"  // for ContentClientBasic
+#include "mozilla/mozalloc.h"           // for operator delete
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+class gfxContext;
 
 namespace mozilla {
 namespace layers {
 
+class ReadbackProcessor;
+
 class BasicThebesLayer : public ThebesLayer, public BasicImplData {
 public:
-  typedef ThebesLayerBuffer::PaintState PaintState;
-  typedef ThebesLayerBuffer::ContentType ContentType;
+  typedef RotatedContentBuffer::PaintState PaintState;
+  typedef RotatedContentBuffer::ContentType ContentType;
 
   BasicThebesLayer(BasicLayerManager* aLayerManager) :
-    ThebesLayer(aLayerManager, static_cast<BasicImplData*>(this)),
+    ThebesLayer(aLayerManager,
+                static_cast<BasicImplData*>(MOZ_THIS_IN_INITIALIZER_LIST())),
     mContentClient(nullptr)
   {
     MOZ_COUNT_CTOR(BasicThebesLayer);
@@ -49,6 +63,9 @@ public:
                            LayerManager::DrawThebesLayerCallback aCallback,
                            void* aCallbackData,
                            ReadbackProcessor* aReadback);
+
+  virtual void Validate(LayerManager::DrawThebesLayerCallback aCallback,
+                        void* aCallbackData) MOZ_OVERRIDE;
 
   virtual void ClearCachedResources()
   {
@@ -86,6 +103,7 @@ protected:
               const nsIntRegion& aExtendedRegionToDraw,
               const nsIntRegion& aRegionToInvalidate,
               bool aDidSelfCopy,
+              DrawRegionClip aClip,
               LayerManager::DrawThebesLayerCallback aCallback,
               void* aCallbackData)
   {
@@ -93,8 +111,8 @@ protected:
       BasicManager()->SetTransactionIncomplete();
       return;
     }
-    aCallback(this, aContext, aExtendedRegionToDraw, aRegionToInvalidate,
-              aCallbackData);
+    aCallback(this, aContext, aExtendedRegionToDraw, aClip,
+              aRegionToInvalidate, aCallbackData);
     // Everything that's visible has been validated. Do this instead of just
     // OR-ing with aRegionToDraw, since that can lead to a very complex region
     // here (OR doesn't automatically simplify to the simplest possible

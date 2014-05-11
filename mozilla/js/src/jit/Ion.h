@@ -9,13 +9,13 @@
 
 #ifdef JS_ION
 
+#include "mozilla/MemoryReporting.h"
+
 #include "jscntxt.h"
 #include "jscompartment.h"
-#include "IonCode.h"
-#include "CompileInfo.h"
-#include "jsinfer.h"
 
-#include "vm/Interpreter.h"
+#include "jit/CompileInfo.h"
+#include "jit/CompileWrappers.h"
 
 namespace js {
 namespace jit {
@@ -77,6 +77,25 @@ struct IonOptions
     // Default: true
     bool rangeAnalysis;
 
+    // Whether to enable extra code to perform dynamic validation of
+    // RangeAnalysis results.
+    //
+    // Default: false
+    bool checkRangeAnalysis;
+
+    // Whether to protect the GC heap during Ion compilation and ensure that
+    // only threadsafe operations are performed on it.
+    //
+    // Default: false
+    bool checkThreadSafety;
+
+    // Whether to perform expensive graph-consistency DEBUG-only assertions.
+    // It can be useful to disable this to reduce DEBUG-compile time of large
+    // asm.js programs.
+    //
+    // Default: true
+    bool checkGraphConsistency;
+
     // Toggles whether Unreachable Code Elimination is performed.
     //
     // Default: true
@@ -87,10 +106,13 @@ struct IonOptions
     // Default: true
     bool eaa;
 
-    // Toggles whether compilation occurs off the main thread.
+#ifdef CHECK_OSIPOINT_REGISTERS
+    // Emit extra code to verify live regs at the start of a VM call
+    // are not modified before its OsiPoint.
     //
-    // Default: true iff there are at least two CPUs available
-    bool parallelCompilation;
+    // Default: false
+    bool checkOsiPointRegisters;
+#endif
 
     // How many invocations or loop iterations are needed before functions
     // are compiled with the baseline compiler.
@@ -121,6 +143,17 @@ struct IonOptions
     //
     // Default: 10
     uint32_t frequentBailoutThreshold;
+
+    // Number of exception bailouts (resuming into catch/finally block) before
+    // we invalidate and forbid Ion compilation.
+    //
+    // Default: 10
+    uint32_t exceptionBailoutThreshold;
+
+    // Whether Ion should compile try-catch statements.
+    //
+    // Default: true
+    bool compileTryCatch;
 
     // How many actual arguments are accepted on the C stack.
     //
@@ -161,12 +194,6 @@ struct IonOptions
     // Default: 1000
     uint32_t inlineMaxTotalBytecodeLength;
 
-    // Minimal ratio between the use counts of the caller and the callee to
-    // enable inlining of functions.
-    //
-    // Default: 128
-    uint32_t inlineUseCountRatio;
-
     // Whether functions are compiled immediately.
     //
     // Default: false
@@ -175,17 +202,21 @@ struct IonOptions
     // How many uses of a parallel kernel before we attempt compilation.
     //
     // Default: 1
-    uint32_t usesBeforeCompileParallel;
+    uint32_t usesBeforeCompilePar;
+
+    // The maximum bytecode length the caller may have,
+    // before we stop inlining large functions in that caller.
+    //
+    // Default: 10000
+    uint32_t inliningMaxCallerBytecodeLength;
 
     void setEagerCompilation() {
         eagerCompilation = true;
         usesBeforeCompile = 0;
         baselineUsesBeforeCompile = 0;
-
-        parallelCompilation = false;
     }
 
-    IonOptions()
+    MOZ_CONSTEXPR IonOptions()
       : gvn(true),
         gvnIsOptimistic(true),
         licm(true),
@@ -195,23 +226,30 @@ struct IonOptions
         inlining(true),
         edgeCaseAnalysis(true),
         rangeAnalysis(true),
+        checkRangeAnalysis(false),
+        checkThreadSafety(false),
+        checkGraphConsistency(true),
         uce(true),
         eaa(true),
-        parallelCompilation(false),
+#ifdef CHECK_OSIPOINT_REGISTERS
+        checkOsiPointRegisters(false),
+#endif
         baselineUsesBeforeCompile(10),
         usesBeforeCompile(1000),
         usesBeforeInliningFactor(.125),
         osrPcMismatchesBeforeRecompile(6000),
         frequentBailoutThreshold(10),
+        exceptionBailoutThreshold(10),
+        compileTryCatch(true),
         maxStackArgs(4096),
         maxInlineDepth(3),
         smallFunctionMaxInlineDepth(10),
         smallFunctionMaxBytecodeLength(100),
         polyInlineMax(4),
         inlineMaxTotalBytecodeLength(1000),
-        inlineUseCountRatio(128),
         eagerCompilation(false),
-        usesBeforeCompileParallel(1)
+        usesBeforeCompilePar(1),
+        inliningMaxCallerBytecodeLength(10000)
     {
     }
 
@@ -232,26 +270,36 @@ enum AbortReason {
     AbortReason_Alloc,
     AbortReason_Inlining,
     AbortReason_Disable,
+    AbortReason_Error,
     AbortReason_NoAbort
 };
 
 // An Ion context is needed to enter into either an Ion method or an instance
 // of the Ion compiler. It points to a temporary allocator and the active
-// JSContext, either of which may be NULL, and the active compartment, which
-// will not be NULL.
+// JSContext, either of which may be nullptr, and the active compartment, which
+// will not be nullptr.
 
 class IonContext
 {
   public:
     IonContext(JSContext *cx, TempAllocator *temp);
-    IonContext(JSCompartment *comp, TempAllocator *temp);
-    IonContext(JSRuntime *rt);
+    IonContext(ExclusiveContext *cx, TempAllocator *temp);
+    IonContext(CompileRuntime *rt, CompileCompartment *comp, TempAllocator *temp);
+    IonContext(CompileRuntime *rt);
     ~IonContext();
 
-    JSRuntime *runtime;
+    // Running context when executing on the main thread. Not available during
+    // compilation.
     JSContext *cx;
-    JSCompartment *compartment;
+
+    // Allocator for temporary memory during compilation.
     TempAllocator *temp;
+
+    // Wrappers with information about the current runtime/compartment for use
+    // during compilation.
+    CompileRuntime *runtime;
+    CompileCompartment *compartment;
+
     int getNextAssemblerId() {
         return assemblerCount_++;
     }
@@ -282,6 +330,10 @@ MethodStatus CanEnterUsingFastInvoke(JSContext *cx, HandleScript script, uint32_
 
 MethodStatus CanEnterInParallel(JSContext *cx, HandleScript script);
 
+MethodStatus
+Recompile(JSContext *cx, HandleScript script, BaselineFrame *osrFrame, jsbytecode *osrPc,
+          bool constructing);
+
 enum IonExecStatus
 {
     // The method call had to be aborted due to a stack limit check. This
@@ -306,17 +358,21 @@ struct EnterJitData;
 
 bool SetEnterJitData(JSContext *cx, EnterJitData &data, RunState &state, AutoValueVector &vals);
 
-IonExecStatus Cannon(JSContext *cx, RunState &state);
+IonExecStatus IonCannon(JSContext *cx, RunState &state);
 
 // Used to enter Ion from C++ natives like Array.map. Called from FastInvokeGuard.
 IonExecStatus FastInvoke(JSContext *cx, HandleFunction fun, CallArgs &args);
 
 // Walk the stack and invalidate active Ion frames for the invalid scripts.
 void Invalidate(types::TypeCompartment &types, FreeOp *fop,
-                const Vector<types::RecompileInfo> &invalid, bool resetUses = true);
-void Invalidate(JSContext *cx, const Vector<types::RecompileInfo> &invalid, bool resetUses = true);
-bool Invalidate(JSContext *cx, JSScript *script, ExecutionMode mode, bool resetUses = true);
-bool Invalidate(JSContext *cx, JSScript *script, bool resetUses = true);
+                const Vector<types::RecompileInfo> &invalid, bool resetUses = true,
+                bool cancelOffThread = true);
+void Invalidate(JSContext *cx, const Vector<types::RecompileInfo> &invalid, bool resetUses = true,
+                bool cancelOffThread = true);
+bool Invalidate(JSContext *cx, JSScript *script, ExecutionMode mode, bool resetUses = true,
+                bool cancelOffThread = true);
+bool Invalidate(JSContext *cx, JSScript *script, bool resetUses = true,
+                bool cancelOffThread = true);
 
 void MarkValueFromIon(JSRuntime *rt, Value *vp);
 void MarkShapeFromIon(JSRuntime *rt, Shape **shapep);
@@ -330,8 +386,8 @@ class CodeGenerator;
 
 bool OptimizeMIR(MIRGenerator *mir);
 LIRGraph *GenerateLIR(MIRGenerator *mir);
-CodeGenerator *GenerateCode(MIRGenerator *mir, LIRGraph *lir, MacroAssembler *maybeMasm = NULL);
-CodeGenerator *CompileBackEnd(MIRGenerator *mir, MacroAssembler *maybeMasm = NULL);
+CodeGenerator *GenerateCode(MIRGenerator *mir, LIRGraph *lir, MacroAssembler *maybeMasm = nullptr);
+CodeGenerator *CompileBackEnd(MIRGenerator *mir, MacroAssembler *maybeMasm = nullptr);
 
 void AttachFinishedCompilations(JSContext *cx);
 void FinishOffThreadBuilder(IonBuilder *builder);
@@ -339,9 +395,23 @@ void FinishOffThreadBuilder(IonBuilder *builder);
 static inline bool
 IsIonEnabled(JSContext *cx)
 {
-    return cx->hasOption(JSOPTION_ION) &&
-        cx->hasOption(JSOPTION_BASELINE) &&
+    return cx->compartment()->options().ion(cx) &&
+        cx->compartment()->options().baseline(cx) &&
         cx->typeInferenceEnabled();
+}
+
+inline bool
+IsIonInlinablePC(jsbytecode *pc) {
+    // CALL, FUNCALL, FUNAPPLY, EVAL, NEW (Normal Callsites)
+    // GETPROP, CALLPROP, and LENGTH. (Inlined Getters)
+    // SETPROP, SETNAME, SETGNAME (Inlined Setters)
+    return IsCallPC(pc) || IsGetPropPC(pc) || IsSetPropPC(pc);
+}
+
+inline bool
+TooManyArguments(unsigned nargs)
+{
+    return (nargs >= SNAPSHOT_MAX_NARGS || nargs > js_IonOptions.maxStackArgs);
 }
 
 void ForbidCompilation(JSContext *cx, JSScript *script);
@@ -349,9 +419,11 @@ void ForbidCompilation(JSContext *cx, JSScript *script, ExecutionMode mode);
 uint32_t UsesBeforeIonRecompile(JSScript *script, jsbytecode *pc);
 
 void PurgeCaches(JSScript *script, JS::Zone *zone);
-size_t SizeOfIonData(JSScript *script, JSMallocSizeOfFun mallocSizeOf);
+size_t SizeOfIonData(JSScript *script, mozilla::MallocSizeOf mallocSizeOf);
 void DestroyIonScripts(FreeOp *fop, JSScript *script);
 void TraceIonScripts(JSTracer* trc, JSScript *script);
+
+void TriggerOperationCallbackForIonCode(JSRuntime *rt, JSRuntime::OperationCallbackTrigger trigger);
 
 } // namespace jit
 } // namespace js

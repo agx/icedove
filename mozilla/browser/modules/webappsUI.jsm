@@ -14,18 +14,61 @@ Cu.import("resource://gre/modules/Webapps.jsm");
 Cu.import("resource://gre/modules/AppsUtils.jsm");
 Cu.import("resource://gre/modules/WebappsInstaller.jsm");
 Cu.import("resource://gre/modules/WebappOSUtils.jsm");
+Cu.import("resource://gre/modules/Task.jsm");
+Cu.import("resource://gre/modules/Promise.jsm");
+
+XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
+                                   "@mozilla.org/childprocessmessagemanager;1",
+                                   "nsIMessageSender");
 
 this.webappsUI = {
+  // List of promises for in-progress installations
+  installations: {},
+
   init: function webappsUI_init() {
     Services.obs.addObserver(this, "webapps-ask-install", false);
     Services.obs.addObserver(this, "webapps-launch", false);
     Services.obs.addObserver(this, "webapps-uninstall", false);
+    cpmm.addMessageListener("Webapps:Install:Return:OK", this);
+    cpmm.addMessageListener("Webapps:Install:Return:KO", this);
+    cpmm.addMessageListener("Webapps:UpdateState", this);
   },
 
   uninit: function webappsUI_uninit() {
     Services.obs.removeObserver(this, "webapps-ask-install");
     Services.obs.removeObserver(this, "webapps-launch");
     Services.obs.removeObserver(this, "webapps-uninstall");
+    cpmm.removeMessageListener("Webapps:Install:Return:OK", this);
+    cpmm.removeMessageListener("Webapps:Install:Return:KO", this);
+    cpmm.removeMessageListener("Webapps:UpdateState", this);
+  },
+
+  receiveMessage: function(aMessage) {
+    let data = aMessage.data;
+
+    let manifestURL = data.manifestURL ||
+                      (data.app && data.app.manifestURL) ||
+                      data.manifest;
+
+    if (!this.installations[manifestURL]) {
+      return;
+    }
+
+    if (aMessage.name == "Webapps:UpdateState") {
+      if (data.error) {
+        this.installations[manifestURL].reject(data.error);
+      } else if (data.app.installState == "installed") {
+        this.installations[manifestURL].resolve();
+      }
+    } else if (aMessage.name == "Webapps:Install:Return:OK" &&
+               !data.isPackage) {
+      let manifest = new ManifestHelper(data.app.manifest, data.app.origin);
+      if (!manifest.appcache_path) {
+        this.installations[manifestURL].resolve();
+      }
+    } else if (aMessage.name == "Webapps:Install:Return:KO") {
+      this.installations[manifestURL].reject(data.error);
+    }
   },
 
   observe: function webappsUI_observe(aSubject, aTopic, aData) {
@@ -34,9 +77,10 @@ this.webappsUI = {
 
     switch(aTopic) {
       case "webapps-ask-install":
-        let [chromeWin, browser] = this._getBrowserForId(data.oid);
-        if (chromeWin)
-          this.doInstall(data, browser, chromeWin);
+        let win = this._getWindowForId(data.oid);
+        if (win && win.location.href == data.from) {
+          this.doInstall(data, win);
+        }
         break;
       case "webapps-launch":
         WebappOSUtils.launch(data);
@@ -47,6 +91,11 @@ this.webappsUI = {
     }
   },
 
+  _getWindowForId: function(aId) {
+    let someWindow = Services.wm.getMostRecentWindow(null);
+    return someWindow && Services.wm.getOuterWindowWithId(aId);
+  },
+
   openURL: function(aUrl, aOrigin) {
     let browserEnumerator = Services.wm.getEnumerator("navigator:browser");
     let ss = Cc["@mozilla.org/browser/sessionstore;1"].getService(Ci.nsISessionStore);
@@ -55,6 +104,9 @@ this.webappsUI = {
     let found = false;
     while (!found && browserEnumerator.hasMoreElements()) {
       let browserWin = browserEnumerator.getNext();
+      if (browserWin.closed) {
+        continue;
+      }
       let tabbrowser = browserWin.gBrowser;
 
       // Check each tab of this browser instance
@@ -86,43 +138,85 @@ this.webappsUI = {
     }
   },
 
-  _getBrowserForId: function(aId) {
-    let content = Services.wm.getOuterWindowWithId(aId);
-    if (content) {
-      let browser = content.QueryInterface(Ci.nsIInterfaceRequestor)
-                    .getInterface(Ci.nsIWebNavigation)
-                    .QueryInterface(Ci.nsIDocShell).chromeEventHandler;
-      let win = browser.ownerDocument.defaultView;
-      return [win, browser];
-    }
+  doInstall: function(aData, aWindow) {
+    let browser = aWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                         .getInterface(Ci.nsIWebNavigation)
+                         .QueryInterface(Ci.nsIDocShell)
+                         .chromeEventHandler;
+    let chromeDoc = browser.ownerDocument;
+    let chromeWin = chromeDoc.defaultView;
+    let popupProgressContent =
+      chromeDoc.getElementById("webapps-install-progress-content");
 
-    return [null, null];
-  },
+    let bundle = chromeWin.gNavigatorBundle;
 
-  doInstall: function(aData, aBrowser, aWindow) {
-    let bundle = aWindow.gNavigatorBundle;
+    let notification;
 
     let mainAction = {
       label: bundle.getString("webapps.install"),
       accessKey: bundle.getString("webapps.install.accesskey"),
-      callback: function() {
-        let app = WebappsInstaller.install(aData);
+      callback: () => {
+        notification.remove();
+
+        notification = chromeWin.PopupNotifications.
+                        show(browser,
+                             "webapps-install-progress",
+                             bundle.getString("webapps.install.inprogress"),
+                             "webapps-notification-icon");
+
+        let progressMeter = chromeDoc.createElement("progressmeter");
+        progressMeter.setAttribute("mode", "undetermined");
+        popupProgressContent.appendChild(progressMeter);
+
+        let manifestURL = aData.app.manifestURL;
+
+        let cleanup = (ex) => {
+          popupProgressContent.removeChild(progressMeter);
+          delete this.installations[manifestURL];
+          if (Object.getOwnPropertyNames(this.installations).length == 0) {
+            notification.remove();
+          }
+        };
+
+        this.installations[manifestURL] = Promise.defer();
+        this.installations[manifestURL].promise.then(null, (error) => {
+          Cu.reportError("Error installing webapp: " + error);
+          cleanup();
+        });
+
+        let app = WebappsInstaller.init(aData);
+
         if (app) {
           let localDir = null;
           if (app.appProfile) {
             localDir = app.appProfile.localDir;
           }
 
-          DOMApplicationRegistry.confirmInstall(aData, false, localDir);
-          installationSuccessNotification(app, aWindow);
+          DOMApplicationRegistry.confirmInstall(aData, localDir,
+            (aManifest, aZipPath) => {
+              Task.spawn(function() {
+                try {
+                  yield WebappsInstaller.install(aData, aManifest, aZipPath);
+                  yield this.installations[manifestURL].promise;
+                  installationSuccessNotification(aData, app, bundle);
+                } catch (ex) {
+                  Cu.reportError("Error installing webapp: " + ex);
+                  // TODO: Notify user that the installation has failed
+                } finally {
+                  cleanup();
+                }
+              }.bind(this));
+            });
         } else {
           DOMApplicationRegistry.denyInstall(aData);
+          cleanup();
         }
       }
     };
 
-    let requestingURI = aWindow.makeURI(aData.from);
-    let manifest = new ManifestHelper(aData.app.manifest, aData.app.origin);
+    let requestingURI = chromeWin.makeURI(aData.from);
+    let jsonManifest = aData.isPackage ? aData.app.updateManifest : aData.app.manifest;
+    let manifest = new ManifestHelper(jsonManifest, aData.app.origin);
 
     let host;
     try {
@@ -134,26 +228,31 @@ this.webappsUI = {
     let message = bundle.getFormattedString("webapps.requestInstall",
                                             [manifest.name, host], 2);
 
-    aWindow.PopupNotifications.show(aBrowser, "webapps-install", message,
-                                    "webapps-notification-icon", mainAction);
+    notification = chromeWin.PopupNotifications.show(browser,
+                                                     "webapps-install",
+                                                     message,
+                                                     "webapps-notification-icon",
+                                                     mainAction);
 
   }
 }
 
-function installationSuccessNotification(app, aWindow) {
-  let bundle = aWindow.gNavigatorBundle;
+function installationSuccessNotification(aData, app, aBundle) {
+  let launcher = {
+    observe: function(aSubject, aTopic) {
+      if (aTopic == "alertclickcallback") {
+        WebappOSUtils.launch(aData.app);
+      }
+    }
+  };
 
-  if (("@mozilla.org/alerts-service;1" in Cc)) {
-    let notifier;
-    try {
-      notifier = Cc["@mozilla.org/alerts-service;1"].
-                 getService(Ci.nsIAlertsService);
+  try {
+    let notifier = Cc["@mozilla.org/alerts-service;1"].
+                   getService(Ci.nsIAlertsService);
 
-      notifier.showAlertNotification(app.iconURI.spec,
-                                    bundle.getString("webapps.install.success"),
-                                    app.appNameAsFilename,
-                                    false, null, null);
-
-    } catch (ex) {}
-  }
+    notifier.showAlertNotification(app.iconURI.spec,
+                                   aBundle.getString("webapps.install.success"),
+                                   app.appNameAsFilename,
+                                   true, null, launcher);
+  } catch (ex) {}
 }

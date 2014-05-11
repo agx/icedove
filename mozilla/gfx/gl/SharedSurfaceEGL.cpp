@@ -6,9 +6,12 @@
 #include "SharedSurfaceEGL.h"
 
 #include "GLContext.h"
+#include "GLBlitHelper.h"
+#include "ScopedGLHelpers.h"
 #include "SharedSurfaceGL.h"
 #include "SurfaceFactory.h"
 #include "GLLibraryEGL.h"
+#include "TextureGarbageBin.h"
 
 using namespace mozilla::gfx;
 
@@ -29,7 +32,7 @@ SharedSurface_EGLImage::Create(GLContext* prodGL,
         return nullptr;
 
     MOZ_ALWAYS_TRUE(prodGL->MakeCurrent());
-    GLuint prodTex = prodGL->CreateTextureForOffscreen(formats, size);
+    GLuint prodTex = CreateTextureForOffscreen(prodGL, formats, size);
     if (!prodTex)
         return nullptr;
 
@@ -46,6 +49,31 @@ SharedSurface_EGLImage::HasExtensions(GLLibraryEGL* egl, GLContext* gl)
            egl->IsExtensionSupported(GLLibraryEGL::KHR_gl_texture_2D_image) &&
            gl->IsExtensionSupported(GLContext::OES_EGL_image);
 }
+
+SharedSurface_EGLImage::SharedSurface_EGLImage(GLContext* gl,
+                                               GLLibraryEGL* egl,
+                                               const gfxIntSize& size,
+                                               bool hasAlpha,
+                                               const GLFormats& formats,
+                                               GLuint prodTex)
+    : SharedSurface_GL(SharedSurfaceType::EGLImageShare,
+                        AttachmentType::GLTexture,
+                        gl,
+                        size,
+                        hasAlpha)
+    , mMutex("SharedSurface_EGLImage mutex")
+    , mEGL(egl)
+    , mFormats(formats)
+    , mProdTex(prodTex)
+    , mProdTexForPipe(0)
+    , mImage(0)
+    , mCurConsGL(nullptr)
+    , mConsTex(0)
+    , mSync(0)
+    , mPipeFailed(false)
+    , mPipeComplete(false)
+    , mPipeActive(false)
+{}
 
 SharedSurface_EGLImage::~SharedSurface_EGLImage()
 {
@@ -86,7 +114,7 @@ SharedSurface_EGLImage::LockProdImpl()
     if (mPipeActive)
         return;
 
-    mGL->BlitTextureToTexture(mProdTex, mProdTexForPipe, Size(), Size());
+    mGL->BlitHelper()->BlitTextureToTexture(mProdTex, mProdTexForPipe, Size(), Size());
     mGL->fDeleteTextures(1, &mProdTex);
     mProdTex = mProdTexForPipe;
     mProdTexForPipe = 0;
@@ -102,7 +130,7 @@ CreateTexturePipe(GLLibraryEGL* const egl, GLContext* const gl,
     *out_tex = 0;
     *out_image = 0;
 
-    GLuint tex = gl->CreateTextureForOffscreen(formats, size);
+    GLuint tex = CreateTextureForOffscreen(gl, formats, size);
     if (!tex)
         return false;
 
@@ -142,9 +170,9 @@ SharedSurface_EGLImage::Fence()
         }
 
         if (!mPixels) {
-            gfxASurface::gfxImageFormat format =
-                  HasAlpha() ? gfxASurface::ImageFormatARGB32
-                             : gfxASurface::ImageFormatRGB24;
+            gfxImageFormat format =
+                  HasAlpha() ? gfxImageFormatARGB32
+                             : gfxImageFormatRGB24;
             mPixels = new gfxImageSurface(Size(), format);
         }
 

@@ -433,7 +433,6 @@ var messageHeaderSink = {
       gBuiltExpandedView = false;
       gBuildAttachmentsForCurrentMsg = false;
       ClearAttachmentList();
-      ClearEditMessageBox();
       gMessageNotificationBar.clearMsgNotifications();
 
       for (let index in gMessageListeners)
@@ -464,7 +463,7 @@ var messageHeaderSink = {
         UpdateExpandedMessageHeaders();
       }
 
-      ShowEditMessageBox();
+      gMessageNotificationBar.setDraftEditMessage();
       UpdateJunkButton();
 
       for (let index in gMessageListeners)
@@ -711,9 +710,10 @@ var messageHeaderSink = {
           }
 
           img.addEventListener("load", function(event) {
-            if (this.clientWidth > this.parentNode.clientWidth &&
-                this.hasAttribute("shrinktofit"))
-              this.setAttribute("isshrunk", true);
+            if (this.clientWidth > this.parentNode.clientWidth) {
+              img.setAttribute("overflowing", "true");
+              img.setAttribute("shrinktofit", "true");
+            }
           });
         }
       }
@@ -1154,7 +1154,7 @@ function HideMessageHeaderPane()
   document.getElementById("attachmentView").collapsed = true;
   document.getElementById("attachment-splitter").collapsed = true;
 
-  ClearEditMessageBox();
+  gMessageNotificationBar.clearMsgNotifications();
 }
 
 /**
@@ -2713,25 +2713,6 @@ var attachmentNameDNDObserver = {
   }
 };
 
-function ShowEditMessageBox()
-{
-  // It would be nice if we passed in the msgHdr from the back end.
-  var msgHdr = gFolderDisplay.selectedMessage;
-  if (!msgHdr || !msgHdr.folder)
-    return;
-
-  const nsMsgFolderFlags = Components.interfaces.nsMsgFolderFlags;
-  if (msgHdr.folder.isSpecialFolder(nsMsgFolderFlags.Drafts, true))
-    document.getElementById("editMessageBox").collapsed = false;
-}
-
-function ClearEditMessageBox()
-{
-  var editBox = document.getElementById("editMessageBox");
-  if (editBox)
-    editBox.collapsed = true;
-}
-
 /**
  * CopyWebsiteAddress takes the website address title button, extracts
  * the website address we stored in there and copies it to the clipboard
@@ -2774,7 +2755,7 @@ nsDummyMsgHeader.prototype =
   markHasAttachments : function(hasAttachments) {},
   messageSize : 0,
   recipients : null,
-  from : null,
+  author: null,
   subject : "",
   get mime2DecodedSubject() { return this.subject; },
   ccList : null,

@@ -1,35 +1,35 @@
-/* -*- Mode: C; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
+#include "mozilla/BasicEvents.h"
 
 #include "nsDOMDataTransfer.h"
 
-#include "prlog.h"
-#include "nsString.h"
-#include "nsIServiceManager.h"
-#include "nsIInterfaceRequestorUtils.h"
+#include "nsIDOMDocument.h"
 #include "nsIVariant.h"
 #include "nsISupportsPrimitives.h"
 #include "nsDOMClassInfoID.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsDOMLists.h"
-#include "nsGUIEvent.h"
 #include "nsError.h"
 #include "nsIDragService.h"
 #include "nsIClipboard.h"
-#include "nsIScriptableRegion.h"
 #include "nsContentUtils.h"
 #include "nsIContent.h"
 #include "nsCRT.h"
 #include "nsIScriptObjectPrincipal.h"
-#include "nsIWebNavigation.h"
 #include "nsIScriptContext.h"
+#include "nsIDocument.h"
+#include "nsIScriptGlobalObject.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMDataTransfer)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDOMDataTransfer)
   if (tmp->mFiles) {
@@ -61,7 +61,7 @@ const char nsDOMDataTransfer::sEffects[8][9] = {
   "none", "copy", "move", "copyMove", "link", "copyLink", "linkMove", "all"
 };
 
-nsDOMDataTransfer::nsDOMDataTransfer(uint32_t aEventType, bool aIsExternal)
+nsDOMDataTransfer::nsDOMDataTransfer(uint32_t aEventType, bool aIsExternal, int32_t aClipboardType)
   : mEventType(aEventType),
     mDropEffect(nsIDragService::DRAGDROP_ACTION_NONE),
     mEffectAllowed(nsIDragService::DRAGDROP_ACTION_UNINITIALIZED),
@@ -70,6 +70,7 @@ nsDOMDataTransfer::nsDOMDataTransfer(uint32_t aEventType, bool aIsExternal)
     mIsExternal(aIsExternal),
     mUserCancelled(false),
     mIsCrossDomainSubFrameDrop(false),
+    mClipboardType(aClipboardType),
     mDragImageX(0),
     mDragImageY(0)
 {
@@ -96,6 +97,7 @@ nsDOMDataTransfer::nsDOMDataTransfer(uint32_t aEventType,
                                      bool aIsExternal,
                                      bool aUserCancelled,
                                      bool aIsCrossDomainSubFrameDrop,
+                                     int32_t aClipboardType,
                                      nsTArray<nsTArray<TransferItem> >& aItems,
                                      nsIDOMElement* aDragImage,
                                      uint32_t aDragImageX,
@@ -108,6 +110,7 @@ nsDOMDataTransfer::nsDOMDataTransfer(uint32_t aEventType,
     mIsExternal(aIsExternal),
     mUserCancelled(aUserCancelled),
     mIsCrossDomainSubFrameDrop(aIsCrossDomainSubFrameDrop),
+    mClipboardType(aClipboardType),
     mItems(aItems),
     mDragImage(aDragImage),
     mDragImageX(aDragImageX),
@@ -165,10 +168,14 @@ nsDOMDataTransfer::SetEffectAllowed(const nsAString& aEffectAllowed)
     return NS_OK;
   }
 
-  PR_STATIC_ASSERT(nsIDragService::DRAGDROP_ACTION_NONE == 0);
-  PR_STATIC_ASSERT(nsIDragService::DRAGDROP_ACTION_COPY == 1);
-  PR_STATIC_ASSERT(nsIDragService::DRAGDROP_ACTION_MOVE == 2);
-  PR_STATIC_ASSERT(nsIDragService::DRAGDROP_ACTION_LINK == 4);
+  static_assert(nsIDragService::DRAGDROP_ACTION_NONE == 0,
+                "DRAGDROP_ACTION_NONE constant is wrong");
+  static_assert(nsIDragService::DRAGDROP_ACTION_COPY == 1,
+                "DRAGDROP_ACTION_COPY constant is wrong");
+  static_assert(nsIDragService::DRAGDROP_ACTION_MOVE == 2,
+                "DRAGDROP_ACTION_MOVE constant is wrong");
+  static_assert(nsIDragService::DRAGDROP_ACTION_LINK == 4,
+                "DRAGDROP_ACTION_LINK constant is wrong");
 
   for (uint32_t e = 0; e < ArrayLength(sEffects); e++) {
     if (aEffectAllowed.EqualsASCII(sEffects[e])) {
@@ -227,7 +234,6 @@ nsDOMDataTransfer::GetFiles(nsIDOMFileList** aFileList)
 
   if (!mFiles) {
     mFiles = new nsDOMFileList(static_cast<nsIDOMDataTransfer*>(this));
-    NS_ENSURE_TRUE(mFiles, NS_ERROR_OUT_OF_MEMORY);
 
     uint32_t count = mItems.Length();
 
@@ -268,7 +274,6 @@ nsDOMDataTransfer::GetTypes(nsIDOMDOMStringList** aTypes)
   *aTypes = nullptr;
 
   nsRefPtr<nsDOMStringList> types = new nsDOMStringList();
-  NS_ENSURE_TRUE(types, NS_ERROR_OUT_OF_MEMORY);
 
   if (mItems.Length()) {
     const nsTArray<TransferItem>& item = mItems[0];
@@ -418,7 +423,6 @@ nsDOMDataTransfer::MozTypesAt(uint32_t aIndex, nsIDOMDOMStringList** aTypes)
   }
 
   nsRefPtr<nsDOMStringList> types = new nsDOMStringList();
-  NS_ENSURE_TRUE(types, NS_ERROR_OUT_OF_MEMORY);
 
   if (aIndex < mItems.Length()) {
     // note that you can retrieve the types regardless of their principal
@@ -495,8 +499,10 @@ nsDOMDataTransfer::MozGetDataAt(const nsAString& aFormat,
           nsresult rv = NS_OK;
           nsIScriptContext* c = pt->GetContextForEventHandlers(&rv);
           NS_ENSURE_TRUE(c && NS_SUCCEEDED(rv), NS_ERROR_DOM_SECURITY_ERR);
-          nsIScriptObjectPrincipal* sp = c->GetGlobalObject();
-          NS_ENSURE_TRUE(sp, NS_ERROR_DOM_SECURITY_ERR);
+          nsIGlobalObject* go = c->GetGlobalObject();
+          NS_ENSURE_TRUE(go, NS_ERROR_DOM_SECURITY_ERR);
+          nsCOMPtr<nsIScriptObjectPrincipal> sp = do_QueryInterface(go);
+          MOZ_ASSERT(sp, "This cannot fail on the main thread.");
           nsIPrincipal* dataPrincipal = sp->GetPrincipal();
           NS_ENSURE_TRUE(dataPrincipal, NS_ERROR_DOM_SECURITY_ERR);
           NS_ENSURE_TRUE(principal || (principal = GetCurrentPrincipal(&rv)),
@@ -651,8 +657,7 @@ nsDOMDataTransfer::Clone(uint32_t aEventType, bool aUserCancelled,
   nsDOMDataTransfer* newDataTransfer =
     new nsDOMDataTransfer(aEventType, mEffectAllowed, mCursorState,
                           mIsExternal, aUserCancelled, aIsCrossDomainSubFrameDrop,
-                          mItems, mDragImage, mDragImageX, mDragImageY);
-  NS_ENSURE_TRUE(newDataTransfer, NS_ERROR_OUT_OF_MEMORY);
+                          mClipboardType, mItems, mDragImage, mDragImageX, mDragImageY);
 
   *aNewDataTransfer = newDataTransfer;
   NS_ADDREF(*aNewDataTransfer);
@@ -977,7 +982,7 @@ nsDOMDataTransfer::CacheExternalClipboardFormats()
   // data will only be retrieved when needed.
 
   nsCOMPtr<nsIClipboard> clipboard = do_GetService("@mozilla.org/widget/clipboard;1");
-  if (!clipboard) {
+  if (!clipboard || mClipboardType < 0) {
     return;
   }
 
@@ -992,8 +997,7 @@ nsDOMDataTransfer::CacheExternalClipboardFormats()
   for (uint32_t f = 0; f < mozilla::ArrayLength(formats); ++f) {
     // check each format one at a time
     bool supported;
-    clipboard->HasDataMatchingFlavors(&(formats[f]), 1,
-                                      nsIClipboard::kGlobalClipboard, &supported);
+    clipboard->HasDataMatchingFlavors(&(formats[f]), 1, mClipboardType, &supported);
     // if the format is supported, add an item to the array with null as
     // the data. When retrieved, GetRealData will read the data.
     if (supported) {
@@ -1034,11 +1038,11 @@ nsDOMDataTransfer::FillInExternalData(TransferItem& aItem, uint32_t aIndex)
     MOZ_ASSERT(aIndex == 0, "index in clipboard must be 0");
 
     nsCOMPtr<nsIClipboard> clipboard = do_GetService("@mozilla.org/widget/clipboard;1");
-    if (!clipboard) {
+    if (!clipboard || mClipboardType < 0) {
       return;
     }
 
-    clipboard->GetData(trans, nsIClipboard::kGlobalClipboard);
+    clipboard->GetData(trans, mClipboardType);
   } else {
     nsCOMPtr<nsIDragSession> dragSession = nsContentUtils::GetDragSession();
     if (!dragSession) {

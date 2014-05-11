@@ -9,17 +9,13 @@
 #include "nsCOMPtr.h"
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
-#include "nsString.h"
 #include "nsError.h"
 #include "imgLoader.h"
 #include "imgICache.h"
 #include "imgIContainer.h"
 #include "imgIEncoder.h"
 #include "gfxContext.h"
-#include "nsStringStream.h"
 #include "nsComponentManagerUtils.h"
-#include "nsWeakReference.h"
-#include "nsIInterfaceRequestorUtils.h"
 #include "nsStreamUtils.h"
 #include "nsNetUtil.h"
 #include "nsContentUtils.h"
@@ -27,8 +23,11 @@
 #include "Image.h"
 #include "ScriptedNotificationObserver.h"
 #include "imgIScriptedNotificationObserver.h"
+#include "gfxPlatform.h"
 
+using namespace mozilla;
 using namespace mozilla::image;
+using namespace mozilla::gfx;
 
 /* ========== imgITools implementation ========== */
 
@@ -147,18 +146,34 @@ NS_IMETHODIMP imgTools::EncodeScaledImage(imgIContainer *aContainer,
 
   // Create a temporary image surface
   nsRefPtr<gfxImageSurface> dest = new gfxImageSurface(gfxIntSize(aScaledWidth, aScaledHeight),
-                                                       gfxASurface::ImageFormatARGB32);
-  gfxContext ctx(dest);
+                                                       gfxImageFormatARGB32);
+  if (gfxPlatform::GetPlatform()->SupportsAzureContent()) {
+    RefPtr<DrawTarget> dt =
+      gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(dest, IntSize(aScaledWidth, aScaledHeight));
+    RefPtr<SourceSurface> source = gfxPlatform::GetPlatform()->GetSourceSurfaceForSurface(dt, frame);
 
-  // Set scaling
-  gfxFloat sw = (double) aScaledWidth / frameWidth;
-  gfxFloat sh = (double) aScaledHeight / frameHeight;
-  ctx.Scale(sw, sh);
+    dt->DrawSurface(source,
+                    Rect(0, 0, aScaledWidth, aScaledHeight),
+                    Rect(0, 0, frameWidth, frameHeight),
+                    DrawSurfaceOptions(),
+                    DrawOptions(1.0f, OP_SOURCE));
+  } else {
+    gfxContext ctx(dest);
 
-  // Paint a scaled image
-  ctx.SetOperator(gfxContext::OPERATOR_SOURCE);
-  ctx.SetSource(frame);
-  ctx.Paint();
+    // Set scaling
+    gfxFloat sw = (double) aScaledWidth / frameWidth;
+    gfxFloat sh = (double) aScaledHeight / frameHeight;
+    ctx.Scale(sw, sh);
+
+    // Paint a scaled image
+    ctx.SetOperator(gfxContext::OPERATOR_SOURCE);
+
+    nsRefPtr<gfxPattern> pat = new gfxPattern(frame);
+    pat->SetExtend(gfxPattern::EXTEND_PAD);
+    ctx.SetPattern(pat);
+    ctx.Paint();
+  }
+
 
   return EncodeImageData(dest, aMimeType, aOutputOptions, aStream);
 }
@@ -205,7 +220,7 @@ NS_IMETHODIMP imgTools::EncodeCroppedImage(imgIContainer *aContainer,
 
   // Create a temporary image surface
   nsRefPtr<gfxImageSurface> dest = new gfxImageSurface(gfxIntSize(aWidth, aHeight),
-                                                       gfxASurface::ImageFormatARGB32);
+                                                       gfxImageFormatARGB32);
   gfxContext ctx(dest);
 
   // Set translate

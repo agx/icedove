@@ -12,7 +12,7 @@
 #include <sys/types.h>
 #include <sys/un.h>
 #include <netinet/in.h>
-#ifdef MOZ_B2G_BT
+#ifdef MOZ_B2G_BT_BLUEZ
 #include <bluetooth/bluetooth.h>
 #include <bluetooth/sco.h>
 #include <bluetooth/l2cap.h>
@@ -22,6 +22,7 @@
 #include "nsString.h"
 #include "nsAutoPtr.h"
 #include "mozilla/RefPtr.h"
+#include "nsThreadUtils.h"
 
 namespace mozilla {
 namespace ipc {
@@ -31,7 +32,7 @@ union sockaddr_any {
   sockaddr_un un;
   sockaddr_in in;
   sockaddr_in6 in6;
-#ifdef MOZ_B2G_BT
+#ifdef MOZ_B2G_BT_BLUEZ
   sockaddr_sco sco;
   sockaddr_rc rc;
   sockaddr_l2 l2;
@@ -42,25 +43,34 @@ union sockaddr_any {
 class UnixSocketRawData
 {
 public:
-  nsAutoArrayPtr<uint8_t> mData;
-
   // Number of octets in mData.
   size_t mSize;
   size_t mCurrentWriteOffset;
+  nsAutoArrayPtr<uint8_t> mData;
 
   /**
-   * Constructor for situations where size is known beforehand (for example,
-   * when being assigned strings)
-   *
+   * Constructor for situations where only size is known beforehand
+   * (for example, when being assigned strings)
    */
-  UnixSocketRawData(int aSize) :
+  UnixSocketRawData(size_t aSize) :
     mSize(aSize),
     mCurrentWriteOffset(0)
   {
-    mData = new uint8_t[aSize];
+    mData = new uint8_t[mSize];
   }
-private:
-  UnixSocketRawData() {}
+
+  /**
+   * Constructor for situations where size and data is known
+   * beforehand (for example, when being assigned strings)
+   */
+  UnixSocketRawData(const void* aData, size_t aSize)
+    : mSize(aSize),
+      mCurrentWriteOffset(0)
+  {
+    MOZ_ASSERT(aData || !mSize);
+    mData = new uint8_t[mSize];
+    memcpy(mData, aData, mSize);
+  }
 };
 
 class UnixSocketImpl;
@@ -92,13 +102,13 @@ public:
    */
   virtual int Create() = 0;
 
-  /** 
+  /**
    * Since most socket specifics are related to address formation into a
    * sockaddr struct, this function is defined by subclasses and fills in the
    * structure as needed for whatever connection it is trying to build
    *
    * @param aIsServer True is we are acting as a server socket
-   * @param aAddrSize Size of the struct 
+   * @param aAddrSize Size of the struct
    * @param aAddr Struct to fill
    * @param aAddress If aIsServer is false, Address to connect to. nullptr otherwise.
    *
@@ -109,8 +119,9 @@ public:
                           sockaddr_any& aAddr,
                           const char* aAddress) = 0;
 
-  /** 
-   * Does any socket type specific setup that may be needed
+  /**
+   * Does any socket type specific setup that may be needed, only for socket
+   * created by ConnectSocket()
    *
    * @param aFd File descriptor for opened socket
    *
@@ -118,7 +129,16 @@ public:
    */
   virtual bool SetUp(int aFd) = 0;
 
-  /** 
+  /**
+   * Perform socket setup for socket created by ListenSocket(), after listen().
+   *
+   * @param aFd File descriptor for opened socket
+   *
+   * @return true is successful, false otherwise
+   */
+  virtual bool SetUpListenSocket(int aFd) = 0;
+
+  /**
    * Get address of socket we're currently connected to. Return null string if
    * not connected.
    *
@@ -146,6 +166,7 @@ public:
 
   SocketConnectionStatus GetConnectionStatus() const
   {
+    MOZ_ASSERT(NS_IsMainThread());
     return mConnectionStatus;
   }
 
@@ -192,7 +213,7 @@ public:
                      const char* aAddress,
                      int aDelayMs = 0);
 
-  /** 
+  /**
    * Starts a task on the socket that will try to accept a new connection in a
    * non-blocking manner.
    *
@@ -208,33 +229,33 @@ public:
    */
   void CloseSocket();
 
-  /** 
+  /**
    * Callback for socket connect/accept success. Called after connect/accept has
    * finished. Will be run on main thread, before any reads take place.
    */
   virtual void OnConnectSuccess() = 0;
 
-  /** 
+  /**
    * Callback for socket connect/accept error. Will be run on main thread.
    */
   virtual void OnConnectError() = 0;
 
-  /** 
+  /**
    * Callback for socket disconnect. Will be run on main thread.
    */
   virtual void OnDisconnect() = 0;
 
-  /** 
+  /**
    * Called by implementation to notify consumer of success.
    */
   void NotifySuccess();
 
-  /** 
+  /**
    * Called by implementation to notify consumer of error.
    */
   void NotifyError();
 
-  /** 
+  /**
    * Called by implementation to notify consumer of disconnect.
    */
   void NotifyDisconnect();

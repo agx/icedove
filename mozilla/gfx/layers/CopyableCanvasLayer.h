@@ -6,18 +6,25 @@
 #ifndef GFX_COPYABLECANVASLAYER_H
 #define GFX_COPYABLECANVASLAYER_H
 
-#include "Layers.h"
-#include "mozilla/layers/CanvasClient.h"
-#include "mozilla/Preferences.h"
-
-#include "gfxPlatform.h"
-
-using namespace mozilla::gfx;
+#include <stdint.h>                     // for uint32_t
+#include "GLContextTypes.h"             // for GLContext
+#include "Layers.h"                     // for CanvasLayer, etc
+#include "gfxASurface.h"                // for gfxASurface
+#include "gfxContext.h"                 // for gfxContext, etc
+#include "gfxTypes.h"
+#include "gfxPlatform.h"                // for gfxImageFormat
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/Preferences.h"        // for Preferences
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/gfx/2D.h"             // for DrawTarget
+#include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
 
 namespace mozilla {
 namespace layers {
 
-class CanvasClient2D;
 class CanvasClientWebGL;
 
 /**
@@ -27,19 +34,12 @@ class CanvasClientWebGL;
 class CopyableCanvasLayer : public CanvasLayer
 {
 public:
-  CopyableCanvasLayer(LayerManager* aLayerManager, void *aImplData) :
-    CanvasLayer(aLayerManager, aImplData)
-  {
-    MOZ_COUNT_CTOR(CopyableCanvasLayer);
-    mForceReadback = Preferences::GetBool("webgl.force-layers-readback", false);
-  }
-  virtual ~CopyableCanvasLayer()
-  {
-    MOZ_COUNT_DTOR(CopyableCanvasLayer);
-  }
+  CopyableCanvasLayer(LayerManager* aLayerManager, void *aImplData);
+  virtual ~CopyableCanvasLayer();
 
   virtual void Initialize(const Data& aData);
-  
+
+  virtual bool IsDataValid(const Data& aData);
 
 protected:
   void PaintWithOpacity(gfxContext* aContext,
@@ -47,7 +47,8 @@ protected:
                         Layer* aMaskLayer,
                         gfxContext::GraphicsOperator aOperator = gfxContext::OPERATOR_OVER);
 
-  void UpdateSurface(gfxASurface* aDestSurface = nullptr, Layer* aMaskLayer = nullptr);
+  void UpdateSurface(gfxASurface* aDestSurface = nullptr,
+                     Layer* aMaskLayer = nullptr);
 
   nsRefPtr<gfxASurface> mSurface;
   nsRefPtr<mozilla::gl::GLContext> mGLContext;
@@ -63,26 +64,9 @@ protected:
   gfxIntSize mCachedSize;
   gfxImageFormat mCachedFormat;
 
-  gfxImageSurface* GetTempSurface(const gfxIntSize& aSize, const gfxImageFormat aFormat)
-  {
-    if (!mCachedTempSurface ||
-        aSize.width != mCachedSize.width ||
-        aSize.height != mCachedSize.height ||
-        aFormat != mCachedFormat)
-    {
-      mCachedTempSurface = new gfxImageSurface(aSize, aFormat);
-      mCachedSize = aSize;
-      mCachedFormat = aFormat;
-    }
+  gfxImageSurface* GetTempSurface(const gfxIntSize& aSize, const gfxImageFormat aFormat);
 
-    MOZ_ASSERT(mCachedTempSurface->Stride() == mCachedTempSurface->Width() * 4);
-    return mCachedTempSurface;
-  }
-
-  void DiscardTempSurface()
-  {
-    mCachedTempSurface = nullptr;
-  }
+  void DiscardTempSurface();
 };
 
 }

@@ -10,11 +10,13 @@
 #include "mozilla/dom/Attr.h"
 #include "mozilla/dom/AttrBinding.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/MutationEvent.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsINameSpaceManager.h"
 #include "nsError.h"
 #include "nsUnicharUtils.h"
 #include "nsDOMString.h"
+#include "nsIContentInlines.h"
 #include "nsIDocument.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMUserDataHandler.h"
@@ -25,7 +27,6 @@
 #include "nsEventListenerManager.h"
 #include "nsTextNode.h"
 #include "mozAutoDocUpdate.h"
-#include "nsMutationEvent.h"
 #include "nsAsyncDOMEvent.h"
 #include "nsWrapperCacheInlines.h"
 
@@ -56,6 +57,8 @@ Attr::Attr(nsDOMAttributeMap *aAttrMap,
 
   SetIsDOMBinding();
 }
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(Attr)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Attr)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
@@ -110,8 +113,8 @@ NS_INTERFACE_TABLE_HEAD(Attr)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Attr)
-NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_DESTROY(Attr,
-                                              nsNodeUtils::LastRelease(this))
+NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(Attr,
+                                                   nsNodeUtils::LastRelease(this))
 
 void
 Attr::SetMap(nsDOMAttributeMap *aMap)

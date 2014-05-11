@@ -13,7 +13,7 @@ function test() {
     // in a variables view instance. Debug builds are slow.
     requestLongerTimeout(4);
 
-    let { document, L10N, SourceEditor, NetMonitorView } = aMonitor.panelWin;
+    let { document, L10N, NetMonitorView } = aMonitor.panelWin;
     let { RequestsMenu } = NetMonitorView;
 
     RequestsMenu.lazyUpdate = false;
@@ -29,7 +29,7 @@ function test() {
           time: true
         });
 
-      aMonitor.panelWin.once("NetMonitor:ResponseBodyAvailable", () => {
+      aMonitor.panelWin.once(aMonitor.panelWin.EVENTS.RESPONSE_BODY_DISPLAYED, () => {
         testResponseTab();
         teardown(aMonitor).then(finish);
       });
@@ -77,7 +77,7 @@ function test() {
         is(jsonScope.querySelectorAll(names)[0].getAttribute("value"),
           "0", "The first json property name was incorrect.");
         is(jsonScope.querySelectorAll(values)[0].getAttribute("value"),
-          "[object Object]", "The first json property value was incorrect.");
+          "Object", "The first json property value was incorrect.");
 
         is(jsonScope.querySelectorAll(names)[1].getAttribute("value"),
           "greeting", "The second json property name was incorrect.");
@@ -87,7 +87,7 @@ function test() {
         is(Array.slice(jsonScope.querySelectorAll(names), -1).shift().getAttribute("value"),
           "__proto__", "The last json property name was incorrect.");
         is(Array.slice(jsonScope.querySelectorAll(values), -1).shift().getAttribute("value"),
-          "[object Object]", "The last json property value was incorrect.");
+          "Object", "The last json property value was incorrect.");
       }
     });
 

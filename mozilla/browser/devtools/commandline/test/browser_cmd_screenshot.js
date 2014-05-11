@@ -166,19 +166,17 @@ function addTabWithToolbarRunTests(win) {
 
 function addWindow(windowOptions, callback) {
   waitForExplicitFinish();
-  let deferred = Promise.defer();
+  let deferred = promise.defer();
 
   let win = OpenBrowserWindow(windowOptions);
 
-  let onLoad = function() {
-    win.removeEventListener("load", onLoad, false);
-
+  whenDelayedStartupFinished(win, function() {
     // Would like to get rid of this executeSoon, but without it the url
     // (TEST_URI) provided in addTabWithToolbarRunTests hasn't loaded
     executeSoon(function() {
       try {
         let reply = callback(win);
-        Promise.resolve(reply).then(function() {
+        promise.resolve(reply).then(function() {
           win.close();
           deferred.resolve();
         });
@@ -187,9 +185,7 @@ function addWindow(windowOptions, callback) {
         deferred.reject(ex);
       }
     });
-  };
-
-  win.addEventListener("load", onLoad, false);
+  });
 
   return deferred.promise;
 }

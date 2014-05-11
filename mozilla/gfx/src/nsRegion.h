@@ -6,9 +6,17 @@
 #ifndef nsRegion_h__
 #define nsRegion_h__
 
-#include "nsRect.h"
-#include "nsPoint.h"
-#include "nsString.h"
+#include <stddef.h>                     // for size_t
+#include <stdint.h>                     // for uint32_t, uint64_t
+#include <sys/types.h>                  // for int32_t
+#include "gfxCore.h"                    // for NS_GFX
+#include "nsCoord.h"                    // for nscoord
+#include "nsError.h"                    // for nsresult
+#include "nsPoint.h"                    // for nsIntPoint, nsPoint
+#include "nsRect.h"                     // for nsIntRect, nsRect
+#include "nsMargin.h"                   // for nsIntMargin
+#include "nsString.h"               // for nsCString
+#include "xpcom-config.h"               // for CPP_THROW_NEW
 
 class nsIntRegion;
 
@@ -142,11 +150,39 @@ public:
     mBoundRect.SetRect (0, 0, 0, 0);
   }
 
+  nsRegion MovedBy(int32_t aXOffset, int32_t aYOffset) const
+  {
+    return MovedBy(nsPoint(aXOffset, aYOffset));
+  }
+  nsRegion MovedBy(const nsPoint& aPt) const
+  {
+    nsRegion copy(*this);
+    copy.MoveBy(aPt);
+    return copy;
+  }
+
+  nsRegion Intersect(const nsRegion& aOther) const
+  {
+    nsRegion intersection;
+    intersection.And(*this, aOther);
+    return intersection;
+  }
+
+  void Inflate(const nsMargin& aMargin);
+
+  nsRegion Inflated(const nsMargin& aMargin) const
+  {
+    nsRegion copy(*this);
+    copy.Inflate(aMargin);
+    return copy;
+  }
+
   bool IsEmpty () const { return mRectCount == 0; }
   bool IsComplex () const { return mRectCount > 1; }
   bool IsEqual (const nsRegion& aRegion) const;
   uint32_t GetNumRects () const { return mRectCount; }
   const nsRect& GetBounds () const { return mBoundRect; }
+  uint64_t Area () const;
   // Converts this region from aFromAPP, an appunits per pixel ratio, to
   // aToAPP. This applies nsRect::ConvertAppUnitsRoundOut/In to each rect of
   // the region.
@@ -396,6 +432,35 @@ public:
   {
     mImpl.MoveBy (aPt.x, aPt.y);
   }
+  nsIntRegion MovedBy(int32_t aXOffset, int32_t aYOffset) const
+  {
+    return MovedBy(nsIntPoint(aXOffset, aYOffset));
+  }
+  nsIntRegion MovedBy(const nsIntPoint& aPt) const
+  {
+    nsIntRegion copy(*this);
+    copy.MoveBy(aPt);
+    return copy;
+  }
+
+  nsIntRegion Intersect(const nsIntRegion& aOther) const
+  {
+    nsIntRegion intersection;
+    intersection.And(*this, aOther);
+    return intersection;
+  }
+
+  void Inflate(const nsIntMargin& aMargin)
+  {
+    mImpl.Inflate(nsMargin(aMargin.top, aMargin.right, aMargin.bottom, aMargin.left));
+  }
+  nsIntRegion Inflated(const nsIntMargin& aMargin) const
+  {
+    nsIntRegion copy(*this);
+    copy.Inflate(aMargin);
+    return copy;
+  }
+
   void SetEmpty ()
   {
     mImpl.SetEmpty  ();
@@ -409,6 +474,7 @@ public:
   }
   uint32_t GetNumRects () const { return mImpl.GetNumRects (); }
   nsIntRect GetBounds () const { return FromRect (mImpl.GetBounds ()); }
+  uint64_t Area () const { return mImpl.Area(); }
   nsRegion ToAppUnits (nscoord aAppUnitsPerPixel) const;
   nsIntRect GetLargestRectangle (const nsIntRect& aContainingRect = nsIntRect()) const
   {

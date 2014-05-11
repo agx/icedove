@@ -4,14 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
-#include "mozilla/Util.h"
 
 #include "nsProtocolProxyService.h"
 #include "nsProxyInfo.h"
 #include "nsIClassInfoImpl.h"
-#include "nsIServiceManager.h"
-#include "nsXPIDLString.h"
 #include "nsIIOService.h"
 #include "nsIObserverService.h"
 #include "nsIProtocolHandler.h"
@@ -21,17 +19,16 @@
 #include "nsPIDNSService.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
-#include "nsReadableUtils.h"
 #include "nsThreadUtils.h"
 #include "nsString.h"
 #include "nsNetUtil.h"
 #include "nsNetCID.h"
-#include "nsCRT.h"
 #include "prnetdb.h"
 #include "nsPACMan.h"
 #include "nsProxyRelease.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/CondVar.h"
+#include "nsISystemProxySettings.h"
 
 //----------------------------------------------------------------------------
 
@@ -39,16 +36,9 @@ using namespace mozilla;
 
 #include "prlog.h"
 #if defined(PR_LOGGING)
-static PRLogModuleInfo *
-GetProxyLog()
-{
-    static PRLogModuleInfo *sLog;
-    if (!sLog)
-        sLog = PR_NewLogModule("proxy");
-    return sLog;
-}
 #endif
-#define LOG(args) PR_LOG(GetProxyLog(), PR_LOG_DEBUG, args)
+#undef LOG
+#define LOG(args) PR_LOG(net::GetProxyLog(), PR_LOG_DEBUG, args)
 
 //----------------------------------------------------------------------------
 
@@ -76,7 +66,7 @@ class nsAsyncResolveRequest MOZ_FINAL : public nsIRunnable
                                       , public nsICancelable
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
 
     nsAsyncResolveRequest(nsProtocolProxyService *pps, nsIURI *uri,
                           uint32_t aResolveFlags,
@@ -273,7 +263,7 @@ private:
     nsCOMPtr<nsIProxyInfo>             mProxyInfo;
 };
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsAsyncResolveRequest, nsICancelable, nsIRunnable)
+NS_IMPL_ISUPPORTS2(nsAsyncResolveRequest, nsICancelable, nsIRunnable)
 
 //----------------------------------------------------------------------------
 
@@ -364,7 +354,7 @@ static const int32_t PROXYCONFIG_COUNT = 6;
 
 NS_IMPL_ADDREF(nsProtocolProxyService)
 NS_IMPL_RELEASE(nsProtocolProxyService)
-NS_IMPL_CLASSINFO(nsProtocolProxyService, NULL, nsIClassInfo::SINGLETON,
+NS_IMPL_CLASSINFO(nsProtocolProxyService, nullptr, nsIClassInfo::SINGLETON,
                   NS_PROTOCOLPROXYSERVICE_CID)
 NS_IMPL_QUERY_INTERFACE3_CI(nsProtocolProxyService,
                             nsIProtocolProxyService,
@@ -401,8 +391,6 @@ nsProtocolProxyService::~nsProtocolProxyService()
 nsresult
 nsProtocolProxyService::Init()
 {
-    mFailedProxies.Init();
-
     // failure to access prefs is non-fatal
     nsCOMPtr<nsIPrefBranch> prefBranch =
             do_GetService(NS_PREFSERVICE_CONTRACTID);
@@ -972,7 +960,7 @@ nsProtocolProxyService::ReloadPAC()
 // a false mainThreadResponse parameter.
 class nsAsyncBridgeRequest MOZ_FINAL  : public nsPACManCallback
 {
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
 
      nsAsyncBridgeRequest()
         : mMutex("nsDeprecatedCallback")
@@ -1012,7 +1000,7 @@ private:
     nsCString mPACURL;
     bool      mCompleted;
 };
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsAsyncBridgeRequest, nsPACManCallback)
+NS_IMPL_ISUPPORTS1(nsAsyncBridgeRequest, nsPACManCallback)
 
 // nsIProtocolProxyService2
 NS_IMETHODIMP
@@ -1087,15 +1075,16 @@ nsProtocolProxyService::DeprecatedBlockingResolve(nsIURI *aURI,
     return NS_OK;
 }
 
-// nsIProtocolProxyService
-NS_IMETHODIMP
-nsProtocolProxyService::AsyncResolve(nsIURI *uri, uint32_t flags,
-                                     nsIProtocolProxyCallback *callback,
-                                     nsICancelable **result)
+nsresult
+nsProtocolProxyService::AsyncResolveInternal(nsIURI *uri, uint32_t flags,
+                                             nsIProtocolProxyCallback *callback,
+                                             nsICancelable **result,
+                                             bool isSyncOK)
 {
     NS_ENSURE_ARG_POINTER(uri);
     NS_ENSURE_ARG_POINTER(callback);
 
+    *result = nullptr;
     nsRefPtr<nsAsyncResolveRequest> ctx =
         new nsAsyncResolveRequest(this, uri, flags, callback);
 
@@ -1119,17 +1108,40 @@ nsProtocolProxyService::AsyncResolve(nsIURI *uri, uint32_t flags,
         // we can do it locally
         ApplyFilters(uri, info, pi);
         ctx->SetResult(NS_OK, pi);
-        return ctx->DispatchCallback();
+        if (isSyncOK) {
+            ctx->Run();
+            return NS_OK;
+        }
+
+        rv = ctx->DispatchCallback();
+        if (NS_SUCCEEDED(rv))
+            ctx.forget(result);
+        return rv;
     }
 
     // else kick off a PAC thread query
 
     rv = mPACMan->AsyncGetProxyForURI(uri, ctx, true);
-    if (NS_SUCCEEDED(rv)) {
-        *result = ctx;
-        NS_ADDREF(*result);
-    }
+    if (NS_SUCCEEDED(rv))
+        ctx.forget(result);
     return rv;
+}
+
+// nsIProtocolProxyService
+NS_IMETHODIMP
+nsProtocolProxyService::AsyncResolve2(nsIURI *uri, uint32_t flags,
+                                      nsIProtocolProxyCallback *callback,
+                                      nsICancelable **result)
+{
+    return AsyncResolveInternal(uri, flags, callback, result, true);
+}
+
+NS_IMETHODIMP
+nsProtocolProxyService::AsyncResolve(nsIURI *uri, uint32_t flags,
+                                     nsIProtocolProxyCallback *callback,
+                                     nsICancelable **result)
+{
+    return AsyncResolveInternal(uri, flags, callback, result, false);
 }
 
 NS_IMETHODIMP

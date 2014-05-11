@@ -27,12 +27,13 @@ Cu.import("resource://gre/modules/devtools/gcli.jsm", {});
 
 // <INJECTED SOURCE:END>
 
+
+'use strict';
+
 var mockCommands = {};
 
 // We use an alias for exports here because this module is used in Firefox
 // mochitests where we don't have define/require
-
-'use strict';
 
 var util = require('util/util');
 var canon = require('gcli/canon');
@@ -147,13 +148,34 @@ var tss = {
 
 var tsu = {
   name: 'tsu',
-  params: [ { name: 'num', type: { name: 'number', max: 10, min: -5, step: 3 } } ],
+  params: [
+    {
+      name: 'num',
+      type: {
+        name: 'number',
+        max: 10,
+        min: -5,
+        step: 3
+      }
+    }
+  ],
   exec: createExec('tsu')
 };
 
 var tsf = {
   name: 'tsf',
-  params: [ { name: 'num', type: { name: 'number', allowFloat: true, max: 11.5, min: -6.5, step: 1.5 } } ],
+  params: [
+    {
+      name: 'num',
+      type: {
+        name: 'number',
+        allowFloat: true,
+        max: 11.5,
+        min: -6.5,
+        step: 1.5
+      }
+    }
+  ],
   exec: createExec('tsf')
 };
 
@@ -163,9 +185,14 @@ var tsn = {
 
 var tsnDif = {
   name: 'tsn dif',
-  description: 'tsn dif',
   params: [ { name: 'text', type: 'string', description: 'tsn dif text' } ],
   exec: createExec('tsnDif')
+};
+
+var tsnHidden = {
+  name: 'tsn hidden',
+  hidden: true,
+  exec: createExec('tsnHidden')
 };
 
 var tsnExt = {
@@ -219,18 +246,21 @@ var tshidden = {
         {
           name: 'visible',
           type: 'string',
+          short: 'v',
           defaultValue: null,
           description: 'visible'
         },
         {
           name: 'invisiblestring',
           type: 'string',
+          short: 'i',
           description: 'invisiblestring',
           defaultValue: null,
           hidden: true
         },
         {
           name: 'invisibleboolean',
+          short: 'b',
           type: 'boolean',
           description: 'invisibleboolean',
           hidden: true
@@ -354,21 +384,23 @@ var tslong = {
       description: 'msg Desc'
     },
     {
-      group: "Options Desc",
+      group: 'Options Desc',
       params: [
         {
           name: 'num',
+          short: 'n',
           type: 'number',
           description: 'num Desc',
           defaultValue: 2
         },
         {
           name: 'sel',
+          short: 's',
           type: {
             name: 'selection',
             lookup: [
-              { name: "space", value: " " },
-              { name: "tab", value: "\t" }
+              { name: 'space', value: ' ' },
+              { name: 'tab', value: '\t' }
             ]
           },
           description: 'sel Desc',
@@ -376,28 +408,32 @@ var tslong = {
         },
         {
           name: 'bool',
+          short: 'b',
           type: 'boolean',
           description: 'bool Desc'
         },
         {
           name: 'num2',
+          short: 'm',
           type: 'number',
           description: 'num2 Desc',
           defaultValue: -1
         },
         {
           name: 'bool2',
+          short: 'c',
           type: 'boolean',
           description: 'bool2 Desc'
         },
         {
           name: 'sel2',
+          short: 't',
           type: {
             name: 'selection',
             data: [ 'collapse', 'basic', 'with space', 'with two spaces' ]
           },
           description: 'sel2 Desc',
-          defaultValue: "collapse"
+          defaultValue: 'collapse'
         }
       ]
     }
@@ -443,8 +479,9 @@ var tsfail = {
     }
   ],
   exec: function(args, context) {
+    var deferred;
     if (args.method === 'reject') {
-      var deferred = context.defer();
+      deferred = context.defer();
       setTimeout(function() {
         deferred.reject('rejected promise');
       }, 10);
@@ -452,7 +489,7 @@ var tsfail = {
     }
 
     if (args.method === 'rejecttyped') {
-      var deferred = context.defer();
+      deferred = context.defer();
       setTimeout(function() {
         deferred.reject(context.typedData('number', 54));
       }, 10);
@@ -460,7 +497,7 @@ var tsfail = {
     }
 
     if (args.method === 'throwinpromise') {
-      var deferred = context.defer();
+      deferred = context.defer();
       setTimeout(function() {
         deferred.resolve('should be lost');
       }, 10);
@@ -481,6 +518,116 @@ var tsfail = {
     return 'no error';
   }
 };
+
+var tsfile = {
+  item: 'command',
+  name: 'tsfile',
+  description: 'test file params',
+};
+
+var tsfileOpen = {
+  item: 'command',
+  name: 'tsfile open',
+  description: 'a file param in open mode',
+  params: [
+    {
+      name: 'p1',
+      type: {
+        name: 'file',
+        filetype: 'file',
+        existing: 'yes'
+      }
+    }
+  ],
+  exec: createExec('tsfile open')
+};
+
+var tsfileSaveas = {
+  item: 'command',
+  name: 'tsfile saveas',
+  description: 'a file param in saveas mode',
+  params: [
+    {
+      name: 'p1',
+      type: {
+        name: 'file',
+        filetype: 'file',
+        existing: 'no'
+      }
+    }
+  ],
+  exec: createExec('tsfile saveas')
+};
+
+var tsfileSave = {
+  item: 'command',
+  name: 'tsfile save',
+  description: 'a file param in save mode',
+  params: [
+    {
+      name: 'p1',
+      type: {
+        name: 'file',
+        filetype: 'file',
+        existing: 'maybe'
+      }
+    }
+  ],
+  exec: createExec('tsfile save')
+};
+
+var tsfileCd = {
+  item: 'command',
+  name: 'tsfile cd',
+  description: 'a file param in cd mode',
+  params: [
+    {
+      name: 'p1',
+      type: {
+        name: 'file',
+        filetype: 'directory',
+        existing: 'yes'
+      }
+    }
+  ],
+  exec: createExec('tsfile cd')
+};
+
+var tsfileMkdir = {
+  item: 'command',
+  name: 'tsfile mkdir',
+  description: 'a file param in mkdir mode',
+  params: [
+    {
+      name: 'p1',
+      type: {
+        name: 'file',
+        filetype: 'directory',
+        existing: 'no'
+      }
+    }
+  ],
+  exec: createExec('tsfile mkdir')
+};
+
+var tsfileRm = {
+  item: 'command',
+  name: 'tsfile rm',
+  description: 'a file param in rm mode',
+  params: [
+    {
+      name: 'p1',
+      type: {
+        name: 'file',
+        filetype: 'any',
+        existing: 'yes'
+      }
+    }
+  ],
+  exec: createExec('tsfile rm')
+};
+
+
 
 mockCommands.commands = {};
 
@@ -517,6 +664,7 @@ mockCommands.setup = function(opts) {
   mockCommands.commands.tsf = canon.addCommand(tsf);
   mockCommands.commands.tsn = canon.addCommand(tsn);
   mockCommands.commands.tsnDif = canon.addCommand(tsnDif);
+  mockCommands.commands.tsnHidden = canon.addCommand(tsnHidden);
   mockCommands.commands.tsnExt = canon.addCommand(tsnExt);
   mockCommands.commands.tsnExte = canon.addCommand(tsnExte);
   mockCommands.commands.tsnExten = canon.addCommand(tsnExten);
@@ -533,6 +681,13 @@ mockCommands.setup = function(opts) {
   mockCommands.commands.tslong = canon.addCommand(tslong);
   mockCommands.commands.tsdate = canon.addCommand(tsdate);
   mockCommands.commands.tsfail = canon.addCommand(tsfail);
+  mockCommands.commands.tsfile = canon.addCommand(tsfile);
+  mockCommands.commands.tsfileOpen = canon.addCommand(tsfileOpen);
+  mockCommands.commands.tsfileSaveas = canon.addCommand(tsfileSaveas);
+  mockCommands.commands.tsfileSave = canon.addCommand(tsfileSave);
+  mockCommands.commands.tsfileCd = canon.addCommand(tsfileCd);
+  mockCommands.commands.tsfileMkdir = canon.addCommand(tsfileMkdir);
+  mockCommands.commands.tsfileRm = canon.addCommand(tsfileRm);
 };
 
 mockCommands.shutdown = function(opts) {
@@ -548,6 +703,7 @@ mockCommands.shutdown = function(opts) {
   canon.removeCommand(tsf);
   canon.removeCommand(tsn);
   canon.removeCommand(tsnDif);
+  canon.removeCommand(tsnHidden);
   canon.removeCommand(tsnExt);
   canon.removeCommand(tsnExte);
   canon.removeCommand(tsnExten);
@@ -564,6 +720,13 @@ mockCommands.shutdown = function(opts) {
   canon.removeCommand(tslong);
   canon.removeCommand(tsdate);
   canon.removeCommand(tsfail);
+  canon.removeCommand(tsfile);
+  canon.removeCommand(tsfileOpen);
+  canon.removeCommand(tsfileSaveas);
+  canon.removeCommand(tsfileSave);
+  canon.removeCommand(tsfileCd);
+  canon.removeCommand(tsfileMkdir);
+  canon.removeCommand(tsfileRm);
 
   types.removeType(mockCommands.optionType);
   types.removeType(mockCommands.optionValue);

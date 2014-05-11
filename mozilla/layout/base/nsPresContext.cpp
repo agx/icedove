@@ -12,65 +12,46 @@
 #include "nsCOMPtr.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
-#include "nsILinkHandler.h"
 #include "nsIDocShell.h"
 #include "nsIContentViewer.h"
 #include "nsPIDOMWindow.h"
 #include "nsStyleSet.h"
 #include "nsIContent.h"
 #include "nsIFrame.h"
-#include "nsIURL.h"
 #include "nsIDocument.h"
 #include "nsIPrintSettings.h"
 #include "nsILanguageAtomService.h"
-#include "nsStyleContext.h"
 #include "mozilla/LookAndFeel.h"
-#include "nsIComponentManager.h"
-#include "nsIURIContentListener.h"
-#include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIServiceManager.h"
-#include "nsIDOMElement.h"
-#include "nsContentPolicyUtils.h"
-#include "nsIDOMWindow.h"
-#include "nsXPIDLString.h"
 #include "nsIWeakReferenceUtils.h"
-#include "nsCSSRendering.h"
-#include "prprf.h"
 #include "nsAutoPtr.h"
 #include "nsEventStateManager.h"
 #include "nsThreadUtils.h"
 #include "nsFrameManager.h"
 #include "nsLayoutUtils.h"
 #include "nsViewManager.h"
-#include "nsCSSFrameConstructor.h"
+#include "RestyleManager.h"
 #include "nsCSSRuleProcessor.h"
-#include "nsStyleChangeList.h"
 #include "nsRuleNode.h"
 #include "nsEventDispatcher.h"
-#include "gfxUserFontSet.h"
 #include "gfxPlatform.h"
 #include "nsCSSRules.h"
 #include "nsFontFaceLoader.h"
 #include "nsEventListenerManager.h"
-#include "nsStyleStructInlines.h"
-#include "nsIAppShell.h"
 #include "prenv.h"
 #include "nsObjectFrame.h"
 #include "nsTransitionManager.h"
 #include "nsAnimationManager.h"
+#include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
 #include "nsIMessageManager.h"
-#include "FrameLayerBuilder.h"
 #include "nsDOMMediaQueryList.h"
 #include "nsSMILAnimationController.h"
 #include "mozilla/css/ImageLoader.h"
-#include "mozilla/dom/PBrowserChild.h"
 #include "mozilla/dom/TabChild.h"
-
-#ifdef IBMBIDI
-#include "nsBidiPresUtils.h"
-#endif // IBMBIDI
+#include "nsRefreshDriver.h"
+#include "Layers.h"
+#include "nsIDOMEvent.h"
 
 #include "nsContentUtils.h"
 #include "nsCxPusher.h"
@@ -81,16 +62,25 @@
 #include "imgIContainer.h"
 #include "nsIImageLoadingContent.h"
 
-//needed for resetting of image service color
-#include "nsLayoutCID.h"
-
 #include "nsCSSParser.h"
+#include "nsBidiUtils.h"
+#include "nsServiceManagerUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::layers;
 
 uint8_t gNotifySubDocInvalidationData;
+
+/**
+ * Layer UserData for ContainerLayers that want to be notified
+ * of local invalidations of them and their descendant layers.
+ * Pass a callback to ComputeDifferences to have these called.
+ */
+class ContainerLayerPresContext : public LayerUserData {
+public:
+  nsPresContext* mPresContext;
+};
 
 namespace {
 
@@ -153,7 +143,8 @@ nsPresContext::IsDOMPaintEventPending()
 int
 nsPresContext::PrefChangedCallback(const char* aPrefName, void* instance_data)
 {
-  nsPresContext*  presContext = (nsPresContext*)instance_data;
+  nsRefPtr<nsPresContext>  presContext =
+    static_cast<nsPresContext*>(instance_data);
 
   NS_ASSERTION(nullptr != presContext, "bad instance data");
   if (nullptr != presContext) {
@@ -186,8 +177,6 @@ IsVisualCharset(const nsCString& aCharset)
 }
 #endif // IBMBIDI
 
-#include "nsContentCID.h"
-
   // NOTE! nsPresContext::operator new() zeroes out all members, so don't
   // bother initializing members to 0.
 
@@ -197,7 +186,8 @@ nsPresContext::nsPresContext(nsIDocument* aDocument, nsPresContextType aType)
     mPageSize(-1, -1), mPPScale(1.0f),
     mViewportStyleOverflow(NS_STYLE_OVERFLOW_AUTO, NS_STYLE_OVERFLOW_AUTO),
     mImageAnimationModePref(imgIContainer::kNormalAnimMode),
-    mAllInvalidated(false)
+    mAllInvalidated(false),
+    mPaintFlashing(false), mPaintFlashingInitialized(false)
 {
   // NOTE! nsPresContext::operator new() zeroes out all members, so don't
   // bother initializing members to 0.
@@ -232,6 +222,7 @@ nsPresContext::nsPresContext(nsIDocument* aDocument, nsPresContextType aType)
     mMedium = nsGkAtoms::print;
     mPaginated = true;
   }
+  mMediaEmulated = mMedium;
 
   if (!IsDynamic()) {
     mImageAnimationMode = imgIContainer::kDontAnimMode;
@@ -243,6 +234,12 @@ nsPresContext::nsPresContext(nsIDocument* aDocument, nsPresContextType aType)
   NS_ASSERTION(mDocument, "Null document");
   mUserFontSet = nullptr;
   mUserFontSetDirty = true;
+
+  // if text perf logging enabled, init stats struct
+  PRLogModuleInfo *log = gfxPlatform::GetLog(eGfxLog_textperf);
+  if (log && PR_LOG_TEST(log, PR_LOG_WARNING)) {
+    mTextPerf = new gfxTextPerfMetrics();
+  }
 
   PR_INIT_CLIST(&mDOMMediaQueryLists);
 }
@@ -312,6 +309,12 @@ nsPresContext::~nsPresContext()
   Preferences::UnregisterCallback(nsPresContext::PrefChangedCallback,
                                   "layout.css.devPixelsPerPx",
                                   this);
+  Preferences::UnregisterCallback(nsPresContext::PrefChangedCallback,
+                                  "nglayout.debug.paint_flashing",
+                                  this);
+  Preferences::UnregisterCallback(nsPresContext::PrefChangedCallback,
+                                  "nglayout.debug.paint_flashing_chrome",
+                                  this);
 }
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPresContext)
@@ -320,7 +323,17 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPresContext)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsPresContext)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsPresContext)
+NS_IMPL_CYCLE_COLLECTING_RELEASE_WITH_LAST_RELEASE(nsPresContext, LastRelease())
+
+void
+nsPresContext::LastRelease()
+{
+  if (IsRoot()) {
+    static_cast<nsRootPresContext*>(this)->CancelDidPaintTimer();
+  }
+}
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsPresContext)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsPresContext)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocument);
@@ -520,8 +533,8 @@ nsPresContext::GetFontPrefsForLang(nsIAtom *aLanguage) const
     &prefs->mDefaultCursiveFont,
     &prefs->mDefaultFantasyFont
   };
-  MOZ_STATIC_ASSERT(NS_ARRAY_LENGTH(fontTypes) == eDefaultFont_COUNT,
-                    "FontTypes array count is not correct");
+  static_assert(NS_ARRAY_LENGTH(fontTypes) == eDefaultFont_COUNT,
+                "FontTypes array count is not correct");
 
   // Get attributes specific to each generic font. We do not get the user's
   // generic-font-name-to-specific-family-name preferences because its the
@@ -736,10 +749,6 @@ nsPresContext::GetUserPreferences()
   mUseDocumentFonts =
     Preferences::GetInt("browser.display.use_document_fonts") != 0;
 
-  // * replace backslashes with Yen signs? (bug 245770)
-  mEnableJapaneseTransform =
-    Preferences::GetBool("layout.enable_japanese_specific_transform");
-
   mPrefScrollbarSide = Preferences::GetInt("layout.scrollbar.side");
 
   ResetCachedFontPrefs();
@@ -804,7 +813,9 @@ nsPresContext::AppUnitsPerDevPixelChanged()
 {
   InvalidateThebesLayers();
 
-  mDeviceContext->FlushFontCache();
+  if (mDeviceContext) {
+    mDeviceContext->FlushFontCache();
+  }
 
   if (HasCachedStyleData()) {
     // All cached style data must be recomputed.
@@ -822,10 +833,14 @@ nsPresContext::PreferenceChanged(const char* aPrefName)
       prefName.EqualsLiteral("layout.css.devPixelsPerPx")) {
     int32_t oldAppUnitsPerDevPixel = AppUnitsPerDevPixel();
     if (mDeviceContext->CheckDPIChange() && mShell) {
+      nsCOMPtr<nsIPresShell> shell = mShell;
       // Re-fetch the view manager's window dimensions in case there's a deferred
       // resize which hasn't affected our mVisibleArea yet
       nscoord oldWidthAppUnits, oldHeightAppUnits;
-      nsViewManager* vm = mShell->GetViewManager();
+      nsRefPtr<nsViewManager> vm = shell->GetViewManager();
+      if (!vm) {
+        return;
+      }
       vm->GetWindowDimensions(&oldWidthAppUnits, &oldHeightAppUnits);
       float oldWidthDevPixels = oldWidthAppUnits/oldAppUnitsPerDevPixel;
       float oldHeightDevPixels = oldHeightAppUnits/oldAppUnitsPerDevPixel;
@@ -867,6 +882,11 @@ nsPresContext::PreferenceChanged(const char* aPrefName)
     if (!mPrefChangedTimer)
       return;
     mPrefChangedTimer->InitWithFuncCallback(nsPresContext::PrefChangedUpdateTimerCallback, (void*)this, 0, nsITimer::TYPE_ONE_SHOT);
+  }
+  if (prefName.EqualsLiteral("nglayout.debug.paint_flashing") ||
+      prefName.EqualsLiteral("nglayout.debug.paint_flashing_chrome")) {
+    mPaintFlashingInitialized = false;
+    return;
   }
 }
 
@@ -921,6 +941,9 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
 
   mAnimationManager = new nsAnimationManager(this);
 
+  // FIXME: Why is mozilla:: needed?
+  mRestyleManager = new mozilla::RestyleManager(this);
+
   if (mDocument->GetDisplayDocument()) {
     NS_ASSERTION(mDocument->GetDisplayDocument()->GetShell() &&
                  mDocument->GetDisplayDocument()->GetShell()->GetPresContext(),
@@ -941,9 +964,7 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
                    "How did we get a presshell?");
 
       // We don't have our container set yet at this point
-      nsCOMPtr<nsISupports> ourContainer = mDocument->GetContainer();
-
-      nsCOMPtr<nsIDocShellTreeItem> ourItem = do_QueryInterface(ourContainer);
+      nsCOMPtr<nsIDocShellTreeItem> ourItem = mDocument->GetDocShell();
       if (ourItem) {
         nsCOMPtr<nsIDocShellTreeItem> parentItem;
         ourItem->GetSameTypeParent(getter_AddRefs(parentItem));
@@ -967,7 +988,8 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
 
   // Initialise refresh tick counters for OMTA
   mLastStyleUpdateForAllAnimations =
-    mLastUpdateThrottledStyle = mRefreshDriver->MostRecentRefresh();
+    mLastUpdateThrottledAnimationStyle =
+    mLastUpdateThrottledTransitionStyle = mRefreshDriver->MostRecentRefresh();
 
   mLangService = do_GetService(NS_LANGUAGEATOMSERVICE_CONTRACTID);
 
@@ -1009,6 +1031,12 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
                                 this);
   Preferences::RegisterCallback(nsPresContext::PrefChangedCallback,
                                 "layout.css.devPixelsPerPx",
+                                this);
+  Preferences::RegisterCallback(nsPresContext::PrefChangedCallback,
+                                "nglayout.debug.paint_flashing",
+                                this);
+  Preferences::RegisterCallback(nsPresContext::PrefChangedCallback,
+                                "nglayout.debug.paint_flashing_chrome",
                                 this);
 
   nsresult rv = mEventManager->Init();
@@ -1088,6 +1116,10 @@ nsPresContext::SetShell(nsIPresShell* aShell)
     if (mAnimationManager) {
       mAnimationManager->Disconnect();
       mAnimationManager = nullptr;
+    }
+    if (mRestyleManager) {
+      mRestyleManager->Disconnect();
+      mRestyleManager = nullptr;
     }
 
     if (IsRoot()) {
@@ -1471,6 +1503,44 @@ nsPresContext::GetContainerExternal() const
   return GetContainerInternal();
 }
 
+bool
+nsPresContext::ThrottledTransitionStyleIsUpToDate() const
+{
+  return
+    mLastUpdateThrottledTransitionStyle == mRefreshDriver->MostRecentRefresh();
+}
+
+void
+nsPresContext::TickLastUpdateThrottledTransitionStyle()
+{
+  mLastUpdateThrottledTransitionStyle = mRefreshDriver->MostRecentRefresh();
+}
+
+bool
+nsPresContext::ThrottledAnimationStyleIsUpToDate() const
+{
+  return
+    mLastUpdateThrottledAnimationStyle == mRefreshDriver->MostRecentRefresh();
+}
+
+void
+nsPresContext::TickLastUpdateThrottledAnimationStyle()
+{
+  mLastUpdateThrottledAnimationStyle = mRefreshDriver->MostRecentRefresh();
+}
+
+bool
+nsPresContext::StyleUpdateForAllAnimationsIsUpToDate()
+{
+  return mLastStyleUpdateForAllAnimations == mRefreshDriver->MostRecentRefresh();
+}
+
+void
+nsPresContext::TickLastStyleUpdateForAllAnimations()
+{
+  mLastStyleUpdateForAllAnimations = mRefreshDriver->MostRecentRefresh();
+}
+
 #ifdef IBMBIDI
 bool
 nsPresContext::BidiEnabledExternal() const
@@ -1683,6 +1753,30 @@ nsPresContext::UIResolutionChangedInternal()
 }
 
 void
+nsPresContext::EmulateMedium(const nsAString& aMediaType)
+{
+  nsIAtom* previousMedium = Medium();
+  mIsEmulatingMedia = true;
+
+  nsAutoString mediaType;
+  nsContentUtils::ASCIIToLower(aMediaType, mediaType);
+
+  mMediaEmulated = do_GetAtom(mediaType);
+  if (mMediaEmulated != previousMedium && mShell) {
+    MediaFeatureValuesChanged(eRebuildStyleIfNeeded, nsChangeHint(0));
+  }
+}
+
+void nsPresContext::StopEmulatingMedium()
+{
+  nsIAtom* previousMedium = Medium();
+  mIsEmulatingMedia = false;
+  if (Medium() != previousMedium) {
+    MediaFeatureValuesChanged(eRebuildStyleIfNeeded, nsChangeHint(0));
+  }
+}
+
+void
 nsPresContext::RebuildAllStyleData(nsChangeHint aExtraHint)
 {
   if (!mShell) {
@@ -1694,7 +1788,7 @@ nsPresContext::RebuildAllStyleData(nsChangeHint aExtraHint)
   mUsesViewportUnits = false;
   RebuildUserFontSet();
 
-  mShell->FrameConstructor()->RebuildAllStyleData(aExtraHint);
+  RestyleManager()->RebuildAllStyleData(aExtraHint);
 }
 
 void
@@ -1704,7 +1798,7 @@ nsPresContext::PostRebuildAllStyleDataEvent(nsChangeHint aExtraHint)
     // We must have been torn down. Nothing to do here.
     return;
   }
-  mShell->FrameConstructor()->PostRebuildAllStyleDataEvent(aExtraHint);
+  RestyleManager()->PostRebuildAllStyleDataEvent(aExtraHint);
 }
 
 void
@@ -1806,9 +1900,8 @@ nsPresContext::HandleMediaFeatureValuesChangedEvent()
   }
 }
 
-void
-nsPresContext::MatchMedia(const nsAString& aMediaQueryList,
-                          nsIDOMMediaQueryList** aResult)
+already_AddRefed<nsIDOMMediaQueryList>
+nsPresContext::MatchMedia(const nsAString& aMediaQueryList)
 {
   nsRefPtr<nsDOMMediaQueryList> result =
     new nsDOMMediaQueryList(this, aMediaQueryList);
@@ -1816,7 +1909,7 @@ nsPresContext::MatchMedia(const nsAString& aMediaQueryList,
   // Insert the new item at the end of the linked list.
   PR_INSERT_BEFORE(result, &mDOMMediaQueryLists);
 
-  result.forget(aResult);
+  return result.forget();
 }
 
 nsCompatibility
@@ -2048,23 +2141,18 @@ nsPresContext::UserFontSetUpdated()
   PostRebuildAllStyleDataEvent(NS_STYLE_HINT_REFLOW);
 }
 
-bool
+void
 nsPresContext::EnsureSafeToHandOutCSSRules()
 {
   nsCSSStyleSheet::EnsureUniqueInnerResult res =
     mShell->StyleSet()->EnsureUniqueInnerOnCSSSheets();
   if (res == nsCSSStyleSheet::eUniqueInner_AlreadyUnique) {
     // Nothing to do.
-    return true;
-  }
-  if (res == nsCSSStyleSheet::eUniqueInner_CloneFailed) {
-    return false;
+    return;
   }
 
-  NS_ABORT_IF_FALSE(res == nsCSSStyleSheet::eUniqueInner_ClonedInner,
-                    "unexpected result");
+  MOZ_ASSERT(res == nsCSSStyleSheet::eUniqueInner_ClonedInner);
   RebuildAllStyleData(nsChangeHint(0));
-  return true;
 }
 
 void
@@ -2137,7 +2225,7 @@ MayHavePaintEventListener(nsPIDOMWindow* aInnerWindow)
     return false;
 
   nsEventListenerManager* manager = nullptr;
-  if ((manager = parentTarget->GetListenerManager(false)) &&
+  if ((manager = parentTarget->GetExistingListenerManager()) &&
       manager->MayHavePaintEventListener()) {
     return true;
   }
@@ -2165,7 +2253,7 @@ MayHavePaintEventListener(nsPIDOMWindow* aInnerWindow)
   EventTarget* tabChildGlobal;
   return root &&
          (tabChildGlobal = root->GetParentTarget()) &&
-         (manager = tabChildGlobal->GetListenerManager(false)) &&
+         (manager = tabChildGlobal->GetExistingListenerManager()) &&
          manager->MayHavePaintEventListener();
 }
 
@@ -2262,6 +2350,20 @@ nsPresContext::NotifySubDocInvalidation(ContainerLayer* aContainer,
     rect.MoveBy(-topLeft);
     data->mPresContext->NotifyInvalidation(rect, 0);
   }
+}
+
+void
+nsPresContext::SetNotifySubDocInvalidationData(ContainerLayer* aContainer)
+{
+  ContainerLayerPresContext* pres = new ContainerLayerPresContext;
+  pres->mPresContext = this;
+  aContainer->SetUserData(&gNotifySubDocInvalidationData, pres);
+}
+
+/* static */ void
+nsPresContext::ClearNotifySubDocInvalidationData(ContainerLayer* aContainer)
+{
+  aContainer->SetUserData(&gNotifySubDocInvalidationData, nullptr);
 }
 
 struct NotifyDidPaintSubdocumentCallbackClosure {
@@ -2523,7 +2625,7 @@ nsPresContext::GetPrimaryFrameFor(nsIContent* aContent)
 
 
 size_t
-nsPresContext::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsPresContext::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return mPropertyTable.SizeOfExcludingThis(aMallocSizeOf);
          mLangGroupFontPrefs.SizeOfExcludingThis(aMallocSizeOf);
@@ -2572,8 +2674,50 @@ nsPresContext::IsCrossProcessRootContentDocument()
     return true;
   }
 
-  TabChild* tabChild = GetTabChildFrom(mShell);
+  TabChild* tabChild = TabChild::GetFrom(mShell);
   return (tabChild && tabChild->IsRootContentDocument());
+}
+
+bool nsPresContext::GetPaintFlashing() const
+{
+  if (!mPaintFlashingInitialized) {
+    bool pref = Preferences::GetBool("nglayout.debug.paint_flashing");
+    if (!pref && IsChrome()) {
+      pref = Preferences::GetBool("nglayout.debug.paint_flashing_chrome");
+    }
+    mPaintFlashing = pref;
+    mPaintFlashingInitialized = true;
+  }
+  return mPaintFlashing;
+}
+
+int32_t
+nsPresContext::AppUnitsPerDevPixel() const
+{
+  return mDeviceContext->AppUnitsPerDevPixel();
+}
+
+nscoord
+nsPresContext::GfxUnitsToAppUnits(gfxFloat aGfxUnits) const
+{
+  return mDeviceContext->GfxUnitsToAppUnits(aGfxUnits);
+}
+
+gfxFloat
+nsPresContext::AppUnitsToGfxUnits(nscoord aAppUnits) const
+{
+  return mDeviceContext->AppUnitsToGfxUnits(aAppUnits);
+}
+
+bool
+nsPresContext::IsDeviceSizePageSize()
+{
+  bool isDeviceSizePageSize = false;
+  nsCOMPtr<nsIDocShell> docShell(do_QueryReferent(mContainer));
+  if (docShell) {
+    isDeviceSizePageSize = docShell->GetDeviceSizeIsPageSize();
+  }
+  return isDeviceSizePageSize;
 }
 
 nsRootPresContext::nsRootPresContext(nsIDocument* aDocument,
@@ -2581,7 +2725,6 @@ nsRootPresContext::nsRootPresContext(nsIDocument* aDocument,
   : nsPresContext(aDocument, aType),
     mDOMGeneration(0)
 {
-  mRegisteredPlugins.Init();
 }
 
 nsRootPresContext::~nsRootPresContext()
@@ -2859,7 +3002,7 @@ nsRootPresContext::FlushWillPaintObservers()
 }
 
 size_t
-nsRootPresContext::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+nsRootPresContext::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 {
   return nsPresContext::SizeOfExcludingThis(aMallocSizeOf);
 

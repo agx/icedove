@@ -11,14 +11,11 @@
 #include "nsFtpProtocolHandler.h"
 #include "nsITabChild.h"
 #include "nsStringStream.h"
-#include "nsMimeTypes.h"
 #include "nsNetUtil.h"
-#include "nsIURIFixup.h"
-#include "nsILoadContext.h"
-#include "nsCDefaultURIFixup.h"
 #include "base/compiler_specific.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "SerializedLoadContext.h"
 
 using namespace mozilla::ipc;
 
@@ -383,7 +380,7 @@ FTPChannelChild::DoOnStopRequest(const nsresult& statusCode)
       mLoadGroup->RemoveRequest(this, nullptr, statusCode);
   }
 
-  // This calls NeckoChild::DeallocPFTPChannel(), which deletes |this| if IPDL
+  // This calls NeckoChild::DeallocPFTPChannelChild(), which deletes |this| if IPDL
   // holds the last reference.  Don't rely on |this| existing after here!
   Send__delete__(this);
 }

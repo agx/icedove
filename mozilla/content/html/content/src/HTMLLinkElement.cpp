@@ -5,24 +5,24 @@
 
 #include "mozilla/dom/HTMLLinkElement.h"
 
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/HTMLLinkElementBinding.h"
-#include "base/compiler_specific.h"
+#include "mozilla/MemoryReporting.h"
+#include "nsAsyncDOMEvent.h"
+#include "nsContentUtils.h"
 #include "nsGenericHTMLElement.h"
-#include "nsILink.h"
 #include "nsGkAtoms.h"
-#include "nsStyleConsts.h"
+#include "nsIDocument.h"
+#include "nsIDOMEvent.h"
 #include "nsIDOMStyleSheet.h"
 #include "nsIStyleSheet.h"
 #include "nsIStyleSheetLinkingElement.h"
-#include "nsReadableUtils.h"
-#include "nsUnicharUtils.h"
 #include "nsIURL.h"
 #include "nsNetUtil.h"
-#include "nsIDocument.h"
-#include "nsIDOMEvent.h"
-#include "nsContentUtils.h"
 #include "nsPIDOMWindow.h"
-#include "nsAsyncDOMEvent.h"
+#include "nsReadableUtils.h"
+#include "nsStyleConsts.h"
+#include "nsUnicharUtils.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Link)
 
@@ -30,20 +30,22 @@ namespace mozilla {
 namespace dom {
 
 HTMLLinkElement::HTMLLinkElement(already_AddRefed<nsINodeInfo> aNodeInfo)
-  : nsGenericHTMLElement(aNodeInfo),
-    ALLOW_THIS_IN_INITIALIZER_LIST(Link(this))
+  : nsGenericHTMLElement(aNodeInfo)
+  , Link(MOZ_THIS_IN_INITIALIZER_LIST())
 {
-  SetIsDOMBinding();
 }
 
 HTMLLinkElement::~HTMLLinkElement()
 {
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(HTMLLinkElement)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLLinkElement,
                                                   nsGenericHTMLElement)
   tmp->nsStyleLinkElement::Traverse(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLLinkElement,
                                                 nsGenericHTMLElement)
   tmp->nsStyleLinkElement::Unlink();
@@ -55,15 +57,11 @@ NS_IMPL_RELEASE_INHERITED(HTMLLinkElement, Element)
 
 // QueryInterface implementation for HTMLLinkElement
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLLinkElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED5(HTMLLinkElement,
+  NS_INTERFACE_TABLE_INHERITED3(HTMLLinkElement,
                                 nsIDOMHTMLLinkElement,
-                                nsIDOMLinkStyle,
-                                nsILink,
                                 nsIStyleSheetLinkingElement,
                                 Link)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
+NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 
 NS_IMPL_ELEMENT_CLONE(HTMLLinkElement)
@@ -133,8 +131,9 @@ HTMLLinkElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                                                  aBindingParent,
                                                  aCompileEventHandlers);
   NS_ENSURE_SUCCESS(rv, rv);
-  
-  if (aDocument) {
+
+  // Link must be inert in ShadowRoot.
+  if (aDocument && !GetContainingShadow()) {
     aDocument->RegisterPendingLinkUpdate(this);
   }
 
@@ -146,18 +145,16 @@ HTMLLinkElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   return rv;
 }
 
-NS_IMETHODIMP
+void
 HTMLLinkElement::LinkAdded()
 {
   CreateAndDispatchEvent(OwnerDoc(), NS_LITERAL_STRING("DOMLinkAdded"));
-  return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 HTMLLinkElement::LinkRemoved()
 {
   CreateAndDispatchEvent(OwnerDoc(), NS_LITERAL_STRING("DOMLinkRemoved"));
-  return NS_OK;
 }
 
 void
@@ -170,12 +167,19 @@ HTMLLinkElement::UnbindFromTree(bool aDeep, bool aNullParent)
   // Once we have XPCOMGC we shouldn't need to call UnbindFromTree during Unlink
   // and so this messy event dispatch can go away.
   nsCOMPtr<nsIDocument> oldDoc = GetCurrentDoc();
-  if (oldDoc) {
+
+  // Check for a ShadowRoot because link elements are inert in a
+  // ShadowRoot.
+  ShadowRoot* oldShadowRoot = GetBindingParent() ?
+    GetBindingParent()->GetShadowRoot() : nullptr;
+
+  if (oldDoc && !oldShadowRoot) {
     oldDoc->UnregisterPendingLinkUpdate(this);
   }
   CreateAndDispatchEvent(oldDoc, NS_LITERAL_STRING("DOMLinkRemoved"));
   nsGenericHTMLElement::UnbindFromTree(aDeep, aNullParent);
-  UpdateStyleSheetInternal(oldDoc);
+
+  UpdateStyleSheetInternal(oldDoc, oldShadowRoot);
 }
 
 bool
@@ -252,7 +256,7 @@ HTMLLinkElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       dropSheet = !(linkTypes & STYLESHEET);          
     }
     
-    UpdateStyleSheetInternal(nullptr,
+    UpdateStyleSheetInternal(nullptr, nullptr,
                              dropSheet ||
                              (aName == nsGkAtoms::title ||
                               aName == nsGkAtoms::media ||
@@ -276,7 +280,7 @@ HTMLLinkElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
        aAttribute == nsGkAtoms::title ||
        aAttribute == nsGkAtoms::media ||
        aAttribute == nsGkAtoms::type)) {
-    UpdateStyleSheetInternal(nullptr, true);
+    UpdateStyleSheetInternal(nullptr, nullptr, true);
   }
 
   // The ordering of the parent class's UnsetAttr call and Link::ResetLinkState
@@ -333,7 +337,8 @@ HTMLLinkElement::GetStyleSheetURL(bool* aIsInline)
   if (href.IsEmpty()) {
     return nullptr;
   }
-  return Link::GetURI();
+  nsCOMPtr<nsIURI> uri = Link::GetURI();
+  return uri.forget();
 }
 
 void
@@ -404,7 +409,7 @@ HTMLLinkElement::IntrinsicState() const
 }
 
 size_t
-HTMLLinkElement::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+HTMLLinkElement::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   return nsGenericHTMLElement::SizeOfExcludingThis(aMallocSizeOf) +
          Link::SizeOfExcludingThis(aMallocSizeOf);

@@ -26,7 +26,7 @@
 
 #include "nsIDOMXULElement.h"
 
-#include "nsGUIEvent.h"
+#include "nsWidgetInitData.h"
 #include "nsWidgetsCID.h"
 #include "nsIWidget.h"
 #include "nsIWidgetListener.h"
@@ -69,6 +69,7 @@
 
 #include "nsIMarkupDocumentViewer.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/MouseEvents.h"
 
 #ifdef XP_MACOSX
 #include "nsINativeMenuService.h"
@@ -306,7 +307,8 @@ nsWebShellWindow::RequestWindowClose(nsIWidget* aWidget)
     nsRefPtr<nsPresContext> presContext = presShell->GetPresContext();
 
     nsEventStatus status = nsEventStatus_eIgnore;
-    nsMouseEvent event(true, NS_XUL_CLOSE, nullptr, nsMouseEvent::eReal);
+    WidgetMouseEvent event(true, NS_XUL_CLOSE, nullptr,
+                           WidgetMouseEvent::eReal);
     if (NS_SUCCEEDED(eventTarget->DispatchDOMEvent(&event, nullptr, presContext, &status)) &&
         status == nsEventStatus_eConsumeNoDefault)
       return false;
@@ -453,7 +455,7 @@ public:
     : mWindow(aWindow)
   {}
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   NS_IMETHOD Notify(nsITimer* aTimer)
   {
@@ -469,10 +471,7 @@ private:
   nsRefPtr<nsWebShellWindow> mWindow;
 };
 
-NS_IMPL_THREADSAFE_ADDREF(WebShellWindowTimerCallback)
-NS_IMPL_THREADSAFE_RELEASE(WebShellWindowTimerCallback)
-NS_IMPL_THREADSAFE_QUERY_INTERFACE1(WebShellWindowTimerCallback,
-                                    nsITimerCallback)
+NS_IMPL_ISUPPORTS1(WebShellWindowTimerCallback, nsITimerCallback)
 
 } // namespace mozilla
 
@@ -696,8 +695,8 @@ bool nsWebShellWindow::ExecuteCloseHandler()
       contentViewer->GetPresContext(getter_AddRefs(presContext));
 
       nsEventStatus status = nsEventStatus_eIgnore;
-      nsMouseEvent event(true, NS_XUL_CLOSE, nullptr,
-                         nsMouseEvent::eReal);
+      WidgetMouseEvent event(true, NS_XUL_CLOSE, nullptr,
+                             WidgetMouseEvent::eReal);
 
       nsresult rv =
         eventTarget->DispatchDOMEvent(&event, nullptr, presContext, &status);

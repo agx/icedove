@@ -6,13 +6,15 @@
 #ifndef GFX_LAYERSTYPES_H
 #define GFX_LAYERSTYPES_H
 
-#include "nsPoint.h"
+#include <stdint.h>                     // for uint32_t
+#include "nsPoint.h"                    // for nsIntPoint
+
 #ifdef MOZ_WIDGET_GONK
 #include <ui/GraphicBuffer.h>
 #endif
 #if defined(DEBUG) || defined(PR_LOGGING)
 #  include <stdio.h>            // FILE
-#  include "prlog.h"
+#  include "prlog.h"            // for PR_LOG
 #  ifndef MOZ_LAYERS_HAVE_LOG
 #    define MOZ_LAYERS_HAVE_LOG
 #  endif
@@ -33,6 +35,7 @@ class GraphicBuffer;
 namespace mozilla {
 namespace layers {
 
+class TextureHostCommon;
 
 typedef uint32_t TextureFlags;
 
@@ -52,13 +55,10 @@ enum BufferMode {
   BUFFER_BUFFERED
 };
 
-// The kinds of mask layer a shader can support
-// We rely on the items in this enum being sequential
-enum MaskType {
-  MaskNone = 0,   // no mask layer
-  Mask2d,         // mask layer for layers with 2D transforms
-  Mask3d,         // mask layer for layers with 3D transforms
-  NumMaskTypes
+enum DrawRegionClip {
+  CLIP_DRAW,
+  CLIP_DRAW_SNAPPED,
+  CLIP_NONE,
 };
 
 // LayerRenderState for Composer2D
@@ -76,19 +76,21 @@ enum LayerRenderStateFlags {
 struct LayerRenderState {
   LayerRenderState()
 #ifdef MOZ_WIDGET_GONK
-    : mSurface(nullptr), mFlags(0), mHasOwnOffset(false)
+    : mSurface(nullptr), mFlags(0), mHasOwnOffset(false), mTexture(nullptr)
 #endif
   {}
 
 #ifdef MOZ_WIDGET_GONK
   LayerRenderState(android::GraphicBuffer* aSurface,
                    const nsIntSize& aSize,
-                   uint32_t aFlags)
+                   uint32_t aFlags,
+                   TextureHostCommon* aTexture)
     : mSurface(aSurface)
     , mSize(aSize)
     , mFlags(aFlags)
     , mHasOwnOffset(false)
-  {}
+    , mTexture(aTexture)
+   {}
 
   bool YFlipped() const
   { return mFlags & LAYER_RENDER_STATE_Y_FLIPPED; }
@@ -111,6 +113,7 @@ struct LayerRenderState {
   android::sp<android::GraphicBuffer> mSurface;
   // size of mSurface 
   nsIntSize mSize;
+  TextureHostCommon* mTexture;
 #endif
   // see LayerRenderStateFlags
   uint32_t mFlags;
@@ -118,6 +121,13 @@ struct LayerRenderState {
   nsIntPoint mOffset;
   // true if mOffset is applicable
   bool mHasOwnOffset;
+};
+
+enum ScaleMode {
+  SCALE_NONE,
+  SCALE_STRETCH,
+  SCALE_SENTINEL
+// Unimplemented - SCALE_PRESERVE_ASPECT_RATIO_CONTAIN
 };
 
 } // namespace

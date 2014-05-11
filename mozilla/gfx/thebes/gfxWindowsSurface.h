@@ -11,6 +11,9 @@
 
 /* include windows.h for the HWND and HDC definitions that we need. */
 #include <windows.h>
+
+struct IDirect3DSurface9;
+
 /* undefine LoadImage because our code uses that name */
 #undef LoadImage
 
@@ -27,14 +30,17 @@ public:
     gfxWindowsSurface(HWND wnd, uint32_t flags = 0);
     gfxWindowsSurface(HDC dc, uint32_t flags = 0);
 
+    // Create from a shared d3d9surface
+    gfxWindowsSurface(IDirect3DSurface9 *surface, uint32_t flags = 0);
+
     // Create a DIB surface
     gfxWindowsSurface(const gfxIntSize& size,
-                      gfxImageFormat imageFormat = ImageFormatRGB24);
+                      gfxImageFormat imageFormat = gfxImageFormatRGB24);
 
-    // Create a DDB surface; dc may be NULL to use the screen DC
+    // Create a DDB surface; dc may be nullptr to use the screen DC
     gfxWindowsSurface(HDC dc,
                       const gfxIntSize& size,
-                      gfxImageFormat imageFormat = ImageFormatRGB24);
+                      gfxImageFormat imageFormat = gfxImageFormatRGB24);
 
     gfxWindowsSurface(cairo_surface_t *csurf);
 
@@ -45,7 +51,7 @@ public:
 
     virtual ~gfxWindowsSurface();
 
-    HDC GetDC() { return mDC; }
+    HDC GetDC();
 
     HDC GetDCWithClip(gfxContext *);
 
@@ -73,7 +79,7 @@ public:
 
     // The memory used by this surface lives in this process's address space,
     // but not in the heap.
-    virtual gfxASurface::MemoryLocation GetMemoryLocation() const;
+    virtual gfxMemoryLocation GetMemoryLocation() const;
 
 private:
     void MakeInvalid(gfxIntSize& size);

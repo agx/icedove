@@ -6,13 +6,80 @@
 #ifndef GFX_IMAGECONTAINER_H
 #define GFX_IMAGECONTAINER_H
 
-#include "mozilla/Mutex.h"
-#include "mozilla/ReentrantMonitor.h"
-#include "gfxASurface.h" // for gfxImageFormat
-#include "mozilla/layers/LayersTypes.h" // for LayersBackend
-#include "mozilla/TimeStamp.h"
-#include "ImageTypes.h"
-#include "nsTArray.h"
+#include <stdint.h>                     // for uint32_t, uint8_t, uint64_t
+#include <sys/types.h>                  // for int32_t
+#include "ImageTypes.h"                 // for ImageFormat, etc
+#include "gfxASurface.h"                // for gfxASurface, etc
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "mozilla/Mutex.h"              // for Mutex
+#include "mozilla/ReentrantMonitor.h"   // for ReentrantMonitorAutoEnter, etc
+#include "mozilla/TimeStamp.h"          // for TimeStamp
+#include "mozilla/layers/LayersTypes.h"  // for LayersBackend, etc
+#include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoArrayPtr, etc
+#include "nsAutoRef.h"                  // for nsCountedRef
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsImpl.h"            // for Image::Release, etc
+#include "nsRect.h"                     // for nsIntRect
+#include "nsSize.h"                     // for nsIntSize
+#include "nsTArray.h"                   // for nsTArray
+#include "mozilla/Atomics.h"
+#include "nsThreadUtils.h"
+
+#ifndef XPCOM_GLUE_AVOID_NSPR
+/**
+ * We need to be able to hold a reference to a gfxASurface from Image
+ * subclasses. This is potentially a problem since Images can be addrefed
+ * or released off the main thread. We can ensure that we never AddRef
+ * a gfxASurface off the main thread, but we might want to Release due
+ * to an Image being destroyed off the main thread.
+ *
+ * We use nsCountedRef<nsMainThreadSurfaceRef> to reference the
+ * gfxASurface. When AddRefing, we assert that we're on the main thread.
+ * When Releasing, if we're not on the main thread, we post an event to
+ * the main thread to do the actual release.
+ */
+class nsMainThreadSurfaceRef;
+
+template <>
+class nsAutoRefTraits<nsMainThreadSurfaceRef> {
+public:
+  typedef gfxASurface* RawRef;
+
+  /**
+   * The XPCOM event that will do the actual release on the main thread.
+   */
+  class SurfaceReleaser : public nsRunnable {
+  public:
+    SurfaceReleaser(RawRef aRef) : mRef(aRef) {}
+    NS_IMETHOD Run() {
+      mRef->Release();
+      return NS_OK;
+    }
+    RawRef mRef;
+  };
+
+  static RawRef Void() { return nullptr; }
+  static void Release(RawRef aRawRef)
+  {
+    if (NS_IsMainThread()) {
+      aRawRef->Release();
+      return;
+    }
+    nsCOMPtr<nsIRunnable> runnable = new SurfaceReleaser(aRawRef);
+    NS_DispatchToMainThread(runnable);
+  }
+  static void AddRef(RawRef aRawRef)
+  {
+    NS_ASSERTION(NS_IsMainThread(),
+                 "Can only add a reference on the main thread");
+    aRawRef->AddRef();
+  }
+};
+
+#endif
 
 #ifdef XP_WIN
 struct ID3D10Texture2D;
@@ -25,14 +92,14 @@ typedef void* HANDLE;
 namespace mozilla {
 
 class CrossProcessMutex;
-namespace ipc {
-class Shmem;
-}
 
 namespace layers {
 
 class ImageClient;
 class SharedPlanarYCbCrImage;
+class DeprecatedSharedPlanarYCbCrImage;
+class TextureClient;
+class SurfaceDescriptor;
 
 struct ImageBackendData
 {
@@ -40,6 +107,18 @@ struct ImageBackendData
 
 protected:
   ImageBackendData() {}
+};
+
+// sadly we'll need this until we get rid of Deprected image classes
+class ISharedImage {
+public:
+    virtual uint8_t* GetBuffer() = 0;
+
+    /**
+     * For use with the CompositableClient only (so that the later can
+     * synchronize the TextureClient with the TextureHost).
+     */
+    virtual TextureClient* GetTextureClient() = 0;
 };
 
 /**
@@ -62,12 +141,17 @@ class Image {
 public:
   virtual ~Image() {}
 
+  virtual ISharedImage* AsSharedImage() { return nullptr; }
 
   ImageFormat GetFormat() { return mFormat; }
   void* GetImplData() { return mImplData; }
 
   virtual already_AddRefed<gfxASurface> GetAsSurface() = 0;
   virtual gfxIntSize GetSize() = 0;
+  virtual nsIntRect GetPictureRect()
+  {
+    return nsIntRect(0, 0, GetSize().width, GetSize().height);
+  }
 
   ImageBackendData* GetBackendData(LayersBackend aBackend)
   { return mBackendData[aBackend]; }
@@ -82,7 +166,7 @@ public:
 protected:
   Image(void* aImplData, ImageFormat aFormat) :
     mImplData(aImplData),
-    mSerial(PR_ATOMIC_INCREMENT(&sSerialCounter)),
+    mSerial(++sSerialCounter),
     mFormat(aFormat),
     mSent(false)
   {}
@@ -92,7 +176,7 @@ protected:
   void* mImplData;
   int32_t mSerial;
   ImageFormat mFormat;
-  static int32_t sSerialCounter;
+  static mozilla::Atomic<int32_t> sSerialCounter;
   bool mSent;
 };
 
@@ -299,6 +383,25 @@ public:
    * PImageBridge protcol without using the main thread.
    */
   void SetCurrentImage(Image* aImage);
+
+  /**
+   * Clear all images. Let ImageClient release all TextureClients.
+   */
+  void ClearAllImages();
+
+  /**
+   * Clear all images except current one.
+   * Let ImageClient release all TextureClients except front one.
+   */
+  void ClearAllImagesExceptFront();
+
+  /**
+   * Clear the current image.
+   * This function is expect to be called only from a CompositableClient
+   * that belongs to ImageBridgeChild. Created to prevent dead lock.
+   * See Bug 901224.
+   */
+  void ClearCurrentImage();
 
   /**
    * Set an Image as the current image to display. The Image must have
@@ -538,7 +641,7 @@ protected:
 
   nsRefPtr<BufferRecycleBin> mRecycleBin;
 
-  // This contains the remote image data for this container, if this is NULL
+  // This contains the remote image data for this container, if this is nullptr
   // that means the container has no other process that may control its active
   // image.
   RemoteImageData *mRemoteData;
@@ -598,6 +701,39 @@ private:
   gfxIntSize mSize;
 };
 
+struct PlanarYCbCrData {
+  // Luminance buffer
+  uint8_t* mYChannel;
+  int32_t mYStride;
+  gfxIntSize mYSize;
+  int32_t mYSkip;
+  // Chroma buffers
+  uint8_t* mCbChannel;
+  uint8_t* mCrChannel;
+  int32_t mCbCrStride;
+  gfxIntSize mCbCrSize;
+  int32_t mCbSkip;
+  int32_t mCrSkip;
+  // Picture region
+  uint32_t mPicX;
+  uint32_t mPicY;
+  gfxIntSize mPicSize;
+  StereoMode mStereoMode;
+
+  nsIntRect GetPictureRect() const {
+    return nsIntRect(mPicX, mPicY,
+                     mPicSize.width,
+                     mPicSize.height);
+  }
+
+  PlanarYCbCrData()
+    : mYChannel(nullptr), mYStride(0), mYSize(0, 0), mYSkip(0)
+    , mCbChannel(nullptr), mCrChannel(nullptr)
+    , mCbCrStride(0), mCbCrSize(0, 0) , mCbSkip(0), mCrSkip(0)
+    , mPicX(0), mPicY(0), mPicSize(0, 0), mStereoMode(STEREO_MODE_MONO)
+  {}
+};
+
 /****** Image subtypes for the different formats ******/
 
 /**
@@ -636,38 +772,7 @@ private:
  */
 class PlanarYCbCrImage : public Image {
 public:
-  struct Data {
-    // Luminance buffer
-    uint8_t* mYChannel;
-    int32_t mYStride;
-    gfxIntSize mYSize;
-    int32_t mYSkip;
-    // Chroma buffers
-    uint8_t* mCbChannel;
-    uint8_t* mCrChannel;
-    int32_t mCbCrStride;
-    gfxIntSize mCbCrSize;
-    int32_t mCbSkip;
-    int32_t mCrSkip;
-    // Picture region
-    uint32_t mPicX;
-    uint32_t mPicY;
-    gfxIntSize mPicSize;
-    StereoMode mStereoMode;
-
-    nsIntRect GetPictureRect() const {
-      return nsIntRect(mPicX, mPicY,
-                       mPicSize.width,
-                       mPicSize.height);
-    }
-
-    Data()
-      : mYChannel(nullptr), mYStride(0), mYSize(0, 0), mYSkip(0)
-      , mCbChannel(nullptr), mCrChannel(nullptr)
-      , mCbCrStride(0), mCbCrSize(0, 0) , mCbSkip(0), mCrSkip(0)
-      , mPicX(0), mPicY(0), mPicSize(0, 0), mStereoMode(STEREO_MODE_MONO)
-    {}
-  };
+  typedef PlanarYCbCrData Data;
 
   enum {
     MAX_DIMENSION = 16384
@@ -719,6 +824,7 @@ public:
   PlanarYCbCrImage(BufferRecycleBin *aRecycleBin);
 
   virtual SharedPlanarYCbCrImage *AsSharedPlanarYCbCrImage() { return nullptr; }
+  virtual DeprecatedSharedPlanarYCbCrImage *AsDeprecatedSharedPlanarYCbCrImage() { return nullptr; }
 
 protected:
   /**
@@ -737,14 +843,14 @@ protected:
 
   already_AddRefed<gfxASurface> GetAsSurface();
 
-  void SetOffscreenFormat(gfxASurface::gfxImageFormat aFormat) { mOffscreenFormat = aFormat; }
-  gfxASurface::gfxImageFormat GetOffscreenFormat();
+  void SetOffscreenFormat(gfxImageFormat aFormat) { mOffscreenFormat = aFormat; }
+  gfxImageFormat GetOffscreenFormat();
 
   nsAutoArrayPtr<uint8_t> mBuffer;
   uint32_t mBufferSize;
   Data mData;
   gfxIntSize mSize;
-  gfxASurface::gfxImageFormat mOffscreenFormat;
+  gfxImageFormat mOffscreenFormat;
   nsCountedRef<nsMainThreadSurfaceRef> mSurface;
   nsRefPtr<BufferRecycleBin> mRecycleBin;
 };
@@ -775,14 +881,13 @@ public:
 
   virtual already_AddRefed<gfxASurface> GetAsSurface()
   {
-    NS_ASSERTION(NS_IsMainThread(), "Must be main thread");
     nsRefPtr<gfxASurface> surface = mSurface.get();
     return surface.forget();
   }
 
   gfxIntSize GetSize() { return mSize; }
 
-  CairoImage() : Image(NULL, CAIRO_SURFACE) {}
+  CairoImage() : Image(nullptr, CAIRO_SURFACE) {}
 
   nsCountedRef<nsMainThreadSurfaceRef> mSurface;
   gfxIntSize mSize;
@@ -790,7 +895,7 @@ public:
 
 class RemoteBitmapImage : public Image {
 public:
-  RemoteBitmapImage() : Image(NULL, REMOTE_IMAGE_BITMAP) {}
+  RemoteBitmapImage() : Image(nullptr, REMOTE_IMAGE_BITMAP) {}
 
   already_AddRefed<gfxASurface> GetAsSurface();
 

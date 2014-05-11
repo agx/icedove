@@ -14,10 +14,6 @@
 #ifndef WEBRTC_TYPEDEFS_H_
 #define WEBRTC_TYPEDEFS_H_
 
-// Reserved words definitions
-// TODO(andrew): Remove this.
-#define G_CONST const
-
 // For access to standard POSIXish features, use WEBRTC_POSIX instead of a
 // more specific macro.
 #if defined(WEBRTC_MAC) || defined(WEBRTC_LINUX) || \
@@ -139,15 +135,22 @@ typedef unsigned int        uint32_t;
 typedef unsigned __int64    uint64_t;
 #endif
 
-// TODO(andrew): remove WebRtc_ types:
-// http://code.google.com/p/webrtc/issues/detail?id=314
-typedef int8_t              WebRtc_Word8;
-typedef int16_t             WebRtc_Word16;
-typedef int32_t             WebRtc_Word32;
-typedef int64_t             WebRtc_Word64;
-typedef uint8_t             WebRtc_UWord8;
-typedef uint16_t            WebRtc_UWord16;
-typedef uint32_t            WebRtc_UWord32;
-typedef uint64_t            WebRtc_UWord64;
+// Borrowed from Chromium's base/compiler_specific.h.
+// Annotate a virtual method indicating it must be overriding a virtual
+// method in the parent class.
+// Use like:
+//   virtual void foo() OVERRIDE;
+#if defined(_MSC_VER)
+#define OVERRIDE override
+#elif defined(__clang__)
+// Clang defaults to C++03 and warns about using override. Squelch that.
+// Intentionally no push/pop here so all users of OVERRIDE ignore the warning
+// too. This is like passing -Wno-c++11-extensions, except that GCC won't die
+// (because it won't see this pragma).
+#pragma clang diagnostic ignored "-Wc++11-extensions"
+#define OVERRIDE override
+#else
+#define OVERRIDE
+#endif
 
 #endif  // WEBRTC_TYPEDEFS_H_

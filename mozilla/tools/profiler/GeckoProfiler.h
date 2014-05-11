@@ -49,11 +49,22 @@
 #ifndef SAMPLER_H
 #define SAMPLER_H
 
-#include "jsfriendapi.h"
 #include "mozilla/NullPtr.h"
-#include "mozilla/TimeStamp.h"
+#include "js/TypeDecls.h"
+
+namespace mozilla {
+class TimeStamp;
+}
+
+enum TracingMetadata {
+  TRACING_DEFAULT,
+  TRACING_INTERVAL_START,
+  TRACING_INTERVAL_END
+};
 
 #ifndef MOZ_ENABLE_PROFILER_SPS
+
+#include <stdint.h>
 
 // Insert a RAII in this scope to active a pseudo label. Any samples collected
 // in this scope will contain this annotation. For dynamic strings use
@@ -71,10 +82,14 @@
 // only recorded if a sample is collected while it is active, marker will always
 // be collected.
 #define PROFILER_MARKER(info) do {} while (0)
+#define PROFILER_MARKER_PAYLOAD(info, payload) do {} while (0)
 
 // Main thread specilization to avoid TLS lookup for performance critical use.
 #define PROFILER_MAIN_THREAD_LABEL(name_space, info) do {} while (0)
 #define PROFILER_MAIN_THREAD_LABEL_PRINTF(name_space, info, format, ...) do {} while (0)
+
+static inline void profiler_tracing(const char* aCategory, const char* aInfo,
+                                    TracingMetadata metaData = TRACING_DEFAULT) {}
 
 // Initilize the profiler TLS, signal handlers on linux. If MOZ_PROFILER_STARTUP
 // is set the profiler will be started. This call must happen before any other
@@ -94,13 +109,21 @@ static inline void profiler_shutdown() {};
 //   "aInterval" the sampling interval. The profiler will do its
 //       best to sample at this interval. The profiler visualization
 //       should represent the actual sampling accuracy.
-static inline void profiler_start(int aProfileEntries, int aInterval,
+static inline void profiler_start(int aProfileEntries, double aInterval,
                               const char** aFeatures, uint32_t aFeatureCount,
                               const char** aThreadNameFilters, uint32_t aFilterCount) {}
 
 // Stop the profiler and discard the profile. Call 'profiler_save' before this
 // to retrieve the profile.
 static inline void profiler_stop() {}
+
+class ProfilerBacktrace;
+
+// Immediately capture the current thread's call stack and return it
+static inline ProfilerBacktrace* profiler_get_backtrace() { return nullptr; }
+
+// Free a ProfilerBacktrace returned by profiler_get_backtrace()
+static inline void profiler_free_backtrace(ProfilerBacktrace* aBacktrace) {}
 
 static inline bool profiler_is_active() { return false; }
 
@@ -144,6 +167,7 @@ static inline void profiler_unregister_thread() {}
 static inline void profiler_js_operation_callback() {}
 
 static inline double profiler_time() { return 0; }
+static inline double profiler_time(const mozilla::TimeStamp& aTime) { return 0; }
 
 static inline bool profiler_in_privacy_mode() { return false; }
 

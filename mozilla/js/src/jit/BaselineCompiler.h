@@ -9,25 +9,13 @@
 
 #ifdef JS_ION
 
-#include "jscntxt.h"
-#include "jscompartment.h"
-#include "IonCode.h"
-#include "jsinfer.h"
-
-#include "vm/Interpreter.h"
-
-#include "IonAllocPolicy.h"
-#include "BaselineJIT.h"
-#include "BaselineIC.h"
-#include "FixedList.h"
-#include "BytecodeAnalysis.h"
-
+#include "jit/FixedList.h"
 #if defined(JS_CPU_X86)
-# include "x86/BaselineCompiler-x86.h"
+# include "jit/x86/BaselineCompiler-x86.h"
 #elif defined(JS_CPU_X64)
-# include "x64/BaselineCompiler-x64.h"
+# include "jit/x64/BaselineCompiler-x64.h"
 #else
-# include "arm/BaselineCompiler-arm.h"
+# include "jit/arm/BaselineCompiler-arm.h"
 #endif
 
 namespace js {
@@ -160,6 +148,7 @@ namespace jit {
     _(JSOP_ENTERBLOCK)         \
     _(JSOP_ENTERLET0)          \
     _(JSOP_ENTERLET1)          \
+    _(JSOP_ENTERLET2)          \
     _(JSOP_LEAVEBLOCK)         \
     _(JSOP_LEAVEBLOCKEXPR)     \
     _(JSOP_LEAVEFORLETIN)      \
@@ -175,29 +164,37 @@ namespace jit {
     _(JSOP_ITERNEXT)           \
     _(JSOP_ENDITER)            \
     _(JSOP_CALLEE)             \
-    _(JSOP_POPV)               \
     _(JSOP_SETRVAL)            \
-    _(JSOP_RETURN)             \
-    _(JSOP_STOP)               \
-    _(JSOP_RETRVAL)
+    _(JSOP_RETRVAL)            \
+    _(JSOP_RETURN)
 
 class BaselineCompiler : public BaselineCompilerSpecific
 {
     FixedList<Label>            labels_;
-    HeapLabel *                 return_;
+    NonAssertingLabel           return_;
 #ifdef JSGC_GENERATIONAL
-    HeapLabel *                 postBarrierSlot_;
+    NonAssertingLabel           postBarrierSlot_;
 #endif
 
     // Native code offset right before the scope chain is initialized.
     CodeOffsetLabel prologueOffset_;
 
+    // Whether any on stack arguments are modified.
+    bool modifiesArguments_;
+
     Label *labelOf(jsbytecode *pc) {
-        return &labels_[pc - script->code];
+        return &labels_[script->pcToOffset(pc)];
+    }
+
+    // If a script has more |nslots| than this, then emit code to do an
+    // early stack check.
+    static const unsigned EARLY_STACK_CHECK_SLOT_COUNT = 128;
+    bool needsEarlyStackCheck() const {
+        return script->nslots > EARLY_STACK_CHECK_SLOT_COUNT;
     }
 
   public:
-    BaselineCompiler(JSContext *cx, HandleScript script);
+    BaselineCompiler(JSContext *cx, TempAllocator &alloc, HandleScript script);
     bool init();
 
     MethodStatus compile();
@@ -218,7 +215,7 @@ class BaselineCompiler : public BaselineCompilerSpecific
         return emitIC(stub, false);
     }
 
-    bool emitStackCheck();
+    bool emitStackCheck(bool earlyCheck=false);
     bool emitInterruptCheck();
     bool emitUseCountIncrement();
     bool emitArgumentTypeChecks();

@@ -9,6 +9,7 @@ const Cc = Components.classes;
 const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/TelemetryTimestamps.jsm");
 
 const Telemetry = Services.telemetry;
 const bundle = Services.strings.createBundle(
@@ -18,8 +19,9 @@ const brandBundle = Services.strings.createBundle(
 const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].
   getService(Ci.nsITelemetryPing);
 
-// Maximum height of a histogram bar (in em)
+// Maximum height of a histogram bar (in em for html, in chars for text)
 const MAX_BAR_HEIGHT = 18;
+const MAX_BAR_CHARS = 25;
 const PREF_TELEMETRY_SERVER_OWNER = "toolkit.telemetry.server_owner";
 #ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
 const PREF_TELEMETRY_ENABLED = "toolkit.telemetry.enabledPreRelease";
@@ -29,6 +31,12 @@ const PREF_TELEMETRY_ENABLED = "toolkit.telemetry.enabled";
 const PREF_DEBUG_SLOW_SQL = "toolkit.telemetry.debugSlowSql";
 const PREF_SYMBOL_SERVER_URI = "profiler.symbolicationUrl";
 const DEFAULT_SYMBOL_SERVER_URI = "http://symbolapi.mozilla.org";
+
+#ifdef XP_WIN
+const EOL = "\r\n";
+#else
+const EOL = "\n";
+#endif
 
 // Cached value of document's RTL mode
 let documentRTLMode = "";
@@ -406,6 +414,8 @@ let Histogram = {
 
   hgramSumCaption: bundle.GetStringFromName("histogramSum"),
 
+  hgramCopyCaption: bundle.GetStringFromName("histogramCopy"),
+
   /**
    * Renders a single Telemetry histogram
    *
@@ -436,7 +446,18 @@ let Histogram = {
     if (isRTL())
       hgram.values.reverse();
 
-    this.renderValues(outerDiv, hgram.values, hgram.max);
+    let textData = this.renderValues(outerDiv, hgram.values, hgram.max, hgram.sample_count);
+
+    // The 'Copy' button contains the textual data, copied to clipboard on click
+    let copyButton = document.createElement("button");
+    copyButton.className = "copy-node";
+    copyButton.appendChild(document.createTextNode(this.hgramCopyCaption));
+    copyButton.histogramText = aName + EOL + stats + EOL + EOL + textData;
+    copyButton.addEventListener("click", function(){
+      Cc["@mozilla.org/widget/clipboardhelper;1"].getService(Ci.nsIClipboardHelper)
+                                                 .copyString(this.histogramText);
+    });
+    outerDiv.appendChild(copyButton);
 
     aParent.appendChild(outerDiv);
   },
@@ -490,14 +511,28 @@ let Histogram = {
   },
 
   /**
-   * Create histogram bars
+   * Create histogram HTML bars, also returns a textual representation
+   * Both aMaxValue and aSumValues must be positive.
+   * Values are assumed to use 0 as baseline.
    *
    * @param aDiv Outer parent div
    * @param aValues Histogram values
-   * @param aMaxValue Largest histogram value in set
+   * @param aMaxValue Value of the longest bar (length, not label)
+   * @param aSumValues Sum of all bar values
    */
-  renderValues: function Histogram_renderValues(aDiv, aValues, aMaxValue) {
+  renderValues: function Histogram_renderValues(aDiv, aValues, aMaxValue, aSumValues) {
+    let text = "";
+    // If the last label is not the longest string, alignment will break a little
+    let labelPadTo = String(aValues[aValues.length -1][0]).length;
+
     for (let [label, value] of aValues) {
+      // Create a text representation: <right-aligned-label> |<bar-of-#><value>  <percentage>
+      text += EOL
+              + " ".repeat(Math.max(0, labelPadTo - String(label).length)) + label // Right-aligned label
+              + " |" + "#".repeat(Math.round(MAX_BAR_CHARS * value / aMaxValue)) + value // Bars and value
+              + "  " + Math.round(100 * value / aSumValues) + "%"; // Percentage
+
+      // Construct the HTML labels + bars
       let belowEm = Math.round(MAX_BAR_HEIGHT * (value / aMaxValue) * 10) / 10;
       let aboveEm = MAX_BAR_HEIGHT - belowEm;
 
@@ -519,22 +554,53 @@ let Histogram = {
 
       aDiv.appendChild(barDiv);
     }
+
+    return text.substr(EOL.length); // Trim the EOL before the first line
   }
 };
 
+/*
+ * Helper function to render JS objects with white space between top level elements
+ * so that they look better in the browser
+ * @param   aObject JavaScript object or array to render
+ * @return  String
+ */
+function RenderObject(aObject) {
+  let output = "";
+  if (Array.isArray(aObject)) {
+    if (aObject.length == 0) {
+      return "[]";
+    }
+    output = "[" + JSON.stringify(aObject[0]);
+    for (let i = 1; i < aObject.length; i++) {
+      output += ", " + JSON.stringify(aObject[i]);
+    }
+    return output + "]";
+  }
+  let keys = Object.keys(aObject);
+  if (keys.length == 0) {
+    return "{}";
+  }
+  output = "{\"" + keys[0] + "\":\u00A0" + JSON.stringify(aObject[keys[0]]);
+  for (let i = 1; i < keys.length; i++) {
+    output += ", \"" + keys[i] + "\":\u00A0" + JSON.stringify(aObject[keys[i]]);
+  }
+  return output + "}";
+};
+
 let KeyValueTable = {
-
-  keysHeader: bundle.GetStringFromName("keysHeader"),
-
-  valuesHeader: bundle.GetStringFromName("valuesHeader"),
-
   /**
-   * Fill out a 2-column table with keys and values
+   * Returns a 2-column table with keys and values
+   * @param aMeasurements Each key in this JS object is rendered as a row in
+   *                      the table with its corresponding value
+   * @param aKeysLabel    Column header for the keys column
+   * @param aValuesLabel  Column header for the values column
    */
-  render: function KeyValueTable_render(aTableID, aMeasurements) {
-    let table = document.getElementById(aTableID);
-    this.renderHeader(table);
+  render: function KeyValueTable_render(aMeasurements, aKeysLabel, aValuesLabel) {
+    let table = document.createElement("table");
+    this.renderHeader(table, aKeysLabel, aValuesLabel);
     this.renderBody(table, aMeasurements);
+    return table;
   },
 
   /**
@@ -542,15 +608,17 @@ let KeyValueTable = {
    * Tabs & newlines added to cells to make it easier to copy-paste.
    *
    * @param aTable Table element
+   * @param aKeysLabel    Column header for the keys column
+   * @param aValuesLabel  Column header for the values column
    */
-  renderHeader: function KeyValueTable_renderHeader(aTable) {
+  renderHeader: function KeyValueTable_renderHeader(aTable, aKeysLabel, aValuesLabel) {
     let headerRow = document.createElement("tr");
     aTable.appendChild(headerRow);
 
     let keysColumn = document.createElement("th");
-    keysColumn.appendChild(document.createTextNode(this.keysHeader + "\t"));
+    keysColumn.appendChild(document.createTextNode(aKeysLabel + "\t"));
     let valuesColumn = document.createElement("th");
-    valuesColumn.appendChild(document.createTextNode(this.valuesHeader + "\n"));
+    valuesColumn.appendChild(document.createTextNode(aValuesLabel + "\n"));
 
     headerRow.appendChild(keysColumn);
     headerRow.appendChild(valuesColumn);
@@ -566,7 +634,7 @@ let KeyValueTable = {
   renderBody: function KeyValueTable_renderBody(aTable, aMeasurements) {
     for (let [key, value] of Iterator(aMeasurements)) {
       if (typeof value == "object") {
-        value = JSON.stringify(value);
+        value = RenderObject(value);
       }
 
       let newRow = document.createElement("tr");
@@ -579,6 +647,28 @@ let KeyValueTable = {
       let valueField = document.createElement("td");
       valueField.appendChild(document.createTextNode(value + "\n"));
       newRow.appendChild(valueField);
+    }
+  }
+};
+
+let AddonDetails = {
+  tableIDTitle: bundle.GetStringFromName("addonTableID"),
+  tableDetailsTitle: bundle.GetStringFromName("addonTableDetails"),
+
+  /**
+   * Render the addon details section as a series of headers followed by key/value tables
+   * @param aSections Object containing the details sections to render
+   */
+  render: function AddonDetails_render(aSections) {
+    let addonSection = document.getElementById("addon-details");
+    for (let provider in aSections) {
+      let providerSection = document.createElement("h2");
+      let titleText = bundle.formatStringFromName("addonProvider", [provider], 1);
+      providerSection.appendChild(document.createTextNode(titleText));
+      addonSection.appendChild(providerSection);
+      addonSection.appendChild(
+        KeyValueTable.render(aSections[provider],
+                             this.tableIDTitle, this.tableDetailsTitle));
     }
   }
 };
@@ -772,21 +862,20 @@ let LateWritesSingleton = {
  * @return Sorted measurements
  */
 function sortStartupMilestones(aSimpleMeasurements) {
-  // List of startup milestones
-  const startupMilestones =
-    ["start", "main", "startupCrashDetectionBegin", "createTopLevelWindow",
-     "firstPaint", "delayedStartupStarted", "firstLoadURI",
-     "sessionRestoreInitialized", "sessionRestoreRestoring", "sessionRestored",
-     "delayedStartupFinished", "startupCrashDetectionEnd",
-     "AMI_startup_begin", "AMI_startup_end", "XPI_startup_begin", "XPI_startup_end",
-     "XPI_bootstrap_addons_begin", "XPI_bootstrap_addons_end"];
+  const telemetryTimestamps = TelemetryTimestamps.get();
+  let startupEvents = Services.startup.getStartupInfo();
+  delete startupEvents['process'];
+
+  function keyIsMilestone(k) {
+    return (k in startupEvents) || (k in telemetryTimestamps);
+  }
 
   let sortedKeys = Object.keys(aSimpleMeasurements);
 
   // Sort the measurements, with startup milestones at the front + ordered by time
   sortedKeys.sort(function keyCompare(keyA, keyB) {
-    let isKeyAMilestone = (startupMilestones.indexOf(keyA) > -1);
-    let isKeyBMilestone = (startupMilestones.indexOf(keyB) > -1);
+    let isKeyAMilestone = keyIsMilestone(keyA);
+    let isKeyBMilestone = keyIsMilestone(keyB);
 
     // First order by startup vs non-startup measurement
     if (isKeyAMilestone && !isKeyBMilestone)
@@ -813,10 +902,15 @@ function sortStartupMilestones(aSimpleMeasurements) {
 function displayPingData() {
   let ping = TelemetryPing.getPayload();
 
+  let keysHeader = bundle.GetStringFromName("keysHeader");
+  let valuesHeader = bundle.GetStringFromName("valuesHeader");
+
   // Show simple measurements
   let simpleMeasurements = sortStartupMilestones(ping.simpleMeasurements);
   if (Object.keys(simpleMeasurements).length) {
-    KeyValueTable.render("simple-measurements-table", simpleMeasurements);
+    let simpleSection = document.getElementById("simple-measurements");
+    simpleSection.appendChild(KeyValueTable.render(simpleMeasurements,
+                                                   keysHeader, valuesHeader));
   } else {
     showEmptySectionMessage("simple-measurements-section");
   }
@@ -825,9 +919,18 @@ function displayPingData() {
 
   // Show basic system info gathered
   if (Object.keys(ping.info).length) {
-    KeyValueTable.render("system-info-table", ping.info);
+    let infoSection = document.getElementById("system-info");
+    infoSection.appendChild(KeyValueTable.render(ping.info,
+                                                 keysHeader, valuesHeader));
   } else {
     showEmptySectionMessage("system-info-section");
+  }
+
+  let addonDetails = ping.addonDetails;
+  if (Object.keys(addonDetails).length) {
+    AddonDetails.render(addonDetails);
+  } else {
+    showEmptySectionMessage("addon-details-section");
   }
 }
 

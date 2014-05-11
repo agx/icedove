@@ -9,8 +9,9 @@
 #include "RasterImage.h"
 #include "imgDecoderObserver.h"
 #include "mozilla/RefPtr.h"
-#include "DecodeStrategy.h"
 #include "ImageMetadata.h"
+#include "Orientation.h"
+#include "mozilla/Telemetry.h"
 
 namespace mozilla {
 namespace image {
@@ -49,7 +50,7 @@ public:
    *
    * Notifications Sent: TODO
    */
-  void Write(const char* aBuffer, uint32_t aCount, DecodeStrategy aStrategy);
+  void Write(const char* aBuffer, uint32_t aCount);
 
   /**
    * Informs the decoder that all the data has been written.
@@ -91,6 +92,11 @@ public:
   {
     NS_ABORT_IF_FALSE(!mInitialized, "Can't set size decode after Init()!");
     mSizeDecode = aSizeDecode;
+  }
+
+  bool IsSynchronous() const
+  {
+    return mSynchronous;
   }
 
   void SetObserver(imgDecoderObserver* aObserver)
@@ -149,7 +155,7 @@ public:
   // will be called again with nullptr and 0 as arguments.
   void NeedNewFrame(uint32_t frameNum, uint32_t x_offset, uint32_t y_offset,
                     uint32_t width, uint32_t height,
-                    gfxASurface::gfxImageFormat format,
+                    gfxImageFormat format,
                     uint8_t palette_depth = 0);
 
   virtual bool NeedsNewFrame() const { return mNeedsNewFrame; }
@@ -171,7 +177,7 @@ protected:
    * only these methods.
    */
   virtual void InitInternal();
-  virtual void WriteInternal(const char* aBuffer, uint32_t aCount, DecodeStrategy aStrategy);
+  virtual void WriteInternal(const char* aBuffer, uint32_t aCount);
   virtual void FinishInternal();
 
   /*
@@ -180,7 +186,9 @@ protected:
 
   // Called by decoders when they determine the size of the image. Informs
   // the image of its size and sends notifications.
-  void PostSize(int32_t aWidth, int32_t aHeight);
+  void PostSize(int32_t aWidth,
+                int32_t aHeight,
+                Orientation aOrientation = Orientation());
 
   // Called by decoders when they begin a frame. Informs the image, sends
   // notifications, and does internal book-keeping.
@@ -233,6 +241,17 @@ protected:
   bool mDataError;
 
 private:
+  // Decode in synchronous mode. This is unsafe off-main-thread since it may
+  // attempt to allocate frames. To ensure that we never accidentally leave the
+  // decoder in synchronous mode, this should only be called by
+  // AutoSetSyncDecode.
+  void SetSynchronous(bool aSynchronous)
+  {
+    mSynchronous = aSynchronous;
+  }
+
+  friend class AutoSetSyncDecode;
+
   uint32_t mFrameCount; // Number of frames, including anything in-progress
 
   nsIntRect mInvalidRect; // Tracks an invalidation region in the current frame.
@@ -246,7 +265,7 @@ private:
 
     NewFrameData(uint32_t num, uint32_t offsetx, uint32_t offsety,
                  uint32_t width, uint32_t height,
-                 gfxASurface::gfxImageFormat format, uint8_t paletteDepth)
+                 gfxImageFormat format, uint8_t paletteDepth)
       : mFrameNum(num)
       , mOffsetX(offsetx)
       , mOffsetY(offsety)
@@ -260,7 +279,7 @@ private:
     uint32_t mOffsetY;
     uint32_t mWidth;
     uint32_t mHeight;
-    gfxASurface::gfxImageFormat mFormat;
+    gfxImageFormat mFormat;
     uint8_t mPaletteDepth;
   };
   NewFrameData mNewFrameData;
@@ -269,6 +288,35 @@ private:
   bool mSizeDecode;
   bool mInFrame;
   bool mIsAnimated;
+  bool mSynchronous;
+};
+
+// A RAII helper class to automatically pair a call to SetSynchronous(true)
+// with a call to SetSynchronous(false), since failing to do so can lead us
+// to try to allocate frames off-main-thread, which is unsafe. Synchronous
+// decoding may only happen within the scope of an AutoSetSyncDecode. Nested
+// AutoSetSyncDecode's are OK.
+class AutoSetSyncDecode
+{
+public:
+  AutoSetSyncDecode(Decoder* aDecoder)
+    : mDecoder(aDecoder)
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    MOZ_ASSERT(mDecoder);
+
+    mOriginalValue = mDecoder->IsSynchronous();
+    mDecoder->SetSynchronous(true);
+  }
+
+  ~AutoSetSyncDecode()
+  {
+    mDecoder->SetSynchronous(mOriginalValue);
+  }
+
+private:
+  nsRefPtr<Decoder> mDecoder;
+  bool              mOriginalValue;
 };
 
 } // namespace image

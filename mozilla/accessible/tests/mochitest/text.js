@@ -6,7 +6,6 @@ const BOUNDARY_WORD_START = nsIAccessibleText.BOUNDARY_WORD_START;
 const BOUNDARY_WORD_END = nsIAccessibleText.BOUNDARY_WORD_END;
 const BOUNDARY_LINE_START = nsIAccessibleText.BOUNDARY_LINE_START;
 const BOUNDARY_LINE_END = nsIAccessibleText.BOUNDARY_LINE_END;
-const BOUNDARY_ATTRIBUTE_RANGE = nsIAccessibleText.BOUNDARY_ATTRIBUTE_RANGE;
 
 const kTextEndOffset = nsIAccessibleText.TEXT_OFFSET_END_OF_TEXT;
 const kCaretOffset = nsIAccessibleText.TEXT_OFFSET_CARET;
@@ -416,7 +415,7 @@ function testTextSetSelection(aID, aStartOffset, aEndOffset,
   var text = acc.getText(0, -1);
 
   acc.setSelectionBounds(aSelectionIndex, aStartOffset, aEndOffset);
- 
+
   is(acc.selectionCount, aSelectionsCount, 
      text + ": failed to set selection at index '" + 
      aSelectionIndex + "': selectionCount after");
@@ -585,7 +584,5 @@ function boundaryToString(aBoundaryType)
       return "line start";
     case BOUNDARY_LINE_END:
       return "line end";
-    case BOUNDARY_ATTRIBUTE_RANGE:
-      return "attr range";
   }
 }

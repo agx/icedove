@@ -4,18 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifdef IBMBIDI
-
 #ifndef nsBidiPresUtils_h___
 #define nsBidiPresUtils_h___
 
-#include "nsTArray.h"
+#ifdef IBMBIDI
+
 #include "nsBidi.h"
 #include "nsBidiUtils.h"
-#include "nsCOMPtr.h"
-#include "nsDataHashtable.h"
-#include "nsBlockFrame.h"
-#include "nsTHashtable.h"
+#include "nsHashKeys.h"
+#include "nsCoord.h"
 
 #ifdef DrawText
 #undef DrawText
@@ -24,6 +21,12 @@
 struct BidiParagraphData;
 struct BidiLineData;
 class nsIFrame;
+class nsBlockFrame;
+class nsPresContext;
+class nsRenderingContext;
+class nsBlockInFlowLineIterator;
+class nsStyleContext;
+template<class T> class nsTHashtable;
 
 /**
  * A structure representing some continuation state for each frame on the line,
@@ -177,9 +180,16 @@ public:
    *
    * @param[in] aText  the string to be rendered (in logical order)
    * @param aLength the number of characters in the string
-   * @param aBaseDirection the base direction of the string
+   * @param aBaseLevel the base embedding level of the string
+   *  odd values are right-to-left; even values are left-to-right, plus special
+   *  constants as follows (defined in nsBidi.h)
    *  NSBIDI_LTR - left-to-right string
    *  NSBIDI_RTL - right-to-left string
+   *  NSBIDI_DEFAULT_LTR - auto direction determined by first strong character,
+   *                       default is left-to-right
+   *  NSBIDI_DEFAULT_RTL - auto direction determined by first strong character,
+   *                       default is right-to-left
+   *
    * @param aPresContext the presentation context
    * @param aRenderingContext the rendering context to render to
    * @param aTextRunConstructionContext the rendering context to be used to construct the textrun (affects font hinting)
@@ -190,7 +200,7 @@ public:
    */
   static nsresult RenderText(const PRUnichar*       aText,
                              int32_t                aLength,
-                             nsBidiDirection        aBaseDirection,
+                             nsBidiLevel            aBaseLevel,
                              nsPresContext*         aPresContext,
                              nsRenderingContext&    aRenderingContext,
                              nsRenderingContext&    aTextRunConstructionContext,
@@ -199,18 +209,18 @@ public:
                              nsBidiPositionResolve* aPosResolve = nullptr,
                              int32_t                aPosResolveCount = 0)
   {
-    return ProcessTextForRenderingContext(aText, aLength, aBaseDirection, aPresContext, aRenderingContext,
+    return ProcessTextForRenderingContext(aText, aLength, aBaseLevel, aPresContext, aRenderingContext,
                                           aTextRunConstructionContext, MODE_DRAW, aX, aY, aPosResolve, aPosResolveCount, nullptr);
   }
   
   static nscoord MeasureTextWidth(const PRUnichar*     aText,
                                   int32_t              aLength,
-                                  nsBidiDirection      aBaseDirection,
+                                  nsBidiLevel          aBaseLevel,
                                   nsPresContext*       aPresContext,
                                   nsRenderingContext&  aRenderingContext)
   {
     nscoord length;
-    nsresult rv = ProcessTextForRenderingContext(aText, aLength, aBaseDirection, aPresContext,
+    nsresult rv = ProcessTextForRenderingContext(aText, aLength, aBaseLevel, aPresContext,
                                                  aRenderingContext, aRenderingContext,
                                                  MODE_MEASURE, 0, 0, nullptr, 0, &length);
     return NS_SUCCEEDED(rv) ? length : 0;
@@ -276,9 +286,16 @@ public:
    *
    * @param[in] aText  the string to be processed (in logical order)
    * @param aLength the number of characters in the string
-   * @param aBaseDirection the base direction of the string
+   * @param aBaseLevel the base embedding level of the string
+   *  odd values are right-to-left; even values are left-to-right, plus special
+   *  constants as follows (defined in nsBidi.h)
    *  NSBIDI_LTR - left-to-right string
    *  NSBIDI_RTL - right-to-left string
+   *  NSBIDI_DEFAULT_LTR - auto direction determined by first strong character,
+   *                       default is left-to-right
+   *  NSBIDI_DEFAULT_RTL - auto direction determined by first strong character,
+   *                       default is right-to-left
+   *
    * @param aPresContext the presentation context
    * @param aprocessor the bidi processor
    * @param aMode the operation to process
@@ -292,7 +309,7 @@ public:
    */
   static nsresult ProcessText(const PRUnichar*       aText,
                               int32_t                aLength,
-                              nsBidiDirection        aBaseDirection,
+                              nsBidiLevel            aBaseLevel,
                               nsPresContext*         aPresContext,
                               BidiProcessor&         aprocessor,
                               Mode                   aMode,
@@ -319,11 +336,25 @@ public:
                                   nsBidiLevel aBaseDirection,
                                   bool aOverride);
 
+  /**
+   * Use style attributes to determine the base paragraph level to pass to the
+   * bidi algorithm.
+   *
+   * If |unicode-bidi| is set to "[-moz-]plaintext", returns NSBIDI_DEFAULT_LTR,
+   * in other words the direction is determined from the first strong character
+   * in the text according to rules P2 and P3 of the bidi algorithm, or LTR if
+   * there is no strong character.
+   *
+   * Otherwise returns NSBIDI_LTR or NSBIDI_RTL depending on the value of
+   * |direction|
+   */
+  static nsBidiLevel BidiLevelFromStyle(nsStyleContext* aStyleContext);
+
 private:
   static nsresult
   ProcessTextForRenderingContext(const PRUnichar*       aText,
                                  int32_t                aLength,
-                                 nsBidiDirection        aBaseDirection,
+                                 nsBidiLevel            aBaseLevel,
                                  nsPresContext*         aPresContext,
                                  nsRenderingContext&    aRenderingContext,
                                  nsRenderingContext&    aTextRunConstructionContext,
@@ -473,6 +504,6 @@ private:
                            PRUnichar* aDest);
 };
 
-#endif /* nsBidiPresUtils_h___ */
-
 #endif // IBMBIDI
+
+#endif /* nsBidiPresUtils_h___ */

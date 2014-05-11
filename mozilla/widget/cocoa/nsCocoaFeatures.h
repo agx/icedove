@@ -6,7 +6,7 @@
 #ifndef nsCocoaFeatures_h_
 #define nsCocoaFeatures_h_
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 
 class nsCocoaFeatures {
 public:
@@ -14,6 +14,7 @@ public:
   static bool OnLionOrLater();
   static bool OnMountainLionOrLater();
   static bool SupportCoreAnimationPlugins();
+  static bool OnMavericksOrLater();
 
 private:
   static int32_t mOSXVersion;

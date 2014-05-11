@@ -7,25 +7,20 @@
 #define MOZILLA_AUDIONODESTREAM_H_
 
 #include "MediaStreamGraph.h"
-#include "AudioChannelFormat.h"
-#include "AudioNodeEngine.h"
 #include "mozilla/dom/AudioNodeBinding.h"
-#include "mozilla/dom/AudioParam.h"
-
-#ifdef PR_LOGGING
-#define LOG(type, msg) PR_LOG(gMediaStreamGraphLog, type, msg)
-#else
-#define LOG(type, msg)
-#endif
+#include "AudioSegment.h"
 
 namespace mozilla {
 
 namespace dom {
 struct ThreeDPoint;
 class AudioParamTimeline;
+class DelayNodeEngine;
+class AudioContext;
 }
 
 class ThreadSharedFloatArrayBufferList;
+class AudioNodeEngine;
 
 /**
  * An AudioNodeStream produces one audio track with ID AUDIO_TRACK.
@@ -39,6 +34,8 @@ class ThreadSharedFloatArrayBufferList;
  */
 class AudioNodeStream : public ProcessedMediaStream {
 public:
+  typedef mozilla::dom::AudioContext AudioContext;
+
   enum { AUDIO_TRACK = 1 };
 
   typedef nsAutoTArray<AudioChunk, 1> OutputChunks;
@@ -55,7 +52,8 @@ public:
       mKind(aKind),
       mNumberOfInputChannels(2),
       mMarkAsFinishedAfterThisBlock(false),
-      mAudioParamStream(false)
+      mAudioParamStream(false),
+      mMuted(false)
   {
     MOZ_ASSERT(NS_IsMainThread());
     mChannelCountMode = dom::ChannelCountMode::Max;
@@ -71,7 +69,7 @@ public:
    * Sets a parameter that's a time relative to some stream's played time.
    * This time is converted to a time relative to this stream when it's set.
    */
-  void SetStreamTimeParameter(uint32_t aIndex, MediaStream* aRelativeToStream,
+  void SetStreamTimeParameter(uint32_t aIndex, AudioContext* aContext,
                               double aStreamTime);
   void SetDoubleParameter(uint32_t aIndex, double aValue);
   void SetInt32Parameter(uint32_t aIndex, int32_t aValue);
@@ -99,11 +97,18 @@ public:
                                       dom::ChannelInterpretation aChannelInterpretation);
   virtual void ProduceOutput(GraphTime aFrom, GraphTime aTo);
   TrackTicks GetCurrentPosition();
-  bool AllInputsFinished() const;
   bool IsAudioParamStream() const
   {
     return mAudioParamStream;
   }
+  void Mute() {
+    mMuted = true;
+  }
+
+  void Unmute() {
+    mMuted = false;
+  }
+
   const OutputChunks& LastChunks() const
   {
     return mLastChunks;
@@ -114,14 +119,26 @@ public:
     return (mKind == MediaStreamGraph::SOURCE_STREAM && mFinished) ||
            mKind == MediaStreamGraph::EXTERNAL_STREAM;
   }
+  virtual bool IsIntrinsicallyConsumed() const MOZ_OVERRIDE
+  {
+    return true;
+  }
 
   // Any thread
   AudioNodeEngine* Engine() { return mEngine; }
   TrackRate SampleRate() const { return mSampleRate; }
 
 protected:
+  void AdvanceOutputSegment();
   void FinishOutput();
+  void AccumulateInputChunk(uint32_t aInputIndex, const AudioChunk& aChunk,
+                            AudioChunk* aBlock,
+                            nsTArray<float>* aDownmixBuffer);
+  void UpMixDownMixChunk(const AudioChunk* aChunk, uint32_t aOutputChannelCount,
+                         nsTArray<const void*>& aOutputChannels,
+                         nsTArray<float>& aDownmixBuffer);
 
+  uint32_t ComputeFinalOuputChannelCount(uint32_t aInputChannelCount);
   void ObtainInputBlock(AudioChunk& aTmpChunk, uint32_t aPortIndex);
 
   // The engine that will generate output for this node.
@@ -142,6 +159,8 @@ protected:
   bool mMarkAsFinishedAfterThisBlock;
   // Whether the stream is an AudioParamHelper stream.
   bool mAudioParamStream;
+  // Whether the stream is muted. Access only on the MediaStreamGraph thread.
+  bool mMuted;
 };
 
 }

@@ -4,10 +4,35 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ContainerLayerComposite.h"
-#include "gfxUtils.h"
-#include "mozilla/layers/Compositor.h"
-#include "mozilla/layers/LayersTypes.h"
-#include "gfx2DGlue.h"
+#include <algorithm>                    // for min
+#include "FrameMetrics.h"               // for FrameMetrics
+#include "Units.h"                      // for LayerRect, LayerPixel, etc
+#include "gfx2DGlue.h"                  // for ToMatrix4x4
+#include "gfx3DMatrix.h"                // for gfx3DMatrix
+#include "gfxImageSurface.h"            // for gfxImageSurface
+#include "gfxMatrix.h"                  // for gfxMatrix
+#include "gfxPlatform.h"                // for gfxPlatform
+#include "gfxUtils.h"                   // for gfxUtils, etc
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc
+#include "mozilla/RefPtr.h"             // for RefPtr
+#include "mozilla/gfx/BaseRect.h"       // for BaseRect
+#include "mozilla/gfx/Matrix.h"         // for Matrix4x4
+#include "mozilla/gfx/Point.h"          // for Point, IntPoint
+#include "mozilla/gfx/Rect.h"           // for IntRect, Rect
+#include "mozilla/layers/Compositor.h"  // for Compositor, etc
+#include "mozilla/layers/CompositorTypes.h"  // for DIAGNOSTIC_CONTAINER
+#include "mozilla/layers/Effects.h"     // for Effect, EffectChain, etc
+#include "mozilla/layers/TextureHost.h"  // for CompositingRenderTarget
+#include "mozilla/mozalloc.h"           // for operator delete, etc
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsDebug.h"                    // for NS_ASSERTION
+#include "nsISupportsUtils.h"           // for NS_ADDREF, NS_RELEASE
+#include "nsPoint.h"                    // for nsIntPoint
+#include "nsRect.h"                     // for nsIntRect
+#include "nsRegion.h"                   // for nsIntRegion
+#include "nsTArray.h"                   // for nsAutoTArray
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+#include <vector>
 
 namespace mozilla {
 namespace layers {
@@ -23,9 +48,160 @@ HasOpaqueAncestorLayer(Layer* aLayer)
   return false;
 }
 
+/**
+ * Returns a rectangle of content painted opaquely by aLayer. Very consertative;
+ * bails by returning an empty rect in any tricky situations.
+ */
+static nsIntRect
+GetOpaqueRect(Layer* aLayer)
+{
+  nsIntRect result;
+  // Just bail if there's anything difficult to handle.
+  if (!aLayer->GetEffectiveTransform().IsIdentity() ||
+      aLayer->GetEffectiveOpacity() != 1.0f ||
+      aLayer->GetMaskLayer()) {
+    return result;
+  }
+  if (aLayer->GetContentFlags() & Layer::CONTENT_OPAQUE) {
+    result = aLayer->GetEffectiveVisibleRegion().GetLargestRectangle();
+  } else {
+    // Drill down into RefLayers because that's what we particularly care about;
+    // layer construction for aLayer will not have known about the opaqueness
+    // of any RefLayer subtrees.
+    RefLayer* refLayer = aLayer->AsRefLayer();
+    if (refLayer && refLayer->GetFirstChild()) {
+      result = GetOpaqueRect(refLayer->GetFirstChild());
+    }
+  }
+  const nsIntRect* clipRect = aLayer->GetEffectiveClipRect();
+  if (clipRect) {
+    result.IntersectRect(result, *clipRect);
+  }
+  return result;
+}
+
+struct LayerVelocityUserData : public LayerUserData {
+public:
+  LayerVelocityUserData() {
+    MOZ_COUNT_CTOR(LayerVelocityUserData);
+  }
+  ~LayerVelocityUserData() {
+    MOZ_COUNT_DTOR(LayerVelocityUserData);
+  }
+
+  struct VelocityData {
+    VelocityData(TimeStamp frameTime, int scrollX, int scrollY)
+      : mFrameTime(frameTime)
+      , mPoint(scrollX, scrollY)
+    {}
+
+    TimeStamp mFrameTime;
+    gfx::Point mPoint;
+  };
+  std::vector<VelocityData> mData;
+};
+
+static void DrawVelGraph(const nsIntRect& aClipRect,
+                         LayerManagerComposite* aManager,
+                         Layer* aLayer) {
+  static char sLayerVelocityUserDataKey;
+  Compositor* compositor = aManager->GetCompositor();
+  gfx::Rect clipRect(aClipRect.x, aClipRect.y,
+                     aClipRect.width, aClipRect.height);
+
+  TimeStamp now = TimeStamp::Now();
+
+  void* key = reinterpret_cast<void*>(&sLayerVelocityUserDataKey);
+  if (!aLayer->HasUserData(key)) {
+    aLayer->SetUserData(key, new LayerVelocityUserData());
+  }
+
+  LayerVelocityUserData* velocityData =
+    static_cast<LayerVelocityUserData*>(aLayer->GetUserData(key));
+
+  if (velocityData->mData.size() >= 1 &&
+    now > velocityData->mData[velocityData->mData.size() - 1].mFrameTime +
+      TimeDuration::FromMilliseconds(200)) {
+    // clear stale data
+    velocityData->mData.clear();
+  }
+
+  nsIntPoint scrollOffset =
+    aLayer->GetEffectiveVisibleRegion().GetBounds().TopLeft();
+  velocityData->mData.push_back(
+    LayerVelocityUserData::VelocityData(now, scrollOffset.x, scrollOffset.y));
+
+
+  // XXX: Uncomment these lines to enable ScrollGraph logging. This is
+  //      useful for HVGA phones or to output the data to accurate
+  //      graphing software.
+  //printf_stderr("ScrollGraph (%p): %i, %i\n",
+  //  aLayer, scrollOffset.x, scrollOffset.y);
+
+  // Keep a circular buffer of 100.
+  size_t circularBufferSize = 100;
+  if (velocityData->mData.size() > circularBufferSize) {
+    velocityData->mData.erase(velocityData->mData.begin());
+  }
+
+  if (velocityData->mData.size() == 1) {
+    return;
+  }
+
+  // Clear and disable the graph when it's flat
+  for (size_t i = 1; i < velocityData->mData.size(); i++) {
+    if (velocityData->mData[i - 1].mPoint != velocityData->mData[i].mPoint) {
+      break;
+    }
+    if (i == velocityData->mData.size() - 1) {
+      velocityData->mData.clear();
+      return;
+    }
+  }
+
+  if (aLayer->GetEffectiveVisibleRegion().GetBounds().width < 300 ||
+      aLayer->GetEffectiveVisibleRegion().GetBounds().height < 300) {
+    // Don't want a graph for smaller layers
+    return;
+  }
+
+  aManager->SetDebugOverlayWantsNextFrame(true);
+
+  gfx::Matrix4x4 transform;
+  ToMatrix4x4(aLayer->GetEffectiveTransform(), transform);
+  nsIntRect bounds = aLayer->GetEffectiveVisibleRegion().GetBounds();
+  gfx::Rect graphBounds = gfx::Rect(bounds.x, bounds.y,
+                                    bounds.width, bounds.height);
+  gfx::Rect graphRect = gfx::Rect(bounds.x, bounds.y, 200, 100);
+
+  float opacity = 1.0;
+  EffectChain effects;
+  effects.mPrimaryEffect = new EffectSolidColor(gfx::Color(0.2,0,0,1));
+  compositor->DrawQuad(graphRect,
+                       clipRect,
+                       effects,
+                       opacity,
+                       transform);
+
+  std::vector<gfx::Point> graph;
+  int yScaleFactor = 3;
+  for (int32_t i = (int32_t)velocityData->mData.size() - 2; i >= 0; i--) {
+    const gfx::Point& p1 = velocityData->mData[i+1].mPoint;
+    const gfx::Point& p2 = velocityData->mData[i].mPoint;
+    int vel = sqrt((p1.x - p2.x) * (p1.x - p2.x) +
+                   (p1.y - p2.y) * (p1.y - p2.y));
+    graph.push_back(
+      gfx::Point(bounds.x + graphRect.width / circularBufferSize * i,
+                 graphBounds.y + graphRect.height - vel/yScaleFactor));
+  }
+
+  compositor->DrawLines(graph, clipRect, gfx::Color(0,1,0,1),
+                        opacity, transform);
+
+}
+
 template<class ContainerT> void
 ContainerRender(ContainerT* aContainer,
-                const nsIntPoint& aOffset,
                 LayerManagerComposite* aManager,
                 const nsIntRect& aClipRect)
 {
@@ -38,7 +214,6 @@ ContainerRender(ContainerT* aContainer,
 
   RefPtr<CompositingRenderTarget> previousTarget = compositor->GetCurrentRenderTarget();
 
-  nsIntPoint childOffset(aOffset);
   nsIntRect visibleRect = aContainer->GetEffectiveVisibleRegion().GetBounds();
 
   aContainer->mSupportsComponentAlphaChildren = false;
@@ -51,6 +226,7 @@ ContainerRender(ContainerT* aContainer,
     bool surfaceCopyNeeded = false;
     gfx::IntRect surfaceRect = gfx::IntRect(visibleRect.x, visibleRect.y,
                                             visibleRect.width, visibleRect.height);
+    gfx::IntPoint sourcePoint = gfx::IntPoint(visibleRect.x, visibleRect.y);
     // we're about to create a framebuffer backed by textures to use as an intermediate
     // surface. What to do if its size (as given by framebufferRect) would exceed the
     // maximum texture size supported by the GL? The present code chooses the compromise
@@ -75,25 +251,26 @@ ContainerRender(ContainerT* aContainer,
       // not safe.
       if (HasOpaqueAncestorLayer(aContainer) &&
           transform3D.Is2D(&transform) && !transform.HasNonIntegerTranslation()) {
-        mode = gfxPlatform::GetPlatform()->UsesSubpixelAATextRendering() ?
-                                            INIT_MODE_COPY : INIT_MODE_CLEAR;
-        surfaceCopyNeeded = (mode == INIT_MODE_COPY);
-        surfaceRect.x += transform.x0;
-        surfaceRect.y += transform.y0;
+        surfaceCopyNeeded = gfxPlatform::ComponentAlphaEnabled();
+        sourcePoint.x += transform.x0;
+        sourcePoint.y += transform.y0;
         aContainer->mSupportsComponentAlphaChildren
-          = gfxPlatform::GetPlatform()->UsesSubpixelAATextRendering();
+          = gfxPlatform::ComponentAlphaEnabled();
       }
     }
 
-    surfaceRect -= gfx::IntPoint(aOffset.x, aOffset.y);
+    sourcePoint -= compositor->GetCurrentRenderTarget()->GetOrigin();
     if (surfaceCopyNeeded) {
-      surface = compositor->CreateRenderTargetFromSource(surfaceRect, previousTarget);
+      surface = compositor->CreateRenderTargetFromSource(surfaceRect, previousTarget, sourcePoint);
     } else {
       surface = compositor->CreateRenderTarget(surfaceRect, mode);
     }
+
+    if (!surface) {
+      return;
+    }
+
     compositor->SetRenderTarget(surface);
-    childOffset.x = visibleRect.x;
-    childOffset.y = visibleRect.y;
   } else {
     surface = previousTarget;
     aContainer->mSupportsComponentAlphaChildren = (aContainer->GetContentFlags() & Layer::CONTENT_OPAQUE) ||
@@ -109,8 +286,26 @@ ContainerRender(ContainerT* aContainer,
   for (uint32_t i = 0; i < children.Length(); i++) {
     LayerComposite* layerToRender = static_cast<LayerComposite*>(children.ElementAt(i)->ImplData());
 
-    if (layerToRender->GetLayer()->GetEffectiveVisibleRegion().IsEmpty()) {
+    if (layerToRender->GetLayer()->GetEffectiveVisibleRegion().IsEmpty() &&
+        !layerToRender->GetLayer()->AsContainerLayer()) {
       continue;
+    }
+
+    if (i + 1 < children.Length() &&
+        layerToRender->GetLayer()->GetEffectiveTransform().IsIdentity()) {
+      LayerComposite* nextLayer = static_cast<LayerComposite*>(children.ElementAt(i + 1)->ImplData());
+      nsIntRect nextLayerOpaqueRect;
+      if (nextLayer && nextLayer->GetLayer()) {
+        nextLayerOpaqueRect = GetOpaqueRect(nextLayer->GetLayer());
+      }
+      if (!nextLayerOpaqueRect.IsEmpty()) {
+        nsIntRegion visibleRegion;
+        visibleRegion.Sub(layerToRender->GetShadowVisibleRegion(), nextLayerOpaqueRect);
+        layerToRender->SetShadowVisibleRegion(visibleRegion);
+        if (visibleRegion.IsEmpty()) {
+          continue;
+        }
+      }
     }
 
     nsIntRect clipRect = layerToRender->GetLayer()->
@@ -119,7 +314,23 @@ ContainerRender(ContainerT* aContainer,
       continue;
     }
 
-    layerToRender->RenderLayer(childOffset, clipRect);
+    if (layerToRender->HasLayerBeenComposited()) {
+      // Composer2D will compose this layer so skip GPU composition
+      // this time & reset composition flag for next composition phase
+      layerToRender->SetLayerComposited(false);
+      if (layerToRender->GetClearFB()) {
+        // Clear layer's visible rect on FrameBuffer with transparent pixels
+        gfx::Rect aRect(clipRect.x, clipRect.y, clipRect.width, clipRect.height);
+        compositor->clearFBRect(&aRect);
+        layerToRender->SetClearFB(false);
+      }
+    } else {
+      layerToRender->RenderLayer(clipRect);
+    }
+
+    if (gfxPlatform::GetPrefLayersScrollGraph()) {
+      DrawVelGraph(clipRect, aManager, layerToRender->GetLayer());
+    }
     // invariant: our GL context should be current here, I don't think we can
     // assert it though
   }
@@ -135,9 +346,9 @@ ContainerRender(ContainerT* aContainer,
 
     compositor->SetRenderTarget(previousTarget);
     EffectChain effectChain;
-    LayerManagerComposite::AddMaskEffect(aContainer->GetMaskLayer(),
-                                         effectChain,
-                                         !aContainer->GetTransform().CanDraw2D());
+    LayerManagerComposite::AutoAddMaskEffect autoMaskEffect(aContainer->GetMaskLayer(),
+                                                            effectChain,
+                                                            !aContainer->GetTransform().CanDraw2D());
 
     effectChain.mPrimaryEffect = new EffectRenderTarget(surface);
 
@@ -147,18 +358,20 @@ ContainerRender(ContainerT* aContainer,
     gfx::Rect rect(visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height);
     gfx::Rect clipRect(aClipRect.x, aClipRect.y, aClipRect.width, aClipRect.height);
     aManager->GetCompositor()->DrawQuad(rect, clipRect, effectChain, opacity,
-                                        transform, gfx::Point(aOffset.x, aOffset.y));
+                                        transform);
   }
 
   if (aContainer->GetFrameMetrics().IsScrollable()) {
     gfx::Matrix4x4 transform;
     ToMatrix4x4(aContainer->GetEffectiveTransform(), transform);
 
-    gfx::Rect rect(visibleRect.x, visibleRect.y, visibleRect.width, visibleRect.height);
+    const FrameMetrics& frame = aContainer->GetFrameMetrics();
+    LayerRect layerBounds = ScreenRect(frame.mCompositionBounds) * ScreenToLayerScale(1.0);
+    gfx::Rect rect(layerBounds.x, layerBounds.y, layerBounds.width, layerBounds.height);
     gfx::Rect clipRect(aClipRect.x, aClipRect.y, aClipRect.width, aClipRect.height);
-    aManager->GetCompositor()->DrawDiagnostics(gfx::Color(1.0, 0.0, 0.0, 1.0),
+    aManager->GetCompositor()->DrawDiagnostics(DIAGNOSTIC_CONTAINER,
                                                rect, clipRect,
-                                               transform, gfx::Point(aOffset.x, aOffset.y));
+                                               transform);
   }
 }
 
@@ -189,75 +402,6 @@ ContainerLayerComposite::~ContainerLayerComposite()
 }
 
 void
-ContainerLayerComposite::InsertAfter(Layer* aChild, Layer* aAfter)
-{
-  NS_ASSERTION(aChild->Manager() == Manager(),
-               "Child has wrong manager");
-  NS_ASSERTION(!aChild->GetParent(),
-               "aChild already in the tree");
-  NS_ASSERTION(!aChild->GetNextSibling() && !aChild->GetPrevSibling(),
-               "aChild already has siblings?");
-  NS_ASSERTION(!aAfter ||
-               (aAfter->Manager() == Manager() &&
-                aAfter->GetParent() == this),
-               "aAfter is not our child");
-
-  aChild->SetParent(this);
-  if (aAfter == mLastChild) {
-    mLastChild = aChild;
-  }
-  if (!aAfter) {
-    aChild->SetNextSibling(mFirstChild);
-    if (mFirstChild) {
-      mFirstChild->SetPrevSibling(aChild);
-    }
-    mFirstChild = aChild;
-    NS_ADDREF(aChild);
-    DidInsertChild(aChild);
-    return;
-  }
-
-  Layer* next = aAfter->GetNextSibling();
-  aChild->SetNextSibling(next);
-  aChild->SetPrevSibling(aAfter);
-  if (next) {
-    next->SetPrevSibling(aChild);
-  }
-  aAfter->SetNextSibling(aChild);
-  NS_ADDREF(aChild);
-  DidInsertChild(aChild);
-}
-
-void
-ContainerLayerComposite::RemoveChild(Layer *aChild)
-{
-  NS_ASSERTION(aChild->Manager() == Manager(),
-               "Child has wrong manager");
-  NS_ASSERTION(aChild->GetParent() == this,
-               "aChild not our child");
-
-  Layer* prev = aChild->GetPrevSibling();
-  Layer* next = aChild->GetNextSibling();
-  if (prev) {
-    prev->SetNextSibling(next);
-  } else {
-    this->mFirstChild = next;
-  }
-  if (next) {
-    next->SetPrevSibling(prev);
-  } else {
-    this->mLastChild = prev;
-  }
-
-  aChild->SetNextSibling(nullptr);
-  aChild->SetPrevSibling(nullptr);
-  aChild->SetParent(nullptr);
-
-  this->DidRemoveChild(aChild);
-  NS_RELEASE(aChild);
-}
-
-void
 ContainerLayerComposite::Destroy()
 {
   if (!mDestroyed) {
@@ -279,55 +423,9 @@ ContainerLayerComposite::GetFirstChildComposite()
 }
 
 void
-ContainerLayerComposite::RepositionChild(Layer* aChild, Layer* aAfter)
+ContainerLayerComposite::RenderLayer(const nsIntRect& aClipRect)
 {
-  NS_ASSERTION(aChild->Manager() == Manager(),
-               "Child has wrong manager");
-  NS_ASSERTION(aChild->GetParent() == this,
-               "aChild not our child");
-  NS_ASSERTION(!aAfter ||
-               (aAfter->Manager() == Manager() &&
-                aAfter->GetParent() == this),
-               "aAfter is not our child");
-
-  Layer* prev = aChild->GetPrevSibling();
-  Layer* next = aChild->GetNextSibling();
-  if (prev == aAfter) {
-    // aChild is already in the correct position, nothing to do.
-    return;
-  }
-  if (prev) {
-    prev->SetNextSibling(next);
-  }
-  if (next) {
-    next->SetPrevSibling(prev);
-  }
-  if (!aAfter) {
-    aChild->SetPrevSibling(nullptr);
-    aChild->SetNextSibling(mFirstChild);
-    if (mFirstChild) {
-      mFirstChild->SetPrevSibling(aChild);
-    }
-    mFirstChild = aChild;
-    return;
-  }
-
-  Layer* afterNext = aAfter->GetNextSibling();
-  if (afterNext) {
-    afterNext->SetPrevSibling(aChild);
-  } else {
-    mLastChild = aChild;
-  }
-  aAfter->SetNextSibling(aChild);
-  aChild->SetPrevSibling(aAfter);
-  aChild->SetNextSibling(afterNext);
-}
-
-void
-ContainerLayerComposite::RenderLayer(const nsIntPoint& aOffset,
-                                     const nsIntRect& aClipRect)
-{
-  ContainerRender(this, aOffset, mCompositeManager, aClipRect);
+  ContainerRender(this, mCompositeManager, aClipRect);
 }
 
 void
@@ -368,10 +466,9 @@ RefLayerComposite::GetFirstChildComposite()
 }
 
 void
-RefLayerComposite::RenderLayer(const nsIntPoint& aOffset,
-                               const nsIntRect& aClipRect)
+RefLayerComposite::RenderLayer(const nsIntRect& aClipRect)
 {
-  ContainerRender(this, aOffset, mCompositeManager, aClipRect);
+  ContainerRender(this, mCompositeManager, aClipRect);
 }
 
 void

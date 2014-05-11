@@ -55,7 +55,7 @@ public:
 
   // Called by the decode thread to keep track of the number of bytes read
   // from the resource.
-  virtual void NotifyBytesConsumed(int64_t aBytes) = 0;
+  virtual void NotifyBytesConsumed(int64_t aBytes, int64_t aOffset) = 0;
 
   // Increments the parsed and decoded frame counters by the passed in counts.
   // Can be called on any thread.
@@ -71,6 +71,11 @@ public:
 
   // Set the duration of the media in microseconds.
   virtual void SetMediaDuration(int64_t aDuration) = 0;
+
+  // Sets the duration of the media in microseconds. The MediaDecoder
+  // fires a durationchange event to its owner (e.g., an HTML audio
+  // tag).
+  virtual void UpdateEstimatedMediaDuration(int64_t aDuration) = 0;
 
   // Set the media as being seekable or not.
   virtual void SetMediaSeekable(bool aMediaSeekable) = 0;

@@ -5,8 +5,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/HTMLAreaElement.h"
+
+#include "mozilla/Attributes.h"
 #include "mozilla/dom/HTMLAreaElementBinding.h"
-#include "base/compiler_specific.h"
+#include "mozilla/MemoryReporting.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Area)
 
@@ -14,29 +16,17 @@ namespace mozilla {
 namespace dom {
 
 HTMLAreaElement::HTMLAreaElement(already_AddRefed<nsINodeInfo> aNodeInfo)
-  : nsGenericHTMLElement(aNodeInfo),
-    ALLOW_THIS_IN_INITIALIZER_LIST(Link(this))
+  : nsGenericHTMLElement(aNodeInfo)
+  , Link(MOZ_THIS_IN_INITIALIZER_LIST())
 {
-  SetIsDOMBinding();
 }
 
 HTMLAreaElement::~HTMLAreaElement()
 {
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLAreaElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLAreaElement, Element)
-
-// QueryInterface implementation for HTMLAreaElement
-NS_INTERFACE_TABLE_HEAD(HTMLAreaElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED3(HTMLAreaElement,
-                                nsIDOMHTMLAreaElement,
-                                nsILink,
-                                Link)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
-
+NS_IMPL_ISUPPORTS_INHERITED2(HTMLAreaElement, nsGenericHTMLElement,
+                             nsIDOMHTMLAreaElement, Link)
 
 NS_IMPL_ELEMENT_CLONE(HTMLAreaElement)
 
@@ -232,7 +222,7 @@ HTMLAreaElement::IntrinsicState() const
 }
 
 size_t
-HTMLAreaElement::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+HTMLAreaElement::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   return nsGenericHTMLElement::SizeOfExcludingThis(aMallocSizeOf) +
          Link::SizeOfExcludingThis(aMallocSizeOf);

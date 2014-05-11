@@ -6,31 +6,24 @@
 
 /* rendering object for the HTML <video> element */
 
-#include "nsHTMLParts.h"
+#include "nsVideoFrame.h"
+
 #include "nsCOMPtr.h"
-#include "nsIServiceManager.h"
 #include "nsGkAtoms.h"
 
-#include "nsVideoFrame.h"
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "nsIDOMHTMLVideoElement.h"
 #include "nsIDOMHTMLImageElement.h"
-#include "nsIDOMHTMLElement.h"
 #include "nsDisplayList.h"
 #include "nsGenericHTMLElement.h"
-#include "gfxContext.h"
-#include "gfxImageSurface.h"
 #include "nsPresContext.h"
-#include "nsTransform2D.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsBoxLayoutState.h"
 #include "nsBoxFrame.h"
 #include "nsImageFrame.h"
 #include "nsIImageLoadingContent.h"
-#include "nsCSSRendering.h"
 #include "nsContentUtils.h"
 #include "nsCxPusher.h"
-#include "mozilla/layers/ShadowLayers.h"
 #include "ImageContainer.h"
 #include "ImageLayers.h"
 #include "nsContentList.h"
@@ -99,8 +92,7 @@ nsVideoFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
     // And now have it update its internal state
     element->UpdateState(false);
 
-    nsresult res = UpdatePosterSource(false);
-    NS_ENSURE_SUCCESS(res,res);
+    UpdatePosterSource(false);
 
     if (!aElements.AppendElement(mPosterImage))
       return NS_ERROR_OUT_OF_MEMORY;
@@ -179,7 +171,7 @@ already_AddRefed<Layer>
 nsVideoFrame::BuildLayer(nsDisplayListBuilder* aBuilder,
                          LayerManager* aManager,
                          nsDisplayItem* aItem,
-                         const ContainerParameters& aContainerParameters)
+                         const ContainerLayerParameters& aContainerParameters)
 {
   nsRect area = GetContentRect() - GetPosition() + aItem->ToReferenceFrame();
   HTMLVideoElement* element = static_cast<HTMLVideoElement*>(GetContent());
@@ -405,14 +397,14 @@ public:
 
   virtual already_AddRefed<Layer> BuildLayer(nsDisplayListBuilder* aBuilder,
                                              LayerManager* aManager,
-                                             const ContainerParameters& aContainerParameters)
+                                             const ContainerLayerParameters& aContainerParameters)
   {
     return static_cast<nsVideoFrame*>(mFrame)->BuildLayer(aBuilder, aManager, this, aContainerParameters);
   }
 
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
-                                   const FrameLayerBuilder::ContainerParameters& aParameters)
+                                   const ContainerLayerParameters& aParameters)
   {
     if (aManager->IsCompositingCheap()) {
       // Since ImageLayers don't require additional memory of the
@@ -503,7 +495,8 @@ nsSize nsVideoFrame::ComputeSize(nsRenderingContext *aRenderingContext,
   intrinsicSize.width.SetCoordValue(size.width);
   intrinsicSize.height.SetCoordValue(size.height);
 
-  nsSize& intrinsicRatio = size; // won't actually be used
+  // Only video elements have an intrinsic ratio.
+  nsSize intrinsicRatio = HasVideoElement() ? size : nsSize(0, 0);
 
   return nsLayoutUtils::ComputeSizeWithIntrinsicDimensions(aRenderingContext,
                                                            this,
@@ -531,6 +524,11 @@ nscoord nsVideoFrame::GetPrefWidth(nsRenderingContext *aRenderingContext)
 
 nsSize nsVideoFrame::GetIntrinsicRatio()
 {
+  if (!HasVideoElement()) {
+    // Audio elements have no intrinsic ratio.
+    return nsSize(0, 0);
+  }
+
   return GetVideoIntrinsicSize(nullptr);
 }
 
@@ -566,12 +564,9 @@ nsVideoFrame::GetVideoIntrinsicSize(nsRenderingContext *aRenderingContext)
 {
   // Defaulting size to 300x150 if no size given.
   nsIntSize size(300, 150);
-  
+
   if (!HasVideoElement()) {
-    if (!aRenderingContext || !mFrames.FirstChild()) {
-      // We just want our intrinsic ratio, but audio elements need no
-      // intrinsic ratio, so just return "no ratio". Also, if there's
-      // no controls frame, we prefer to be zero-sized.
+    if (!mFrames.FirstChild()) {
       return nsSize(0, 0);
     }
 
@@ -596,20 +591,22 @@ nsVideoFrame::GetVideoIntrinsicSize(nsRenderingContext *aRenderingContext)
                 nsPresContext::CSSPixelsToAppUnits(size.height));
 }
 
-nsresult
+void
 nsVideoFrame::UpdatePosterSource(bool aNotify)
 {
   NS_ASSERTION(HasVideoElement(), "Only call this on <video> elements.");
   HTMLVideoElement* element = static_cast<HTMLVideoElement*>(GetContent());
 
-  nsAutoString posterStr;
-  element->GetPoster(posterStr);
-  nsresult res = mPosterImage->SetAttr(kNameSpaceID_None,
-                                       nsGkAtoms::src,
-                                       posterStr,
-                                       aNotify);
-  NS_ENSURE_SUCCESS(res,res);
-  return NS_OK;
+  if (element->HasAttr(kNameSpaceID_None, nsGkAtoms::poster)) {
+    nsAutoString posterStr;
+    element->GetPoster(posterStr);
+    mPosterImage->SetAttr(kNameSpaceID_None,
+                          nsGkAtoms::src,
+                          posterStr,
+                          aNotify);
+  } else {
+    mPosterImage->UnsetAttr(kNameSpaceID_None, nsGkAtoms::poster, aNotify);
+  }
 }
 
 NS_IMETHODIMP
@@ -618,8 +615,7 @@ nsVideoFrame::AttributeChanged(int32_t aNameSpaceID,
                                int32_t aModType)
 {
   if (aAttribute == nsGkAtoms::poster && HasVideoElement()) {
-    nsresult res = UpdatePosterSource(true);
-    NS_ENSURE_SUCCESS(res,res);
+    UpdatePosterSource(true);
   }
   return nsContainerFrame::AttributeChanged(aNameSpaceID,
                                             aAttribute,

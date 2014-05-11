@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -35,6 +35,7 @@ function inspectNode(aInspector)
 
   inspector.highlighter.once("locked", performScrollingTest);
   executeSoon(function() {
+    inspector.highlighter.unlock();
     inspector.selection.setNode(div, "");
   });
 }
@@ -42,6 +43,8 @@ function inspectNode(aInspector)
 function performScrollingTest()
 {
   executeSoon(function() {
+    // FIXME: this will fail on retina displays. EventUtils will only scroll
+    // 25px down instead of 50.
     EventUtils.synthesizeWheel(div, 10, 10,
       { deltaY: 50.0, deltaMode: WheelEvent.DOM_DELTA_PIXEL },
       iframe.contentWindow);

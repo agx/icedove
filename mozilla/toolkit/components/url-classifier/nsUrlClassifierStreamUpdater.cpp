@@ -15,8 +15,12 @@
 #include "nsToolkitCompsCID.h"
 #include "nsUrlClassifierStreamUpdater.h"
 #include "prlog.h"
+#include "nsIInterfaceRequestor.h"
+#include "mozilla/LoadContext.h"
 
 static const char* gQuitApplicationMessage = "quit-application";
+
+#undef LOG
 
 // NSPR_LOG_MODULES=UrlClassifierStreamUpdater:5
 #if defined(PR_LOGGING)
@@ -26,6 +30,8 @@ static const PRLogModuleInfo *gUrlClassifierStreamUpdaterLog = nullptr;
 #define LOG(args)
 #endif
 
+
+// This class does absolutely nothing, except pass requests onto the DBService.
 
 ///////////////////////////////////////////////////////////////////////////////
 // nsIUrlClassiferStreamUpdater implementation
@@ -42,7 +48,7 @@ nsUrlClassifierStreamUpdater::nsUrlClassifierStreamUpdater()
 
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS7(nsUrlClassifierStreamUpdater,
+NS_IMPL_ISUPPORTS7(nsUrlClassifierStreamUpdater,
                               nsIUrlClassifierStreamUpdater,
                               nsIUrlClassifierUpdateObserver,
                               nsIRequestObserver,
@@ -107,6 +113,7 @@ nsUrlClassifierStreamUpdater::FetchUpdate(nsIURI *aUpdateUrl,
 
   mBeganStream = false;
 
+  // If aRequestBody is empty, construct it for the test.
   if (!aRequestBody.IsEmpty()) {
     rv = AddRequestBody(aRequestBody);
     NS_ENSURE_SUCCESS(rv, rv);
@@ -114,11 +121,20 @@ nsUrlClassifierStreamUpdater::FetchUpdate(nsIURI *aUpdateUrl,
 
   // Set the appropriate content type for file/data URIs, for unit testing
   // purposes.
+  // This is only used for testing and should be deleted.
   bool match;
   if ((NS_SUCCEEDED(aUpdateUrl->SchemeIs("file", &match)) && match) ||
       (NS_SUCCEEDED(aUpdateUrl->SchemeIs("data", &match)) && match)) {
     mChannel->SetContentType(NS_LITERAL_CSTRING("application/vnd.google.safebrowsing-update"));
   }
+
+   // Create a custom LoadContext for SafeBrowsing, so we can use callbacks on
+   // the channel to query the appId which allows separation of safebrowsing
+   // cookies in a separate jar.
+  nsCOMPtr<nsIInterfaceRequestor> sbContext =
+    new mozilla::LoadContext(NECKO_SAFEBROWSING_APP_ID);
+  rv = mChannel->SetNotificationCallbacks(sbContext);
+  NS_ENSURE_SUCCESS(rv, rv);
 
   // Make the request
   rv = mChannel->AsyncOpen(this, nullptr);
@@ -214,8 +230,9 @@ nsUrlClassifierStreamUpdater::DownloadUpdates(
   mUpdateUrl->GetAsciiSpec(urlSpec);
 
   LOG(("FetchUpdate: %s", urlSpec.get()));
-  //LOG(("requestBody: %s", aRequestBody.get()));
+  //LOG(("requestBody: %s", aRequestBody.Data()));
 
+  LOG(("Calling into FetchUpdate"));
   return FetchUpdate(mUpdateUrl, aRequestBody, EmptyCString(), EmptyCString());
 }
 
@@ -238,6 +255,9 @@ nsUrlClassifierStreamUpdater::UpdateUrlRequested(const nsACString &aUrl,
       StringBeginsWith(aUrl, NS_LITERAL_CSTRING("file:"))) {
     update->mUrl = aUrl;
   } else {
+    // This must be fixed when bug 783047 is fixed. However, for unittesting
+    // update urls to localhost should use http, not https (otherwise the
+    // connection will fail silently, since there will be no cert available).
     update->mUrl = NS_LITERAL_CSTRING("http://") + aUrl;
   }
   update->mTable = aTable;
@@ -418,6 +438,7 @@ nsUrlClassifierStreamUpdater::OnStartRequest(nsIRequest *request,
 
         uint32_t requestStatus;
         rv = httpChannel->GetResponseStatus(&requestStatus);
+        LOG(("HTTP request returned failure code: %d.", requestStatus));
         NS_ENSURE_SUCCESS(rv, rv);
 
         strStatus.AppendInt(requestStatus);
@@ -462,7 +483,6 @@ nsUrlClassifierStreamUpdater::OnDataAvailable(nsIRequest *request,
   NS_ENSURE_SUCCESS(rv, rv);
 
   //LOG(("Chunk (%d): %s\n\n", chunk.Length(), chunk.get()));
-
   rv = mDBService->UpdateStream(chunk);
   NS_ENSURE_SUCCESS(rv, rv);
 

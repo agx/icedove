@@ -26,23 +26,27 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#include "YarrPattern.h"
+#include "yarr/YarrPattern.h"
 
-#include "Yarr.h"
-#include "YarrCanonicalizeUCS2.h"
-#include "YarrParser.h"
+#include "yarr/Yarr.h"
+#include "yarr/YarrCanonicalizeUCS2.h"
+#include "yarr/YarrParser.h"
 
 using namespace WTF;
 
 namespace JSC { namespace Yarr {
 
-#include "RegExpJitTables.h"
+#include "yarr/RegExpJitTables.h"
 
 #if WTF_CPU_SPARC
 # define BASE_FRAME_SIZE 24
 #else
 # define BASE_FRAME_SIZE 0
 #endif
+
+// Thanks, windows.h!
+#undef min
+#undef max
 
 class CharacterClassConstructor {
 public:
@@ -183,7 +187,7 @@ public:
 
     CharacterClass* charClass()
     {
-        CharacterClass* characterClass = js_new<CharacterClass>(PassRefPtr<CharacterClassTable>(0));
+        CharacterClass* characterClass = js_new<CharacterClass>();
 
         characterClass->m_matches.swap(m_matches);
         characterClass->m_ranges.swap(m_ranges);
@@ -766,7 +770,10 @@ public:
             if (term.type == PatternTerm::TypeParenthesesSubpattern) {
                 PatternDisjunction* nestedDisjunction = term.parentheses.disjunction;
                 for (unsigned alt = 0; alt < nestedDisjunction->m_alternatives.size(); ++alt) {
-                    if (containsCapturingTerms(nestedDisjunction->m_alternatives[alt], 0, nestedDisjunction->m_alternatives[alt]->m_terms.size() - 1))
+                    PatternAlternative *pattern = nestedDisjunction->m_alternatives[alt];
+                    if (pattern->m_terms.size() == 0)
+                        continue;
+                    if (containsCapturingTerms(pattern, 0, pattern->m_terms.size() - 1))
                         return true;
                 }
             }

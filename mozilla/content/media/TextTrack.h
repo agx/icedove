@@ -8,32 +8,36 @@
 #define mozilla_dom_TextTrack_h
 
 #include "mozilla/dom/TextTrackBinding.h"
-#include "mozilla/dom/TextTrackCue.h"
-#include "mozilla/dom/TextTrackCueList.h"
 #include "nsCOMPtr.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDOMEventTargetHelper.h"
 #include "nsString.h"
-#include "nsWrapperCache.h"
 
 namespace mozilla {
 namespace dom {
 
 class TextTrackCue;
 class TextTrackCueList;
+class TextTrackRegion;
+class TextTrackRegionList;
+class HTMLMediaElement;
 
 class TextTrack MOZ_FINAL : public nsDOMEventTargetHelper
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(TextTrack,
-                                                         nsDOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TextTrack, nsDOMEventTargetHelper)
 
   TextTrack(nsISupports* aParent);
   TextTrack(nsISupports* aParent,
+            HTMLMediaElement* aMediaElement);
+  TextTrack(nsISupports* aParent,
+            HTMLMediaElement* aMediaElement,
             TextTrackKind aKind,
             const nsAString& aLabel,
             const nsAString& aLanguage);
+
+  void SetDefaultSettings();
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
@@ -59,6 +63,10 @@ public:
   {
     aType = mType;
   }
+  void GetId(nsAString& aId) const
+  {
+    aId = mId;
+  }
 
   TextTrackMode Mode() const
   {
@@ -74,34 +82,50 @@ public:
     return mCueList;
   }
 
-  TextTrackCueList* GetActiveCues() const
+  TextTrackCueList* GetActiveCues();
+
+  TextTrackRegionList* GetRegions() const
   {
-    if (mMode == TextTrackMode::Disabled) {
-      return nullptr;
+    if (mMode != TextTrackMode::Disabled) {
+      return mRegionList;
     }
-    return mActiveCueList;
+    return nullptr;
   }
+
+  uint16_t ReadyState() const;
+  void SetReadyState(uint16_t aState);
+
+  void AddRegion(TextTrackRegion& aRegion);
+  void RemoveRegion(const TextTrackRegion& aRegion, ErrorResult& aRv);
 
   // Time is in seconds.
   void Update(double aTime);
 
   void AddCue(TextTrackCue& aCue);
-  void RemoveCue(TextTrackCue& aCue);
+  void RemoveCue(TextTrackCue& aCue, ErrorResult& aRv);
   void CueChanged(TextTrackCue& aCue);
+  void SetDirty() { mDirty = true; }
 
   IMPL_EVENT_HANDLER(cuechange)
 
 private:
   nsCOMPtr<nsISupports> mParent;
+  nsRefPtr<HTMLMediaElement> mMediaElement;
 
   TextTrackKind mKind;
   nsString mLabel;
   nsString mLanguage;
   nsString mType;
+  nsString mId;
   TextTrackMode mMode;
 
   nsRefPtr<TextTrackCueList> mCueList;
   nsRefPtr<TextTrackCueList> mActiveCueList;
+  nsRefPtr<TextTrackRegionList> mRegionList;
+
+  uint32_t mCuePos;
+  uint16_t mReadyState;
+  bool mDirty;
 };
 
 } // namespace dom

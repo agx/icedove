@@ -30,24 +30,27 @@ function onLoad() {
 
 function testGen() {
   subtestGen("log");
-  yield;
+  yield undefined;
 
   subtestGen("info");
-  yield;
+  yield undefined;
 
   subtestGen("warn");
-  yield;
+  yield undefined;
 
   subtestGen("error");
-  yield;
+  yield undefined;
+
+  subtestGen("exception");
+  yield undefined;
 
   subtestGen("debug"); // bug 616742
-  yield;
+  yield undefined;
 
   testDriver = subtestDriver = null;
   finishTest();
 
-  yield;
+  yield undefined;
 }
 
 function subtestGen(aMethod) {
@@ -72,13 +75,13 @@ function testConsoleLoggingAPI(aMethod) {
     name: "1 hidden " + aMethod + " node via string filtering",
     validatorFn: function()
     {
-      return outputNode.querySelectorAll(".hud-filtered-by-string").length == 1;
+      return outputNode.querySelectorAll(".filtered-by-string").length == 1;
     },
     successFn: nextTest,
     failureFn: nextTest,
   });
 
-  yield;
+  yield undefined;
 
   hud.jsterm.clearOutput();
 
@@ -86,36 +89,48 @@ function testConsoleLoggingAPI(aMethod) {
 
   // TODO: move all filtering tests into a separate test file: see bug 608135
   setStringFilter("");
-  hud.setFilterState(aMethod, false);
+  let filter;
+  switch(aMethod) {
+    case "debug":
+      filter = "log";
+      break;
+    case "exception":
+      filter = "error";
+      break;
+    default:
+      filter = aMethod;
+      break;
+  }
+  hud.setFilterState(filter, false);
   console[aMethod]("foo-bar-baz");
 
   waitForSuccess({
     name: "1 message hidden for " + aMethod + " (logging turned off)",
     validatorFn: function()
     {
-      return outputNode.querySelectorAll("description").length == 1;
+      return outputNode.querySelectorAll(".filtered-by-type").length == 1;
     },
     successFn: nextTest,
     failureFn: nextTest,
   });
 
-  yield;
+  yield undefined;
 
   hud.jsterm.clearOutput();
-  hud.setFilterState(aMethod, true);
+  hud.setFilterState(filter, true);
   console[aMethod]("foo-bar-baz");
 
   waitForSuccess({
     name: "1 message shown for " + aMethod + " (logging turned on)",
     validatorFn: function()
     {
-      return outputNode.querySelectorAll("description").length == 1;
+      return outputNode.querySelectorAll(".message:not(.filtered-by-type)").length == 1;
     },
     successFn: nextTest,
     failureFn: nextTest,
   });
 
-  yield;
+  yield undefined;
 
   hud.jsterm.clearOutput();
   setStringFilter("");
@@ -123,20 +138,17 @@ function testConsoleLoggingAPI(aMethod) {
   // test for multiple arguments.
   console[aMethod]("foo", "bar");
 
-  waitForSuccess({
-    name: "show both console arguments for " + aMethod,
-    validatorFn: function()
-    {
-      let node = outputNode.querySelector(".hud-msg-node");
-      return node && /"foo" "bar"/.test(node.textContent);
-    },
-    successFn: nextTest,
-    failureFn: nextTest,
-  });
+  waitForMessages({
+    webconsole: hud,
+    messages: [{
+      text: '"foo" "bar"',
+      category: CATEGORY_WEBDEV,
+    }],
+  }).then(nextTest);
 
-  yield;
+  yield undefined;
   testDriver.next();
-  yield;
+  yield undefined;
 }
 
 function setStringFilter(aValue) {

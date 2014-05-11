@@ -9,11 +9,7 @@
 
 #include "mozilla/Endian.h"
 
-#include "jsapi.h"
-#include "jsprvtd.h"
-#include "jsnum.h"
-
-#include "vm/NumericConversions.h"
+#include "jsatom.h"
 
 namespace js {
 
@@ -26,12 +22,12 @@ namespace js {
  * and saved versions. If deserialization fails, the data should be
  * invalidated if possible.
  */
-static const uint32_t XDR_BYTECODE_VERSION = uint32_t(0xb973c0de - 148);
+static const uint32_t XDR_BYTECODE_VERSION = uint32_t(0xb973c0de - 156);
 
 class XDRBuffer {
   public:
     XDRBuffer(JSContext *cx)
-      : context(cx), base(NULL), cursor(NULL), limit(NULL) { }
+      : context(cx), base(nullptr), cursor(nullptr), limit(nullptr) { }
 
     JSContext *cx() const {
         return context;
@@ -67,7 +63,7 @@ class XDRBuffer {
     uint8_t *write(size_t n) {
         if (n > size_t(limit - cursor)) {
             if (!grow(n))
-                return NULL;
+                return nullptr;
         }
         uint8_t *ptr = cursor;
         cursor += n;
@@ -98,16 +94,20 @@ class XDRState {
     XDRBuffer buf;
 
   protected:
-    JSPrincipals *principals;
-    JSPrincipals *originPrincipals;
+    JSPrincipals *principals_;
+    JSPrincipals *originPrincipals_;
 
     XDRState(JSContext *cx)
-      : buf(cx), principals(NULL), originPrincipals(NULL) {
+      : buf(cx), principals_(nullptr), originPrincipals_(nullptr) {
     }
 
   public:
     JSContext *cx() const {
         return buf.cx();
+    }
+
+    JSPrincipals *originPrincipals() const {
+        return originPrincipals_;
     }
 
     bool codeUint8(uint8_t *n) {
@@ -210,8 +210,6 @@ class XDRState {
 
     bool codeFunction(JS::MutableHandleObject objp);
     bool codeScript(MutableHandleScript scriptp);
-
-    void initScriptPrincipals(JSScript *script);
 };
 
 class XDREncoder : public XDRState<XDR_ENCODE> {
@@ -230,7 +228,7 @@ class XDREncoder : public XDRState<XDR_ENCODE> {
 
     void *forgetData(uint32_t *lengthp) {
         void *data = buf.getData(lengthp);
-        buf.setData(NULL, 0);
+        buf.setData(nullptr, 0);
         return data;
     }
 };

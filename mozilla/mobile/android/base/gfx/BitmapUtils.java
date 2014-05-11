@@ -5,20 +5,29 @@
 
 package org.mozilla.gecko.gfx;
 
+import org.mozilla.gecko.util.ThreadUtils;
+import org.mozilla.gecko.util.GeckoJarReader;
+import org.mozilla.gecko.util.UiAsyncTask;
+
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.BitmapDrawable;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.util.Base64;
 import android.util.Log;
+import android.text.TextUtils;
 
 import org.mozilla.gecko.R;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
+import java.lang.NoSuchFieldException;
 import java.net.MalformedURLException;
 import java.net.URL;
 
@@ -26,6 +35,82 @@ public final class BitmapUtils {
     private static final String LOGTAG = "GeckoBitmapUtils";
 
     private BitmapUtils() {}
+
+    public interface BitmapLoader {
+        public void onBitmapFound(Drawable d);
+    }
+
+    public static void getDrawable(final Context context, final String data, final BitmapLoader loader) {
+        if (TextUtils.isEmpty(data)) {
+            loader.onBitmapFound(null);
+            return;
+        }
+
+        if (data.startsWith("data")) {
+            BitmapDrawable d = new BitmapDrawable(getBitmapFromDataURI(data));
+            loader.onBitmapFound(d);
+            return;
+        }
+
+        if (data.startsWith("jar:") || data.startsWith("file://")) {
+            (new UiAsyncTask<Void, Void, Drawable>(ThreadUtils.getBackgroundHandler()) {
+                @Override
+                public Drawable doInBackground(Void... params) {
+                    try {
+                        if (data.startsWith("jar:jar")) {
+                            return GeckoJarReader.getBitmapDrawable(context.getResources(), data);
+                        }
+
+                        // Don't attempt to validate the JAR signature when loading an add-on icon
+                        if (data.startsWith("jar:file")) {
+                            return GeckoJarReader.getBitmapDrawable(context.getResources(), Uri.decode(data));
+                        }
+
+                        URL url = new URL(data);
+                        InputStream is = (InputStream) url.getContent();
+                        try {
+                            return Drawable.createFromStream(is, "src");
+                        } finally {
+                            is.close();
+                        }
+                    } catch (Exception e) {
+                        Log.w(LOGTAG, "Unable to set icon", e);
+                    }
+                    return null;
+                }
+
+                @Override
+                public void onPostExecute(Drawable drawable) {
+                    loader.onBitmapFound(drawable);
+                }
+            }).execute();
+            return;
+        }
+
+        if(data.startsWith("-moz-icon://")) {
+            Uri imageUri = Uri.parse(data);
+            String resource = imageUri.getSchemeSpecificPart();
+            resource = resource.substring(resource.lastIndexOf('/') + 1);
+
+            try {
+                Drawable d = context.getPackageManager().getApplicationIcon(resource);
+                loader.onBitmapFound(d);
+            } catch(Exception ex) { }
+
+            return;
+        }
+
+        if(data.startsWith("drawable://")) {
+            Uri imageUri = Uri.parse(data);
+            int id = getResource(imageUri, R.drawable.ic_status_logo);
+            Drawable d = context.getResources().getDrawable(id);
+
+            loader.onBitmapFound(d);
+            return;
+        }
+
+        loader.onBitmapFound(null);
+    }
 
     public static Bitmap decodeByteArray(byte[] bytes) {
         return decodeByteArray(bytes, null);
@@ -216,11 +301,34 @@ public final class BitmapUtils {
         if ("drawable".equals(scheme)) {
             String resource = resourceUrl.getSchemeSpecificPart();
             resource = resource.substring(resource.lastIndexOf('/') + 1);
+
+            try {
+                return Integer.parseInt(resource);
+            } catch(NumberFormatException ex) {
+                // This isn't a resource id, try looking for a string
+            }
+
             try {
                 final Class<R.drawable> drawableClass = R.drawable.class;
                 final Field f = drawableClass.getField(resource);
                 icon = f.getInt(null);
-            } catch (final Exception e) {} // just means the resource doesn't exist
+            } catch (final NoSuchFieldException e1) {
+
+                // just means the resource doesn't exist for fennec. Check in Android resources
+                try {
+                    final Class<android.R.drawable> drawableClass = android.R.drawable.class;
+                    final Field f = drawableClass.getField(resource);
+                    icon = f.getInt(null);
+                } catch (final NoSuchFieldException e2) {
+                    // This drawable doesn't seem to exist...
+                } catch(Exception e3) {
+                    Log.i(LOGTAG, "Exception getting drawable", e3);
+                }
+
+            } catch (Exception e4) {
+              Log.i(LOGTAG, "Exception getting drawable", e4);
+            }
+
             resourceUrl = null;
         }
         return icon;

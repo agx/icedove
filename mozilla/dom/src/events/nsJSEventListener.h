@@ -7,10 +7,10 @@
 #define nsJSEventListener_h__
 
 #include "mozilla/Attributes.h"
+#include "mozilla/MemoryReporting.h"
 #include "nsIDOMKeyEvent.h"
 #include "nsIJSEventListener.h"
 #include "nsIDOMEventListener.h"
-#include "jsapi.h"
 #include "nsCOMPtr.h"
 #include "nsIAtom.h"
 #include "nsIScriptContext.h"
@@ -21,9 +21,8 @@
 class nsJSEventListener : public nsIJSEventListener
 {
 public:
-  nsJSEventListener(nsIScriptContext* aContext, JSObject* aScopeObject,
-                    nsISupports* aTarget, nsIAtom* aType,
-                    const nsEventHandler& aHandler);
+  nsJSEventListener(JSObject* aScopeObject, nsISupports* aTarget,
+                    nsIAtom* aType, const nsEventHandler& aHandler);
   virtual ~nsJSEventListener();
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
@@ -33,7 +32,7 @@ public:
 
   // nsIJSEventListener
 
-  virtual size_t SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const MOZ_OVERRIDE
+  virtual size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const MOZ_OVERRIDE
   {
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }

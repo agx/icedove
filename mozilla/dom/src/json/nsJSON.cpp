@@ -5,15 +5,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jsapi.h"
-#include "jsdbgapi.h"
-#include "nsIServiceManager.h"
+#include "js/OldDebugAPI.h"
 #include "nsJSON.h"
 #include "nsIXPConnect.h"
 #include "nsIXPCScriptable.h"
 #include "nsStreamUtils.h"
 #include "nsIInputStream.h"
 #include "nsStringStream.h"
-#include "nsICharsetConverterManager.h"
+#include "mozilla/dom/EncodingUtils.h"
+#include "nsIUnicodeEncoder.h"
+#include "nsIUnicodeDecoder.h"
 #include "nsXPCOMStrings.h"
 #include "nsNetUtil.h"
 #include "nsContentUtils.h"
@@ -21,9 +22,10 @@
 #include "nsCRTGlue.h"
 #include "nsAutoPtr.h"
 #include "nsIScriptSecurityManager.h"
+#include "mozilla/Maybe.h"
 #include <algorithm>
 
-static const char kXPConnectServiceCID[] = "@mozilla.org/js/xpc/XPConnect;1";
+using mozilla::dom::EncodingUtils;
 
 #define JSON_STREAM_BUFSIZE 4096
 
@@ -49,7 +51,7 @@ static nsresult
 WarnDeprecatedMethod(DeprecationWarning warning)
 {
   return nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                         "DOM Core", nullptr,
+                                         NS_LITERAL_CSTRING("DOM Core"), nullptr,
                                          nsContentUtils::eDOM_PROPERTIES,
                                          warning == EncodeWarning
                                          ? "nsIJSONEncodeDeprecatedWarning"
@@ -159,15 +161,15 @@ nsJSON::EncodeToStream(nsIOutputStream *aStream,
   return rv;
 }
 
-static JSBool
+static bool
 WriteCallback(const jschar *buf, uint32_t len, void *data)
 {
   nsJSONWriter *writer = static_cast<nsJSONWriter*>(data);
   nsresult rv =  writer->Write((const PRUnichar*)buf, (uint32_t)len);
   if (NS_FAILED(rv))
-    return JS_FALSE;
+    return false;
 
-  return JS_TRUE;
+  return true;
 }
 
 NS_IMETHODIMP
@@ -182,9 +184,11 @@ nsJSON::EncodeFromJSVal(JS::Value *value, JSContext *cx, nsAString &result)
   }
 
   nsJSONWriter writer;
-  if (!JS_Stringify(cx, value, NULL, JSVAL_NULL, WriteCallback, &writer)) {
+  JS::Rooted<JS::Value> vp(cx, *value);
+  if (!JS_Stringify(cx, &vp, JS::NullPtr(), JS::NullHandleValue, WriteCallback, &writer)) {
     return NS_ERROR_XPC_BAD_CONVERT_JS;
   }
+  *value = vp;
 
   NS_ENSURE_TRUE(writer.DidWrite(), NS_ERROR_UNEXPECTED);
   writer.FlushBuffer();
@@ -211,11 +215,11 @@ nsJSON::EncodeInternal(JSContext* cx, const JS::Value& aValue,
    */
   JS::Rooted<JS::Value> val(cx, aValue);
   JS::Rooted<JS::Value> toJSON(cx);
-  if (JS_GetProperty(cx, obj, "toJSON", toJSON.address()) &&
+  if (JS_GetProperty(cx, obj, "toJSON", &toJSON) &&
       toJSON.isObject() &&
       JS_ObjectIsCallable(cx, &toJSON.toObject())) {
     // If toJSON is implemented, it must not throw
-    if (!JS_CallFunctionValue(cx, obj, toJSON, 0, NULL, val.address())) {
+    if (!JS_CallFunctionValue(cx, obj, toJSON, 0, nullptr, val.address())) {
       if (JS_IsExceptionPending(cx))
         // passing NS_OK will throw the pending exception
         return NS_OK;
@@ -241,7 +245,7 @@ nsJSON::EncodeInternal(JSContext* cx, const JS::Value& aValue,
     return NS_ERROR_INVALID_ARG;
 
   // We're good now; try to stringify
-  if (!JS_Stringify(cx, val.address(), NULL, JSVAL_NULL, WriteCallback, writer))
+  if (!JS_Stringify(cx, &val, JS::NullPtr(), JS::NullHandleValue, WriteCallback, writer))
     return NS_ERROR_FAILURE;
 
   return NS_OK;
@@ -274,11 +278,7 @@ nsJSONWriter::SetCharset(const char* aCharset)
 {
   nsresult rv = NS_OK;
   if (mStream) {
-    nsCOMPtr<nsICharsetConverterManager> ccm =
-      do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = ccm->GetUnicodeEncoder(aCharset, getter_AddRefs(mEncoder));
-    NS_ENSURE_SUCCESS(rv, rv);
+    mEncoder = EncodingUtils::EncoderForEncoding(aCharset);
     rv = mEncoder->SetOutputErrorBehavior(nsIUnicodeEncoder::kOnError_Signal,
                                           nullptr, '\0');
     NS_ENSURE_SUCCESS(rv, rv);
@@ -523,13 +523,13 @@ nsJSONListener::OnStopRequest(nsIRequest *aRequest, nsISupports *aContext,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  JS::RootedValue reviver(mCx, JS::NullValue()), value(mCx);
+  JS::Rooted<JS::Value> reviver(mCx, JS::NullValue()), value(mCx);
 
   JS::StableCharPtr chars(reinterpret_cast<const jschar*>(mBufferedChars.Elements()),
                           mBufferedChars.Length());
-  JSBool ok = JS_ParseJSONWithReviver(mCx, chars.get(),
+  bool ok = JS_ParseJSONWithReviver(mCx, chars.get(),
                                       uint32_t(mBufferedChars.Length()),
-                                      reviver, value.address());
+                                      reviver, &value);
 
   *mRootVal = value;
   mBufferedChars.TruncateLength(0);
@@ -600,11 +600,7 @@ nsJSONListener::ProcessBytes(const char* aBuffer, uint32_t aByteLength)
     // We should have a unicode charset by now
     rv = CheckCharset(charset.get());
     NS_ENSURE_SUCCESS(rv, rv);
-    nsCOMPtr<nsICharsetConverterManager> ccm =
-        do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-    rv = ccm->GetUnicodeDecoderRaw(charset.get(), getter_AddRefs(mDecoder));
-    NS_ENSURE_SUCCESS(rv, rv);
+    mDecoder = EncodingUtils::DecoderForEncoding(charset);
 
     // consume the sniffed bytes
     rv = ConsumeConverted(mSniffBuffer.get(), mSniffBuffer.Length());

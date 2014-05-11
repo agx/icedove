@@ -79,7 +79,7 @@ struct nsTableReflowState {
             nscoord         aAvailWidth,
             nscoord         aAvailHeight)
   {
-    nsTableFrame* table = (nsTableFrame*)aTableFrame.GetFirstInFlow();
+    nsTableFrame* table = static_cast<nsTableFrame*>(aTableFrame.FirstInFlow());
     nsMargin borderPadding = table->GetChildAreaOffset(&reflowState);
     nscoord cellSpacingX = table->GetCellSpacingX();
 
@@ -457,7 +457,6 @@ void nsTableFrame::ResetRowIndices(const nsFrameList::Slice& aRowGroupsToExclude
 
   int32_t rowIndex = 0;
   nsTHashtable<nsPtrHashKey<nsTableRowGroupFrame> > excludeRowGroups;
-  excludeRowGroups.Init();
   nsFrameList::Enumerator excludeRowGroupsEnumerator(aRowGroupsToExclude);
   while (!excludeRowGroupsEnumerator.AtEnd()) {
     excludeRowGroups.PutEntry(static_cast<nsTableRowGroupFrame*>(excludeRowGroupsEnumerator.get()));
@@ -575,12 +574,12 @@ void nsTableFrame::RemoveCol(nsTableColGroupFrame* aColGroupFrame,
 }
 
 /** Get the cell map for this table frame.  It is not always mCellMap.
-  * Only the firstInFlow has a legit cell map
+  * Only the first-in-flow has a legit cell map.
   */
-nsTableCellMap* nsTableFrame::GetCellMap() const
+nsTableCellMap*
+nsTableFrame::GetCellMap() const
 {
-  nsTableFrame* firstInFlow = (nsTableFrame *)GetFirstInFlow();
-  return firstInFlow->mCellMap;
+  return static_cast<nsTableFrame*>(FirstInFlow())->mCellMap;
 }
 
 // XXX this needs to be moved to nsCSSFrameConstructor
@@ -596,10 +595,8 @@ nsTableFrame::CreateAnonymousColGroupFrame(nsTableColGroupType aColGroupType)
     ResolveAnonymousBoxStyle(nsCSSAnonBoxes::tableColGroup, mStyleContext);
   // Create a col group frame
   nsIFrame* newFrame = NS_NewTableColGroupFrame(shell, colGroupStyle);
-  if (newFrame) {
-    ((nsTableColGroupFrame *)newFrame)->SetColType(aColGroupType);
-    newFrame->Init(colGroupContent, this, nullptr);
-  }
+  ((nsTableColGroupFrame *)newFrame)->SetColType(aColGroupType);
+  newFrame->Init(colGroupContent, this, nullptr);
   return (nsTableColGroupFrame *)newFrame;
 }
 
@@ -1061,10 +1058,65 @@ public:
   }
 #endif
 
+  virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                         const nsDisplayItemGeometry* aGeometry,
+                                         nsRegion *aInvalidRegion) MOZ_OVERRIDE;
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx);
   NS_DISPLAY_DECL_NAME("TableBorderBackground", TYPE_TABLE_BORDER_BACKGROUND)
 };
+
+#ifdef DEBUG
+static bool
+IsFrameAllowedInTable(nsIAtom* aType)
+{
+  return IS_TABLE_CELL(aType) ||
+         nsGkAtoms::tableRowFrame == aType ||
+         nsGkAtoms::tableRowGroupFrame == aType ||
+         nsGkAtoms::scrollFrame == aType ||
+         nsGkAtoms::tableFrame == aType ||
+         nsGkAtoms::tableColFrame == aType ||
+         nsGkAtoms::tableColGroupFrame == aType;
+}
+#endif
+
+/* static */ bool
+nsTableFrame::AnyTablePartHasUndecodedBackgroundImage(nsIFrame* aStart,
+                                                      nsIFrame* aEnd)
+{
+  for (nsIFrame* f = aStart; f != aEnd; f = f->GetNextSibling()) {
+    NS_ASSERTION(IsFrameAllowedInTable(f->GetType()), "unexpected frame type");
+
+    if (!nsCSSRendering::AreAllBackgroundImagesDecodedForFrame(f))
+      return true;
+
+    nsTableCellFrame *cellFrame = do_QueryFrame(f);
+    if (cellFrame)
+      continue;
+
+    if (AnyTablePartHasUndecodedBackgroundImage(f->PrincipalChildList().FirstChild(), nullptr))
+      return true;
+  }
+  
+  return false;
+}
+
+void
+nsDisplayTableBorderBackground::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                                          const nsDisplayItemGeometry* aGeometry,
+                                                          nsRegion *aInvalidRegion)
+{
+  if (aBuilder->ShouldSyncDecodeImages()) {
+    if (nsTableFrame::AnyTablePartHasUndecodedBackgroundImage(mFrame, mFrame->GetNextSibling()) ||
+        nsTableFrame::AnyTablePartHasUndecodedBackgroundImage(
+          mFrame->GetChildList(nsIFrame::kColGroupList).FirstChild(), nullptr)) {
+      bool snap;
+      aInvalidRegion->Or(*aInvalidRegion, GetBounds(aBuilder, &snap));
+    }
+  }
+
+  nsDisplayTableItem::ComputeInvalidationRegion(aBuilder, aGeometry, aInvalidRegion);
+}
 
 void
 nsDisplayTableBorderBackground::Paint(nsDisplayListBuilder* aBuilder,
@@ -1176,20 +1228,6 @@ nsTableFrame::DisplayGenericTablePart(nsDisplayListBuilder* aBuilder,
   aFrame->DisplayOutline(aBuilder, aLists);
 }
 
-#ifdef DEBUG
-static bool
-IsFrameAllowedInTable(nsIAtom* aType)
-{
-  return IS_TABLE_CELL(aType) ||
-         nsGkAtoms::tableRowFrame == aType ||
-         nsGkAtoms::tableRowGroupFrame == aType ||
-         nsGkAtoms::scrollFrame == aType ||
-         nsGkAtoms::tableFrame == aType ||
-         nsGkAtoms::tableColFrame == aType ||
-         nsGkAtoms::tableColGroupFrame == aType;
-}
-#endif
-
 static bool
 AnyTablePartHasBorderOrBackground(nsIFrame* aStart, nsIFrame* aEnd)
 {
@@ -1227,8 +1265,7 @@ nsTableFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       // in its own display item, so do that to take advantage of
       // opacity and visibility optimizations
       if (deflate == nsMargin(0, 0, 0, 0)) {
-        nsDisplayBackgroundImage* bg;
-        DisplayBackgroundUnconditional(aBuilder, aLists, false, &bg);
+        DisplayBackgroundUnconditional(aBuilder, aLists, false);
       }
     }
     
@@ -1292,7 +1329,7 @@ nsTableFrame::PaintTableBorderBackground(nsRenderingContext& aRenderingContext,
 }
 
 int
-nsTableFrame::GetSkipSides() const
+nsTableFrame::GetSkipSides(const nsHTMLReflowState* aReflowState) const
 {
   int skip = 0;
   // frame attribute was accounted for in nsHTMLTableElement::MapTableBorderInto
@@ -1939,7 +1976,7 @@ nsTableFrame::AdjustForCollapsingRowsCols(nsHTMLReflowMetrics& aDesiredSize,
   RowGroupArray rowGroups;
   OrderRowGroups(rowGroups);
 
-  nsTableFrame* firstInFlow = static_cast<nsTableFrame*> (GetFirstInFlow());
+  nsTableFrame* firstInFlow = static_cast<nsTableFrame*>(FirstInFlow());
   nscoord width = firstInFlow->GetCollapsedWidth(aBorderPadding);
   nscoord rgWidth = width - 2 * GetCellSpacingX();
   nsOverflowAreas overflow;
@@ -2297,7 +2334,7 @@ nsTableFrame::DoRemoveFrame(ChildListID     aListID,
       nsIntRect damageArea;
       cellMap->RebuildConsideringCells(nullptr, nullptr, 0, 0, false, damageArea);
 
-      ((nsTableFrame*)GetFirstInFlow())->MatchCellMapToColCache(cellMap);
+      static_cast<nsTableFrame*>(FirstInFlow())->MatchCellMapToColCache(cellMap);
     }
   }
 }
@@ -2644,7 +2681,7 @@ nsTableFrame::SetupHeaderFooterChild(const nsTableReflowState& aReflowState,
   nsHTMLReflowState kidReflowState(presContext, aReflowState.reflowState,
                                    aFrame,
                                    nsSize(aReflowState.availSize.width, NS_UNCONSTRAINEDSIZE),
-                                   -1, -1, false);
+                                   -1, -1, nsHTMLReflowState::CALLER_WILL_INIT);
   InitChildReflowState(kidReflowState);
   kidReflowState.mFlags.mIsTopOfPage = true;
   nsHTMLReflowMetrics desiredSize;
@@ -2671,7 +2708,8 @@ nsTableFrame::PlaceRepeatedFooter(nsTableReflowState& aReflowState,
   nsHTMLReflowState footerReflowState(presContext,
                                       aReflowState.reflowState,
                                       aTfoot, kidAvailSize,
-                                      -1, -1, false);
+                                      -1, -1,
+                                      nsHTMLReflowState::CALLER_WILL_INIT);
   InitChildReflowState(footerReflowState);
   aReflowState.y += GetCellSpacingY();
 
@@ -2791,7 +2829,8 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
       // Reflow the child into the available space
       nsHTMLReflowState kidReflowState(presContext, aReflowState.reflowState,
                                        kidFrame, kidAvailSize,
-                                       -1, -1, false);
+                                       -1, -1,
+                                       nsHTMLReflowState::CALLER_WILL_INIT);
       InitChildReflowState(kidReflowState);
 
       // If this isn't the first row group, and the previous row group has a
@@ -3329,7 +3368,7 @@ nsTableFrame::DistributeHeightToRows(const nsHTMLReflowState& aReflowState,
 
 int32_t nsTableFrame::GetColumnWidth(int32_t aColIndex)
 {
-  nsTableFrame* firstInFlow = static_cast<nsTableFrame*>(GetFirstInFlow());
+  nsTableFrame* firstInFlow = static_cast<nsTableFrame*>(FirstInFlow());
   if (this == firstInFlow) {
     nsTableColFrame* colFrame = GetColFrame(aColIndex);
     return colFrame ? colFrame->GetFinalWidth() : 0;
@@ -6091,7 +6130,7 @@ BCPaintBorderIterator::BCPaintBorderIterator(nsTableFrame* aTable)
   mTable      = aTable;
   mVerInfo    = nullptr;
   nsMargin childAreaOffset = mTable->GetChildAreaOffset(nullptr);
-  mTableFirstInFlow    = (nsTableFrame*) mTable->GetFirstInFlow();
+  mTableFirstInFlow    = static_cast<nsTableFrame*>(mTable->FirstInFlow());
   mTableCellMap        = mTable->GetCellMap();
   // y position of first row in damage area
   mInitialOffsetY = mTable->GetPrevInFlow() ? 0 : childAreaOffset.top;
@@ -6136,7 +6175,7 @@ BCPaintBorderIterator::SetDamageArea(const nsRect& aDirtyRect)
       if (haveIntersect) {
         if (aDirtyRect.YMost() >= (rowY - topBorderHalf)) {
           nsTableRowFrame* fifRow =
-            static_cast<nsTableRowFrame*>(rowFrame->GetFirstInFlow());
+            static_cast<nsTableRowFrame*>(rowFrame->FirstInFlow());
           endRowIndex = fifRow->GetRowIndex();
         }
         else done = true;
@@ -6146,7 +6185,7 @@ BCPaintBorderIterator::SetDamageArea(const nsRect& aDirtyRect)
           mStartRg  = rgFrame;
           mStartRow = rowFrame;
           nsTableRowFrame* fifRow =
-            static_cast<nsTableRowFrame*>(rowFrame->GetFirstInFlow());
+            static_cast<nsTableRowFrame*>(rowFrame->FirstInFlow());
           startRowIndex = endRowIndex = fifRow->GetRowIndex();
           haveIntersect = true;
         }
@@ -6351,7 +6390,7 @@ BCPaintBorderIterator::SetNewRowGroup()
     mPrevRg = mRg;
     mRg = mRowGroups[mRgIndex];
     nsTableRowGroupFrame* fifRg =
-      static_cast<nsTableRowGroupFrame*>(mRg->GetFirstInFlow());
+      static_cast<nsTableRowGroupFrame*>(mRg->FirstInFlow());
     mFifRgFirstRowIndex = fifRg->GetStartRowIndex();
     mRgFirstRowIndex    = mRg->GetStartRowIndex();
     mRgLastRowIndex     = mRgFirstRowIndex + mRg->GetRowCount() - 1;

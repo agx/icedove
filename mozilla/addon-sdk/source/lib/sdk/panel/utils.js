@@ -81,6 +81,10 @@ function isOpen(panel) {
 }
 exports.isOpen = isOpen;
 
+function isOpening(panel) {
+  return panel.state === "showing"
+}
+exports.isOpening = isOpening
 
 function close(panel) {
   // Sometimes "TypeError: panel.hidePopup is not a function" is thrown
@@ -205,16 +209,6 @@ function setupPanelFrame(frame) {
   }
 }
 
-let EVENT_NAMES = {
-  "popupshowing": "sdk-panel-show",
-  "popuphiding": "sdk-panel-hide",
-  "popupshown": "sdk-panel-shown",
-  "popuphidden": "sdk-panel-hidden",
-  "document-element-inserted": "sdk-panel-content-changed",
-  "DOMContentLoaded": "sdk-panel-content-loaded",
-  "load": "sdk-panel-document-loaded"
-};
-
 function make(document) {
   document = document || getMostRecentBrowserWindow().document;
   let panel = document.createElementNS(XUL_NS, "panel");
@@ -254,29 +248,29 @@ function make(document) {
 
     try { swapFrameLoaders(backgroundFrame, viewFrame); }
     catch(error) { console.exception(error); }
-    events.emit(EVENT_NAMES[type], { subject: panel });
+    events.emit(type, { subject: panel });
   }
 
   function onContentReady({target, type}) {
     if (target === getContentDocument(panel)) {
       style(panel);
-      events.emit(EVENT_NAMES[type], { subject: panel });
+      events.emit(type, { subject: panel });
     }
   }
 
   function onContentLoad({target, type}) {
     if (target === getContentDocument(panel))
-      events.emit(EVENT_NAMES[type], { subject: panel });
+      events.emit(type, { subject: panel });
   }
 
   function onContentChange({subject, type}) {
     let document = subject;
     if (document === getContentDocument(panel) && document.defaultView)
-      events.emit(EVENT_NAMES[type], { subject: panel });
+      events.emit(type, { subject: panel });
   }
 
   function onPanelStateChange({type}) {
-    events.emit(EVENT_NAMES[type], { subject: panel })
+    events.emit(type, { subject: panel })
   }
 
   panel.addEventListener("popupshowing", onDisplayChange, false);
@@ -373,8 +367,10 @@ function style(panel) {
 }
 exports.style = style;
 
-function getContentFrame(panel) isOpen(panel) ? panel.firstChild :
-                                                panel.backgroundFrame
+let getContentFrame = panel =>
+    (isOpen(panel) || isOpening(panel)) ?
+    panel.firstChild :
+    panel.backgroundFrame
 exports.getContentFrame = getContentFrame;
 
 function getContentDocument(panel) getContentFrame(panel).contentDocument

@@ -22,14 +22,12 @@
 namespace mozilla {
 namespace layers {
 
-DeviceManagerD3D9 *LayerManagerD3D9::mDefaultDeviceManager = nullptr;
-
 LayerManagerD3D9::LayerManagerD3D9(nsIWidget *aWidget)
   : mWidget(aWidget)
   , mDeviceResetCount(0)
 {
-  mCurrentCallbackInfo.Callback = NULL;
-  mCurrentCallbackInfo.CallbackData = NULL;
+  mCurrentCallbackInfo.Callback = nullptr;
+  mCurrentCallbackInfo.CallbackData = nullptr;
 }
 
 LayerManagerD3D9::~LayerManagerD3D9()
@@ -57,17 +55,9 @@ LayerManagerD3D9::Initialize(bool force)
     }
   }
 
-  if (!mDefaultDeviceManager) {
-    mDeviceManager = new DeviceManagerD3D9;
-
-    if (!mDeviceManager->Init()) {
-      mDeviceManager = nullptr;
-      return false;
-    }
-
-    mDefaultDeviceManager = mDeviceManager;
-  } else {
-    mDeviceManager = mDefaultDeviceManager;
+  mDeviceManager = gfxWindowsPlatform::GetPlatform()->GetD3D9DeviceManager();
+  if (!mDeviceManager) {
+    return false;
   }
 
   mSwapChain = mDeviceManager->
@@ -163,12 +153,12 @@ LayerManagerD3D9::EndTransaction(DrawThebesLayerCallback aCallback,
     SetCompositingDisabled(aFlags & END_NO_COMPOSITE);
     Render();
     /* Clean this out for sanity */
-    mCurrentCallbackInfo.Callback = NULL;
-    mCurrentCallbackInfo.CallbackData = NULL;
+    mCurrentCallbackInfo.Callback = nullptr;
+    mCurrentCallbackInfo.CallbackData = nullptr;
   }
 
   // Clear mTarget, next transaction could have no target
-  mTarget = NULL;
+  mTarget = nullptr;
 }
 
 void
@@ -219,11 +209,6 @@ LayerManagerD3D9::CreateReadbackLayer()
   return layer.forget();
 }
 
-void ReleaseTexture(void *texture)
-{
-  static_cast<IDirect3DTexture9*>(texture)->Release();
-}
-
 void
 LayerManagerD3D9::ReportFailure(const nsACString &aMsg, HRESULT aCode)
 {
@@ -240,9 +225,10 @@ LayerManagerD3D9::ReportFailure(const nsACString &aMsg, HRESULT aCode)
 void
 LayerManagerD3D9::Render()
 {
-  if (!mSwapChain->PrepareForRendering()) {
+  if (mSwapChain->PrepareForRendering() != DeviceOK) {
     return;
   }
+
   deviceManager()->SetupRenderState();
 
   SetupPipeline();
@@ -255,7 +241,7 @@ LayerManagerD3D9::Render()
   nsIntRect rect;
   mWidget->GetClientBounds(rect);
 
-  device()->Clear(0, NULL, D3DCLEAR_TARGET, 0x00000000, 0, 0);
+  device()->Clear(0, nullptr, D3DCLEAR_TARGET, 0x00000000, 0, 0);
 
   device()->BeginScene();
 
@@ -283,7 +269,8 @@ LayerManagerD3D9::Render()
          (r = iter.Next()) != nullptr;) {
       mSwapChain->Present(*r);
     }
-    LayerManager::PostPresent();
+    RecordFrame();
+    PostPresent();
   } else {
     PaintToTarget();
   }
@@ -341,18 +328,18 @@ LayerManagerD3D9::PaintToTarget()
 
   device()->CreateOffscreenPlainSurface(desc.Width, desc.Height,
                                        D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
-                                       getter_AddRefs(destSurf), NULL);
+                                       getter_AddRefs(destSurf), nullptr);
 
   device()->GetRenderTargetData(backBuff, destSurf);
 
   D3DLOCKED_RECT rect;
-  destSurf->LockRect(&rect, NULL, D3DLOCK_READONLY);
+  destSurf->LockRect(&rect, nullptr, D3DLOCK_READONLY);
 
   nsRefPtr<gfxImageSurface> imageSurface =
     new gfxImageSurface((unsigned char*)rect.pBits,
                         gfxIntSize(desc.Width, desc.Height),
                         rect.Pitch,
-                        gfxASurface::ImageFormatARGB32);
+                        gfxImageFormatARGB32);
 
   mTarget->SetSource(imageSurface);
   mTarget->SetOperator(gfxContext::OPERATOR_OVER);

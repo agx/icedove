@@ -59,6 +59,7 @@
 #include "nsTextNode.h"
 #include "mozilla/dom/CDATASection.h"
 #include "mozilla/dom/Comment.h"
+#include "mozilla/dom/Element.h"
 #include "mozilla/dom/ProcessingInstruction.h"
 
 using namespace mozilla::dom;
@@ -84,9 +85,6 @@ NS_NewXMLContentSink(nsIXMLContentSink** aResult,
     return NS_ERROR_NULL_POINTER;
   }
   nsXMLContentSink* it = new nsXMLContentSink();
-  if (nullptr == it) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
   
   nsCOMPtr<nsIXMLContentSink> kungFuDeathGrip = it;
   nsresult rv = it->Init(aDoc, aURI, aContainer, aChannel);
@@ -139,6 +137,8 @@ NS_INTERFACE_MAP_END_INHERITING(nsContentSink)
 
 NS_IMPL_ADDREF_INHERITED(nsXMLContentSink, nsContentSink)
 NS_IMPL_RELEASE_INHERITED(nsXMLContentSink, nsContentSink)
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsXMLContentSink)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXMLContentSink,
                                                   nsContentSink)
@@ -463,7 +463,7 @@ nsXMLContentSink::CreateElement(const PRUnichar** aAtts, uint32_t aAttsCount,
   nsresult rv = NS_OK;
 
   nsCOMPtr<nsINodeInfo> ni = aNodeInfo;
-  nsCOMPtr<nsIContent> content;
+  nsCOMPtr<Element> content;
   rv = NS_NewElement(getter_AddRefs(content), ni.forget(), aFromParser);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -490,7 +490,7 @@ nsXMLContentSink::CreateElement(const PRUnichar** aAtts, uint32_t aAttsCount,
     }
 
     if (!aNodeInfo->NamespaceEquals(kNameSpaceID_SVG)) {
-      content.swap(*aResult);
+      content.forget(aResult);
 
       return NS_OK;
     }
@@ -511,7 +511,7 @@ nsXMLContentSink::CreateElement(const PRUnichar** aAtts, uint32_t aAttsCount,
     }
   } 
 
-  content.swap(*aResult);
+  content.forget(aResult);
 
   return NS_OK;
 }
@@ -723,7 +723,7 @@ nsXMLContentSink::ProcessStyleLink(nsIContent* aElement,
 
     // Do content policy check
     int16_t decision = nsIContentPolicy::ACCEPT;
-    rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_STYLESHEET,
+    rv = NS_CheckContentLoadPolicy(nsIContentPolicy::TYPE_XSLT,
                                    url,
                                    mDocument->NodePrincipal(),
                                    aElement,

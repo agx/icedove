@@ -5,8 +5,12 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXTRA_JS_MODULES += [
+    'ContactService.jsm',
+    'HelperApps.jsm',
+    'Home.jsm',
     'JNI.jsm',
     'LightweightThemeConsumer.jsm',
+    'Notifications.jsm',
     'OrderedBroadcast.jsm',
     'Prompt.jsm',
     'Sanitizer.jsm',

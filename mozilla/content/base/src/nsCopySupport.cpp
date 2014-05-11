@@ -36,8 +36,9 @@
 #include "nsIDOMDocument.h"
 #include "nsIHTMLDocument.h"
 #include "nsGkAtoms.h"
-#include "nsGUIEvent.h"
 #include "nsIFrame.h"
+#include "nsIURI.h"
+#include "nsISimpleEnumerator.h"
 
 // image copy stuff
 #include "nsIImageLoadingContent.h"
@@ -45,6 +46,7 @@
 #include "nsContentUtils.h"
 #include "nsContentCID.h"
 
+#include "mozilla/ContentEvents.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/Selection.h"
 
@@ -584,7 +586,7 @@ nsCopySupport::CanCopy(nsIDocument* aDocument)
 }
 
 bool
-nsCopySupport::FireClipboardEvent(int32_t aType, nsIPresShell* aPresShell, nsISelection* aSelection)
+nsCopySupport::FireClipboardEvent(int32_t aType, int32_t aClipboardType, nsIPresShell* aPresShell, nsISelection* aSelection)
 {
   NS_ASSERTION(aType == NS_CUT || aType == NS_COPY || aType == NS_PASTE,
                "Invalid clipboard event type");
@@ -639,15 +641,19 @@ nsCopySupport::FireClipboardEvent(int32_t aType, nsIPresShell* aPresShell, nsISe
   if (!nsContentUtils::IsSafeToRunScript())
     return false;
 
+  int32_t type = -1;
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(piWindow);
+  bool chromeShell = (docShell && NS_SUCCEEDED(docShell->GetItemType(&type)) &&
+                      type == nsIDocShellTreeItem::typeChrome);
+
   // next, fire the cut, copy or paste event
-  // XXXndeakin Bug 844941 - why was a preference added here without a running-in-chrome check?
   bool doDefault = true;
   nsRefPtr<nsDOMDataTransfer> clipboardData;
-  if (Preferences::GetBool("dom.event.clipboardevents.enabled", true)) {
-    clipboardData = new nsDOMDataTransfer(aType, aType == NS_PASTE);
+  if (chromeShell || Preferences::GetBool("dom.event.clipboardevents.enabled", true)) {
+    clipboardData = new nsDOMDataTransfer(aType, aType == NS_PASTE, aClipboardType);
 
     nsEventStatus status = nsEventStatus_eIgnore;
-    nsClipboardEvent evt(true, aType);
+    InternalClipboardEvent evt(true, aType);
     evt.clipboardData = clipboardData;
     nsEventDispatcher::Dispatch(content, presShell->GetPresContext(), &evt, nullptr,
                                 &status);
@@ -686,7 +692,7 @@ nsCopySupport::FireClipboardEvent(int32_t aType, nsIPresShell* aPresShell, nsISe
       return false;
     }
     // call the copy code
-    rv = HTMLCopy(sel, doc, nsIClipboard::kGlobalClipboard);
+    rv = HTMLCopy(sel, doc, aClipboardType);
     if (NS_FAILED(rv)) {
       return false;
     }
@@ -703,7 +709,7 @@ nsCopySupport::FireClipboardEvent(int32_t aType, nsIPresShell* aPresShell, nsISe
       NS_ENSURE_TRUE(transferable, false);
 
       // put the transferable on the clipboard
-      rv = clipboard->SetData(transferable, nullptr, nsIClipboard::kGlobalClipboard);
+      rv = clipboard->SetData(transferable, nullptr, aClipboardType);
       if (NS_FAILED(rv)) {
         return false;
       }

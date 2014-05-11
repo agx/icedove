@@ -182,7 +182,7 @@ nsresult
 nsTableCellFrame::GetColIndex(int32_t &aColIndex) const
 {
   if (GetPrevInFlow()) {
-    return ((nsTableCellFrame*)GetFirstInFlow())->GetColIndex(aColIndex);
+    return static_cast<nsTableCellFrame*>(FirstInFlow())->GetColIndex(aColIndex);
   }
   else {
     aColIndex = mColIndex;
@@ -373,6 +373,9 @@ public:
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx);
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap);
+  virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                         const nsDisplayItemGeometry* aGeometry,
+                                         nsRegion *aInvalidRegion) MOZ_OVERRIDE;
 
   NS_DISPLAY_DECL_NAME("TableCellBackground", TYPE_TABLE_CELL_BACKGROUND)
 };
@@ -392,6 +395,21 @@ nsDisplayTableCellBackground::GetBounds(nsDisplayListBuilder* aBuilder,
   // revert from nsDisplayTableItem's implementation ... cell backgrounds
   // don't overflow the cell
   return nsDisplayItem::GetBounds(aBuilder, aSnap);
+}
+
+void
+nsDisplayTableCellBackground::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                                        const nsDisplayItemGeometry* aGeometry,
+                                                        nsRegion *aInvalidRegion)
+{
+  if (aBuilder->ShouldSyncDecodeImages()) {
+    if (!nsCSSRendering::AreAllBackgroundImagesDecodedForFrame(mFrame)) {
+      bool snap;
+      aInvalidRegion->Or(*aInvalidRegion, GetBounds(aBuilder, &snap));
+    }
+  }
+
+  nsDisplayTableItem::ComputeInvalidationRegion(aBuilder, aGeometry, aInvalidRegion);
 }
 
 void nsTableCellFrame::InvalidateFrame(uint32_t aDisplayItemKey)
@@ -504,7 +522,7 @@ nsTableCellFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 }
 
 int
-nsTableCellFrame::GetSkipSides() const
+nsTableCellFrame::GetSkipSides(const nsHTMLReflowState* aReflowState) const
 {
   int skip = 0;
   if (nullptr != GetPrevInFlow()) {
@@ -769,12 +787,14 @@ CalcUnpaginagedHeight(nsPresContext*        aPresContext,
                       nsTableFrame&         aTableFrame,
                       nscoord               aVerticalBorderPadding)
 {
-  const nsTableCellFrame* firstCellInFlow   = (nsTableCellFrame*)aCellFrame.GetFirstInFlow();
-  nsTableFrame*           firstTableInFlow  = (nsTableFrame*)aTableFrame.GetFirstInFlow();
-  nsTableRowFrame*        row
-    = static_cast<nsTableRowFrame*>(firstCellInFlow->GetParent());
-  nsTableRowGroupFrame*   firstRGInFlow
-    = static_cast<nsTableRowGroupFrame*>(row->GetParent());
+  const nsTableCellFrame* firstCellInFlow =
+    static_cast<nsTableCellFrame*>(aCellFrame.FirstInFlow());
+  nsTableFrame* firstTableInFlow  =
+    static_cast<nsTableFrame*>(aTableFrame.FirstInFlow());
+  nsTableRowFrame* row =
+    static_cast<nsTableRowFrame*>(firstCellInFlow->GetParent());
+  nsTableRowGroupFrame* firstRGInFlow =
+    static_cast<nsTableRowGroupFrame*>(row->GetParent());
 
   int32_t rowIndex;
   firstCellInFlow->GetRowIndex(rowIndex);
@@ -803,7 +823,7 @@ NS_METHOD nsTableCellFrame::Reflow(nsPresContext*           aPresContext,
   DISPLAY_REFLOW(aPresContext, this, aReflowState, aDesiredSize, aStatus);
 
   if (aReflowState.mFlags.mSpecialHeightReflow) {
-    GetFirstInFlow()->AddStateBits(NS_TABLE_CELL_HAD_SPECIAL_REFLOW);
+    FirstInFlow()->AddStateBits(NS_TABLE_CELL_HAD_SPECIAL_REFLOW);
   }
 
   // see if a special height reflow needs to occur due to having a pct height
@@ -872,7 +892,7 @@ NS_METHOD nsTableCellFrame::Reflow(nsPresContext*           aPresContext,
   kidReflowState.mFlags.mSpecialHeightReflow = false;
 
   if (aReflowState.mFlags.mSpecialHeightReflow ||
-      (GetFirstInFlow()->GetStateBits() & NS_TABLE_CELL_HAD_SPECIAL_REFLOW)) {
+      (FirstInFlow()->GetStateBits() & NS_TABLE_CELL_HAD_SPECIAL_REFLOW)) {
     // We need to force the kid to have mVResize set if we've had a
     // special reflow in the past, since the non-special reflow needs to
     // resize back to what it was without the special height reflow.

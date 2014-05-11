@@ -8,11 +8,11 @@
 #define mozilla_net_NullHttpTransaction_h
 
 #include "nsAHttpTransaction.h"
-#include "nsAHttpConnection.h"
-#include "nsIInterfaceRequestor.h"
-#include "nsHttpConnectionInfo.h"
-#include "nsHttpRequestHead.h"
 #include "mozilla/Attributes.h"
+
+class nsAHttpConnection;
+class nsHttpRequestHead;
+class nsHttpConnectionInfo;
 
 // This is the minimal nsAHttpTransaction implementation. A NullHttpTransaction
 // can be used to drive connection level semantics (such as SSL handshakes
@@ -24,7 +24,7 @@ namespace mozilla { namespace net {
 class NullHttpTransaction MOZ_FINAL : public nsAHttpTransaction
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSAHTTPTRANSACTION
 
   NullHttpTransaction(nsHttpConnectionInfo *ci,
@@ -41,6 +41,12 @@ private:
 
   nsresult mStatus;
   uint32_t mCaps;
+  // mCapsToClear holds flags that should be cleared in mCaps, e.g. unset
+  // NS_HTTP_REFRESH_DNS when DNS refresh request has completed to avoid
+  // redundant requests on the network. To deal with raciness, only unsetting
+  // bitfields should be allowed: 'lost races' will thus err on the
+  // conservative side, e.g. by going ahead with a 2nd DNS refresh.
+  uint32_t mCapsToClear;
   nsRefPtr<nsAHttpConnection> mConnection;
   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
   nsRefPtr<nsHttpConnectionInfo> mConnectionInfo;

@@ -18,6 +18,9 @@
 #include "mozilla/Preferences.h"
 #include "mozilla/Attributes.h"
 #include "nsIPermissionManager.h"
+#include "mozilla/dom/DeviceLightEvent.h"
+#include "mozilla/dom/DeviceProximityEvent.h"
+#include "mozilla/dom/UserProximityEvent.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -172,7 +175,7 @@ WindowCannotReceiveSensorEvent (nsPIDOMWindow* aWindow)
   // Check to see if this window is in the background.  If
   // it is and it does not have the "background-sensors" permission,
   // don't send any device motion events to it.
-  if (!aWindow || !aWindow->GetOuterWindow()) {
+  if (!aWindow || !aWindow->IsCurrentInnerWindow()) {
     return true;
   }
 
@@ -236,14 +239,12 @@ void
 nsDeviceSensors::FireDOMLightEvent(mozilla::dom::EventTarget* aTarget,
                                    double aValue)
 {
-  nsCOMPtr<nsIDOMEvent> event;
-  NS_NewDOMDeviceLightEvent(getter_AddRefs(event), aTarget, nullptr, nullptr);
-
-  nsCOMPtr<nsIDOMDeviceLightEvent> oe = do_QueryInterface(event);
-  oe->InitDeviceLightEvent(NS_LITERAL_STRING("devicelight"),
-                          true,
-                          false,
-                          aValue);
+  DeviceLightEventInit init;
+  init.mBubbles = true;
+  init.mCancelable = false;
+  init.mValue = aValue;
+  nsRefPtr<DeviceLightEvent> event =
+    DeviceLightEvent::Constructor(aTarget, NS_LITERAL_STRING("devicelight"), init);
 
   event->SetTrusted(true);
 
@@ -257,17 +258,16 @@ nsDeviceSensors::FireDOMProximityEvent(mozilla::dom::EventTarget* aTarget,
                                        double aMin,
                                        double aMax)
 {
-  nsCOMPtr<nsIDOMEvent> event;
-  NS_NewDOMDeviceProximityEvent(getter_AddRefs(event), aTarget, nullptr, nullptr);
-  nsCOMPtr<nsIDOMDeviceProximityEvent> oe = do_QueryInterface(event);
-
-  oe->InitDeviceProximityEvent(NS_LITERAL_STRING("deviceproximity"),
-                               true,
-                               false,
-                               aValue,
-                               aMin,
-                               aMax);
-
+  DeviceProximityEventInit init;
+  init.mBubbles = true;
+  init.mCancelable = false;
+  init.mValue = aValue;
+  init.mMin = aMin;
+  init.mMax = aMax;
+  nsRefPtr<DeviceProximityEvent> event =
+    DeviceProximityEvent::Constructor(aTarget,
+                                      NS_LITERAL_STRING("deviceproximity"),
+                                      init);
   event->SetTrusted(true);
 
   bool defaultActionEnabled;
@@ -289,14 +289,14 @@ void
 nsDeviceSensors::FireDOMUserProximityEvent(mozilla::dom::EventTarget* aTarget,
                                            bool aNear)
 {
-  nsCOMPtr<nsIDOMEvent> event;
-  NS_NewDOMUserProximityEvent(getter_AddRefs(event), aTarget, nullptr, nullptr);
-  nsCOMPtr<nsIDOMUserProximityEvent> pe = do_QueryInterface(event);
-
-  pe->InitUserProximityEvent(NS_LITERAL_STRING("userproximity"),
-                             true,
-                             false,
-                             aNear);
+  UserProximityEventInit init;
+  init.mBubbles = true;
+  init.mCancelable = false;
+  init.mNear = aNear;
+  nsRefPtr<UserProximityEvent> event =
+    UserProximityEvent::Constructor(aTarget,
+                                    NS_LITERAL_STRING("userproximity"),
+                                    init);
 
   event->SetTrusted(true);
 

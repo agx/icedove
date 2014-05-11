@@ -7,15 +7,13 @@
 /* representation of one line within a block frame, a CSS line box */
 
 #include "nsLineBox.h"
-#include "nsLineLayout.h"
 #include "prprf.h"
-#include "nsBlockFrame.h"
-#include "nsIFrame.h"
+#include "nsFrame.h"
 #include "nsPresArena.h"
 #ifdef IBMBIDI
 #include "nsBidiPresUtils.h"
 #endif
-#include "nsStyleStructInlines.h"
+#include "nsIFrameInlines.h"
 #include "mozilla/Assertions.h"
 #include "mozilla/Likely.h"
 
@@ -44,9 +42,9 @@ nsLineBox::nsLineBox(nsIFrame* aFrame, int32_t aCount, bool aIsBlock)
   }
 #endif
 
-  MOZ_STATIC_ASSERT(NS_STYLE_CLEAR_LAST_VALUE <= 15,
-                    "FlagBits needs more bits to store the full range of "
-                    "break type ('clear') values");
+  static_assert(NS_STYLE_CLEAR_LAST_VALUE <= 15,
+                "FlagBits needs more bits to store the full range of "
+                "break type ('clear') values");
 #if NS_STYLE_CLEAR_NONE > 0
   mFlags.mBreakType = NS_STYLE_CLEAR_NONE;
 #endif

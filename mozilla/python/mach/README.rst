@@ -55,6 +55,51 @@ to the decorators are being used as arguments to
 The Python modules defining mach commands do not need to live inside the
 main mach source tree.
 
+Conditionally Filtering Commands
+--------------------------------
+
+Sometimes it might only make sense to run a command given a certain
+context. For example, running tests only makes sense if the product
+they are testing has been built, and said build is available. To make
+sure a command is only runnable from within a correct context, you can
+define a series of conditions on the *Command* decorator.
+
+A condition is simply a function that takes an instance of the
+*CommandProvider* class as an argument, and returns True or False. If
+any of the conditions defined on a command return False, the command
+will not be runnable. The doc string of a condition function is used in
+error messages, to explain why the command cannot currently be run.
+
+Here is an example:
+
+    from mach.decorators import (
+        CommandProvider,
+        Command,
+    )
+
+    def build_available(cls):
+        """The build needs to be available."""
+        return cls.build_path is not None
+
+    @CommandProvider
+    class MyClass(MachCommandBase):
+        def __init__(self, build_path=None):
+            self.build_path = build_path
+
+        @Command('run_tests', conditions=[build_available])
+        def run_tests(self):
+            # Do stuff here.
+
+It is important to make sure that any state needed by the condition is
+available to instances of the command provider.
+
+By default all commands without any conditions applied will be runnable,
+but it is possible to change this behaviour by setting *require_conditions*
+to True:
+
+    m = mach.main.Mach()
+    m.require_conditions = True
+
 Minimizing Code in Mach
 -----------------------
 
@@ -173,3 +218,30 @@ LoggingMixin:
              self.log(logging.INFO, 'foo_start', {'bar': True},
                  'Foo performed. Bar: {bar}')
 
+Entry Points
+============
+
+It is possible to use setuptools' entry points to load commands
+directly from python packages. A mach entry point is a function which
+returns a list of files or directories containing mach command
+providers.
+
+E.g:
+
+    def list_providers():
+        providers = []
+        here = os.path.abspath(os.path.dirname(__file__))
+        for p in os.listdir(here):
+            if p.endswith('.py'):
+                providers.append(os.path.join(here, p))
+        return providers
+
+See http://pythonhosted.org/setuptools/setuptools.html#dynamic-discovery-of-services-and-plugins
+for more information on creating an entry point. To search for entry
+point plugins, you can call *load_commands_from_entry_point*. This
+takes a single parameter called *group*. This is the name of the entry
+point group to load and defaults to "mach.providers".
+
+E.g:
+
+    mach.load_commands_from_entry_point("mach.external.providers")

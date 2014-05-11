@@ -3,8 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "nsSelectsAreaFrame.h"
-#include "nsCOMPtr.h"
-#include "nsIDOMHTMLOptionElement.h"
 #include "nsIContent.h"
 #include "nsListControlFrame.h"
 #include "nsDisplayList.h"
@@ -14,11 +12,9 @@ NS_NewSelectsAreaFrame(nsIPresShell* aShell, nsStyleContext* aContext, uint32_t 
 {
   nsSelectsAreaFrame* it = new (aShell) nsSelectsAreaFrame(aContext);
 
-  if (it) {
-    // We need NS_BLOCK_FLOAT_MGR to ensure that the options inside the select
-    // aren't expanded by right floats outside the select.
-    it->SetFlags(aFlags | NS_BLOCK_FLOAT_MGR);
-  }
+  // We need NS_BLOCK_FLOAT_MGR to ensure that the options inside the select
+  // aren't expanded by right floats outside the select.
+  it->SetFlags(aFlags | NS_BLOCK_FLOAT_MGR);
 
   return it;
 }

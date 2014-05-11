@@ -13,14 +13,6 @@ XPIDL_SOURCES += [
 
 XPIDL_MODULE = 'dom_file'
 
-XPIDL_FLAGS += [
-    '-I$(topsrcdir)/dom/base',
-    '-I$(topsrcdir)/dom/interfaces/base',
-    '-I$(topsrcdir)/dom/interfaces/events',
-]
-
-MODULE = 'dom'
-
 EXPORTS += [
     'nsIFileStorage.h',
 ]
@@ -41,7 +33,7 @@ EXPORTS.mozilla.dom.file += [
     'LockedFile.h',
 ]
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'ArchiveEvent.cpp',
     'ArchiveReader.cpp',
     'ArchiveRequest.cpp',
@@ -61,3 +53,10 @@ CPP_SOURCES += [
     'MetadataHelper.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
+LOCAL_INCLUDES += [
+    '../base',
+]
+
+FINAL_LIBRARY = 'gklayout'

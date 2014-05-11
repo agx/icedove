@@ -2,9 +2,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/ArrayUtils.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/Util.h"
 
 #include "Database.h"
 
@@ -26,6 +26,7 @@
 #include "nsPrintfCString.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
+#include "prtime.h"
 
 // Time between corrupt database backups.
 #define RECENT_BACKUP_TIME_MICROSEC (int64_t)86400 * PR_USEC_PER_SEC // 24H
@@ -38,12 +39,15 @@
 // Set when the database file was found corrupt by a previous maintenance.
 #define PREF_FORCE_DATABASE_REPLACEMENT "places.database.replaceOnStartup"
 
+// Set to specify the size of the places database growth increments in kibibytes
+#define PREF_GROWTH_INCREMENT_KIB "places.database.growthIncrementKiB"
+
 // Maximum size for the WAL file.  It should be small enough since in case of
 // crashes we could lose all the transactions in the file.  But a too small
 // file could hurt performance.
 #define DATABASE_MAX_WAL_SIZE_IN_KIBIBYTES 512
 
-#define BYTES_PER_MEBIBYTE 1048576
+#define BYTES_PER_KIBIBYTE 1024
 
 // Old Sync GUID annotation.
 #define SYNCGUID_ANNO NS_LITERAL_CSTRING("sync/guid")
@@ -215,14 +219,14 @@ class BlockingConnectionCloseCallback MOZ_FINAL : public mozIStorageCompletionCa
   bool mDone;
 
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_MOZISTORAGECOMPLETIONCALLBACK
   BlockingConnectionCloseCallback();
   void Spin();
 };
 
 NS_IMETHODIMP
-BlockingConnectionCloseCallback::Complete()
+BlockingConnectionCloseCallback::Complete(nsresult, nsISupports*)
 {
   mDone = true;
   nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
@@ -249,7 +253,7 @@ void BlockingConnectionCloseCallback::Spin() {
   }
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(
+NS_IMPL_ISUPPORTS1(
   BlockingConnectionCloseCallback
 , mozIStorageCompletionCallback
 )
@@ -332,7 +336,7 @@ CreateRoot(nsCOMPtr<mozIStorageConnection>& aDBConn,
 
 PLACES_FACTORY_SINGLETON_IMPLEMENTATION(Database, gDatabase)
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(Database
+NS_IMPL_ISUPPORTS2(Database
 , nsIObserver
 , nsISupportsWeakReference
 )
@@ -591,8 +595,13 @@ Database::InitSchema(bool* aDatabaseMigrated)
   journalSizePragma.AppendInt(DATABASE_MAX_WAL_SIZE_IN_KIBIBYTES * 3);
   (void)mMainConn->ExecuteSimpleSQL(journalSizePragma);
 
-  // Grow places in 10MiB increments to limit fragmentation on disk.
-  (void)mMainConn->SetGrowthIncrement(10 * BYTES_PER_MEBIBYTE, EmptyCString());
+  // Grow places in |growthIncrementKiB| increments to limit fragmentation on disk.
+  // By default, it's 10 MB.
+  int32_t growthIncrementKiB =
+    Preferences::GetInt(PREF_GROWTH_INCREMENT_KIB, 10 * BYTES_PER_KIBIBYTE);
+  if (growthIncrementKiB > 0) {
+    (void)mMainConn->SetGrowthIncrement(growthIncrementKiB * BYTES_PER_KIBIBYTE, EmptyCString());
+  }
 
   // We use our functions during migration, so initialize them now.
   rv = InitFunctions();

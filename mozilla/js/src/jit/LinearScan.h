@@ -7,9 +7,7 @@
 #ifndef jit_LinearScan_h
 #define jit_LinearScan_h
 
-#include "LiveRangeAllocator.h"
-#include "BitSet.h"
-
+#include "jit/LiveRangeAllocator.h"
 #include "js/Vector.h"
 
 namespace js {
@@ -28,6 +26,9 @@ class LinearScanVirtualRegister : public VirtualRegister
     bool finished_ : 1;
 
   public:
+    LinearScanVirtualRegister(TempAllocator &alloc)
+      : VirtualRegister(alloc)
+    {}
     void setCanonicalSpill(LAllocation *alloc) {
         canonicalSpill_ = alloc;
     }
@@ -58,7 +59,8 @@ class LinearScanVirtualRegister : public VirtualRegister
     }
 };
 
-class LinearScanAllocator : public LiveRangeAllocator<LinearScanVirtualRegister>
+class LinearScanAllocator
+  : private LiveRangeAllocator<LinearScanVirtualRegister, /* forLSRA = */ true>
 {
     friend class C1Spewer;
     friend class JSONSpewer;
@@ -70,7 +72,6 @@ class LinearScanAllocator : public LiveRangeAllocator<LinearScanVirtualRegister>
       public:
         void enqueueForward(LiveInterval *after, LiveInterval *interval);
         void enqueueBackward(LiveInterval *interval);
-        void enqueueAtHead(LiveInterval *interval);
 
         void assertSorted();
 
@@ -124,7 +125,7 @@ class LinearScanAllocator : public LiveRangeAllocator<LinearScanVirtualRegister>
 
   public:
     LinearScanAllocator(MIRGenerator *mir, LIRGenerator *lir, LIRGraph &graph)
-      : LiveRangeAllocator<LinearScanVirtualRegister>(mir, lir, graph, /* forLSRA = */ true)
+      : LiveRangeAllocator<LinearScanVirtualRegister, /* forLSRA = */ true>(mir, lir, graph)
     {
     }
 

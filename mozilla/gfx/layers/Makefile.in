@@ -3,9 +3,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-DEPTH       = @DEPTH@
-topsrcdir   = @top_srcdir@
-srcdir      = @srcdir@
 VPATH       = \
   $(srcdir) \
   $(srcdir)/basic \
@@ -18,28 +15,9 @@ VPATH       = \
   $(srcdir)/ipc \
   $(NULL)
 
-include $(DEPTH)/config/autoconf.mk
-
-LIBRARY_NAME   = layers
-MSVC_ENABLE_PGO := 1
-LIBXUL_LIBRARY = 1
-FORCE_STATIC_LIB = 1
-
-DEFINES += -DIMPL_THEBES
-ifdef MOZ_DEBUG
-DEFINES += -DD3D_DEBUG_INFO
-endif
-
-ifdef MOZ_ENABLE_D3D10_LAYER
-DEFINES	+= -DMOZ_ENABLE_D3D10_LAYER
-endif
-
 include $(topsrcdir)/config/rules.mk
 
-include $(topsrcdir)/ipc/chromium/chromium-config.mk
-
-LOCAL_INCLUDES += \
-        -I$(topsrcdir)/content/events/src \
+CXXFLAGS += \
         -I$(ANDROID_SOURCE)/frameworks/base/include/media/stagefright \
         -I$(ANDROID_SOURCE)/frameworks/base/include/media/stagefright/openmax \
         -I$(ANDROID_SOURCE)/frameworks/av/include/media/stagefright \
@@ -51,7 +29,9 @@ CXXFLAGS += $(MOZ_CAIRO_CFLAGS) $(MOZ_PIXMAN_CFLAGS) $(TK_CFLAGS)
 ifdef _MSC_VER
 ifeq ($(CPU_ARCH),x86_64)
 # Workaround compiler bug (Bug 795594)
-LayerTreeInvalidation.$(OBJ_SUFFIX): CXXFLAGS += -GL-
-Layers.$(OBJ_SUFFIX): CXXFLAGS += -GL-
+NO_PROFILE_GUIDED_OPTIMIZE := \
+  LayerTreeInvalidation.cpp \
+  Layers.cpp \
+  $(NULL)
 endif
 endif

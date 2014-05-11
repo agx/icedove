@@ -10,10 +10,13 @@ XPIDL_SOURCES += [
     'nsIAlertsService.idl',
 ]
 
-MODULE = 'alerts'
+XPIDL_MODULE = 'alerts'
 
-CPP_SOURCES += [
+UNIFIED_SOURCES += [
     'nsAlertsService.cpp',
     'nsXULAlerts.cpp',
 ]
 
+include('/ipc/chromium/chromium-config.mozbuild')
+
+FINAL_LIBRARY = 'toolkitcomps'

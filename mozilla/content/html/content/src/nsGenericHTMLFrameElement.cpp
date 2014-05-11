@@ -6,31 +6,37 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsGenericHTMLFrameElement.h"
+
+#include "nsIDOMDocument.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsContentUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ErrorResult.h"
 #include "nsIAppsService.h"
 #include "nsServiceManagerUtils.h"
-#include "nsIDOMApplicationRegistry.h"
+#include "mozIApplication.h"
 #include "nsIPermissionManager.h"
 #include "GeckoProfiler.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsGenericHTMLFrameElement)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsGenericHTMLFrameElement,
                                                   nsGenericHTMLElement)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFrameLoader)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_INTERFACE_TABLE_HEAD(nsGenericHTMLFrameElement)
+NS_IMPL_ADDREF_INHERITED(nsGenericHTMLFrameElement, nsGenericHTMLElement)
+NS_IMPL_RELEASE_INHERITED(nsGenericHTMLFrameElement, nsGenericHTMLElement)
+
+NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(nsGenericHTMLFrameElement)
   NS_INTERFACE_TABLE_INHERITED3(nsGenericHTMLFrameElement,
                                 nsIFrameLoaderOwner,
                                 nsIDOMMozBrowserFrame,
                                 nsIMozBrowserFrame)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsGenericHTMLFrameElement)
-NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
+NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLElement)
 
 NS_IMPL_BOOL_ATTR(nsGenericHTMLFrameElement, Mozbrowser, mozbrowser)
 
@@ -229,7 +235,9 @@ nsGenericHTMLFrameElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
                                               aValue, aNotify);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::src) {
+  if (aNameSpaceID == kNameSpaceID_None && aName == nsGkAtoms::src &&
+      (Tag() != nsGkAtoms::iframe || 
+       !HasAttr(kNameSpaceID_None,nsGkAtoms::srcdoc))) {
     // Don't propagate error here. The attribute was successfully set, that's
     // what we should reflect.
     LoadSrc();
@@ -315,6 +323,21 @@ nsGenericHTMLFrameElement::IsHTMLFocusable(bool aWithMouse,
   return false;
 }
 
+bool
+nsGenericHTMLFrameElement::BrowserFramesEnabled()
+{
+  static bool sMozBrowserFramesEnabled = false;
+  static bool sBoolVarCacheInitialized = false;
+
+  if (!sBoolVarCacheInitialized) {
+    sBoolVarCacheInitialized = true;
+    Preferences::AddBoolVarCache(&sMozBrowserFramesEnabled,
+                                 "dom.mozBrowserFramesEnabled");
+  }
+
+  return sMozBrowserFramesEnabled;
+}
+
 /**
  * Return true if this frame element really is a mozbrowser or mozapp.  (It
  * needs to have the right attributes, and its creator must have the right
@@ -326,7 +349,7 @@ nsGenericHTMLFrameElement::GetReallyIsBrowserOrApp(bool *aOut)
   *aOut = false;
 
   // Fail if browser frames are globally disabled.
-  if (!Preferences::GetBool("dom.mozBrowserFramesEnabled")) {
+  if (!nsGenericHTMLFrameElement::BrowserFramesEnabled()) {
     return NS_OK;
   }
 
@@ -407,7 +430,7 @@ nsGenericHTMLFrameElement::GetAppManifestURL(nsAString& aOut)
   nsCOMPtr<nsIAppsService> appsService = do_GetService(APPS_SERVICE_CONTRACTID);
   NS_ENSURE_TRUE(appsService, NS_OK);
 
-  nsCOMPtr<mozIDOMApplication> app;
+  nsCOMPtr<mozIApplication> app;
   appsService->GetAppByManifestURL(manifestURL, getter_AddRefs(app));
   if (app) {
     aOut.Assign(manifestURL);

@@ -22,8 +22,8 @@
 namespace mozilla {
 namespace dom {
 
-class PluginDocument : public MediaDocument
-                     , public nsIPluginDocument
+class PluginDocument MOZ_FINAL : public MediaDocument
+                               , public nsIPluginDocument
 {
 public:
   PluginDocument();
@@ -44,7 +44,7 @@ public:
   virtual bool CanSavePresentation(nsIRequest *aNewRequest);
 
   const nsCString& GetType() const { return mMimeType; }
-  nsIContent*      GetPluginContent() { return mPluginContent; }
+  Element*         GetPluginContent() { return mPluginContent; }
 
   void StartLayout() { MediaDocument::StartLayout(); }
 
@@ -52,7 +52,7 @@ public:
 protected:
   nsresult CreateSyntheticPluginDocument();
 
-  nsCOMPtr<nsIContent>                     mPluginContent;
+  nsCOMPtr<Element>                        mPluginContent;
   nsRefPtr<MediaDocumentStreamListener>    mStreamListener;
   nsCString                                mMimeType;
 };
@@ -186,9 +186,6 @@ PluginDocument::StartDocumentLoad(const char*         aCommand,
   MediaDocument::UpdateTitleAndCharset(mMimeType);
 
   mStreamListener = new PluginStreamListener(this);
-  if (!mStreamListener) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
   NS_ASSERTION(aDocListener, "null aDocListener");
   NS_ADDREF(*aDocListener = mStreamListener);
 
@@ -288,9 +285,6 @@ nsresult
 NS_NewPluginDocument(nsIDocument** aResult)
 {
   mozilla::dom::PluginDocument* doc = new mozilla::dom::PluginDocument();
-  if (!doc) {
-    return NS_ERROR_OUT_OF_MEMORY;
-  }
 
   NS_ADDREF(doc);
   nsresult rv = doc->Init();

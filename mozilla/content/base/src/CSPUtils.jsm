@@ -24,7 +24,8 @@ XPCOMUtils.defineLazyModuleGetter(this, "Services",
 
 // Module stuff
 this.EXPORTED_SYMBOLS = ["CSPRep", "CSPSourceList", "CSPSource", "CSPHost",
-                         "CSPdebug", "CSPViolationReportListener", "CSPLocalizer"];
+                         "CSPdebug", "CSPViolationReportListener", "CSPLocalizer",
+                         "CSPPrefObserver"];
 
 var STRINGS_URI = "chrome://global/locale/security/csp.properties";
 
@@ -65,17 +66,28 @@ const R_EXTHOSTSRC = new RegExp ("^" + R_HOSTSRC.source + "\\/[:print:]+$", 'i')
 // keyword-source  = "'self'" / "'unsafe-inline'" / "'unsafe-eval'"
 const R_KEYWORDSRC = new RegExp ("^('self'|'unsafe-inline'|'unsafe-eval')$", 'i');
 
+// nonce-source      = "'nonce-" nonce-value "'"
+// nonce-value       = 1*( ALPHA / DIGIT / "+" / "/" )
+const R_NONCESRC = new RegExp ("^'nonce-([a-zA-Z0-9\+\/]+)'$", 'i');
+
 // source-exp      = scheme-source / host-source / keyword-source
 const R_SOURCEEXP  = new RegExp (R_SCHEMESRC.source + "|" +
                                    R_HOSTSRC.source + "|" +
-                                R_KEYWORDSRC.source,  'i');
+                                R_KEYWORDSRC.source + "|" +
+                                  R_NONCESRC.source,  'i');
 
 
-var gPrefObserver = {
+this.CSPPrefObserver = {
   get debugEnabled () {
     if (!this._branch)
       this._initialize();
     return this._debugEnabled;
+  },
+
+  get experimentalEnabled () {
+    if (!this._branch)
+      this._initialize();
+    return this._experimentalEnabled;
   },
 
   _initialize: function() {
@@ -84,6 +96,7 @@ var gPrefObserver = {
     this._branch = prefSvc.getBranch("security.csp.");
     this._branch.addObserver("", this, false);
     this._debugEnabled = this._branch.getBoolPref("debug");
+    this._experimentalEnabled = this._branch.getBoolPref("experimentalEnabled");
   },
 
   unregister: function() {
@@ -95,11 +108,13 @@ var gPrefObserver = {
     if (aTopic != "nsPref:changed") return;
     if (aData === "debug")
       this._debugEnabled = this._branch.getBoolPref("debug");
+    if (aData === "experimentalEnabled")
+      this._experimentalEnabled = this._branch.getBoolPref("experimentalEnabled");
   },
 };
 
 this.CSPdebug = function CSPdebug(aMsg) {
-  if (!gPrefObserver.debugEnabled) return;
+  if (!CSPPrefObserver.debugEnabled) return;
 
   aMsg = 'CSP debug: ' + aMsg + "\n";
   Components.classes["@mozilla.org/consoleservice;1"]
@@ -108,7 +123,7 @@ this.CSPdebug = function CSPdebug(aMsg) {
 }
 
 // Callback to resume a request once the policy-uri has been fetched
-function CSPPolicyURIListener(policyURI, docRequest, csp) {
+function CSPPolicyURIListener(policyURI, docRequest, csp, reportOnly) {
   this._policyURI = policyURI;    // location of remote policy
   this._docRequest = docRequest;  // the parent document request
   this._csp = csp;                // parent document's CSP
@@ -116,6 +131,7 @@ function CSPPolicyURIListener(policyURI, docRequest, csp) {
   this._wrapper = null;           // nsIScriptableInputStream
   this._docURI = docRequest.QueryInterface(Ci.nsIChannel)
                  .URI;    // parent document URI (to be used as 'self')
+  this._reportOnly = reportOnly;
 }
 
 CSPPolicyURIListener.prototype = {
@@ -147,13 +163,17 @@ CSPPolicyURIListener.prototype = {
     if (Components.isSuccessCode(status)) {
       // send the policy we received back to the parent document's CSP
       // for parsing
-      this._csp.refinePolicy(this._policy, this._docURI,
-                             this._csp._specCompliant);
+      this._csp.appendPolicy(this._policy, this._docURI,
+                             this._reportOnly, this._csp._specCompliant);
     }
     else {
-      // problem fetching policy so fail closed
-      this._csp.refinePolicy("default-src 'none'", this._docURI,
-                             this._csp._specCompliant);
+      // problem fetching policy so fail closed by appending a "block it all"
+      // policy.  Also toss an error into the console so developers can see why
+      // this policy is used.
+      this._csp.log(WARN_FLAG, CSPLocalizer.getFormatStr("errorFetchingPolicy",
+                                                         [status]));
+      this._csp.appendPolicy("default-src 'none'", this._docURI,
+                             this._reportOnly, this._csp._specCompliant);
     }
     // resume the parent document request
     this._docRequest.resume();
@@ -177,6 +197,7 @@ this.CSPRep = function CSPRep(aSpecCompliant) {
 
   this._allowEval = false;
   this._allowInlineScripts = false;
+  this._reportOnlyMode = false;
 
   // don't auto-populate _directives, so it is easier to find bugs
   this._directives = {};
@@ -236,6 +257,8 @@ CSPRep.ALLOW_DIRECTIVE   = "allow";
   *        string rep of a CSP
   * @param self (optional)
   *        URI representing the "self" source
+  * @param reportOnly (optional)
+  *        whether or not this CSP is report-only (defaults to false)
   * @param docRequest (optional)
   *        request for the parent document which may need to be suspended
   *        while the policy-uri is asynchronously fetched
@@ -244,12 +267,14 @@ CSPRep.ALLOW_DIRECTIVE   = "allow";
   * @returns
   *        an instance of CSPRep
   */
-CSPRep.fromString = function(aStr, self, docRequest, csp) {
+CSPRep.fromString = function(aStr, self, reportOnly, docRequest, csp) {
   var SD = CSPRep.SRC_DIRECTIVES_OLD;
   var UD = CSPRep.URI_DIRECTIVES;
   var aCSPR = new CSPRep();
   aCSPR._originalText = aStr;
   aCSPR._innerWindowID = innerWindowFromRequest(docRequest);
+  if (typeof reportOnly === 'undefined') reportOnly = false;
+  aCSPR._reportOnlyMode = reportOnly;
 
   var selfUri = null;
   if (self instanceof Ci.nsIURI) {
@@ -298,7 +323,7 @@ CSPRep.fromString = function(aStr, self, docRequest, csp) {
         else if (opt === "eval-script")
           aCSPR._allowEval = true;
         else
-          cspWarn(aCSPR, CSPLocalizer.getFormatStr("doNotUnderstandOption",
+          cspWarn(aCSPR, CSPLocalizer.getFormatStr("ignoringUnknownOption",
                                                    [opt]));
       }
       continue directive;
@@ -361,17 +386,17 @@ CSPRep.fromString = function(aStr, self, docRequest, csp) {
             if (gETLDService.getBaseDomain(uri) !==
                 gETLDService.getBaseDomain(selfUri)) {
               cspWarn(aCSPR,
-                      CSPLocalizer.getFormatStr("notETLDPlus1",
-                                            [gETLDService.getBaseDomain(uri)]));
+                      CSPLocalizer.getFormatStr("reportURInotETLDPlus1",
+                                                [gETLDService.getBaseDomain(uri)]));
               continue;
             }
             if (!uri.schemeIs(selfUri.scheme)) {
-              cspWarn(aCSPR, CSPLocalizer.getFormatStr("notSameScheme",
+              cspWarn(aCSPR, CSPLocalizer.getFormatStr("reportURInotSameSchemeAsSelf",
                                                        [uri.asciiSpec]));
               continue;
             }
             if (uri.port && uri.port !== selfUri.port) {
-              cspWarn(aCSPR, CSPLocalizer.getFormatStr("notSamePort",
+              cspWarn(aCSPR, CSPLocalizer.getFormatStr("reportURInotSamePortAsSelf",
                                                        [uri.asciiSpec]));
               continue;
             }
@@ -406,13 +431,13 @@ CSPRep.fromString = function(aStr, self, docRequest, csp) {
       // POLICY_URI can only be alone
       if (aCSPR._directives.length > 0 || dirs.length > 1) {
         cspError(aCSPR, CSPLocalizer.getStr("policyURINotAlone"));
-        return CSPRep.fromString("default-src 'none'");
+        return CSPRep.fromString("default-src 'none'", null, reportOnly);
       }
       // if we were called without a reference to the parent document request
       // we won't be able to suspend it while we fetch the policy -> fail closed
       if (!docRequest || !csp) {
         cspError(aCSPR, CSPLocalizer.getStr("noParentRequest"));
-        return CSPRep.fromString("default-src 'none'");
+        return CSPRep.fromString("default-src 'none'", null, reportOnly);
       }
 
       var uri = '';
@@ -421,7 +446,7 @@ CSPRep.fromString = function(aStr, self, docRequest, csp) {
       } catch(e) {
         cspError(aCSPR, CSPLocalizer.getFormatStr("policyURIParseError",
                                                   [dirvalue]));
-        return CSPRep.fromString("default-src 'none'");
+        return CSPRep.fromString("default-src 'none'", null, reportOnly);
       }
 
       // Verify that policy URI comes from the same origin
@@ -429,17 +454,17 @@ CSPRep.fromString = function(aStr, self, docRequest, csp) {
         if (selfUri.host !== uri.host) {
           cspError(aCSPR, CSPLocalizer.getFormatStr("nonMatchingHost",
                                                     [uri.host]));
-          return CSPRep.fromString("default-src 'none'");
+          return CSPRep.fromString("default-src 'none'", null, reportOnly);
         }
         if (selfUri.port !== uri.port) {
           cspError(aCSPR, CSPLocalizer.getFormatStr("nonMatchingPort",
                                                     [uri.port.toString()]));
-          return CSPRep.fromString("default-src 'none'");
+          return CSPRep.fromString("default-src 'none'", null, reportOnly);
         }
         if (selfUri.scheme !== uri.scheme) {
           cspError(aCSPR, CSPLocalizer.getFormatStr("nonMatchingScheme",
                                                     [uri.scheme]));
-          return CSPRep.fromString("default-src 'none'");
+          return CSPRep.fromString("default-src 'none'", null, reportOnly);
         }
       }
 
@@ -451,19 +476,19 @@ CSPRep.fromString = function(aStr, self, docRequest, csp) {
         // policy-uri can't be abused for CSRF
         chan.loadFlags |= Ci.nsIChannel.LOAD_ANONYMOUS;
         chan.loadGroup = docRequest.loadGroup;
-        chan.asyncOpen(new CSPPolicyURIListener(uri, docRequest, csp), null);
+        chan.asyncOpen(new CSPPolicyURIListener(uri, docRequest, csp, reportOnly), null);
       }
       catch (e) {
         // resume the document request and apply most restrictive policy
         docRequest.resume();
         cspError(aCSPR, CSPLocalizer.getFormatStr("errorFetchingPolicy",
                                                   [e.toString()]));
-        return CSPRep.fromString("default-src 'none'");
+        return CSPRep.fromString("default-src 'none'", null, reportOnly);
       }
 
-      // return a fully-open policy to be intersected with the contents of the
-      // policy-uri when it returns
-      return CSPRep.fromString("default-src *");
+      // return a fully-open policy to be used until the contents of the
+      // policy-uri come back.
+      return CSPRep.fromString("default-src *", null, reportOnly);
     }
 
     // UNIDENTIFIED DIRECTIVE /////////////////////////////////////////////
@@ -476,7 +501,7 @@ CSPRep.fromString = function(aStr, self, docRequest, csp) {
   // directive to be present.
   if (!aCSPR._directives[SD.DEFAULT_SRC]) {
     cspWarn(aCSPR, CSPLocalizer.getStr("allowOrDefaultSrcRequired"));
-    return CSPRep.fromString("default-src 'none'", selfUri);
+    return CSPRep.fromString("default-src 'none'", null, reportOnly);
   }
   return aCSPR;
 };
@@ -489,6 +514,8 @@ CSPRep.fromString = function(aStr, self, docRequest, csp) {
   *        string rep of a CSP
   * @param self (optional)
   *        URI representing the "self" source
+  * @param reportOnly (optional)
+  *        whether or not this CSP is report-only (defaults to false)
   * @param docRequest (optional)
   *        request for the parent document which may need to be suspended
   *        while the policy-uri is asynchronously fetched
@@ -499,12 +526,14 @@ CSPRep.fromString = function(aStr, self, docRequest, csp) {
   */
 // When we deprecate our original CSP implementation, we rename this to
 // CSPRep.fromString and remove the existing CSPRep.fromString above.
-CSPRep.fromStringSpecCompliant = function(aStr, self, docRequest, csp) {
+CSPRep.fromStringSpecCompliant = function(aStr, self, reportOnly, docRequest, csp) {
   var SD = CSPRep.SRC_DIRECTIVES_NEW;
   var UD = CSPRep.URI_DIRECTIVES;
   var aCSPR = new CSPRep(true);
   aCSPR._originalText = aStr;
   aCSPR._innerWindowID = innerWindowFromRequest(docRequest);
+  if (typeof reportOnly === 'undefined') reportOnly = false;
+  aCSPR._reportOnlyMode = reportOnly;
 
   var selfUri = null;
   if (self instanceof Ci.nsIURI) {
@@ -620,19 +649,19 @@ CSPRep.fromStringSpecCompliant = function(aStr, self, docRequest, csp) {
             if (gETLDService.getBaseDomain(uri) !==
                 gETLDService.getBaseDomain(selfUri)) {
               cspWarn(aCSPR, 
-                      CSPLocalizer.getFormatStr("notETLDPlus1",
-                                            [gETLDService.getBaseDomain(uri)]));
+                      CSPLocalizer.getFormatStr("reportURInotETLDPlus1",
+                                                [gETLDService.getBaseDomain(uri)]));
               continue;
             }
             if (!uri.schemeIs(selfUri.scheme)) {
-              cspWarn(aCSPR, 
-                      CSPLocalizer.getFormatStr("notSameScheme",
+              cspWarn(aCSPR,
+                      CSPLocalizer.getFormatStr("reportURInotSameSchemeAsSelf",
                                                 [uri.asciiSpec]));
               continue;
             }
             if (uri.port && uri.port !== selfUri.port) {
-              cspWarn(aCSPR, 
-                      CSPLocalizer.getFormatStr("notSamePort",
+              cspWarn(aCSPR,
+                      CSPLocalizer.getFormatStr("reportURInotSamePortAsSelf",
                                                 [uri.asciiSpec]));
               continue;
             }
@@ -666,13 +695,13 @@ CSPRep.fromStringSpecCompliant = function(aStr, self, docRequest, csp) {
       // POLICY_URI can only be alone
       if (aCSPR._directives.length > 0 || dirs.length > 1) {
         cspError(aCSPR, CSPLocalizer.getStr("policyURINotAlone"));
-        return CSPRep.fromStringSpecCompliant("default-src 'none'");
+        return CSPRep.fromStringSpecCompliant("default-src 'none'", null, reportOnly);
       }
       // if we were called without a reference to the parent document request
       // we won't be able to suspend it while we fetch the policy -> fail closed
       if (!docRequest || !csp) {
         cspError(aCSPR, CSPLocalizer.getStr("noParentRequest"));
-        return CSPRep.fromStringSpecCompliant("default-src 'none'");
+        return CSPRep.fromStringSpecCompliant("default-src 'none'", null, reportOnly);
       }
 
       var uri = '';
@@ -680,22 +709,22 @@ CSPRep.fromStringSpecCompliant = function(aStr, self, docRequest, csp) {
         uri = gIoService.newURI(dirvalue, null, selfUri);
       } catch(e) {
         cspError(aCSPR, CSPLocalizer.getFormatStr("policyURIParseError", [dirvalue]));
-        return CSPRep.fromStringSpecCompliant("default-src 'none'");
+        return CSPRep.fromStringSpecCompliant("default-src 'none'", null, reportOnly);
       }
 
       // Verify that policy URI comes from the same origin
       if (selfUri) {
         if (selfUri.host !== uri.host){
           cspError(aCSPR, CSPLocalizer.getFormatStr("nonMatchingHost", [uri.host]));
-          return CSPRep.fromStringSpecCompliant("default-src 'none'");
+          return CSPRep.fromStringSpecCompliant("default-src 'none'", null, reportOnly);
         }
         if (selfUri.port !== uri.port){
           cspError(aCSPR, CSPLocalizer.getFormatStr("nonMatchingPort", [uri.port.toString()]));
-          return CSPRep.fromStringSpecCompliant("default-src 'none'");
+          return CSPRep.fromStringSpecCompliant("default-src 'none'", null, reportOnly);
         }
         if (selfUri.scheme !== uri.scheme){
           cspError(aCSPR, CSPLocalizer.getFormatStr("nonMatchingScheme", [uri.scheme]));
-          return CSPRep.fromStringSpecCompliant("default-src 'none'");
+          return CSPRep.fromStringSpecCompliant("default-src 'none'", null, reportOnly);
         }
       }
 
@@ -707,18 +736,18 @@ CSPRep.fromStringSpecCompliant = function(aStr, self, docRequest, csp) {
         // policy-uri can't be abused for CSRF
         chan.loadFlags |= Components.interfaces.nsIChannel.LOAD_ANONYMOUS;
         chan.loadGroup = docRequest.loadGroup;
-        chan.asyncOpen(new CSPPolicyURIListener(uri, docRequest, csp), null);
+        chan.asyncOpen(new CSPPolicyURIListener(uri, docRequest, csp, reportOnly), null);
       }
       catch (e) {
         // resume the document request and apply most restrictive policy
         docRequest.resume();
         cspError(aCSPR, CSPLocalizer.getFormatStr("errorFetchingPolicy", [e.toString()]));
-        return CSPRep.fromStringSpecCompliant("default-src 'none'");
+        return CSPRep.fromStringSpecCompliant("default-src 'none'", null, reportOnly);
       }
 
-      // return a fully-open policy to be intersected with the contents of the
-      // policy-uri when it returns
-      return CSPRep.fromStringSpecCompliant("default-src *");
+      // return a fully-open policy to be used until the contents of the
+      // policy-uri come back
+      return CSPRep.fromStringSpecCompliant("default-src *", null, reportOnly);
     }
 
     // UNIDENTIFIED DIRECTIVE /////////////////////////////////////////////
@@ -779,14 +808,28 @@ CSPRep.prototype = {
 
   /**
    * Determines if this policy accepts a URI.
-   * @param aContext
+   * @param aURI
+   *        URI of the requested resource
+   * @param aDirective
    *        one of the SRC_DIRECTIVES defined above
+   * @param aContext
+   *        Context of the resource being requested. This is a type inheriting
+   *        from nsIDOMHTMLElement if this is called from shouldLoad to check
+   *        an external resource load, and refers to the HTML element that is
+   *        causing the resource load. Otherwise, it is a string containing
+   *        a nonce from a nonce="" attribute if it is called from
+   *        getAllowsNonce.
    * @returns
    *        true if the policy permits the URI in given context.
    */
   permits:
-  function csp_permits(aURI, aContext) {
-    if (!aURI) return false;
+  function csp_permits(aURI, aDirective, aContext) {
+    // In the case where permits is called from getAllowsNonce (for an inline
+    // element), aURI is null and aContext has a specific value. Otherwise,
+    // calling permits without aURI is invalid.
+    let checking_nonce = aContext instanceof Ci.nsIDOMHTMLElement ||
+                         typeof aContext === 'string';
+    if (!aURI && !checking_nonce) return false;
 
     // GLOBALLY ALLOW "about:" SCHEME
     if (aURI instanceof String && aURI.substring(0,6) === "about:")
@@ -797,13 +840,13 @@ CSPRep.prototype = {
     // make sure the right directive set is used
     let DIRS = this._specCompliant ? CSPRep.SRC_DIRECTIVES_NEW : CSPRep.SRC_DIRECTIVES_OLD;
 
-    let contextIsSrcDir = false;
+    let directiveInPolicy = false;
     for (var i in DIRS) {
-      if (DIRS[i] === aContext) {
+      if (DIRS[i] === aDirective) {
         // for catching calls with invalid contexts (below)
-        contextIsSrcDir = true;
-        if (this._directives.hasOwnProperty(aContext)) {
-          return this._directives[aContext].permits(aURI);
+        directiveInPolicy = true;
+        if (this._directives.hasOwnProperty(aDirective)) {
+          return this._directives[aDirective].permits(aURI, aContext);
         }
         //found matching dir, can stop looking
         break;
@@ -811,15 +854,15 @@ CSPRep.prototype = {
     }
 
     // frame-ancestors is a special case; it doesn't fall back to default-src.
-    if (aContext === DIRS.FRAME_ANCESTORS)
+    if (aDirective === DIRS.FRAME_ANCESTORS)
       return true;
 
     // All directives that don't fall back to default-src should have an escape
     // hatch above (like frame-ancestors).
-    if (!contextIsSrcDir) {
+    if (!directiveInPolicy) {
       // if this code runs, there's probably something calling permits() that
       // shouldn't be calling permits().
-      CSPdebug("permits called with invalid load type: " + aContext);
+      CSPdebug("permits called with invalid load type: " + aDirective);
       return false;
     }
 
@@ -828,126 +871,12 @@ CSPRep.prototype = {
     // indicates no relevant directives were present and the load should be
     // permitted).
     if (this._directives.hasOwnProperty(DIRS.DEFAULT_SRC)) {
-      return this._directives[DIRS.DEFAULT_SRC].permits(aURI);
+      return this._directives[DIRS.DEFAULT_SRC].permits(aURI, aContext);
     }
 
     // no relevant directives present -- this means for CSP 1.0 that the load
     // should be permitted (and for the old CSP, to block it).
     return this._specCompliant;
-  },
-
-  /**
-   * Intersects with another CSPRep, deciding the subset policy
-   * that should be enforced, and returning a new instance.
-   * This assumes that either both CSPReps are specCompliant or they are both
-   * not.
-   * @param aCSPRep
-   *        a CSPRep instance to use as "other" CSP
-   * @returns
-   *        a new CSPRep instance of the intersection
-   */
-  intersectWith:
-  function cspsd_intersectWith(aCSPRep) {
-    var newRep = new CSPRep();
-
-    let DIRS = aCSPRep._specCompliant ? CSPRep.SRC_DIRECTIVES_NEW :
-                                        CSPRep.SRC_DIRECTIVES_OLD;
-
-    // one or more of the two CSPReps may not have any given directive.  In
-    // these cases, we need to pick "all" or "none" based on the type of CSPRep
-    // (spec compliant or not).
-    let thisHasDefault = this._directives.hasOwnProperty(DIRS.DEFAULT_SRC),
-        thatHasDefault = aCSPRep._directives.hasOwnProperty(DIRS.DEFAULT_SRC);
-    for (var dir in DIRS) {
-      let dirv = DIRS[dir];
-      let thisHasDir = this._directives.hasOwnProperty(dirv),
-          thatHasDir = aCSPRep._directives.hasOwnProperty(dirv);
-
-
-      // if both specific src directives are absent, skip this (new policy will
-      // rely on default-src)
-      if (!thisHasDir && !thatHasDir) {
-        continue;
-      }
-
-      // frame-ancestors is a special case; it doesn't fall back to
-      // default-src, so only add it to newRep if one or both of the policies
-      // have it.
-      if (dirv === DIRS.FRAME_ANCESTORS) {
-        if (thisHasDir && thatHasDir) {
-          // both have frame-ancestors, intersect them.
-          newRep._directives[dirv] =
-            aCSPRep._directives[dirv].intersectWith(this._directives[dirv]);
-        } else if (thisHasDir || thatHasDir) {
-          // one or the other has frame-ancestors, copy it.
-          newRep._directives[dirv] =
-            ( thisHasDir ? this : aCSPRep )._directives[dirv].clone();
-        }
-      }
-      else if (aCSPRep._specCompliant) {
-        // CSP 1.0 doesn't require default-src, so an intersection only makes
-        // sense if there is a default-src or both policies have the directive.
-
-        if (!thisHasDir && !thisHasDefault) {
-          // only aCSPRep has a relevant directive
-          newRep._directives[dirv] = aCSPRep._directives[dirv].clone();
-        }
-        else if (!thatHasDir && !thatHasDefault) {
-          // only "this" has a relevant directive
-          newRep._directives[dirv] = this._directives[dirv].clone();
-        }
-        else {
-          // both policies have a relevant directive (may be default-src)
-          var isect1 = thisHasDir ?
-                       this._directives[dirv] :
-                       this._directives[DIRS.DEFAULT_SRC];
-          var isect2 = thatHasDir ?
-                       aCSPRep._directives[dirv] :
-                       aCSPRep._directives[DIRS.DEFAULT_SRC];
-          newRep._directives[dirv] = isect1.intersectWith(isect2);
-        }
-      }
-      else {
-        // pre-1.0 CSP requires a default-src, so we can assume it's here
-        // (since the parser created one).
-        var isect1 = thisHasDir ?
-                     this._directives[dirv] :
-                     this._directives[DIRS.DEFAULT_SRC];
-        var isect2 = thatHasDir ?
-                     aCSPRep._directives[dirv] :
-                     aCSPRep._directives[DIRS.DEFAULT_SRC];
-        newRep._directives[dirv] = isect1.intersectWith(isect2);
-      }
-    }
-
-    // REPORT_URI
-    var reportURIDir = CSPRep.URI_DIRECTIVES.REPORT_URI;
-    if (this._directives[reportURIDir] && aCSPRep._directives[reportURIDir]) {
-      newRep._directives[reportURIDir] =
-        this._directives[reportURIDir].concat(aCSPRep._directives[reportURIDir]);
-    }
-    else if (this._directives[reportURIDir]) {
-      // blank concat makes a copy of the string.
-      newRep._directives[reportURIDir] = this._directives[reportURIDir].concat();
-    }
-    else if (aCSPRep._directives[reportURIDir]) {
-      // blank concat makes a copy of the string.
-      newRep._directives[reportURIDir] = aCSPRep._directives[reportURIDir].concat();
-    }
-
-    newRep._allowEval =          this.allowsEvalInScripts
-                           && aCSPRep.allowsEvalInScripts;
-
-    newRep._allowInlineScripts = this.allowsInlineScripts
-                           && aCSPRep.allowsInlineScripts;
-
-    newRep._allowInlineStyles = this.allowsInlineStyles
-                           && aCSPRep.allowsInlineStyles;
-
-    newRep._innerWindowID = this._innerWindowID ?
-                              this._innerWindowID : aCSPRep._innerWindowID;
-
-    return newRep;
   },
 
   /**
@@ -1084,7 +1013,6 @@ CSPSourceList.fromString = function(aStr, aCSPRep, self, enforceSelfChecks) {
     // if a source is a *, then we can permit all sources
     if (src.permitAll) {
       slObj._permitAllSources = true;
-      return slObj;
     } else {
       slObj._sources.push(src);
     }
@@ -1182,72 +1110,16 @@ CSPSourceList.prototype = {
    *        true if the URI matches a source in this source list.
    */
   permits:
-  function cspsd_permits(aURI) {
+  function cspsd_permits(aURI, aContext) {
     if (this.isNone())    return false;
     if (this.isAll())     return true;
 
     for (var i in this._sources) {
-      if (this._sources[i].permits(aURI)) {
+      if (this._sources[i].permits(aURI, aContext)) {
         return true;
       }
     }
     return false;
-  },
-
-  /**
-   * Intersects with another CSPSourceList, deciding the subset directive
-   * that should be enforced, and returning a new instance.
-   * @param that
-   *        the other CSPSourceList to intersect "this" with
-   * @returns
-   *        a new instance of a CSPSourceList representing the intersection
-   */
-  intersectWith:
-  function cspsd_intersectWith(that) {
-
-    var newCSPSrcList = null;
-
-    if (!that) return this.clone();
-
-    if (this.isNone() || that.isNone())
-      newCSPSrcList = CSPSourceList.fromString("'none'", this._CSPRep);
-
-    if (this.isAll()) newCSPSrcList = that.clone();
-    if (that.isAll()) newCSPSrcList = this.clone();
-
-    if (!newCSPSrcList) {
-      // the shortcuts didn't apply, must do intersection the hard way.
-      // --  find only common sources
-
-      // XXX (sid): we should figure out a better algorithm for this.
-      // This is horribly inefficient.
-      var isrcs = [];
-      for (var i in this._sources) {
-        for (var j in that._sources) {
-          var s = that._sources[j].intersectWith(this._sources[i]);
-          if (s) {
-            isrcs.push(s);
-          }
-        }
-      }
-      // Next, remove duplicates
-      dup: for (var i = 0; i < isrcs.length; i++) {
-        for (var j = 0; j < i; j++) {
-          if (isrcs[i].equals(isrcs[j])) {
-            isrcs.splice(i, 1);
-            i--;
-            continue dup;
-          }
-        }
-      }
-      newCSPSrcList = new CSPSourceList();
-      newCSPSrcList._sources = isrcs;
-    }
-
-    if ((!newCSPSrcList._CSPRep) && that._CSPRep) {
-      newCSPSrcList._CSPRep = that._CSPRep;
-    }
-    return newCSPSrcList;
   }
 }
 
@@ -1259,6 +1131,7 @@ this.CSPSource = function CSPSource() {
   this._scheme = undefined;
   this._port = undefined;
   this._host = undefined;
+  this._nonce = undefined;
 
   //when set to true, this allows all source
   this._permitAll = false;
@@ -1503,6 +1376,19 @@ CSPSource.fromString = function(aStr, aCSPRep, self, enforceSelfChecks) {
     return sObj;
   }
 
+  // check for a nonce-source match
+  if (R_NONCESRC.test(aStr)) {
+    // We can't put this check outside of the regex test because R_NONCESRC is
+    // included in R_SOURCEEXP, which is const. By testing here, we can
+    // explicitly return null for nonces if experimental is not enabled,
+    // instead of letting it fall through and assuming it won't accidentally
+    // match something later in this function.
+    if (!CSPPrefObserver.experimentalEnabled) return null;
+    var nonceSrcMatch = R_NONCESRC.exec(aStr);
+    sObj._nonce = nonceSrcMatch[1];
+    return sObj;
+  }
+
   // check for 'self' (case insensitive)
   if (aStr.toUpperCase() === "'SELF'") {
     if (!self) {
@@ -1607,6 +1493,8 @@ CSPSource.prototype = {
       s = s + this._host;
     if (this.port)
       s = s + ":" + this.port;
+    if (this._nonce)
+      s = s + "'nonce-" + this._nonce + "'";
     return s;
   },
 
@@ -1622,6 +1510,7 @@ CSPSource.prototype = {
     aClone._scheme = this._scheme;
     aClone._port = this._port;
     aClone._host = this._host ? this._host.clone() : undefined;
+    aClone._nonce = this._nonce;
     aClone._isSelf = this._isSelf;
     aClone._CSPRep = this._CSPRep;
     return aClone;
@@ -1631,11 +1520,24 @@ CSPSource.prototype = {
    * Determines if this Source accepts a URI.
    * @param aSource
    *        the URI, or CSPSource in question
+   * @param aContext
+   *        the context of the resource being loaded
    * @returns
    *        true if the URI matches a source in this source list.
    */
   permits:
-  function(aSource) {
+  function(aSource, aContext) {
+    if (this._nonce && CSPPrefObserver.experimentalEnabled) {
+      if (aContext instanceof Ci.nsIDOMHTMLElement) {
+        return this._nonce === aContext.getAttribute('nonce');
+      } else if (typeof aContext === 'string') {
+        return this._nonce === aContext;
+      }
+    }
+    // We only use aContext for nonce checks. If it's otherwise provided,
+    // ignore it.
+    if (!CSPPrefObserver.experimentalEnabled && aContext) return false;
+
     if (!aSource) return false;
 
     if (!(aSource instanceof CSPSource))
@@ -1659,93 +1561,6 @@ CSPSource.prototype = {
 
     // all scheme, host and port matched!
     return true;
-  },
-
-  /**
-   * Determines the intersection of two sources.
-   * Returns a null object if intersection generates no
-   * hosts that satisfy it.
-   * @param that
-   *        the other CSPSource to intersect "this" with
-   * @returns
-   *        a new instance of a CSPSource representing the intersection
-   */
-  intersectWith:
-  function(that) {
-    var newSource = new CSPSource();
-
-    // 'self' is not part of the intersection.  Intersect the raw values from
-    // the source, self must be set by someone creating this source.
-    // When intersecting, we take the more specific of the two: if one scheme,
-    // host or port is undefined, the other is taken.  (This is contrary to
-    // when "permits" is called -- there, the value of 'self' is looked at
-    // when a scheme, host or port is undefined.)
-
-    // port
-    if (!this.port)
-      newSource._port = that.port;
-    else if (!that.port)
-      newSource._port = this.port;
-    else if (this.port === "*")
-      newSource._port = that.port;
-    else if (that.port === "*")
-      newSource._port = this.port;
-    else if (that.port === this.port)
-      newSource._port = this.port;
-    else {
-      let msg = CSPLocalizer.getFormatStr("notIntersectPort",
-                                          [this.toString(), that.toString()]);
-      cspError(this._CSPRep, msg);
-      return null;
-    }
-
-    // scheme
-    if (!this.scheme)
-      newSource._scheme = that.scheme;
-    else if (!that.scheme)
-      newSource._scheme = this.scheme;
-    if (this.scheme === "*")
-      newSource._scheme = that.scheme;
-    else if (that.scheme === "*")
-      newSource._scheme = this.scheme;
-    else if (that.scheme === this.scheme)
-      newSource._scheme = this.scheme;
-    else {
-      var msg = CSPLocalizer.getFormatStr("notIntersectScheme",
-                                          [this.toString(), that.toString()]);
-      cspError(this._CSPRep, msg);
-      return null;
-    }
-
-    // NOTE: Both sources must have a host, if they don't, something funny is
-    // going on.  The fromString() factory method should have set the host to
-    // * if there's no host specified in the input. Regardless, if a host is
-    // not present either the scheme is hostless or any host should be allowed.
-    // This means we can use the other source's host as the more restrictive
-    // host expression, or if neither are present, we can use "*", but the
-    // error should still be reported.
-
-    // host
-    if (this.host && that.host) {
-      newSource._host = this.host.intersectWith(that.host);
-    } else if (this.host) {
-      let msg = CSPLocalizer.getFormatStr("intersectingSourceWithUndefinedHost",
-                                          [that.toString()]);
-      cspError(this._CSPRep, msg);
-      newSource._host = this.host.clone();
-    } else if (that.host) {
-      let msg = CSPLocalizer.getFormatStr("intersectingSourceWithUndefinedHost",
-                                          [this.toString()]);
-      cspError(this._CSPRep, msg);
-      newSource._host = that.host.clone();
-    } else {
-      let msg = CSPLocalizer.getFormatStr("intersectingSourcesWithUndefinedHosts",
-                                          [this.toString(), that.toString()]);
-      cspError(this._CSPRep, msg);
-      newSource._host = CSPHost.fromString("*");
-    }
-
-    return newSource;
   },
 
   /**
@@ -1894,36 +1709,6 @@ CSPHost.prototype = {
 
     // at this point, all conditions are met, so the host is allowed
     return true;
-  },
-
-  /**
-   * Determines the intersection of two Hosts.
-   * Basically, they must be the same, or one must have a wildcard.
-   * @param that
-   *        the other CSPHost to intersect "this" with
-   * @returns
-   *        a new instance of a CSPHost representing the intersection
-   *        (or null, if they can't be intersected)
-   */
-  intersectWith:
-  function(that) {
-    if (!(this.permits(that) || that.permits(this))) {
-      // host definitions cannot co-exist without a more general host
-      // ... one must be a subset of the other, or intersection makes no sense.
-      return null;
-    }
-
-    // pick the more specific one, if both are same length.
-    if (this._segments.length == that._segments.length) {
-      // *.a vs b.a : b.a
-      return (this._segments[0] === "*") ? that.clone() : this.clone();
-    }
-
-    // different lengths...
-    // *.b.a vs *.a : *.b.a
-    // *.b.a vs d.c.b.a : d.c.b.a
-    return (this._segments.length > that._segments.length) ?
-            this.clone() : that.clone();
   },
 
   /**

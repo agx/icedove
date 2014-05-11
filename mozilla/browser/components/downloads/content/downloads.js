@@ -134,10 +134,9 @@ const DownloadsPanel = {
 
     window.addEventListener("unload", this.onWindowUnload, false);
 
-    // Ensure that the Download Manager service is running.  This resumes
-    // active downloads if required.  If there are downloads to be shown in the
-    // panel, starting the service will make us load their data asynchronously.
-    Services.downloads;
+    // Load and resume active downloads if required.  If there are downloads to
+    // be shown in the panel, they will be loaded asynchronously.
+    DownloadsCommon.initializeAllDataLinks();
 
     // Now that data loading has eventually started, load the required XUL
     // elements and initialize our views.
@@ -147,6 +146,8 @@ const DownloadsPanel = {
       DownloadsViewController.initialize();
       DownloadsCommon.log("Attaching DownloadsView...");
       DownloadsCommon.getData(window).addView(DownloadsView);
+      DownloadsCommon.getSummary(window, DownloadsView.kItemCountLimit)
+                     .addView(DownloadsSummary);
       DownloadsCommon.log("DownloadsView attached - the panel for this window",
                           "should now see download items come in.");
       DownloadsPanel._attachEventListeners();
@@ -175,6 +176,8 @@ const DownloadsPanel = {
 
     DownloadsViewController.terminate();
     DownloadsCommon.getData(window).removeView(DownloadsView);
+    DownloadsCommon.getSummary(window, DownloadsView.kItemCountLimit)
+                   .removeView(DownloadsSummary);
     this._unattachEventListeners();
 
     this._state = this.kStateUninitialized;
@@ -187,12 +190,19 @@ const DownloadsPanel = {
   //// Panel interface
 
   /**
-   * Main panel element in the browser window.
+   * Main panel element in the browser window, or null if the panel overlay
+   * hasn't been loaded yet.
    */
   get panel()
   {
+    // If the downloads panel overlay hasn't loaded yet, just return null
+    // without reseting this.panel.
+    let downloadsPanel = document.getElementById("downloadsPanel");
+    if (!downloadsPanel)
+      return null;
+
     delete this.panel;
-    return this.panel = document.getElementById("downloadsPanel");
+    return this.panel = downloadsPanel;
   },
 
   /**
@@ -495,8 +505,7 @@ const DownloadsPanel = {
 
       let uri = NetUtil.newURI(url);
       DownloadsCommon.log("Pasted URL seems valid. Starting download.");
-      saveURL(uri.spec, name || uri.spec, null, true, true,
-              undefined, document);
+      DownloadURL(uri.spec, name, document);
     } catch (ex) {}
   },
 
@@ -772,26 +781,6 @@ const DownloadsView = {
     // Notify the panel that all the initially available downloads have been
     // loaded.  This ensures that the interface is visible, if still required.
     DownloadsPanel.onViewLoadCompleted();
-  },
-
-  /**
-   * Called when the downloads database becomes unavailable (for example,
-   * entering Private Browsing Mode).  References to existing data should be
-   * discarded.
-   */
-  onDataInvalidated: function DV_onDataInvalidated()
-  {
-    DownloadsCommon.log("Downloads data has been invalidated. Cleaning up",
-                        "DownloadsView.");
-
-    DownloadsPanel.terminate();
-
-    // Clear the list by replacing with a shallow copy.
-    let emptyView = this.richListBox.cloneNode(false);
-    this.richListBox.parentNode.replaceChild(emptyView, this.richListBox);
-    this.richListBox = emptyView;
-    this._viewItems = {};
-    this._dataItems = [];
   },
 
   /**
@@ -1344,11 +1333,7 @@ const DownloadsViewController = {
   {
     // Handle commands that are not selection-specific.
     if (aCommand == "downloadsCmd_clearList") {
-      if (PrivateBrowsingUtils.isWindowPrivate(window)) {
-        return Services.downloads.canCleanUpPrivate;
-      } else {
-        return Services.downloads.canCleanUp;
-      }
+      return DownloadsCommon.getData(window).canRemoveFinished;
     }
 
     // Other commands are selection-specific.
@@ -1395,11 +1380,7 @@ const DownloadsViewController = {
   commands: {
     downloadsCmd_clearList: function DVC_downloadsCmd_clearList()
     {
-      if (PrivateBrowsingUtils.isWindowPrivate(window)) {
-        Services.downloads.cleanUpPrivate();
-      } else {
-        Services.downloads.cleanUp();
-      }
+      DownloadsCommon.getData(window).removeFinished();
     }
   }
 };
@@ -1479,7 +1460,8 @@ DownloadsViewItemController.prototype = {
 
     downloadsCmd_open: function DVIC_downloadsCmd_open()
     {
-      this.dataItem.openLocalFile(window);
+      this.dataItem.openLocalFile();
+
       // We explicitly close the panel here to give the user the feedback that
       // their click has been received, and we're handling the action.
       // Otherwise, we'd have to wait for the file-type handler to execute
@@ -1572,10 +1554,8 @@ const DownloadsSummary = {
     }
     if (aActive) {
       DownloadsCommon.getSummary(window, DownloadsView.kItemCountLimit)
-                     .addView(this);
+                     .refreshView(this);
     } else {
-      DownloadsCommon.getSummary(window, DownloadsView.kItemCountLimit)
-                     .removeView(this);
       DownloadsFooter.showingSummary = false;
     }
 

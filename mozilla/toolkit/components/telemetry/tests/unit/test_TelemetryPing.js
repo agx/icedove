@@ -18,13 +18,13 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/LightweightThemeManager.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-const SERVER = "http://localhost:4444";
 const IGNORE_HISTOGRAM = "test::ignore_me";
 const IGNORE_HISTOGRAM_TO_CLONE = "MEMORY_HEAP_ALLOCATED";
 const IGNORE_CLONED_HISTOGRAM = "test::ignore_me_also";
 const ADDON_NAME = "Telemetry test addon";
 const ADDON_HISTOGRAM = "addon-histogram";
-const FLASH_VERSION = "1.1.1.1";
+// Add some unicode characters here to ensure that sending them works correctly.
+const FLASH_VERSION = "\u201c1.1.1.1\u201d";
 const SHUTDOWN_TIME = 10000;
 const FAILED_PROFILE_LOCK_ATTEMPTS = 2;
 
@@ -41,13 +41,18 @@ const Telemetry = Cc["@mozilla.org/base/telemetry;1"].getService(Ci.nsITelemetry
 const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsITelemetryPing);
 
 var httpserver = new HttpServer();
+var serverStarted = false;
 var gFinished = false;
 
 function telemetry_ping () {
   TelemetryPing.gatherStartup();
   TelemetryPing.enableLoadSaveNotifications();
   TelemetryPing.cacheProfileDirectory();
-  TelemetryPing.testPing(SERVER);
+  if (serverStarted) {
+    TelemetryPing.testPing("http://localhost:" + httpserver.identity.primaryPort);
+  } else {
+    TelemetryPing.testPing("http://doesnotexist");
+  }
 }
 
 // Mostly useful so that you can dump payloads from decodeRequestPayload.
@@ -83,7 +88,8 @@ function registerPingHandler(handler) {
 }
 
 function nonexistentServerObserver(aSubject, aTopic, aData) {
-  httpserver.start(4444);
+  httpserver.start(-1);
+  serverStarted = true;
 
   // Provide a dummy function so it returns 200 instead of 404 to telemetry.
   registerPingHandler(dummyHandler);
@@ -136,7 +142,7 @@ function decodeRequestPayload(request) {
     let observer = {
       buffer: "",
       onStreamComplete: function(loader, context, status, length, result) {
-	this.buffer = String.fromCharCode.apply(this, result);
+        this.buffer = String.fromCharCode.apply(this, result);
       }
     };
 
@@ -150,7 +156,12 @@ function decodeRequestPayload(request) {
     converter.onStartRequest(null, null);
     converter.onDataAvailable(null, null, s, 0, s.available());
     converter.onStopRequest(null, null, null);
-    payload = decoder.decode(observer.buffer);
+    let unicodeConverter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+                    .createInstance(Ci.nsIScriptableUnicodeConverter);
+    unicodeConverter.charset = "UTF-8";
+    let utf8string = unicodeConverter.ConvertToUnicode(observer.buffer);
+    utf8string += unicodeConverter.Finish();
+    payload = decoder.decode(utf8string);
   } else {
     payload = decoder.decodeFromStream(s, s.available());
   }
@@ -352,7 +363,7 @@ function runOldPingFileTest() {
   do_check_true(histogramsFile.exists());
 
   let mtime = histogramsFile.lastModifiedTime;
-  histogramsFile.lastModifiedTime = mtime - 8 * 24 * 60 * 60 * 1000; // 8 days.
+  histogramsFile.lastModifiedTime = mtime - (14 * 24 * 60 * 60 * 1000 + 60000); // 14 days, 1m
   TelemetryPing.testLoadHistograms(histogramsFile, true);
   do_check_false(histogramsFile.exists());
 }

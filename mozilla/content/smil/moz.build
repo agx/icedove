@@ -6,16 +6,14 @@
 
 TEST_TOOL_DIRS += ['test']
 
-MODULE = 'content'
-
 EXPORTS += [
     'nsDOMTimeEvent.h',
     'nsISMILAttr.h',
     'nsISMILType.h',
     'nsSMILAnimationController.h',
     'nsSMILAnimationFunction.h',
-    'nsSMILCSSProperty.h',
     'nsSMILCompositorTable.h',
+    'nsSMILCSSProperty.h',
     'nsSMILInstanceTime.h',
     'nsSMILInterval.h',
     'nsSMILKeySpline.h',
@@ -26,25 +24,21 @@ EXPORTS += [
     'nsSMILSetAnimationFunction.h',
     'nsSMILTargetIdentifier.h',
     'nsSMILTimeContainer.h',
+    'nsSMILTimedElement.h',
     'nsSMILTimeValue.h',
     'nsSMILTimeValueSpec.h',
     'nsSMILTimeValueSpecParams.h',
-    'nsSMILTimedElement.h',
     'nsSMILTypes.h',
     'nsSMILValue.h',
 ]
 
-CPP_SOURCES += [
-    'SMILBoolType.cpp',
-    'SMILEnumType.cpp',
-    'SMILIntegerType.cpp',
-    'SMILStringType.cpp',
+UNIFIED_SOURCES += [
     'nsDOMTimeEvent.cpp',
     'nsSMILAnimationController.cpp',
     'nsSMILAnimationFunction.cpp',
+    'nsSMILCompositor.cpp',
     'nsSMILCSSProperty.cpp',
     'nsSMILCSSValueType.cpp',
-    'nsSMILCompositor.cpp',
     'nsSMILFloatType.cpp',
     'nsSMILInstanceTime.cpp',
     'nsSMILInterval.cpp',
@@ -55,9 +49,23 @@ CPP_SOURCES += [
     'nsSMILRepeatCount.cpp',
     'nsSMILSetAnimationFunction.cpp',
     'nsSMILTimeContainer.cpp',
+    'nsSMILTimedElement.cpp',
     'nsSMILTimeValue.cpp',
     'nsSMILTimeValueSpec.cpp',
-    'nsSMILTimedElement.cpp',
     'nsSMILValue.cpp',
+    'SMILBoolType.cpp',
+    'SMILEnumType.cpp',
+    'SMILIntegerType.cpp',
+    'SMILStringType.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
+LOCAL_INCLUDES += [
+    '../base/src',
+    '../events/src',
+    '../svg/content/src',
+    '/layout/style',
+]
+
+FINAL_LIBRARY = 'gklayout'

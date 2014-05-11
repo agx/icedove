@@ -20,11 +20,10 @@ Cu.import("resource://testing-common/httpd.js");
 Cu.import("resource://testing-common/services-common/bagheeraserver.js");
 Cu.import("resource://testing-common/services/metrics/mocks.jsm");
 Cu.import("resource://testing-common/services/healthreport/utils.jsm");
+Cu.import("resource://testing-common/AppData.jsm");
 
 
-const SERVER_HOSTNAME = "localhost";
-const SERVER_PORT = 8080;
-const SERVER_URI = "http://" + SERVER_HOSTNAME + ":" + SERVER_PORT;
+const DUMMY_URI = "http://localhost:62013/";
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const HealthReporterState = bsp.HealthReporterState;
@@ -54,13 +53,12 @@ function getReporter(name, uri, inspected) {
 
 function getReporterAndServer(name, namespace="test") {
   return Task.spawn(function get() {
-    let reporter = yield getReporter(name, SERVER_URI);
-    reporter.serverNamespace = namespace;
-
-    let server = new BagheeraServer(SERVER_URI);
+    let server = new BagheeraServer();
     server.createNamespace(namespace);
+    server.start();
 
-    server.start(SERVER_PORT);
+    let reporter = yield getReporter(name, server.serverURI);
+    reporter.serverNamespace = namespace;
 
     throw new Task.Result([reporter, server]);
   });
@@ -77,7 +75,7 @@ function getHealthReportProviderValues(reporter, day=null) {
   return Task.spawn(function getValues() {
     let p = reporter.getProvider("org.mozilla.healthreport");
     do_check_neq(p, null);
-    let m = p.getMeasurement("submissions", 1);
+    let m = p.getMeasurement("submissions", 2);
     do_check_neq(m, null);
 
     let data = yield reporter._storage.getMeasurementValues(m.id);
@@ -88,6 +86,7 @@ function getHealthReportProviderValues(reporter, day=null) {
     do_check_true(data.days.hasDay(day));
     let serializer = m.serializer(m.SERIALIZE_JSON)
     let json = serializer.daily(data.days.getDay(day));
+    do_check_eq(json._v, 2);
 
     throw new Task.Result(json);
   });
@@ -137,7 +136,7 @@ add_task(function test_shutdown_normal() {
 });
 
 add_task(function test_shutdown_storage_in_progress() {
-  let reporter = yield getHealthReporter("shutdown_storage_in_progress", SERVER_URI, true);
+  let reporter = yield getHealthReporter("shutdown_storage_in_progress", DUMMY_URI, true);
 
   reporter.onStorageCreated = function () {
     print("Faking shutdown during storage initialization.");
@@ -155,7 +154,7 @@ add_task(function test_shutdown_storage_in_progress() {
 // results in shutdown and storage closure.
 add_task(function test_shutdown_provider_manager_in_progress() {
   let reporter = yield getHealthReporter("shutdown_provider_manager_in_progress",
-                                         SERVER_URI, true);
+                                         DUMMY_URI, true);
 
   reporter.onProviderManagerInitialized = function () {
     print("Faking shutdown during provider manager initialization.");
@@ -173,7 +172,7 @@ add_task(function test_shutdown_provider_manager_in_progress() {
 // Simulates an error during provider manager initialization and verifies we shut down.
 add_task(function test_shutdown_when_provider_manager_errors() {
   let reporter = yield getHealthReporter("shutdown_when_provider_manager_errors",
-                                       SERVER_URI, true);
+                                       DUMMY_URI, true);
 
   reporter.onInitializeProviderManagerFinished = function () {
     print("Throwing fake error.");
@@ -556,7 +555,7 @@ add_task(function test_idle_daily() {
 add_task(function test_data_submission_transport_failure() {
   let reporter = yield getReporter("data_submission_transport_failure");
   try {
-    reporter.serverURI = "http://localhost:8080/";
+    reporter.serverURI = DUMMY_URI;
     reporter.serverNamespace = "test00";
 
     let deferred = Promise.defer();
@@ -567,7 +566,6 @@ add_task(function test_data_submission_transport_failure() {
     do_check_eq(request.state, request.SUBMISSION_FAILURE_SOFT);
 
     let data = yield getHealthReportProviderValues(reporter, new Date());
-    do_check_eq(data._v, 1);
     do_check_eq(data.firstDocumentUploadAttempt, 1);
     do_check_eq(data.uploadTransportFailure, 1);
     do_check_eq(Object.keys(data).length, 3);
@@ -594,7 +592,6 @@ add_task(function test_data_submission_server_failure() {
     do_check_eq(request.state, request.SUBMISSION_FAILURE_HARD);
 
     let data = yield getHealthReportProviderValues(reporter, now);
-    do_check_eq(data._v, 1);
     do_check_eq(data.firstDocumentUploadAttempt, 1);
     do_check_eq(data.uploadServerFailure, 1);
     do_check_eq(Object.keys(data).length, 3);
@@ -633,7 +630,6 @@ add_task(function test_data_submission_success() {
     do_check_true("DummyConstantProvider.DummyMeasurement" in o.data.last);
 
     let data = yield getHealthReportProviderValues(reporter, now);
-    do_check_eq(data._v, 1);
     do_check_eq(data.continuationUploadAttempt, 1);
     do_check_eq(data.uploadSuccess, 1);
     do_check_eq(Object.keys(data).length, 3);
@@ -684,7 +680,6 @@ add_task(function test_recurring_daily_pings() {
     // now() on the health reporter instance wasn't munged. So, we should see
     // both requests attributed to the same day.
     let data = yield getHealthReportProviderValues(reporter, new Date());
-    do_check_eq(data._v, 1);
     do_check_eq(data.firstDocumentUploadAttempt, 1);
     do_check_eq(data.continuationUploadAttempt, 1);
     do_check_eq(data.uploadSuccess, 2);
@@ -716,6 +711,54 @@ add_task(function test_request_remote_data_deletion() {
     do_check_null(reporter.lastSubmitID);
     do_check_false(reporter.haveRemoteData());
     do_check_false(server.hasDocument(reporter.serverNamespace, id));
+  } finally {
+    reporter._shutdown();
+    yield shutdownServer(server);
+  }
+});
+
+add_task(function test_multiple_simultaneous_uploads() {
+  let [reporter, server] = yield getReporterAndServer("multiple_simultaneous_uploads");
+
+  try {
+    let d1 = Promise.defer();
+    let d2 = Promise.defer();
+    let t1 = new Date(Date.now() - 1000);
+    let t2 = new Date(t1.getTime() + 500);
+    let r1 = new DataSubmissionRequest(d1, t1);
+    let r2 = new DataSubmissionRequest(d2, t2);
+
+    let getPayloadDeferred = Promise.defer();
+
+    Object.defineProperty(reporter, "getJSONPayload", {
+      configurable: true,
+      value: () => {
+        getPayloadDeferred.resolve();
+        delete reporter["getJSONPayload"];
+        return reporter.getJSONPayload();
+      },
+    });
+
+    let p1 = reporter.requestDataUpload(r1);
+    yield getPayloadDeferred.promise;
+    do_check_true(reporter._uploadInProgress);
+    let p2 = reporter.requestDataUpload(r2);
+
+    yield p1;
+    yield p2;
+
+    do_check_eq(r1.state, r1.SUBMISSION_SUCCESS);
+    do_check_eq(r2.state, r2.UPLOAD_IN_PROGRESS);
+
+    // They should both be resolved already.
+    yield d1;
+    yield d2;
+
+    let data = yield getHealthReportProviderValues(reporter, t1);
+    do_check_eq(data.firstDocumentUploadAttempt, 1);
+    do_check_false("continuationUploadAttempt" in data);
+    do_check_eq(data.uploadSuccess, 1);
+    do_check_eq(data.uploadAlreadyInProgress, 1);
   } finally {
     reporter._shutdown();
     yield shutdownServer(server);
@@ -843,10 +886,10 @@ add_task(function test_failure_if_not_initialized() {
 });
 
 add_task(function test_upload_on_init_failure() {
-  let reporter = yield getHealthReporter("upload_on_init_failure", SERVER_URI, true);
-  let server = new BagheeraServer(SERVER_URI);
+  let server = new BagheeraServer();
+  server.start();
+  let reporter = yield getHealthReporter("upload_on_init_failure", server.serverURI, true);
   server.createNamespace(reporter.serverNamespace);
-  server.start(SERVER_PORT);
 
   reporter.onInitializeProviderManagerFinished = function () {
     throw new Error("Fake error during provider manager initialization.");

@@ -48,7 +48,7 @@ public:
   virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
 
-  virtual IntrinsicSize GetIntrinsicSize() MOZ_OVERRIDE;
+  virtual mozilla::IntrinsicSize GetIntrinsicSize() MOZ_OVERRIDE;
   virtual nsSize  GetIntrinsicRatio() MOZ_OVERRIDE;
 
   virtual nsSize ComputeAutoSize(nsRenderingContext *aRenderingContext,
@@ -107,6 +107,12 @@ public:
     return !frameLoader || frameLoader->ShouldClampScrollPosition();
   }
 
+  /**
+   * Return true if pointer event hit-testing should be allowed to target
+   * content in the subdocument.
+   */
+  bool PassPointerEventsToChildren();
+
 protected:
   friend class AsyncFrameInit;
 
@@ -134,12 +140,6 @@ protected:
    * says it should be called ObtainDocShell because of it's side effects.
    */
   nsIFrame* ObtainIntrinsicSizeFrame();
-
-  /**
-   * Return true if pointer event hit-testing should be allowed to target
-   * content in the subdocument.
-   */
-  bool PassPointerEventsToChildren();
 
   nsRefPtr<nsFrameLoader> mFrameLoader;
   nsView* mInnerView;

@@ -10,42 +10,35 @@
 #include "nsIProtocolHandler.h"
 #include "nsIFileProtocolHandler.h"
 #include "nscore.h"
-#include "nsIServiceManager.h"
 #include "nsIURI.h"
-#include "nsIStreamListener.h"
 #include "prprf.h"
-#include "prlog.h"
-#include "nsLoadGroup.h"
-#include "nsInputStreamChannel.h"
-#include "nsXPIDLString.h" 
-#include "nsReadableUtils.h"
-#include "nsIErrorService.h" 
+#include "nsIErrorService.h"
 #include "netCore.h"
 #include "nsIObserverService.h"
 #include "nsIPrefService.h"
-#include "nsIPrefLocalizedString.h"
-#include "nsICategoryManager.h"
 #include "nsXPCOM.h"
-#include "nsISupportsPrimitives.h"
 #include "nsIProxiedProtocolHandler.h"
 #include "nsIProxyInfo.h"
 #include "nsEscape.h"
 #include "nsNetCID.h"
-#include "nsISocketTransport.h"
 #include "nsCRT.h"
 #include "nsSimpleNestedURI.h"
 #include "nsNetUtil.h"
-#include "nsThreadUtils.h"
-#include "nsIPermissionManager.h"
 #include "nsTArray.h"
 #include "nsIConsoleService.h"
 #include "nsIUploadChannel2.h"
 #include "nsXULAppAPI.h"
-#include "nsIProxiedChannel.h"
 #include "nsIProtocolProxyCallback.h"
 #include "nsICancelable.h"
+#include "nsINetworkLinkService.h"
+#include "nsPISocketTransportService.h"
+#include "nsAsyncRedirectVerifyHelper.h"
+#include "nsURLHelper.h"
+#include "nsPIDNSService.h"
+#include "nsIProtocolProxyService2.h"
+#include "MainThreadUtils.h"
 
-#if defined(XP_WIN) || defined(MOZ_PLATFORM_MAEMO)
+#if defined(XP_WIN)
 #include "nsNativeConnectionHelper.h"
 #endif
 
@@ -301,13 +294,13 @@ nsIOService::GetInstance() {
     return gIOService;
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS6(nsIOService,
-                              nsIIOService,
-                              nsIIOService2,
-                              nsINetUtil,
-                              nsISpeculativeConnect,
-                              nsIObserver,
-                              nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS6(nsIOService,
+                   nsIIOService,
+                   nsIIOService2,
+                   nsINetUtil,
+                   nsISpeculativeConnect,
+                   nsIObserver,
+                   nsISupportsWeakReference)
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -326,8 +319,8 @@ nsIOService::AsyncOnChannelRedirect(nsIChannel* oldChan, nsIChannel* newChan,
     }
 
     // Finally, our category
-    const nsCOMArray<nsIChannelEventSink>& entries =
-        mChannelEventSinks.GetEntries();
+    nsCOMArray<nsIChannelEventSink> entries;
+    mChannelEventSinks.GetEntries(entries);
     int32_t len = entries.Count();
     for (int32_t i = 0; i < len; ++i) {
         nsresult rv = helper->DelegateOnChannelRedirect(entries[i], oldChan,
@@ -1105,10 +1098,11 @@ nsIOService::TrackNetworkLinkStatusForOffline()
         // option is set to always autodial. If so, then we are 
         // always up for the purposes of offline management.
         if (autodialEnabled) {
-#if defined(XP_WIN) || defined(MOZ_PLATFORM_MAEMO)
-            // On Windows and Maemo (libconic) we should first check with the OS
-            // to see if autodial is enabled.  If it is enabled then we are
-            // allowed to manage the offline state.
+#if defined(XP_WIN)
+            // On Windows, we should first check with the OS
+            // to see if autodial is enabled.  If it is
+            // enabled then we are allowed to manage the
+            // offline state.
             if(nsNativeConnectionHelper::IsAutodialEnabled()) 
                 return SetOffline(false);
 #else

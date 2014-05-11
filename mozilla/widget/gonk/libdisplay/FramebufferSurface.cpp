@@ -29,7 +29,9 @@
 #include <EGL/egl.h>
 
 #include <hardware/hardware.h>
+#if ANDROID_VERSION == 17
 #include <gui/SurfaceTextureClient.h>
+#endif
 #include <ui/GraphicBuffer.h>
 
 #include "FramebufferSurface.h"
@@ -52,7 +54,8 @@ FramebufferSurface::FramebufferSurface(int disp, uint32_t width, uint32_t height
     ConsumerBase(new BufferQueue(true, alloc)),
     mDisplayType(disp),
     mCurrentBufferSlot(-1),
-    mCurrentBuffer(0)
+    mCurrentBuffer(0),
+    lastHandle(0)
 {
     mName = "FramebufferSurface";
     mBufferQueue->setConsumerName(mName);

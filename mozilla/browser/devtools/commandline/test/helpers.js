@@ -26,10 +26,11 @@ Components.utils.import("resource://gre/modules/devtools/gcli.jsm", {});
 let console = (Cu.import("resource://gre/modules/devtools/Console.jsm", {})).console;
 let TargetFactory = (Cu.import("resource://gre/modules/devtools/Loader.jsm", {})).devtools.TargetFactory;
 
-let Promise = (Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js", {})).Promise;
+let promise = (Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js", {})).Promise;
 let assert = { ok: ok, is: is, log: info };
 
 var util = require('util/util');
+var cli = require('gcli/cli');
 
 var converters = require('gcli/converters');
 
@@ -60,7 +61,7 @@ var converters = require('gcli/converters');
  * @param options An optional set of options to customize the way the tests run
  */
 helpers.addTab = function(url, callback, options) {
-  var deferred = Promise.defer();
+  var deferred = promise.defer();
 
   waitForExplicitFinish();
 
@@ -96,7 +97,7 @@ helpers.addTab = function(url, callback, options) {
     };
 
     var reply = callback(options);
-    Promise.resolve(reply).then(cleanUp, function(error) {
+    promise.resolve(reply).then(cleanUp, function(error) {
       ok(false, error);
       cleanUp();
     });
@@ -106,6 +107,77 @@ helpers.addTab = function(url, callback, options) {
   options.browser.addEventListener("load", onPageLoad, true);
 
   return deferred.promise;
+};
+
+helpers.openTab = function(url, options) {
+  var deferred = promise.defer();
+
+  waitForExplicitFinish();
+
+  options = options || {};
+  options.chromeWindow = options.chromeWindow || window;
+  options.isFirefox = true;
+
+  var tabbrowser = options.chromeWindow.gBrowser;
+  options.tab = tabbrowser.addTab();
+  tabbrowser.selectedTab = options.tab;
+  options.browser = tabbrowser.getBrowserForTab(options.tab);
+  options.target = TargetFactory.forTab(options.tab);
+
+  options.browser.contentWindow.location = url;
+
+  var onPageLoad = function() {
+    options.browser.removeEventListener("load", onPageLoad, true);
+    options.document = options.browser.contentDocument;
+    options.window = options.document.defaultView;
+
+    deferred.resolve(options);
+  };
+
+  options.browser.addEventListener("load", onPageLoad, true);
+
+  return deferred.promise;
+};
+
+helpers.closeTab = function(options) {
+  options.chromeWindow.gBrowser.removeTab(options.tab);
+
+  delete options.window;
+  delete options.document;
+
+  delete options.target;
+  delete options.browser;
+  delete options.tab;
+
+  delete options.chromeWindow;
+  delete options.isFirefox;
+
+  return promise.resolve(undefined);
+};
+
+helpers.openToolbar = function(options) {
+  var deferred = promise.defer();
+
+  options.chromeWindow.DeveloperToolbar.show(true, function() {
+    options.display = options.chromeWindow.DeveloperToolbar.display;
+
+    deferred.resolve(options);
+  });
+
+  return deferred.promise;
+};
+
+helpers.closeToolbar = function(options) {
+  options.chromeWindow.DeveloperToolbar.hide();
+  delete options.display;
+
+  return promise.resolve(undefined);
+};
+
+helpers.handleError = function(ex) {
+  console.error(ex);
+  ok(false, ex);
+  finish();
 };
 
 /**
@@ -118,7 +190,7 @@ helpers.addTab = function(url, callback, options) {
 helpers.addTabWithToolbar = function(url, callback, options) {
   return helpers.addTab(url, function(innerOptions) {
     var win = innerOptions.chromeWindow;
-    var deferred = Promise.defer();
+    var deferred = promise.defer();
 
     win.DeveloperToolbar.show(true, function() {
       innerOptions.display = win.DeveloperToolbar.display;
@@ -130,8 +202,9 @@ helpers.addTabWithToolbar = function(url, callback, options) {
       };
 
       var reply = callback(innerOptions);
-      Promise.resolve(reply).then(cleanUp, function(error) {
+      promise.resolve(reply).then(cleanUp, function(error) {
         ok(false, error);
+        console.error(error);
         cleanUp();
       });
     });
@@ -163,8 +236,8 @@ helpers.runTests = function(options, tests) {
 
   info("SETUP");
   var setupDone = (tests.setup != null) ?
-      Promise.resolve(tests.setup(options)) :
-      Promise.resolve();
+      promise.resolve(tests.setup(options)) :
+      promise.resolve();
 
   var testDone = setupDone.then(function() {
     return util.promiseEach(testNames, function(testName) {
@@ -173,13 +246,13 @@ helpers.runTests = function(options, tests) {
 
       if (typeof action === "function") {
         var reply = action.call(tests, options);
-        return Promise.resolve(reply);
+        return promise.resolve(reply);
       }
       else if (Array.isArray(action)) {
         return helpers.audit(options, action);
       }
 
-      return Promise.reject("test action '" + testName +
+      return promise.reject("test action '" + testName +
                             "' is not a function or helpers.audit() object");
     });
   }, recover);
@@ -187,8 +260,8 @@ helpers.runTests = function(options, tests) {
   return testDone.then(function() {
     info("SHUTDOWN");
     return (tests.shutdown != null) ?
-        Promise.resolve(tests.shutdown(options)) :
-        Promise.resolve();
+        promise.resolve(tests.shutdown(options)) :
+        promise.resolve();
   }, recover);
 };
 
@@ -226,7 +299,7 @@ helpers._actual = {
                 .replace(/ $/, '');
     };
 
-    var promisedJoin = Promise.promised(join);
+    var promisedJoin = promise.promised(join);
     return promisedJoin(templateData.directTabText,
                         templateData.emptyParameters,
                         templateData.arrowTabText);
@@ -236,7 +309,7 @@ helpers._actual = {
     var cursor = options.display.inputter.element.selectionStart;
     var statusMarkup = options.display.requisition.getInputStatusMarkup(cursor);
     return statusMarkup.map(function(s) {
-      return Array(s.string.length + 1).join(s.status.toString()[0]);
+      return new Array(s.string.length + 1).join(s.status.toString()[0]);
     }).join('');
   },
 
@@ -249,7 +322,7 @@ helpers._actual = {
   },
 
   status: function(options) {
-    return options.display.requisition.getStatus().toString();
+    return options.display.requisition.status.toString();
   },
 
   predictions: function(options) {
@@ -309,12 +382,12 @@ helpers._createDebugCheck = function(options) {
   var command = requisition.commandAssignment.value;
   var cursor = helpers._actual.cursor(options);
   var input = helpers._actual.input(options);
-  var padding = Array(input.length + 1).join(' ');
+  var padding = new Array(input.length + 1).join(' ');
 
   var hintsPromise = helpers._actual.hints(options);
   var predictionsPromise = helpers._actual.predictions(options);
 
-  return Promise.all(hintsPromise, predictionsPromise).then(function(values) {
+  return promise.all(hintsPromise, predictionsPromise).then(function(values) {
     var hints = values[0];
     var predictions = values[1];
     var output = '';
@@ -367,7 +440,7 @@ helpers._createDebugCheck = function(options) {
 
         output += 'arg: \'' + assignment.arg + '\', ';
         output += 'status: \'' + assignment.getStatus().toString() + '\', ';
-        output += 'message: \'' + assignment.getMessage() + '\'';
+        output += 'message: \'' + assignment.message + '\'';
         output += ' },\n';
       });
 
@@ -446,8 +519,8 @@ var ACTIONS = {
 };
 
 /**
- * Used in helpers.setInput to cut an input string like "blah<TAB>foo<UP>" into
- * an array like [ "blah", "<TAB>", "foo", "<UP>" ].
+ * Used in helpers.setInput to cut an input string like 'blah<TAB>foo<UP>' into
+ * an array like [ 'blah', '<TAB>', 'foo', '<UP>' ].
  * When using this RegExp, you also need to filter out the blank strings.
  */
 var CHUNKER = /([^<]*)(<[A-Z]+>)/;
@@ -459,7 +532,7 @@ var CHUNKER = /([^<]*)(<[A-Z]+>)/;
  */
 helpers.setInput = function(options, typed, cursor) {
   checkOptions(options);
-  var promise = undefined;
+  var inputPromise;
   var inputter = options.display.inputter;
   // We try to measure average keypress time, but setInput can simulate
   // several, so we try to keep track of how many
@@ -467,18 +540,18 @@ helpers.setInput = function(options, typed, cursor) {
 
   // The easy case is a simple string without things like <TAB>
   if (typed.indexOf('<') === -1) {
-    promise = inputter.setInput(typed);
+    inputPromise = inputter.setInput(typed);
   }
   else {
     // Cut the input up into input strings separated by '<KEY>' tokens. The
     // CHUNKS RegExp leaves blanks so we filter them out.
     var chunks = typed.split(CHUNKER).filter(function(s) {
-      return s != '';
+      return s !== '';
     });
     chunkLen = chunks.length + 1;
 
     // We're working on this in chunks so first clear the input
-    promise = inputter.setInput('').then(function() {
+    inputPromise = inputter.setInput('').then(function() {
       return util.promiseEach(chunks, function(chunk) {
         if (chunk.charAt(0) === '<') {
           var action = ACTIONS[chunk];
@@ -495,7 +568,7 @@ helpers.setInput = function(options, typed, cursor) {
     });
   }
 
-  return promise.then(function() {
+  return inputPromise.then(function() {
     if (cursor != null) {
       options.display.inputter.setCursor({ start: cursor, end: cursor });
     }
@@ -531,7 +604,7 @@ helpers.setInput = function(options, typed, cursor) {
  */
 helpers._check = function(options, name, checks) {
   if (checks == null) {
-    return Promise.resolve();
+    return promise.resolve();
   }
 
   var outstanding = [];
@@ -566,7 +639,7 @@ helpers._check = function(options, name, checks) {
 
   if ('predictions' in checks) {
     var predictionsCheck = function(actualPredictions) {
-      helpers._arrayIs(actualPredictions,
+      helpers.arrayIs(actualPredictions,
                        checks.predictions,
                        'predictions' + suffix);
     };
@@ -585,7 +658,7 @@ helpers._check = function(options, name, checks) {
   }
 
   if ('unassigned' in checks) {
-    helpers._arrayIs(helpers._actual.unassigned(options),
+    helpers.arrayIs(helpers._actual.unassigned(options),
                      checks.unassigned,
                      'unassigned' + suffix);
   }
@@ -613,7 +686,7 @@ helpers._check = function(options, name, checks) {
   }
 
   if ('options' in checks) {
-    helpers._arrayIs(helpers._actual.options(options),
+    helpers.arrayIs(helpers._actual.options(options),
                      checks.options,
                      'options' + suffix);
   }
@@ -688,11 +761,11 @@ helpers._check = function(options, name, checks) {
 
       if ('message' in check) {
         if (typeof check.message.test === 'function') {
-          assert.ok(check.message.test(assignment.getMessage()),
+          assert.ok(check.message.test(assignment.message),
                     'arg.' + paramName + '.message' + suffix);
         }
         else {
-          assert.is(assignment.getMessage(),
+          assert.is(assignment.message,
                     check.message,
                     'arg.' + paramName + '.message' + suffix);
         }
@@ -700,7 +773,7 @@ helpers._check = function(options, name, checks) {
     });
   }
 
-  return Promise.all(outstanding).then(function() {
+  return promise.all(outstanding).then(function() {
     // Ensure the promise resolves to nothing
     return undefined;
   });
@@ -714,85 +787,109 @@ helpers._check = function(options, name, checks) {
  * @return A promise which resolves to undefined when the checks are complete
  */
 helpers._exec = function(options, name, expected) {
+  var requisition = options.display.requisition;
   if (expected == null) {
-    return Promise.resolve({});
+    return promise.resolve({});
   }
 
-  var output;
+  var origLogErrors = cli.logErrors;
+  if (expected.error) {
+    cli.logErrors = false;
+  }
+
+  var completed = true;
+
   try {
-    output = options.display.requisition.exec({ hidden: true });
+    return requisition.exec({ hidden: true }).then(function(output) {
+      if ('completed' in expected) {
+        assert.is(completed,
+                  expected.completed,
+                  'output.completed for: ' + name);
+      }
+
+      if ('type' in expected) {
+        assert.is(output.type,
+                  expected.type,
+                  'output.type for: ' + name);
+      }
+
+      if ('error' in expected) {
+        assert.is(output.error,
+                  expected.error,
+                  'output.error for: ' + name);
+      }
+
+      if (!options.window) {
+        assert.ok(false, 'Missing options.window in \'' + name + '\'. ' +
+                         'Are you assming that helpers.audit is synchronous? ' +
+                         'It returns a promise');
+        return { output: output };
+      }
+
+      if (!options.window.document.createElement) {
+        assert.log('skipping output tests (missing doc.createElement) for ' + name);
+        return { output: output };
+      }
+
+      if (!('output' in expected)) {
+        return { output: output };
+      }
+
+      var context = requisition.conversionContext;
+      return output.convert('dom', context).then(function(node) {
+        var actualOutput = node.textContent.trim();
+
+        var doTest = function(match, against) {
+          // Only log the real textContent if the test fails
+          if (against.match(match) != null) {
+            assert.ok(true, 'html output for \'' + name + '\' ' +
+                            'should match /' + match.source || match + '/');
+          } else {
+            assert.ok(false, 'html output for \'' + name + '\' ' +
+                             'should match /' + match.source || match + '/. ' +
+                             'Actual textContent: "' + against + '"');
+          }
+        };
+
+        if (typeof expected.output === 'string') {
+          assert.is(actualOutput,
+                    expected.output,
+                    'html output for ' + name);
+        }
+        else if (Array.isArray(expected.output)) {
+          expected.output.forEach(function(match) {
+            doTest(match, actualOutput);
+          });
+        }
+        else {
+          doTest(expected.output, actualOutput);
+        }
+
+        if (expected.error) {
+          cli.logErrors = origLogErrors;
+        }
+        return { output: output, text: actualOutput };
+      });
+    }.bind(this)).then(function(data) {
+      if (expected.error) {
+        cli.logErrors = origLogErrors;
+      }
+
+      return data;
+    });
   }
   catch (ex) {
     assert.ok(false, 'Failure executing \'' + name + '\': ' + ex);
     util.errorHandler(ex);
 
-    return Promise.resolve({});
-  }
-
-  if ('completed' in expected) {
-    assert.is(output.completed,
-              expected.completed,
-              'output.completed false for: ' + name);
-  }
-
-  if (!options.window.document.createElement) {
-    assert.log('skipping output tests (missing doc.createElement) for ' + name);
-    return Promise.resolve({ output: output });
-  }
-
-  if (!('output' in expected)) {
-    return Promise.resolve({ output: output });
-  }
-
-  var checkOutput = function() {
-    if ('type' in expected) {
-      assert.is(output.type,
-                expected.type,
-                'output.type for: ' + name);
+    if (expected.error) {
+      cli.logErrors = origLogErrors;
     }
-
-    if ('error' in expected) {
-      assert.is(output.error,
-                expected.error,
-                'output.error for: ' + name);
-    }
-
-    var conversionContext = options.display.requisition.conversionContext;
-    var convertPromise = converters.convert(output.data, output.type, 'dom',
-                                            conversionContext);
-    return convertPromise.then(function(node) {
-      var actualOutput = node.textContent.trim();
-
-      var doTest = function(match, against) {
-        if (match.test(against)) {
-          assert.ok(true, 'html output for ' + name + ' should match /' +
-                          match.source + '/');
-        } else {
-          assert.ok(false, 'html output for ' + name + ' should match /' +
-                           match.source +
-                           '/. Actual textContent: "' + against + '"');
-        }
-      };
-
-      if (typeof expected.output === 'string') {
-        assert.is(actualOutput,
-                  expected.output,
-                  'html output for ' + name);
-      }
-      else if (Array.isArray(expected.output)) {
-        expected.output.forEach(function(match) {
-          doTest(match, actualOutput);
-        });
-      }
-      else {
-        doTest(expected.output, actualOutput);
-      }
-
-      return { output: output, text: actualOutput };
-    });
-  };
-
-  return output.promise.then(checkOutput, checkOutput);
+    return promise.resolve({});
+  }
+  finally {
+    completed = false;
+  }
 };
 
 /**
@@ -804,10 +901,10 @@ helpers._setup = function(options, name, action) {
   }
 
   if (typeof action === 'function') {
-    return Promise.resolve(action());
+    return promise.resolve(action());
   }
 
-  return Promise.reject('\'setup\' property must be a string or a function. Is ' + action);
+  return promise.reject('\'setup\' property must be a string or a function. Is ' + action);
 };
 
 /**
@@ -815,9 +912,9 @@ helpers._setup = function(options, name, action) {
  */
 helpers._post = function(name, action, data) {
   if (typeof action === 'function') {
-    return Promise.resolve(action(data.output, data.text));
+    return promise.resolve(action(data.output, data.text));
   }
-  return Promise.resolve(action);
+  return promise.resolve(action);
 };
 
 /*
@@ -826,8 +923,8 @@ helpers._post = function(name, action, data) {
 var totalResponseTime = 0;
 var averageOver = 0;
 var maxResponseTime = 0;
-var maxResponseCulprit = undefined;
-var start = undefined;
+var maxResponseCulprit;
+var start;
 
 /**
  * Restart the stats collection process
@@ -902,12 +999,12 @@ Object.defineProperty(helpers, 'timingSummary', {
  * - check: Check data. Available checks:
  *   - input: The text displayed in the input field
  *   - cursor: The position of the start of the cursor
- *   - status: One of "VALID", "ERROR", "INCOMPLETE"
+ *   - status: One of 'VALID', 'ERROR', 'INCOMPLETE'
  *   - hints: The hint text, i.e. a concatenation of the directTabText, the
  *       emptyParameters and the arrowTabText. The text as inserted into the UI
  *       will include NBSP and Unicode RARR characters, these should be
  *       represented using normal space and '->' for the arrow
- *   - markup: What state should the error markup be in. e.g. "VVVIIIEEE"
+ *   - markup: What state should the error markup be in. e.g. 'VVVIIIEEE'
  *   - args: Maps of checks to make against the arguments:
  *     - value: i.e. assignment.value (which ignores defaultValue)
  *     - type: Argument/BlankArgument/MergedArgument/etc i.e. what's assigned
@@ -915,7 +1012,7 @@ Object.defineProperty(helpers, 'timingSummary', {
  *             implementation detail
  *     - arg: The toString value of the argument
  *     - status: i.e. assignment.getStatus
- *     - message: i.e. assignment.getMessage
+ *     - message: i.e. assignment.message
  *     - name: For commands - checks assignment.value.name
  * - exec: Object to indicate we should execute the command and check the
  *     results. Available checks:
@@ -940,17 +1037,6 @@ helpers.audit = function(options, audits) {
       log('- START \'' + name + '\' in ' + assert.currentTest);
     }
 
-    if (audit.skipIf) {
-      var skip = (typeof audit.skipIf === 'function') ?
-          audit.skipIf(options) :
-          !!audit.skipIf;
-      if (skip) {
-        var reason = audit.skipIf.name ? 'due to ' + audit.skipIf.name : '';
-        assert.log('Skipped ' + name + ' ' + reason);
-        return Promise.resolve(undefined);
-      }
-    }
-
     if (audit.skipRemainingIf) {
       var skipRemainingIf = (typeof audit.skipRemainingIf === 'function') ?
           audit.skipRemainingIf(options) :
@@ -960,13 +1046,24 @@ helpers.audit = function(options, audits) {
             'due to ' + audit.skipRemainingIf.name :
             '';
         assert.log('Skipped ' + name + ' ' + skipReason);
-        return Promise.resolve(undefined);
+        return promise.resolve(undefined);
+      }
+    }
+
+    if (audit.skipIf) {
+      var skip = (typeof audit.skipIf === 'function') ?
+          audit.skipIf(options) :
+          !!audit.skipIf;
+      if (skip) {
+        var reason = audit.skipIf.name ? 'due to ' + audit.skipIf.name : '';
+        assert.log('Skipped ' + name + ' ' + reason);
+        return promise.resolve(undefined);
       }
     }
 
     if (skipReason != null) {
       assert.log('Skipped ' + name + ' ' + skipReason);
-      return Promise.resolve(undefined);
+      return promise.resolve(undefined);
     }
 
     var start = new Date().getTime();
@@ -1008,7 +1105,7 @@ helpers.audit = function(options, audits) {
 /**
  * Compare 2 arrays.
  */
-helpers._arrayIs = function(actual, expected, message) {
+helpers.arrayIs = function(actual, expected, message) {
   assert.ok(Array.isArray(actual), 'actual is not an array: ' + message);
   assert.ok(Array.isArray(expected), 'expected is not an array: ' + message);
 

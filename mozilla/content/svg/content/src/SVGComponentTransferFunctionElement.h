@@ -33,6 +33,8 @@ protected:
   }
 
 public:
+  typedef gfx::AttributeMap AttributeMap;
+
   // interfaces:
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_SVG_FE_COMPONENT_TRANSFER_FUNCTION_ELEMENT_CID)
 
@@ -42,18 +44,19 @@ public:
           int32_t aNameSpaceID, nsIAtom* aAttribute) const MOZ_OVERRIDE;
 
   virtual int32_t GetChannel() = 0;
-  bool GenerateLookupTable(uint8_t* aTable);
+
+  AttributeMap ComputeAttributes();
 
   // WebIDL
   virtual JSObject* WrapNode(JSContext* aCx,
                              JS::Handle<JSObject*> aScope) MOZ_OVERRIDE = 0;
-  already_AddRefed<nsIDOMSVGAnimatedEnumeration> Type();
+  already_AddRefed<SVGAnimatedEnumeration> Type();
   already_AddRefed<DOMSVGAnimatedNumberList> TableValues();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Slope();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Intercept();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Amplitude();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Exponent();
-  already_AddRefed<nsIDOMSVGAnimatedNumber> Offset();
+  already_AddRefed<SVGAnimatedNumber> Slope();
+  already_AddRefed<SVGAnimatedNumber> Intercept();
+  already_AddRefed<SVGAnimatedNumber> Amplitude();
+  already_AddRefed<SVGAnimatedNumber> Exponent();
+  already_AddRefed<SVGAnimatedNumber> Offset();
 
 protected:
   virtual NumberAttributesInfo GetNumberInfo() MOZ_OVERRIDE;

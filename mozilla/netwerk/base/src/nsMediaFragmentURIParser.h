@@ -6,9 +6,11 @@
 #if !defined(nsMediaFragmentURIParser_h__)
 #define nsMediaFragmentURIParser_h__
 
-#include "nsIURI.h"
-#include "nsString.h"
+#include "mozilla/Maybe.h"
+#include "nsStringFwd.h"
 #include "nsRect.h"
+
+class nsIURI;
 
 // Class to handle parsing of a W3C media fragment URI as per
 // spec at: http://www.w3.org/TR/media-frags/
@@ -32,6 +34,9 @@ class nsMediaFragmentURIParser
 public:
   // Create a parser with the provided URI.
   nsMediaFragmentURIParser(nsIURI* aURI);
+
+  // Create a parser with the provided URI reference portion.
+  nsMediaFragmentURIParser(nsCString& aRef);
 
   // True if a valid temporal media fragment indicated a start time.
   bool HasStartTime() const { return !mStart.empty(); }

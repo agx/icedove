@@ -10,11 +10,10 @@ XPIDL_SOURCES += [
     'nsIJSInspector.idl',
 ]
 
-MODULE = 'jsinspector'
+XPIDL_MODULE = 'jsinspector'
 
-CPP_SOURCES += [
+SOURCES += [
     'nsJSInspector.cpp',
 ]
 
-LIBRARY_NAME = 'jsinspector'
-
+FINAL_LIBRARY = 'xul'

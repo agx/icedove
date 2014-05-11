@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -7,59 +8,53 @@
 
 #include "mozilla/XPTInterfaceInfoManager.h"
 
+#include "mozilla/FileUtils.h"
+#include "mozilla/MemoryReporting.h"
+
 #include "xptiprivate.h"
 #include "nsDependentString.h"
 #include "nsString.h"
 #include "nsISupportsArray.h"
 #include "nsArrayEnumerator.h"
 #include "nsDirectoryService.h"
-#include "mozilla/FileUtils.h"
 #include "nsIMemoryReporter.h"
 
 using namespace mozilla;
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(XPTInterfaceInfoManager, 
-                              nsIInterfaceInfoManager)
+NS_IMPL_ISUPPORTS_INHERITED1(
+  XPTInterfaceInfoManager,
+  MemoryUniReporter,
+  nsIInterfaceInfoManager)
 
 static XPTInterfaceInfoManager* gInterfaceInfoManager = nullptr;
 #ifdef DEBUG
 static int gCallCount = 0;
 #endif
 
-
-NS_MEMORY_REPORTER_MALLOC_SIZEOF_FUN(XPTMallocSizeOf)
-
 size_t
-XPTInterfaceInfoManager::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf)
+XPTInterfaceInfoManager::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf)
 {
     size_t n = aMallocSizeOf(this);
     ReentrantMonitorAutoEnter monitor(mWorkingSet.mTableReentrantMonitor);
     // The entries themselves are allocated out of an arena accounted
     // for elsewhere, so don't measure them
-    n += mWorkingSet.mIIDTable.SizeOfExcludingThis(NULL, XPTMallocSizeOf);
-    n += mWorkingSet.mNameTable.SizeOfExcludingThis(NULL, XPTMallocSizeOf);
+    n += mWorkingSet.mIIDTable.SizeOfExcludingThis(nullptr, aMallocSizeOf);
+    n += mWorkingSet.mNameTable.SizeOfExcludingThis(nullptr, aMallocSizeOf);
     return n;
 }
 
-// static
 int64_t
-XPTInterfaceInfoManager::GetXPTIWorkingSetSize()
+XPTInterfaceInfoManager::Amount()
 {
-    size_t n = XPT_SizeOfArena(gXPTIStructArena, XPTMallocSizeOf);
+    size_t n = SizeOfIncludingThis(MallocSizeOf);
 
-    if (gInterfaceInfoManager) {
-        n += gInterfaceInfoManager->SizeOfIncludingThis(XPTMallocSizeOf);
-    }
+    // Measure gXPTIStructArena here, too.  This is a bit grotty because it
+    // doesn't belong to the XPTIInterfaceInfoManager, but there's no
+    // obviously better place to measure it.
+    n += XPT_SizeOfArena(gXPTIStructArena, MallocSizeOf);
 
     return n;
 }
-
-NS_MEMORY_REPORTER_IMPLEMENT(XPTInterfaceInfoManager,
-                             "explicit/xpti-working-set",
-                             KIND_HEAP,
-                             UNITS_BYTES,
-                             XPTInterfaceInfoManager::GetXPTIWorkingSetSize,
-                             "Memory used by the XPCOM typelib system.")
 
 // static
 XPTInterfaceInfoManager*
@@ -68,6 +63,7 @@ XPTInterfaceInfoManager::GetSingleton()
     if (!gInterfaceInfoManager) {
         gInterfaceInfoManager = new XPTInterfaceInfoManager();
         NS_ADDREF(gInterfaceInfoManager);
+        gInterfaceInfoManager->InitMemoryReporter();
     }
     return gInterfaceInfoManager;
 }
@@ -79,10 +75,11 @@ XPTInterfaceInfoManager::FreeInterfaceInfoManager()
 }
 
 XPTInterfaceInfoManager::XPTInterfaceInfoManager()
-    :   mWorkingSet(),
+    :   MemoryUniReporter("explicit/xpti-working-set", KIND_HEAP, UNITS_BYTES,
+                          "Memory used by the XPCOM typelib system."),
+        mWorkingSet(),
         mResolveLock("XPTInterfaceInfoManager.mResolveLock")
 {
-    NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(XPTInterfaceInfoManager));
 }
 
 XPTInterfaceInfoManager::~XPTInterfaceInfoManager()
@@ -90,10 +87,18 @@ XPTInterfaceInfoManager::~XPTInterfaceInfoManager()
     // We only do this on shutdown of the service.
     mWorkingSet.InvalidateInterfaceInfos();
 
+    UnregisterWeakMemoryReporter(this);
+
     gInterfaceInfoManager = nullptr;
 #ifdef DEBUG
     gCallCount = 0;
 #endif
+}
+
+void
+XPTInterfaceInfoManager::InitMemoryReporter()
+{
+    RegisterWeakMemoryReporter(this);
 }
 
 void

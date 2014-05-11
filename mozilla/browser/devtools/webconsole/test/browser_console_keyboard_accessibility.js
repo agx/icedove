@@ -36,8 +36,8 @@ function test()
   function onConsoleMessage()
   {
     hud.jsterm.once("messages-cleared", onClear);
-    info("try ctrl-k to clear output");
-    EventUtils.synthesizeKey("K", { accelKey: true });
+    info("try ctrl-l to clear output");
+    EventUtils.synthesizeKey("l", { ctrlKey: true });
   }
 
   function onClear()
@@ -54,15 +54,18 @@ function test()
        "filter input is focused");
 
     if (Services.appinfo.OS == "Darwin") {
+      ok(hud.ui.getFilterState("network"), "network category is enabled");
       EventUtils.synthesizeKey("t", { ctrlKey: true });
+      ok(!hud.ui.getFilterState("network"), "accesskey for Network works");
+      EventUtils.synthesizeKey("t", { ctrlKey: true });
+      ok(hud.ui.getFilterState("network"), "accesskey for Network works (again)");
     }
     else {
       EventUtils.synthesizeKey("N", { altKey: true });
+      let net = hud.ui.document.querySelector("toolbarbutton[category=net]");
+      is(hud.ui.document.activeElement, net,
+         "accesskey for Network category focuses the Net button");
     }
-
-    let net = hud.ui.document.querySelector("toolbarbutton[category=net]");
-    is(hud.ui.document.activeElement, net,
-       "accesskey for Network category focuses the Net button");
 
     finishTest();
   }

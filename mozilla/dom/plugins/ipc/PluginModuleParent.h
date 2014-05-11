@@ -4,31 +4,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#ifndef dom_plugins_PluginModuleParent_h
-#define dom_plugins_PluginModuleParent_h 1
+#ifndef mozilla_plugins_PluginModuleParent_h
+#define mozilla_plugins_PluginModuleParent_h
 
-#include <cstring>
-
-#include "base/basictypes.h"
-
-#include "prlink.h"
-
-#include "npapi.h"
-#include "npfunctions.h"
-
-#include "base/string_util.h"
-
+#include "base/process.h"
 #include "mozilla/FileUtils.h"
 #include "mozilla/PluginLibrary.h"
-#include "mozilla/plugins/PPluginModuleParent.h"
-#include "mozilla/plugins/PluginInstanceParent.h"
+#include "mozilla/plugins/ScopedMethodFactory.h"
 #include "mozilla/plugins/PluginProcessParent.h"
-#include "mozilla/plugins/PluginIdentifierParent.h"
-
+#include "mozilla/plugins/PPluginModuleParent.h"
+#include "mozilla/plugins/PluginMessageUtils.h"
+#include "npapi.h"
+#include "npfunctions.h"
 #include "nsAutoPtr.h"
 #include "nsDataHashtable.h"
 #include "nsHashKeys.h"
-#include "nsIFileStreams.h"
+#include "nsIObserver.h"
 
 #ifdef MOZ_CRASHREPORTER
 #include "nsExceptionHandler.h"
@@ -44,6 +35,8 @@ namespace plugins {
 //-----------------------------------------------------------------------------
 
 class BrowserStreamParent;
+class PluginIdentifierParent;
+class PluginInstanceParent;
 
 #ifdef XP_WIN
 class PluginHangUIParent;
@@ -75,22 +68,22 @@ private:
 protected:
 
     virtual PPluginIdentifierParent*
-    AllocPPluginIdentifier(const nsCString& aString,
-                           const int32_t& aInt,
-                           const bool& aTemporary);
+    AllocPPluginIdentifierParent(const nsCString& aString,
+                                 const int32_t& aInt,
+                                 const bool& aTemporary);
 
     virtual bool
-    DeallocPPluginIdentifier(PPluginIdentifierParent* aActor);
+    DeallocPPluginIdentifierParent(PPluginIdentifierParent* aActor);
 
     PPluginInstanceParent*
-    AllocPPluginInstance(const nsCString& aMimeType,
-                         const uint16_t& aMode,
-                         const InfallibleTArray<nsCString>& aNames,
-                         const InfallibleTArray<nsCString>& aValues,
-                         NPError* rv);
+    AllocPPluginInstanceParent(const nsCString& aMimeType,
+                               const uint16_t& aMode,
+                               const InfallibleTArray<nsCString>& aNames,
+                               const InfallibleTArray<nsCString>& aValues,
+                               NPError* rv);
 
     virtual bool
-    DeallocPPluginInstance(PPluginInstanceParent* aActor);
+    DeallocPPluginInstanceParent(PPluginInstanceParent* aActor);
 
 public:
     // aFilePath is UTF8, not native!
@@ -132,7 +125,7 @@ public:
     PluginIdentifierParent*
     GetIdentifierForNPIdentifier(NPP npp, NPIdentifier aIdentifier);
 
-    void ProcessRemoteNativeEventsInRPCCall();
+    void ProcessRemoteNativeEventsInInterruptCall();
 
     void TerminateChildProcess(MessageLoop* aMsgLoop);
 
@@ -142,8 +135,8 @@ public:
 #endif // XP_WIN
 
 protected:
-    virtual mozilla::ipc::RPCChannel::RacyRPCPolicy
-    MediateRPCRace(const Message& parent, const Message& child) MOZ_OVERRIDE
+    virtual mozilla::ipc::RacyInterruptPolicy
+    MediateInterruptRace(const Message& parent, const Message& child) MOZ_OVERRIDE
     {
         return MediateRace(parent, child);
     }
@@ -166,7 +159,7 @@ protected:
     virtual bool AnswerProcessSomeEvents() MOZ_OVERRIDE;
 
     virtual bool
-    RecvProcessNativeEventsInRPCCall() MOZ_OVERRIDE;
+    RecvProcessNativeEventsInInterruptCall() MOZ_OVERRIDE;
 
     virtual bool
     RecvPluginShowWindow(const uint32_t& aWindowId, const bool& aModal,
@@ -177,10 +170,10 @@ protected:
     RecvPluginHideWindow(const uint32_t& aWindowId) MOZ_OVERRIDE;
 
     virtual PCrashReporterParent*
-    AllocPCrashReporter(mozilla::dom::NativeThreadId* id,
-                        uint32_t* processType) MOZ_OVERRIDE;
+    AllocPCrashReporterParent(mozilla::dom::NativeThreadId* id,
+                              uint32_t* processType) MOZ_OVERRIDE;
     virtual bool
-    DeallocPCrashReporter(PCrashReporterParent* actor) MOZ_OVERRIDE;
+    DeallocPCrashReporterParent(PCrashReporterParent* actor) MOZ_OVERRIDE;
 
     virtual bool
     RecvSetCursor(const NSCursorInfo& aCursorInfo) MOZ_OVERRIDE;
@@ -284,10 +277,6 @@ private:
     virtual nsresult IsRemoteDrawingCoreAnimation(NPP instance, bool *aDrawing);
     virtual nsresult ContentsScaleFactorChanged(NPP instance, double aContentsScaleFactor);
 #endif
-#if defined(MOZ_WIDGET_QT) && (MOZ_PLATFORM_MAEMO == 6)
-    virtual nsresult HandleGUIEvent(NPP instance, const nsGUIEvent& anEvent,
-                                    bool* handled);
-#endif
 
 private:
     CrashReporterParent* CrashReporter();
@@ -315,7 +304,7 @@ private:
     const NPNetscapeFuncs* mNPNIface;
     nsDataHashtable<nsPtrHashKey<void>, PluginIdentifierParent*> mIdentifiers;
     nsNPAPIPlugin* mPlugin;
-    ScopedRunnableMethodFactory<PluginModuleParent> mTaskFactory;
+    ScopedMethodFactory<PluginModuleParent> mTaskFactory;
     nsString mPluginDumpID;
     nsString mBrowserDumpID;
     nsString mHangID;
@@ -325,6 +314,17 @@ private:
     PluginHangUIParent *mHangUIParent;
     bool mHangUIEnabled;
     bool mIsTimerReset;
+#ifdef MOZ_CRASHREPORTER
+    /**
+     * This mutex protects the crash reporter when the Plugin Hang UI event
+     * handler is executing off main thread. It is intended to protect both
+     * the mCrashReporter variable in addition to the CrashReporterParent object
+     * that mCrashReporter refers to.
+     */
+    mozilla::Mutex mCrashReporterMutex;
+    CrashReporterParent* mCrashReporter;
+#endif // MOZ_CRASHREPORTER
+
 
     void
     EvaluateHangUIState(const bool aReset);
@@ -370,4 +370,4 @@ private:
 } // namespace plugins
 } // namespace mozilla
 
-#endif  // ifndef dom_plugins_PluginModuleParent_h
+#endif // mozilla_plugins_PluginModuleParent_h

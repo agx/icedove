@@ -26,7 +26,7 @@ else
 UNIVERSAL_PATH=
 endif
 
-_ABS_DIST := $(call core_abspath,$(DIST))
+_ABS_DIST := $(abspath $(DIST))
 
 # This variable is to allow the wget-en-US target to know which ftp server to download from
 ifndef EN_US_BINARY_URL
@@ -122,7 +122,7 @@ repackage-zip-%:
 repack-stage: repack-stage-all
 	grep -v 'locale \w\+ en-US' $(L10N_TARGET)/chrome.manifest > $(L10N_TARGET)/chrome.manifest~ && \
 	  mv $(L10N_TARGET)/chrome.manifest~ $(L10N_TARGET)/chrome.manifest
-	find $(call core_abspath,$(L10N_TARGET)) -name '*en-US*' -print0 | xargs -0 rm -rf
+	find $(abspath $(L10N_TARGET)) -name '*en-US*' -print0 | xargs -0 rm -rf
 
 repack-stage-all: $(XPI_STAGE_PATH)/$(XPI_NAME)
 	@echo "Repackaging $(XPI_PKGNAME) locale for Language $(AB_CD)"
@@ -145,15 +145,17 @@ libs-%: FINAL_XPI_PKGNAME=$(if $(L10N_XPI_PKGNAME),$(L10N_XPI_PKGNAME),$(XPI_PKG
 libs-%:
 	$(MAKE) -C locales libs AB_CD=$* FINAL_TARGET=$(_ABS_DIST)/$(UNIVERSAL_PATH)xpi-stage/$(FINAL_XPI_NAME) \
 	  XPI_NAME=$(FINAL_XPI_NAME) XPI_PKGNAME=$(FINAL_XPI_PKGNAME) USE_EXTENSION_MANIFEST=1
+	$(MAKE) -C locales tools AB_CD=$* FINAL_TARGET=$(_ABS_DIST)/$(UNIVERSAL_PATH)xpi-stage/$(FINAL_XPI_NAME) \
+	  XPI_NAME=$(FINAL_XPI_NAME) XPI_PKGNAME=$(FINAL_XPI_PKGNAME) USE_EXTENSION_MANIFEST=1
 
 # For localized xpis, the install.rdf need to be reprocessed with some defines
 # from the locale.
 repack-process-extrafiles: LOCALE_BASEDIR=$(call EXPAND_LOCALE_SRCDIR,calendar/locales)
 repack-process-extrafiles:
-	$(PYTHON) $(MOZILLA_SRCDIR)/config/Preprocessor.py \
+	$(call py_action,preprocessor, \
 	  $(XULAPP_DEFINES) $(DEFINES) $(ACDEFINES) $(XULPPFLAGS) \
 	  -I $(LOCALE_BASEDIR)/defines.inc \
-	  $(srcdir)/install.rdf > $(XPI_STAGE_PATH)/$(L10N_XPI_NAME)/install.rdf
+	  $(srcdir)/install.rdf -o $(XPI_STAGE_PATH)/$(L10N_XPI_NAME)/install.rdf)
 
 # When repackaging Lightning from the builder, platform.ini is not yet created.
 # Recreate it from the application.ini bundled with the downloaded xpi.

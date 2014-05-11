@@ -4,20 +4,15 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "MIRGenerator.h"
-#include "IonFrames.h"
 #include "jsscript.h"
-#include "IonLinker.h"
-#include "IonSpewer.h"
-#include "SnapshotReader.h"
-#include "SnapshotWriter.h"
 
+#include "jit/IonSpewer.h"
 #ifdef TRACK_SNAPSHOTS
-#include "MIR.h"
-#include "LIR.h"
+#include "jit/LIR.h"
+#include "jit/MIR.h"
 #endif
-
-#include "jsscriptinlines.h"
+#include "jit/SnapshotReader.h"
+#include "jit/SnapshotWriter.h"
 
 using namespace js;
 using namespace js::jit;
@@ -58,13 +53,16 @@ using namespace js::jit;
 //
 //         JSVAL_TYPE_NULL:
 //              Reg value:
-//                 0-29: Constant integer; Int32Value(n)
+//                 0-27: Constant integer; Int32Value(n)
+//                   28: Variable float32; Float register code
+//                   29: Variable float32; Stack index
 //                   30: NullValue()
 //                   31: Constant integer; Int32Value([vws])
 //
 //         JSVAL_TYPE_UNDEFINED:
 //              Reg value:
-//                 0-29: Constant value, index n into ionScript->constants()
+//                 0-27: Constant value, index n into ionScript->constants()
+//                28-29: unused
 //                   30: UndefinedValue()
 //                   31: Constant value, index [vwu] into
 //                       ionScript->constants()
@@ -174,10 +172,12 @@ static const uint32_t NUNBOX32_REG_REG     = 3;
 
 static const uint32_t MAX_TYPE_FIELD_VALUE = 7;
 
-static const uint32_t MAX_REG_FIELD_VALUE  = 31;
-static const uint32_t ESC_REG_FIELD_INDEX  = 31;
-static const uint32_t ESC_REG_FIELD_CONST  = 30;
-static const uint32_t MIN_REG_FIELD_ESC    = 30;
+static const uint32_t MAX_REG_FIELD_VALUE         = 31;
+static const uint32_t ESC_REG_FIELD_INDEX         = 31;
+static const uint32_t ESC_REG_FIELD_CONST         = 30;
+static const uint32_t ESC_REG_FIELD_FLOAT32_STACK = 29;
+static const uint32_t ESC_REG_FIELD_FLOAT32_REG   = 28;
+static const uint32_t MIN_REG_FIELD_ESC           = 28;
 
 SnapshotReader::Slot
 SnapshotReader::readSlot()
@@ -212,6 +212,10 @@ SnapshotReader::readSlot()
             return Slot(JS_NULL);
         if (code == ESC_REG_FIELD_INDEX)
             return Slot(JS_INT32, reader_.readSigned());
+        if (code == ESC_REG_FIELD_FLOAT32_REG)
+            return Slot(FLOAT32_REG, FloatRegister::FromCode(reader_.readUnsigned()));
+        if (code == ESC_REG_FIELD_FLOAT32_STACK)
+            return Slot(FLOAT32_STACK, Location::From(reader_.readSigned()));
         return Slot(JS_INT32, code);
 
       case JSVAL_TYPE_UNDEFINED:
@@ -268,8 +272,7 @@ SnapshotReader::readSlot()
       }
     }
 
-    JS_NOT_REACHED("huh?");
-    return Slot(JS_UNDEFINED);
+    MOZ_ASSUME_UNREACHABLE("huh?");
 }
 
 SnapshotOffset
@@ -298,9 +301,12 @@ SnapshotWriter::startSnapshot(uint32_t frameCount, BailoutKind kind, bool resume
 void
 SnapshotWriter::startFrame(JSFunction *fun, JSScript *script, jsbytecode *pc, uint32_t exprStack)
 {
-    JS_ASSERT(CountArgSlots(script, fun) < SNAPSHOT_MAX_NARGS);
+    // Test if we honor the maximum of arguments at all times.
+    // This is a sanity check and not an algorithm limit. So check might be a bit too loose.
+    // +4 to account for scope chain, return value, this value and maybe arguments_object.
+    JS_ASSERT(CountArgSlots(script, fun) < SNAPSHOT_MAX_NARGS + 4);
 
-    uint32_t implicit = StartArgSlot(script, fun);
+    uint32_t implicit = StartArgSlot(script);
     uint32_t formalArgs = CountArgSlots(script, fun);
 
     nslots_ = formalArgs + script->nfixed + exprStack;
@@ -309,9 +315,7 @@ SnapshotWriter::startFrame(JSFunction *fun, JSScript *script, jsbytecode *pc, ui
     IonSpew(IonSpew_Snapshots, "Starting frame; implicit %u, formals %u, fixed %u, exprs %u",
             implicit, formalArgs - implicit, script->nfixed, exprStack);
 
-    JS_ASSERT(script->code <= pc && pc <= script->code + script->length);
-
-    uint32_t pcoff = uint32_t(pc - script->code);
+    uint32_t pcoff = script->pcToOffset(pc);
     IonSpew(IonSpew_Snapshots, "Writing pc offset %u, nslots %u", pcoff, nslots_);
     writer_.writeUnsigned(pcoff);
     writer_.writeUnsigned(nslots_);
@@ -356,6 +360,7 @@ SnapshotWriter::writeSlotHeader(JSValueType type, uint32_t regCode)
 void
 SnapshotWriter::addSlot(const FloatRegister &reg)
 {
+    JS_ASSERT(uint32_t(reg.code()) < MIN_REG_FIELD_ESC);
     IonSpew(IonSpew_Snapshots, "    slot %u: double (reg %s)", slotsWritten_, reg.name());
 
     writeSlotHeader(JSVAL_TYPE_DOUBLE, reg.code());
@@ -378,8 +383,7 @@ ValTypeToString(JSValueType type)
       case JSVAL_TYPE_MAGIC:
         return "magic";
       default:
-        JS_NOT_REACHED("no payload");
-        return "";
+        MOZ_ASSUME_UNREACHABLE("no payload");
     }
 }
 
@@ -508,6 +512,23 @@ SnapshotWriter::addInt32Slot(int32_t value)
         writeSlotHeader(JSVAL_TYPE_NULL, ESC_REG_FIELD_INDEX);
         writer_.writeSigned(value);
     }
+}
+
+void
+SnapshotWriter::addFloat32Slot(const FloatRegister &reg)
+{
+    JS_ASSERT(uint32_t(reg.code()) < MIN_REG_FIELD_ESC);
+    IonSpew(IonSpew_Snapshots, "    slot %u: float32 (reg %s)", slotsWritten_, reg.name());
+    writeSlotHeader(JSVAL_TYPE_NULL, ESC_REG_FIELD_FLOAT32_REG);
+    writer_.writeUnsigned(reg.code());
+}
+
+void
+SnapshotWriter::addFloat32Slot(int32_t stackIndex)
+{
+    IonSpew(IonSpew_Snapshots, "    slot %u: float32 (stack %d)", slotsWritten_, stackIndex);
+    writeSlotHeader(JSVAL_TYPE_NULL, ESC_REG_FIELD_FLOAT32_STACK);
+    writer_.writeSigned(stackIndex);
 }
 
 void

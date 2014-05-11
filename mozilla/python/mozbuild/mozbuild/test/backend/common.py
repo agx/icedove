@@ -58,17 +58,45 @@ CONFIGS = {
         'non_global_defines': [],
         'substs': [],
     },
+    'defines': {
+        'defines': [],
+        'non_global_defines': [],
+        'substs': [],
+    },
     'exports': {
         'defines': [],
         'non_global_defines': [],
         'substs': [],
     },
-    'xpcshell_manifests': {
+    'test-manifests-written': {
         'defines': [],
         'non_global_defines': [],
-        'substs': [
-            ('XPCSHELL_TESTS_MANIFESTS', 'XPCSHELL_TESTS'),
-            ],
+        'substs': [],
+    },
+    'ipdl_sources': {
+        'defines': [],
+        'non_global_defines': [],
+        'substs': [],
+    },
+    'xpidl': {
+        'defines': [],
+        'non_global_defines': [],
+        'substs': [],
+    },
+    'local_includes': {
+        'defines': [],
+        'non_global_defines': [],
+        'substs': [],
+    },
+    'generated_includes': {
+        'defines': [],
+        'non_global_defines': [],
+        'substs': [],
+    },
+    'final_target': {
+        'defines': [],
+        'non_global_defines': [],
+        'substs': [],
     },
 }
 
@@ -89,15 +117,15 @@ class BackendTester(unittest.TestCase):
         config['substs'].append(('top_srcdir', srcdir))
         return ConfigEnvironment(srcdir, objdir, **config)
 
-    def _emit(self, name):
-        env = self._get_environment(name)
+    def _emit(self, name, env=None):
+        env = env or self._get_environment(name)
         reader = BuildReader(env)
         emitter = TreeMetadataEmitter(env)
 
         return env, emitter.emit(reader.read_topsrcdir())
 
-    def _consume(self, name, cls):
-        env, objs = self._emit(name)
+    def _consume(self, name, cls, env=None):
+        env, objs = self._emit(name, env=env)
         backend = cls(env)
         backend.consume(objs)
 

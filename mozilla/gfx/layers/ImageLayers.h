@@ -6,11 +6,15 @@
 #ifndef GFX_IMAGELAYER_H
 #define GFX_IMAGELAYER_H
 
-#include "Layers.h"
+#include "Layers.h"                     // for Layer, etc
+#include "GraphicsFilter.h"             // for GraphicsFilter
+#include "gfxPoint.h"                   // for gfxIntSize
+#include "mozilla/gfx/BaseSize.h"       // for BaseSize
+#include "mozilla/layers/LayersTypes.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nscore.h"                     // for nsACString
 
-#include "ImageTypes.h"
-#include "nsISupportsImpl.h"
-#include "gfxPattern.h"
+class gfx3DMatrix;
 
 namespace mozilla {
 namespace layers {
@@ -22,13 +26,6 @@ class ImageContainer;
  */
 class ImageLayer : public Layer {
 public:
-  enum ScaleMode {
-    SCALE_NONE,
-    SCALE_STRETCH,
-    SCALE_SENTINEL
-  // Unimplemented - SCALE_PRESERVE_ASPECT_RATIO_CONTAIN
-  };
-
   /**
    * CONSTRUCTION PHASE ONLY
    * Set the ImageContainer. aContainer must have the same layer manager
@@ -40,7 +37,7 @@ public:
    * CONSTRUCTION PHASE ONLY
    * Set the filter used to resample this image if necessary.
    */
-  void SetFilter(gfxPattern::GraphicsFilter aFilter)
+  void SetFilter(GraphicsFilter aFilter)
   {
     if (mFilter != aFilter) {
       MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) Filter", this));
@@ -64,7 +61,7 @@ public:
 
 
   ImageContainer* GetContainer() { return mContainer; }
-  gfxPattern::GraphicsFilter GetFilter() { return mFilter; }
+  GraphicsFilter GetFilter() { return mFilter; }
   const gfxIntSize& GetScaleToSize() { return mScaleToSize; }
   ScaleMode GetScaleMode() { return mScaleMode; }
 
@@ -75,11 +72,11 @@ public:
   /**
    * if true, the image will only be backed by a single tile texture
    */
-  void SetForceSingleTile(bool aForceSingleTile)
+  void SetDisallowBigImage(bool aDisallowBigImage)
   {
-    if (mForceSingleTile != aForceSingleTile) {
-      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) ForceSingleTile", this));
-      mForceSingleTile = aForceSingleTile;
+    if (mDisallowBigImage != aDisallowBigImage) {
+      MOZ_LAYERS_LOG_IF_SHADOWABLE(this, ("Layer::Mutated(%p) DisallowBigImage", this));
+      mDisallowBigImage = aDisallowBigImage;
       Mutated();
     }
   }
@@ -91,10 +88,10 @@ protected:
 
 
   nsRefPtr<ImageContainer> mContainer;
-  gfxPattern::GraphicsFilter mFilter;
+  GraphicsFilter mFilter;
   gfxIntSize mScaleToSize;
   ScaleMode mScaleMode;
-  bool mForceSingleTile;
+  bool mDisallowBigImage;
 };
 
 }

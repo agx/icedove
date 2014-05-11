@@ -9,11 +9,11 @@
 
 #include "AudioNode.h"
 #include "AudioBuffer.h"
-#include "AudioParam.h"
-#include "mozilla/dom/BindingUtils.h"
 
 namespace mozilla {
 namespace dom {
+
+class AudioParam;
 
 class AudioBufferSourceNode : public AudioNode,
                               public MainThreadMediaStreamListener
@@ -56,7 +56,7 @@ public:
     duration.Construct(aDuration);
     Start(aWhen, aOffset, duration, aRv);
   }
-  void Stop(double aWhen, ErrorResult& aRv, bool aShuttingDown = false);
+  void Stop(double aWhen, ErrorResult& aRv);
   void NoteOff(double aWhen, ErrorResult& aRv)
   {
     Stop(aWhen, aRv);
@@ -111,9 +111,10 @@ public:
 
 private:
   friend class AudioBufferSourceNodeEngine;
-  // START, OFFSET and DURATION are always set by start() (along with setting
-  // mBuffer to something non-null).
-  // STOP is set by stop().
+  // START is sent during Start().
+  // STOP is sent during Stop().
+  // OFFSET and DURATION are sent when SetBuffer() and Start() have
+  // been called (along with sending the buffer).
   enum EngineParameters {
     SAMPLE_RATE,
     START,
@@ -129,9 +130,7 @@ private:
 
   void SendLoopParametersToStream();
   void SendBufferParameterToStream(JSContext* aCx);
-  void SendOffsetAndDurationParametersToStream(AudioNodeStream* aStream,
-                                               double aOffset,
-                                               double aDuration);
+  void SendOffsetAndDurationParametersToStream(AudioNodeStream* aStream);
   static void SendPlaybackRateToStream(AudioNode* aNode);
 
 private:
@@ -141,7 +140,6 @@ private:
   double mDuration;
   nsRefPtr<AudioBuffer> mBuffer;
   nsRefPtr<AudioParam> mPlaybackRate;
-  SelfReference<AudioBufferSourceNode> mPlayingRef; // a reference to self while playing
   bool mLoop;
   bool mStartCalled;
   bool mStopped;

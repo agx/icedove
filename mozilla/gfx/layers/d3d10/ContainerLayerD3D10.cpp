@@ -4,11 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "ContainerLayerD3D10.h"
-#include "nsAlgorithm.h"
-#include "gfxUtils.h"
-#include "nsRect.h"
 
-#include "../d3d9/Nv3DVUtils.h"
 #include "ThebesLayerD3D10.h"
 #include "ReadbackProcessor.h"
 
@@ -16,7 +12,7 @@ namespace mozilla {
 namespace layers {
 
 ContainerLayerD3D10::ContainerLayerD3D10(LayerManagerD3D10 *aManager)
-  : ContainerLayer(aManager, NULL)
+  : ContainerLayer(aManager, nullptr)
   , LayerD3D10(aManager)
 {
   mImplData = static_cast<LayerD3D10*>(this);
@@ -27,140 +23,6 @@ ContainerLayerD3D10::~ContainerLayerD3D10()
   while (mFirstChild) {
     RemoveChild(mFirstChild);
   }
-}
-template<class Container>
-static void
-ContainerInsertAfter(Container* aContainer, Layer* aChild, Layer* aAfter)
-{
-  NS_ASSERTION(aChild->Manager() == aContainer->Manager(),
-               "Child has wrong manager");
-  NS_ASSERTION(!aChild->GetParent(),
-               "aChild already in the tree");
-  NS_ASSERTION(!aChild->GetNextSibling() && !aChild->GetPrevSibling(),
-               "aChild already has siblings?");
-  NS_ASSERTION(!aAfter ||
-               (aAfter->Manager() == aContainer->Manager() &&
-                aAfter->GetParent() == aContainer),
-               "aAfter is not our child");
-
-  aChild->SetParent(aContainer);
-  if (aAfter == aContainer->mLastChild) {
-    aContainer->mLastChild = aChild;
-  }
-  if (!aAfter) {
-    aChild->SetNextSibling(aContainer->mFirstChild);
-    if (aContainer->mFirstChild) {
-      aContainer->mFirstChild->SetPrevSibling(aChild);
-    }
-    aContainer->mFirstChild = aChild;
-    NS_ADDREF(aChild);
-    aContainer->DidInsertChild(aChild);
-    return;
-  }
-
-  Layer* next = aAfter->GetNextSibling();
-  aChild->SetNextSibling(next);
-  aChild->SetPrevSibling(aAfter);
-  if (next) {
-    next->SetPrevSibling(aChild);
-  }
-  aAfter->SetNextSibling(aChild);
-  NS_ADDREF(aChild);
-  aContainer->DidInsertChild(aChild);
-}
-
-template<class Container>
-static void
-ContainerRemoveChild(Container* aContainer, Layer* aChild)
-{
-  NS_ASSERTION(aChild->Manager() == aContainer->Manager(),
-               "Child has wrong manager");
-  NS_ASSERTION(aChild->GetParent() == aContainer,
-               "aChild not our child");
-
-  Layer* prev = aChild->GetPrevSibling();
-  Layer* next = aChild->GetNextSibling();
-  if (prev) {
-    prev->SetNextSibling(next);
-  } else {
-    aContainer->mFirstChild = next;
-  }
-  if (next) {
-    next->SetPrevSibling(prev);
-  } else {
-    aContainer->mLastChild = prev;
-  }
-
-  aChild->SetNextSibling(nullptr);
-  aChild->SetPrevSibling(nullptr);
-  aChild->SetParent(nullptr);
-
-  aContainer->DidRemoveChild(aChild);
-  NS_RELEASE(aChild);
-}
-
-template<class Container>
-static void
-ContainerRepositionChild(Container* aContainer, Layer* aChild, Layer* aAfter)
-{
-  NS_ASSERTION(aChild->Manager() == aContainer->Manager(),
-               "Child has wrong manager");
-  NS_ASSERTION(aChild->GetParent() == aContainer,
-               "aChild not our child");
-  NS_ASSERTION(!aAfter ||
-               (aAfter->Manager() == aContainer->Manager() &&
-                aAfter->GetParent() == aContainer),
-               "aAfter is not our child");
-
-  Layer* prev = aChild->GetPrevSibling();
-  Layer* next = aChild->GetNextSibling();
-  if (prev == aAfter) {
-    // aChild is already in the correct position, nothing to do.
-    return;
-  }
-  if (prev) {
-    prev->SetNextSibling(next);
-  }
-  if (next) {
-    next->SetPrevSibling(prev);
-  }
-  if (!aAfter) {
-    aChild->SetPrevSibling(nullptr);
-    aChild->SetNextSibling(aContainer->mFirstChild);
-    if (aContainer->mFirstChild) {
-      aContainer->mFirstChild->SetPrevSibling(aChild);
-    }
-    aContainer->mFirstChild = aChild;
-    return;
-  }
-
-  Layer* afterNext = aAfter->GetNextSibling();
-  if (afterNext) {
-    afterNext->SetPrevSibling(aChild);
-  } else {
-    aContainer->mLastChild = aChild;
-  }
-  aAfter->SetNextSibling(aChild);
-  aChild->SetPrevSibling(aAfter);
-  aChild->SetNextSibling(afterNext);
-}
-
-void
-ContainerLayerD3D10::InsertAfter(Layer* aChild, Layer* aAfter)
-{
-  ContainerInsertAfter(this, aChild, aAfter);
-}
-
-void
-ContainerLayerD3D10::RemoveChild(Layer *aChild)
-{
-  ContainerRemoveChild(this, aChild);
-}
-
-void
-ContainerLayerD3D10::RepositionChild(Layer* aChild, Layer* aAfter)
-{
-  ContainerRepositionChild(this, aChild, aAfter);
 }
 
 Layer*
@@ -215,7 +77,7 @@ ContainerLayerD3D10::RenderLayer()
   gfx3DMatrix oldViewMatrix;
 
   if (useIntermediate) {
-    device()->OMGetRenderTargets(1, getter_AddRefs(previousRTView), NULL);
+    device()->OMGetRenderTargets(1, getter_AddRefs(previousRTView), nullptr);
  
     D3D10_TEXTURE2D_DESC desc;
     memset(&desc, 0, sizeof(D3D10_TEXTURE2D_DESC));
@@ -227,7 +89,7 @@ ContainerLayerD3D10::RenderLayer()
     desc.SampleDesc.Count = 1;
     desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     HRESULT hr;
-    hr = device()->CreateTexture2D(&desc, NULL, getter_AddRefs(renderTexture));
+    hr = device()->CreateTexture2D(&desc, nullptr, getter_AddRefs(renderTexture));
 
     if (FAILED(hr)) {
       LayerManagerD3D10::ReportFailure(NS_LITERAL_CSTRING("Failed to create new texture for ContainerLayerD3D10!"), 
@@ -235,7 +97,7 @@ ContainerLayerD3D10::RenderLayer()
       return;
     }
 
-    hr = device()->CreateRenderTargetView(renderTexture, NULL, getter_AddRefs(rtView));
+    hr = device()->CreateRenderTargetView(renderTexture, nullptr, getter_AddRefs(rtView));
     NS_ASSERTION(SUCCEEDED(hr), "Failed to create render target view for ContainerLayerD3D10!");
 
     effect()->GetVariableByName("vRenderTargetOffset")->
@@ -279,7 +141,7 @@ ContainerLayerD3D10::RenderLayer()
     }
 
     ID3D10RenderTargetView *rtViewPtr = rtView;
-    device()->OMSetRenderTargets(1, &rtViewPtr, NULL);
+    device()->OMSetRenderTargets(1, &rtViewPtr, nullptr);
 
     renderTargetOffset[0] = (float)visibleRect.x;
     renderTargetOffset[1] = (float)visibleRect.y;
@@ -333,7 +195,7 @@ ContainerLayerD3D10::RenderLayer()
   if (useIntermediate) {
     mD3DManager->SetViewport(previousViewportSize);
     ID3D10RenderTargetView *rtView = previousRTView;
-    device()->OMSetRenderTargets(1, &rtView, NULL);
+    device()->OMSetRenderTargets(1, &rtView, nullptr);
     effect()->GetVariableByName("vRenderTargetOffset")->
       SetRawValue(previousRenderTargetOffset, 0, 8);
 
@@ -361,7 +223,7 @@ ContainerLayerD3D10::RenderLayer()
     technique->GetPassByIndex(0)->Apply(0);
 
     ID3D10ShaderResourceView *view;
-    device()->CreateShaderResourceView(renderTexture, NULL, &view);
+    device()->CreateShaderResourceView(renderTexture, nullptr, &view);
     device()->PSSetShaderResources(0, 1, &view);    
     device()->Draw(4, 0);
     view->Release();

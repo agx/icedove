@@ -47,6 +47,7 @@ typedef enum {
 } jstate;
 
 class RasterImage;
+class Orientation;
 
 class nsJPEGDecoder : public Decoder
 {
@@ -55,13 +56,14 @@ public:
   virtual ~nsJPEGDecoder();
 
   virtual void InitInternal();
-  virtual void WriteInternal(const char* aBuffer, uint32_t aCount, DecodeStrategy aStrategy);
+  virtual void WriteInternal(const char* aBuffer, uint32_t aCount);
   virtual void FinishInternal();
 
   virtual Telemetry::ID SpeedHistogram();
   void NotifyDone();
 
 protected:
+  Orientation ReadOrientationFromEXIF();
   void OutputScanlines(bool* suspend);
 
 public:

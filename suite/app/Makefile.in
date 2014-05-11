@@ -34,7 +34,6 @@ DEFINES += -DXPCOM_GLUE
 STL_FLAGS=
 
 LIBS += \
-	$(EXTRA_DSO_LIBS) \
 	$(XPCOM_STANDALONE_GLUE_LDOPTS) \
 	$(NULL)
 
@@ -166,7 +165,7 @@ PROFILE_EXTENSIONS += \
   $(NULL)
 endif
 
-ABS_DIST = $(call core_abspath,$(STAGEDIST))
+ABS_DIST = $(abspath $(STAGEDIST))
 
 define _PACKAGE_APP_EXTENSIONS
 @echo "Packaging $(dir).xpi..."
@@ -194,7 +193,7 @@ pack-ext: $(STAGEDIST)
 	$(foreach dir,$(APP_EXTENSIONS),$(_PACKAGE_APP_EXTENSIONS))
 	$(foreach dir,$(PROFILE_EXTENSIONS),$(_PACKAGE_PROFILE_EXTENSIONS))
 
-libs::
+tools::
 	@$(MAKE) pack-ext STAGEDIST="$(DIST)/bin"
 
 endif
@@ -222,7 +221,7 @@ else
 APPFILES = MacOS
 endif
 
-libs:: $(PROGRAM)
+tools:: $(PROGRAM)
 	mkdir -p $(DIST)/$(MOZ_MACBUNDLE_NAME)/Contents/MacOS
 	rsync -a --exclude CVS --exclude "*.in" $(srcdir)/macbuild/Contents $(DIST)/$(MOZ_MACBUNDLE_NAME) --exclude English.lproj
 	mkdir -p $(DIST)/$(MOZ_MACBUNDLE_NAME)/Contents/Resources/$(AB).lproj

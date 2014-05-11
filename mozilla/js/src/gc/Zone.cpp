@@ -4,16 +4,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jscntxt.h"
-#include "jsgc.h"
+#include "gc/Zone.h"
 
-#include "vm/Debugger.h"
+#include "jsgc.h"
 
 #ifdef JS_ION
 #include "jit/BaselineJIT.h"
-#include "jit/IonCompartment.h"
 #include "jit/Ion.h"
+#include "jit/JitCompartment.h"
 #endif
+#include "vm/Debugger.h"
+#include "vm/Runtime.h"
 
 #include "jsgcinlines.h"
 
@@ -21,8 +22,9 @@ using namespace js;
 using namespace js::gc;
 
 JS::Zone::Zone(JSRuntime *rt)
-  : rt(rt),
+  : JS::shadow::Zone(rt, &rt->gcMarker),
     allocator(this),
+    hold(false),
     ionUsingBarriers_(false),
     active(false),
     gcScheduled(false),
@@ -32,9 +34,11 @@ JS::Zone::Zone(JSRuntime *rt)
     gcTriggerBytes(0),
     gcHeapGrowthFactor(3.0),
     isSystem(false),
+    usedByExclusiveThread(false),
     scheduledForDestruction(false),
     maybeAlive(true),
     gcMallocBytes(0),
+    gcMallocGCTriggered(false),
     gcGrayRoots(),
     data(nullptr),
     types(this)
@@ -48,8 +52,8 @@ JS::Zone::Zone(JSRuntime *rt)
 
 Zone::~Zone()
 {
-    if (this == rt->systemZone)
-        rt->systemZone = NULL;
+    if (this == runtimeFromMainThread()->systemZone)
+        runtimeFromMainThread()->systemZone = nullptr;
 }
 
 bool
@@ -69,6 +73,10 @@ Zone::setNeedsBarrier(bool needs, ShouldUpdateIon updateIon)
     }
 #endif
 
+    if (needs && runtimeFromMainThread()->isAtomsZone(this))
+        JS_ASSERT(!runtimeFromMainThread()->exclusiveThreadsPresent());
+
+    JS_ASSERT_IF(needs, canCollect());
     needsBarrier_ = needs;
 }
 
@@ -91,7 +99,7 @@ Zone::markTypes(JSTracer *trc)
     for (size_t thingKind = FINALIZE_OBJECT0; thingKind < FINALIZE_OBJECT_LIMIT; thingKind++) {
         ArenaHeader *aheader = allocator.arenas.getFirstArena(static_cast<AllocKind>(thingKind));
         if (aheader)
-            rt->gcMarker.pushArenaList(aheader);
+            trc->runtime->gcMarker.pushArenaList(aheader);
     }
 
     for (CellIterUnderGC i(this, FINALIZE_TYPE_OBJECT); !i.done(); i.next()) {
@@ -105,6 +113,7 @@ void
 Zone::resetGCMallocBytes()
 {
     gcMallocBytes = ptrdiff_t(gcMaxMallocBytes);
+    gcMallocGCTriggered = false;
 }
 
 void
@@ -121,7 +130,8 @@ Zone::setGCMaxMallocBytes(size_t value)
 void
 Zone::onTooMuchMalloc()
 {
-    TriggerZoneGC(this, gcreason::TOO_MUCH_MALLOC);
+    if (!gcMallocGCTriggered)
+        gcMallocGCTriggered = TriggerZoneGC(this, JS::gcreason::TOO_MUCH_MALLOC);
 }
 
 void
@@ -135,11 +145,11 @@ Zone::sweep(FreeOp *fop, bool releaseTypes)
         releaseTypes = false;
 
     if (!isPreservingCode()) {
-        gcstats::AutoPhase ap(rt->gcStats, gcstats::PHASE_DISCARD_ANALYSIS);
+        gcstats::AutoPhase ap(fop->runtime()->gcStats, gcstats::PHASE_DISCARD_ANALYSIS);
         types.sweep(fop, releaseTypes);
     }
 
-    if (!rt->debuggerList.isEmpty())
+    if (!fop->runtime()->debuggerList.isEmpty())
         sweepBreakpoints(fop);
 
     active = false;
@@ -153,8 +163,8 @@ Zone::sweepBreakpoints(FreeOp *fop)
      * to iterate over the scripts belonging to a single compartment in a zone.
      */
 
-    gcstats::AutoPhase ap1(rt->gcStats, gcstats::PHASE_SWEEP_TABLES);
-    gcstats::AutoPhase ap2(rt->gcStats, gcstats::PHASE_SWEEP_TABLES_BREAKPOINT);
+    gcstats::AutoPhase ap1(fop->runtime()->gcStats, gcstats::PHASE_SWEEP_TABLES);
+    gcstats::AutoPhase ap2(fop->runtime()->gcStats, gcstats::PHASE_SWEEP_TABLES_BREAKPOINT);
 
     for (CellIterUnderGC i(this, FINALIZE_SCRIPT); !i.done(); i.next()) {
         JSScript *script = i.get<JSScript>();
@@ -162,8 +172,8 @@ Zone::sweepBreakpoints(FreeOp *fop)
             continue;
         bool scriptGone = IsScriptAboutToBeFinalized(&script);
         JS_ASSERT(script == i.get<JSScript>());
-        for (unsigned i = 0; i < script->length; i++) {
-            BreakpointSite *site = script->getBreakpointSite(script->code + i);
+        for (unsigned i = 0; i < script->length(); i++) {
+            BreakpointSite *site = script->getBreakpointSite(script->offsetToPC(i));
             if (!site)
                 continue;
             Breakpoint *nextbp;
@@ -177,7 +187,7 @@ Zone::sweepBreakpoints(FreeOp *fop)
 }
 
 void
-Zone::discardJitCode(FreeOp *fop, bool discardConstraints)
+Zone::discardJitCode(FreeOp *fop)
 {
 #ifdef JS_ION
     if (isPreservingCode()) {
@@ -216,23 +226,30 @@ Zone::discardJitCode(FreeOp *fop, bool discardConstraints)
             script->resetUseCount();
         }
 
-        for (CompartmentsInZoneIter comp(this); !comp.done(); comp.next()) {
-            /* Free optimized baseline stubs. */
-            if (comp->ionCompartment())
-                comp->ionCompartment()->optimizedStubSpace()->free();
-
-            comp->types.sweepCompilerOutputs(fop, discardConstraints);
-        }
+        for (CompartmentsInZoneIter comp(this); !comp.done(); comp.next())
+            jit::FinishDiscardJitCode(fop, comp);
     }
 #endif
 }
 
-bool
-Zone::hasMarkedCompartments()
+uint64_t
+Zone::gcNumber()
 {
-    for (CompartmentsInZoneIter comp(this); !comp.done(); comp.next()) {
-        if (comp->marked)
-            return true;
-    }
-    return false;
+    // Zones in use by exclusive threads are not collected, and threads using
+    // them cannot access the main runtime's gcNumber without racing.
+    return usedByExclusiveThread ? 0 : runtimeFromMainThread()->gcNumber;
 }
+
+JS::Zone *
+js::ZoneOfObject(const JSObject &obj)
+{
+    return obj.zone();
+}
+
+JS::Zone *
+js::ZoneOfObjectFromAnyThread(const JSObject &obj)
+{
+    return obj.zoneFromAnyThread();
+}
+
+

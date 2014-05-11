@@ -24,7 +24,7 @@ function test()
   {
     ok(hud, "web console opened");
     webconsole = hud;
-    HUDConsoleUI.toggleBrowserConsole().then(browserConsoleOpened);
+    HUDService.toggleBrowserConsole().then(browserConsoleOpened);
   }
 
   function browserConsoleOpened(hud)
@@ -53,7 +53,7 @@ function test()
       webconsole: hud,
       messages: [
         {
-          text: "TypeError: this._toolPanels is null",
+          text: "TypeError: can't convert null to object",
           category: CATEGORY_JS,
           severity: SEVERITY_ERROR,
         },
@@ -68,7 +68,7 @@ function test()
   {
     let msg = [...results[0].matched][0];
     ok(msg, "message element found");
-    let locationNode = msg.querySelector(".webconsole-location");
+    let locationNode = msg.querySelector(".location");
     ok(locationNode, "message location element found");
 
     let title = locationNode.getAttribute("title");

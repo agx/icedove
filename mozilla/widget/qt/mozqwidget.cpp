@@ -17,6 +17,7 @@
 
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
+#include "mozilla/TextEvents.h"
 
 
 #ifdef MOZ_ENABLE_QTMOBILITY
@@ -198,38 +199,11 @@ void MozQWidget::hoverMoveEvent(QGraphicsSceneHoverEvent* aEvent)
 
 void MozQWidget::keyPressEvent(QKeyEvent* aEvent)
 {
-#if (MOZ_PLATFORM_MAEMO == 6)
-    if (!gKeyboardOpen ||
-       //those might get sended as KeyEvents, even in 'NormalMode'
-       aEvent->key() == Qt::Key_Space ||
-       aEvent->key() == Qt::Key_Return ||
-       aEvent->key() == Qt::Key_Backspace) {
-        mReceiver->OnKeyPressEvent(aEvent);
-    }
-#elif (MOZ_PLATFORM_MAEMO == 5)
-    // Below removed to prevent invertion of upper and lower case
-    // See bug 561234
-    // mReceiver->OnKeyPressEvent(aEvent);
-#else
     mReceiver->OnKeyPressEvent(aEvent);
-#endif
 }
 
 void MozQWidget::keyReleaseEvent(QKeyEvent* aEvent)
 {
-#if (MOZ_PLATFORM_MAEMO == 6)
-    if (!gKeyboardOpen ||
-       //those might get sended as KeyEvents, even in 'NormalMode'
-       aEvent->key() == Qt::Key_Space ||
-       aEvent->key() == Qt::Key_Return ||
-       aEvent->key() == Qt::Key_Backspace) {
-        mReceiver->OnKeyReleaseEvent(aEvent);
-    }
-    return;
-#elif (MOZ_PLATFORM_MAEMO == 5)
-    // Below line should be removed when bug 561234 is fixed
-    mReceiver->OnKeyPressEvent(aEvent);
-#endif
     mReceiver->OnKeyReleaseEvent(aEvent);
 }
 
@@ -320,15 +294,17 @@ void MozQWidget::sendPressReleaseKeyEvent(int key,
 
     if (letter) {
         // Handle as TextEvent
-        nsCompositionEvent start(true, NS_COMPOSITION_START, mReceiver);
+        mozilla::WidgetCompositionEvent start(true, NS_COMPOSITION_START,
+                                              mReceiver);
         mReceiver->DispatchEvent(&start);
 
-        nsTextEvent text(true, NS_TEXT_TEXT, mReceiver);
+        mozilla::WidgetTextEvent text(true, NS_TEXT_TEXT, mReceiver);
         QString commitString = QString(*letter);
         text.theText.Assign(commitString.utf16());
         mReceiver->DispatchEvent(&text);
 
-        nsCompositionEvent end(true, NS_COMPOSITION_END, mReceiver);
+        mozilla::WidgetCompositionEvent end(true, NS_COMPOSITION_END,
+                                            mReceiver);
         mReceiver->DispatchEvent(&end);
         return;
     }

@@ -4,17 +4,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "Safepoints.h"
-#include "IonSpewer.h"
-#include "LIR.h"
+#include "jit/Safepoints.h"
+
+#include "mozilla/MathAlgorithms.h"
+
+#include "jit/BitSet.h"
+#include "jit/IonSpewer.h"
+#include "jit/LIR.h"
 
 using namespace js;
 using namespace jit;
 
+using mozilla::FloorLog2;
+
 bool
-SafepointWriter::init(uint32_t slotCount)
+SafepointWriter::init(TempAllocator &alloc, uint32_t slotCount)
 {
-    frameSlots_ = BitSet::New(slotCount);
+    frameSlots_ = BitSet::New(alloc, slotCount);
     if (!frameSlots_)
         return false;
 
@@ -47,12 +53,15 @@ void
 SafepointWriter::writeGcRegs(LSafepoint *safepoint)
 {
     GeneralRegisterSet gc = safepoint->gcRegs();
-    GeneralRegisterSet spilled = safepoint->liveRegs().gprs();
+    GeneralRegisterSet spilledGpr = safepoint->liveRegs().gprs();
+    FloatRegisterSet spilledFloat = safepoint->liveRegs().fpus();
+    GeneralRegisterSet slots = safepoint->slotsOrElementsRegs();
     GeneralRegisterSet valueRegs;
 
-    WriteRegisterMask(stream_, spilled.bits());
-    if (!spilled.empty()) {
+    WriteRegisterMask(stream_, spilledGpr.bits());
+    if (!spilledGpr.empty()) {
         WriteRegisterMask(stream_, gc.bits());
+        WriteRegisterMask(stream_, slots.bits());
 
 #ifdef JS_PUNBOX64
         valueRegs = safepoint->valueRegs();
@@ -61,19 +70,25 @@ SafepointWriter::writeGcRegs(LSafepoint *safepoint)
     }
 
     // GC registers are a subset of the spilled registers.
-    JS_ASSERT((valueRegs.bits() & ~spilled.bits()) == 0);
-    JS_ASSERT((gc.bits() & ~spilled.bits()) == 0);
+    JS_ASSERT((valueRegs.bits() & ~spilledGpr.bits()) == 0);
+    JS_ASSERT((gc.bits() & ~spilledGpr.bits()) == 0);
+
+    WriteRegisterMask(stream_, spilledFloat.bits());
 
 #ifdef DEBUG
     if (IonSpewEnabled(IonSpew_Safepoints)) {
-        for (GeneralRegisterIterator iter(spilled); iter.more(); iter++) {
+        for (GeneralRegisterForwardIterator iter(spilledGpr); iter.more(); iter++) {
             const char *type = gc.has(*iter)
                                ? "gc"
-                               : valueRegs.has(*iter)
-                                 ? "value"
-                                 : "any";
+                               : slots.has(*iter)
+                                 ? "slots"
+                                 : valueRegs.has(*iter)
+                                   ? "value"
+                                   : "any";
             IonSpew(IonSpew_Safepoints, "    %s reg: %s", type, (*iter).name());
         }
+        for (FloatRegisterForwardIterator iter(spilledFloat); iter.more(); iter++)
+            IonSpew(IonSpew_Safepoints, "    float reg: %s", (*iter).name());
     }
 #endif
 }
@@ -110,6 +125,21 @@ SafepointWriter::writeGcSlots(LSafepoint *safepoint)
                      stream_,
                      slots.length(),
                      slots.begin());
+}
+
+void
+SafepointWriter::writeSlotsOrElementsSlots(LSafepoint *safepoint)
+{
+    LSafepoint::SlotList &slots = safepoint->slotsOrElementsSlots();
+
+    stream_.writeUnsigned(slots.length());
+
+    for (uint32_t i = 0; i < slots.length(); i++) {
+#ifdef DEBUG
+        IonSpew(IonSpew_Safepoints, "    slots/elements slot: %d", slots[i]);
+#endif
+        stream_.writeUnsigned(slots[i]);
+    }
 }
 
 void
@@ -175,6 +205,7 @@ static const uint32_t PAYLOAD_INFO_SHIFT = TYPE_INFO_SHIFT - PART_INFO_BITS;
 
 JS_STATIC_ASSERT(PAYLOAD_INFO_SHIFT == 0);
 
+#ifdef JS_NUNBOX32
 static inline NunboxPartKind
 AllocationToPartKind(const LAllocation &a)
 {
@@ -206,7 +237,6 @@ CanEncodeInfoInHeader(const LAllocation &a, uint32_t *out)
     return *out < MAX_INFO_VALUE;
 }
 
-#ifdef JS_NUNBOX32
 void
 SafepointWriter::writeNunboxParts(LSafepoint *safepoint)
 {
@@ -289,6 +319,8 @@ SafepointWriter::encode(LSafepoint *safepoint)
     writeNunboxParts(safepoint);
 #endif
 
+    writeSlotsOrElementsSlots(safepoint);
+
     endEntry();
     safepoint->setOffset(safepointOffset);
 }
@@ -306,17 +338,21 @@ SafepointReader::SafepointReader(IonScript *script, const SafepointIndex *si)
 {
     osiCallPointOffset_ = stream_.readUnsigned();
 
-    // gcSpills is a subset of allSpills.
-    allSpills_ = GeneralRegisterSet(stream_.readUnsigned());
-    if (allSpills_.empty()) {
-        gcSpills_ = allSpills_;
-        valueSpills_ = allSpills_;
+    // gcSpills is a subset of allGprSpills.
+    allGprSpills_ = GeneralRegisterSet(stream_.readUnsigned());
+    if (allGprSpills_.empty()) {
+        gcSpills_ = allGprSpills_;
+        valueSpills_ = allGprSpills_;
+        slotsOrElementsSpills_ = allGprSpills_;
     } else {
         gcSpills_ = GeneralRegisterSet(stream_.readUnsigned());
+        slotsOrElementsSpills_ = GeneralRegisterSet(stream_.readUnsigned());
 #ifdef JS_PUNBOX64
         valueSpills_ = GeneralRegisterSet(stream_.readUnsigned());
 #endif
     }
+
+    allFloatSpills_ = FloatRegisterSet(stream_.readUnsigned());
 
     advanceFromGcRegs();
 }
@@ -358,8 +394,7 @@ SafepointReader::getSlotFromBitmap(uint32_t *slot)
 
     // The current chunk still has bits in it, so get the next bit, then mask
     // it out of the slot chunk.
-    uint32_t bit;
-    JS_FLOOR_LOG2(bit, currentSlotChunk_);
+    uint32_t bit = FloorLog2(currentSlotChunk_);
     currentSlotChunk_ &= ~(1 << bit);
 
     // Return the slot, taking care to add 1 back in since it was subtracted
@@ -401,6 +436,7 @@ SafepointReader::advanceFromValueSlots()
     nunboxSlotsRemaining_ = stream_.readUnsigned();
 #else
     nunboxSlotsRemaining_ = 0;
+    advanceFromNunboxSlots();
 #endif
 }
 
@@ -423,8 +459,10 @@ PartFromStream(CompactBufferReader &stream, NunboxPartKind kind, uint32_t info)
 bool
 SafepointReader::getNunboxSlot(LAllocation *type, LAllocation *payload)
 {
-    if (!nunboxSlotsRemaining_--)
+    if (!nunboxSlotsRemaining_--) {
+        advanceFromNunboxSlots();
         return false;
+    }
 
     uint16_t header = stream_.readFixedUint16_t();
     NunboxPartKind typeKind = (NunboxPartKind)((header >> TYPE_KIND_SHIFT) & PART_KIND_MASK);
@@ -437,3 +475,17 @@ SafepointReader::getNunboxSlot(LAllocation *type, LAllocation *payload)
     return true;
 }
 
+void
+SafepointReader::advanceFromNunboxSlots()
+{
+    slotsOrElementsSlotsRemaining_ = stream_.readUnsigned();
+}
+
+bool
+SafepointReader::getSlotsOrElementsSlot(uint32_t *slot)
+{
+    if (!slotsOrElementsSlotsRemaining_--)
+        return false;
+    *slot = stream_.readUnsigned();
+    return true;
+}

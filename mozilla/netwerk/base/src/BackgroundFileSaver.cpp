@@ -4,7 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/RefPtr.h"
 #include "pk11pub.h"
 #include "ScopedNSSTypes.h"
 #include "secoidt.h"
@@ -13,10 +12,10 @@
 #include "nsIPipe.h"
 #include "nsNetUtil.h"
 #include "nsThreadUtils.h"
-#include "nsXPCOMStrings.h"
 
 #include "BackgroundFileSaver.h"
 #include "mozilla/Telemetry.h"
+#include "nsIAsyncInputStream.h"
 
 namespace mozilla {
 namespace net {
@@ -25,9 +24,9 @@ namespace net {
 //// Globals
 
 /**
- * Buffer size for writing to the output file.
+ * Buffer size for writing to the output file or reading from the input file.
  */
-#define BUFFERED_OUTPUT_SIZE (1024 * 32)
+#define BUFFERED_IO_SIZE (1024 * 32)
 
 /**
  * When this upper limit is reached, the original request is suspended.
@@ -82,8 +81,11 @@ BackgroundFileSaver::BackgroundFileSaver()
 , mFinishRequested(false)
 , mComplete(false)
 , mStatus(NS_OK)
-, mAssignedTarget(nullptr)
-, mAssignedTargetKeepPartial(false)
+, mAppend(false)
+, mInitialTarget(nullptr)
+, mInitialTargetKeepPartial(false)
+, mRenamedTarget(nullptr)
+, mRenamedTargetKeepPartial(false)
 , mAsyncCopyContext(nullptr)
 , mSha256Enabled(false)
 , mActualTarget(nullptr)
@@ -164,13 +166,30 @@ BackgroundFileSaver::SetObserver(nsIBackgroundFileSaverObserver *aObserver)
 
 // Called on the control thread.
 NS_IMETHODIMP
+BackgroundFileSaver::EnableAppend()
+{
+  MOZ_ASSERT(NS_IsMainThread(), "This should be called on the main thread");
+
+  MutexAutoLock lock(mLock);
+  mAppend = true;
+
+  return NS_OK;
+}
+
+// Called on the control thread.
+NS_IMETHODIMP
 BackgroundFileSaver::SetTarget(nsIFile *aTarget, bool aKeepPartial)
 {
   NS_ENSURE_ARG(aTarget);
   {
     MutexAutoLock lock(mLock);
-    aTarget->Clone(getter_AddRefs(mAssignedTarget));
-    mAssignedTargetKeepPartial = aKeepPartial;
+    if (!mInitialTarget) {
+      aTarget->Clone(getter_AddRefs(mInitialTarget));
+      mInitialTargetKeepPartial = aKeepPartial;
+    } else {
+      aTarget->Clone(getter_AddRefs(mRenamedTarget));
+      mRenamedTargetKeepPartial = aKeepPartial;
+    }
   }
 
   // After the worker thread wakes up because attention is requested, it will
@@ -361,68 +380,89 @@ BackgroundFileSaver::ProcessStateChange()
   }
 
   // Get a copy of the current shared state for the worker thread.
-  nsCOMPtr<nsIFile> target;
-  bool targetKeepPartial;
-  bool sha256Enabled = false;
+  nsCOMPtr<nsIFile> initialTarget;
+  bool initialTargetKeepPartial;
+  nsCOMPtr<nsIFile> renamedTarget;
+  bool renamedTargetKeepPartial;
+  bool sha256Enabled;
+  bool append;
   {
     MutexAutoLock lock(mLock);
 
-    target = mAssignedTarget;
-    targetKeepPartial = mAssignedTargetKeepPartial;
+    initialTarget = mInitialTarget;
+    initialTargetKeepPartial = mInitialTargetKeepPartial;
+    renamedTarget = mRenamedTarget;
+    renamedTargetKeepPartial = mRenamedTargetKeepPartial;
+    sha256Enabled = mSha256Enabled;
+    append = mAppend;
 
     // From now on, another attention event needs to be posted if state changes.
     mWorkerThreadAttentionRequested = false;
-
-    sha256Enabled = mSha256Enabled;
   }
 
-  // The target can only be null if it has never been assigned.  In this case,
-  // there is nothing to do since we never created any output file.
-  if (!target) {
+  // The initial target can only be null if it has never been assigned.  In this
+  // case, there is nothing to do since we never created any output file.
+  if (!initialTarget) {
     return NS_OK;
   }
 
-  // We will append to the target file only if we already started writing it.
-  bool equalToCurrent = false;
-  int32_t creationIoFlags = PR_CREATE_FILE | PR_TRUNCATE;
-  if (mActualTarget) {
-    creationIoFlags = PR_APPEND;
+  // Determine if we are processing the attention request for the first time.
+  bool isContinuation = !!mActualTarget;
+  if (!isContinuation) {
+    // Assign the target file for the first time.
+    mActualTarget = initialTarget;
+    mActualTargetKeepPartial = initialTargetKeepPartial;
+  }
 
-    // Verify whether we have actually been instructed to use a different file.
-    rv = mActualTarget->Equals(target, &equalToCurrent);
+  // Verify whether we have actually been instructed to use a different file.
+  // This may happen the first time this function is executed, if SetTarget was
+  // called two times before the worker thread processed the attention request.
+  bool equalToCurrent = false;
+  if (renamedTarget) {
+    rv = mActualTarget->Equals(renamedTarget, &equalToCurrent);
     NS_ENSURE_SUCCESS(rv, rv);
     if (!equalToCurrent)
     {
-      // We are moving the previous target file to a different location.
-      nsCOMPtr<nsIFile> targetParentDir;
-      rv = target->GetParent(getter_AddRefs(targetParentDir));
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      nsAutoString targetName;
-      rv = target->GetLeafName(targetName);
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      // We must delete any existing target file before moving the current one.
-      bool exists = false;
-      rv = target->Exists(&exists);
-      NS_ENSURE_SUCCESS(rv, rv);
+      // If we were asked to rename the file but the initial file did not exist,
+      // we simply create the file in the renamed location.  We avoid this check
+      // if we have already started writing the output file ourselves.
+      bool exists = true;
+      if (!isContinuation) {
+        rv = mActualTarget->Exists(&exists);
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
       if (exists) {
-        rv = target->Remove(false);
+        // We are moving the previous target file to a different location.
+        nsCOMPtr<nsIFile> renamedTargetParentDir;
+        rv = renamedTarget->GetParent(getter_AddRefs(renamedTargetParentDir));
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        nsAutoString renamedTargetName;
+        rv = renamedTarget->GetLeafName(renamedTargetName);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        // We must delete any existing target file before moving the current
+        // one.
+        rv = renamedTarget->Exists(&exists);
+        NS_ENSURE_SUCCESS(rv, rv);
+        if (exists) {
+          rv = renamedTarget->Remove(false);
+          NS_ENSURE_SUCCESS(rv, rv);
+        }
+
+        // Move the file.  If this fails, we still reference the original file
+        // in mActualTarget, so that it is deleted if requested.  If this
+        // succeeds, the nsIFile instance referenced by mActualTarget mutates
+        // and starts pointing to the new file, but we'll discard the reference.
+        rv = mActualTarget->MoveTo(renamedTargetParentDir, renamedTargetName);
         NS_ENSURE_SUCCESS(rv, rv);
       }
 
-      // Move the file.  If this fails, we still reference the original file
-      // in mActualTarget, so that it is deleted if requested.  If this
-      // succeeds, the nsIFile instance referenced by mActualTarget mutates and
-      // starts pointing to the new file, but we'll discard the reference.
-      rv = mActualTarget->MoveTo(targetParentDir, targetName);
-      NS_ENSURE_SUCCESS(rv, rv);
+      // Now we can update the actual target file name.
+      mActualTarget = renamedTarget;
+      mActualTargetKeepPartial = renamedTargetKeepPartial;
     }
   }
-
-  // Now we can update the actual target file name.
-  mActualTarget = target;
-  mActualTargetKeepPartial = targetKeepPartial;
 
   // Notify if the target file name actually changed.
   if (!equalToCurrent) {
@@ -440,18 +480,20 @@ BackgroundFileSaver::ProcessStateChange()
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  // The pending rename operation might be the last task before finishing.
-  if (CheckCompletion()) {
-    return NS_OK;
-  }
+  if (isContinuation) {
+    // The pending rename operation might be the last task before finishing. We
+    // may return here only if we have already created the target file.
+    if (CheckCompletion()) {
+      return NS_OK;
+    }
 
-  // Even if the operation did not complete, the pipe input stream may be empty
-  // and may have been closed already.  We detect this case using the Available
-  // property, because it never returns an error if there is more data to be
-  // consumed.  If the pipe input stream is closed, we just exit and wait for
-  // more calls like SetTarget or Finish to be invoked on the control thread.
-  // However, we still truncate the file if we are expected to do that.
-  if (creationIoFlags == PR_APPEND) {
+    // Even if the operation did not complete, the pipe input stream may be
+    // empty and may have been closed already.  We detect this case using the
+    // Available property, because it never returns an error if there is more
+    // data to be consumed.  If the pipe input stream is closed, we just exit
+    // and wait for more calls like SetTarget or Finish to be invoked on the
+    // control thread.  However, we still truncate the file or create the
+    // initial digest context if we are expected to do that.
     uint64_t available;
     rv = mPipeInputStream->Available(&available);
     if (NS_FAILED(rv)) {
@@ -459,31 +501,75 @@ BackgroundFileSaver::ProcessStateChange()
     }
   }
 
-  // Create the target file, or append to it if we already started writing it.
-  nsCOMPtr<nsIOutputStream> outputStream;
-  rv = NS_NewLocalFileOutputStream(getter_AddRefs(outputStream),
-                                   mActualTarget,
-                                   PR_WRONLY | creationIoFlags, 0600);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  outputStream = NS_BufferOutputStream(outputStream, BUFFERED_OUTPUT_SIZE);
-  if (!outputStream) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // Wrap the output stream in a hashing stream if hashing is enabled and NSS
-  // hasn't been shut down.
-  bool isShutDown = false;
+  // Create the digest context if requested and NSS hasn't been shut down.
   if (sha256Enabled && !mDigestContext) {
     nsNSSShutDownPreventionLock lock;
-    if (!(isShutDown = isAlreadyShutDown())) {
+    if (!isAlreadyShutDown()) {
       mDigestContext =
         PK11_CreateDigestContext(static_cast<SECOidTag>(SEC_OID_SHA256));
       NS_ENSURE_TRUE(mDigestContext, NS_ERROR_OUT_OF_MEMORY);
     }
   }
-  MOZ_ASSERT(!sha256Enabled || mDigestContext || isShutDown,
-             "Hashing enabled but creating digest context didn't work");
+
+  // When we are requested to append to an existing file, we should read the
+  // existing data and ensure we include it as part of the final hash.
+  if (mDigestContext && append && !isContinuation) {
+    nsCOMPtr<nsIInputStream> inputStream;
+    rv = NS_NewLocalFileInputStream(getter_AddRefs(inputStream),
+                                    mActualTarget,
+                                    PR_RDONLY | nsIFile::OS_READAHEAD);
+    if (rv != NS_ERROR_FILE_NOT_FOUND) {
+      NS_ENSURE_SUCCESS(rv, rv);
+
+      char buffer[BUFFERED_IO_SIZE];
+      while (true) {
+        uint32_t count;
+        rv = inputStream->Read(buffer, BUFFERED_IO_SIZE, &count);
+        NS_ENSURE_SUCCESS(rv, rv);
+
+        if (count == 0) {
+          // We reached the end of the file.
+          break;
+        }
+
+        nsNSSShutDownPreventionLock lock;
+        if (isAlreadyShutDown()) {
+          return NS_ERROR_NOT_AVAILABLE;
+        }
+
+        nsresult rv = MapSECStatus(PK11_DigestOp(mDigestContext,
+                                                 uint8_t_ptr_cast(buffer),
+                                                 count));
+        NS_ENSURE_SUCCESS(rv, rv);
+      }
+
+      rv = inputStream->Close();
+      NS_ENSURE_SUCCESS(rv, rv);
+    }
+  }
+
+  // We will append to the initial target file only if it was requested by the
+  // caller, but we'll always append on subsequent accesses to the target file.
+  int32_t creationIoFlags;
+  if (isContinuation) {
+    creationIoFlags = PR_APPEND;
+  } else {
+    creationIoFlags = (append ? PR_APPEND : PR_TRUNCATE) | PR_CREATE_FILE;
+  }
+
+  // Create the target file, or append to it if we already started writing it.
+  nsCOMPtr<nsIOutputStream> outputStream;
+  rv = NS_NewLocalFileOutputStream(getter_AddRefs(outputStream),
+                                   mActualTarget,
+                                   PR_WRONLY | creationIoFlags, 0644);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  outputStream = NS_BufferOutputStream(outputStream, BUFFERED_IO_SIZE);
+  if (!outputStream) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // Wrap the output stream so that it feeds the digest context if needed.
   if (mDigestContext) {
     // No need to acquire the NSS lock here, DigestOutputStream must acquire it
     // in any case before each asynchronous write. Constructing the
@@ -511,7 +597,7 @@ BackgroundFileSaver::ProcessStateChange()
     }
   }
 
-  // If the operation succeded, we must ensure that we keep this object alive
+  // If the operation succeeded, we must ensure that we keep this object alive
   // for the entire duration of the copy, since only the raw pointer will be
   // provided as the argument of the AsyncCopyCallback function.  We can add the
   // reference now, after NS_AsyncCopy returned, because it always starts
@@ -545,16 +631,24 @@ BackgroundFileSaver::CheckCompletion()
     if (NS_SUCCEEDED(mStatus)) {
       failed = false;
 
-      // On success, if there is a pending rename operation, we must process it
-      // before finishing.  Otherwise, we can finish now if requested.
-      if ((mAssignedTarget && mAssignedTarget != mActualTarget) ||
-          !mFinishRequested) {
+      // We did not incur in an error, so we must determine if we can stop now.
+      // If the Finish method has not been called, we can just continue now.
+      if (!mFinishRequested) {
         return false;
       }
 
-      // If completion was requested, but we still have data to write to the
-      // output file, allow the copy operation to resume.  The Available getter
-      // may return an error if one of the pipe's streams has been already closed.
+      // We can only stop when all the operations requested by the control
+      // thread have been processed.  First, we check whether we have processed
+      // the first SetTarget call, if any.  Then, we check whether we have
+      // processed any rename requested by subsequent SetTarget calls.
+      if ((mInitialTarget && !mActualTarget) ||
+          (mRenamedTarget && mRenamedTarget != mActualTarget)) {
+        return false;
+      }
+
+      // If we still have data to write to the output file, allow the copy
+      // operation to resume.  The Available getter may return an error if one
+      // of the pipe's streams has been already closed.
       uint64_t available;
       rv = mPipeInputStream->Available(&available);
       if (NS_SUCCEEDED(rv) && available != 0) {
@@ -650,11 +744,11 @@ BackgroundFileSaver::NotifySaveComplete()
 ////////////////////////////////////////////////////////////////////////////////
 //// BackgroundFileSaverOutputStream
 
-NS_IMPL_THREADSAFE_ISUPPORTS4(BackgroundFileSaverOutputStream,
-                              nsIBackgroundFileSaver,
-                              nsIOutputStream,
-                              nsIAsyncOutputStream,
-                              nsIOutputStreamCallback)
+NS_IMPL_ISUPPORTS4(BackgroundFileSaverOutputStream,
+                   nsIBackgroundFileSaver,
+                   nsIOutputStream,
+                   nsIAsyncOutputStream,
+                   nsIOutputStreamCallback)
 
 BackgroundFileSaverOutputStream::BackgroundFileSaverOutputStream()
 : BackgroundFileSaver()
@@ -753,10 +847,10 @@ BackgroundFileSaverOutputStream::OnOutputStreamReady(
 ////////////////////////////////////////////////////////////////////////////////
 //// BackgroundFileSaverStreamListener
 
-NS_IMPL_THREADSAFE_ISUPPORTS3(BackgroundFileSaverStreamListener,
-                              nsIBackgroundFileSaver,
-                              nsIRequestObserver,
-                              nsIStreamListener)
+NS_IMPL_ISUPPORTS3(BackgroundFileSaverStreamListener,
+                   nsIBackgroundFileSaver,
+                   nsIRequestObserver,
+                   nsIStreamListener)
 
 BackgroundFileSaverStreamListener::BackgroundFileSaverStreamListener()
 : BackgroundFileSaver()
@@ -917,8 +1011,8 @@ BackgroundFileSaverStreamListener::NotifySuspendOrResume()
 
 ////////////////////////////////////////////////////////////////////////////////
 //// DigestOutputStream
-NS_IMPL_THREADSAFE_ISUPPORTS1(DigestOutputStream,
-                              nsIOutputStream)
+NS_IMPL_ISUPPORTS1(DigestOutputStream,
+                   nsIOutputStream)
 
 DigestOutputStream::DigestOutputStream(nsIOutputStream* aStream,
                                        PK11Context* aContext) :
@@ -968,7 +1062,7 @@ DigestOutputStream::WriteFrom(nsIInputStream* aFromStream,
   // Not supported. We could read the stream to a buf, call DigestOp on the
   // result, seek back and pass the stream on, but it's not worth it since our
   // application (NS_AsyncCopy) doesn't invoke this on the sink.
-  MOZ_NOT_REACHED("DigestOutputStream::WriteFrom not implemented");
+  MOZ_CRASH("DigestOutputStream::WriteFrom not implemented");
 }
 
 NS_IMETHODIMP
@@ -976,7 +1070,7 @@ DigestOutputStream::WriteSegments(nsReadSegmentFun aReader,
                                   void *aClosure, uint32_t aCount,
                                   uint32_t *retval)
 {
-  MOZ_NOT_REACHED("DigestOutputStream::WriteSegments not implemented");
+  MOZ_CRASH("DigestOutputStream::WriteSegments not implemented");
 }
 
 NS_IMETHODIMP

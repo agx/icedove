@@ -47,9 +47,6 @@
  * allocated using C memory allocation functions.
  */
 
-// Prevent the standard macros from being redefined
-#define mozilla_mozalloc_macro_wrappers_h
-
 #include "mozilla/mozalloc.h"
 
 extern void HunspellReportMemoryAllocation(void*);
@@ -84,7 +81,7 @@ inline void* hunspell_realloc(void* ptr, size_t size)
   void* result = moz_realloc(ptr, size);
   if (result) {
     HunspellReportMemoryAllocation(result);
-  } else if (size != 0) {
+  } else {
     // realloc failed;  undo the HunspellReportMemoryDeallocation from above
     HunspellReportMemoryAllocation(ptr);
   }

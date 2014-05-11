@@ -51,6 +51,8 @@ class GradientStopsCairo : public GradientStops
 class DrawTargetCairo : public DrawTarget
 {
 public:
+  friend class BorrowedCairoContext;
+
   DrawTargetCairo();
   virtual ~DrawTargetCairo();
 
@@ -58,12 +60,22 @@ public:
   virtual TemporaryRef<SourceSurface> Snapshot();
   virtual IntSize GetSize();
 
+  virtual void SetPermitSubpixelAA(bool aPermitSubpixelAA);
+
+  virtual bool LockBits(uint8_t** aData, IntSize* aSize,
+                        int32_t* aStride, SurfaceFormat* aFormat);
+  virtual void ReleaseBits(uint8_t* aData);
+
   virtual void Flush();
   virtual void DrawSurface(SourceSurface *aSurface,
                            const Rect &aDest,
                            const Rect &aSource,
                            const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
                            const DrawOptions &aOptions = DrawOptions());
+  virtual void DrawFilter(FilterNode *aNode,
+                          const Rect &aSourceRect,
+                          const Point &aDestPoint,
+                          const DrawOptions &aOptions = DrawOptions());
   virtual void DrawSurfaceWithShadow(SourceSurface *aSurface,
                                      const Point &aDest,
                                      const Color &aColor,
@@ -76,6 +88,8 @@ public:
   virtual void CopySurface(SourceSurface *aSurface,
                            const IntRect &aSourceRect,
                            const IntPoint &aDestination);
+  virtual void CopyRect(const IntRect &aSourceRect,
+                        const IntPoint &aDestination);
 
   virtual void FillRect(const Rect &aRect,
                         const Pattern &aPattern,
@@ -110,7 +124,7 @@ public:
   virtual void MaskSurface(const Pattern &aSource,
                            SourceSurface *aMask,
                            Point aOffset,
-                           const DrawOptions &aOptions = DrawOptions()) { MOZ_ASSERT(0); };
+                           const DrawOptions &aOptions = DrawOptions());
 
   virtual void PushClip(const Path *aPath);
   virtual void PushClipRect(const Rect &aRect);
@@ -136,11 +150,13 @@ public:
                         uint32_t aNumStops,
                         ExtendMode aExtendMode = EXTEND_CLAMP) const;
 
+  virtual TemporaryRef<FilterNode> CreateFilter(FilterType aType);
+
   virtual void *GetNativeSurface(NativeSurfaceType aType);
 
   bool Init(cairo_surface_t* aSurface, const IntSize& aSize);
-
-  void SetPathObserver(CairoPathContext* aPathObserver);
+  bool Init(const IntSize& aSize, SurfaceFormat aFormat);
+  bool Init(unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat);
 
   virtual void SetTransform(const Matrix& aTransform);
 
@@ -148,6 +164,12 @@ public:
   // Pass the path you're going to be using if you have one.
   // Implicitly calls WillChange(aPath).
   void PrepareForDrawing(cairo_t* aContext, const Path* aPath = nullptr);
+
+  static cairo_surface_t *GetDummySurface();
+
+  static TemporaryRef<SourceSurface>
+      CreateSourceSurfaceForCairoSurface(cairo_surface_t* aSurface,
+                                         SurfaceFormat aFormat);
 
 private: // methods
   // Init cairo surface without doing a cairo_surface_reference() call.
@@ -157,7 +179,14 @@ private: // methods
   void DrawPattern(const Pattern& aPattern,
                    const StrokeOptions& aStrokeOptions,
                    const DrawOptions& aOptions,
-                   DrawPatternType aDrawType);
+                   DrawPatternType aDrawType,
+                   bool aPathBoundsClip = false);
+
+  void CopySurfaceInternal(cairo_surface_t* aSurface,
+                           const IntRect& aSource,
+                           const IntPoint& aDest);
+
+  Rect GetUserSpaceClip();
 
   // Call before you make any changes to the backing surface with which this
   // context is associated. Pass the path you're going to be using if you have
@@ -176,15 +205,12 @@ private: // data
   cairo_surface_t* mSurface;
   IntSize mSize;
 
+  uint8_t* mLockedBits;
+
   // The latest snapshot of this surface. This needs to be told when this
   // target is modified. We keep it alive as a cache.
   RefPtr<SourceSurfaceCairo> mSnapshot;
-
-  // It is safe to use a regular pointer here because the CairoPathContext will
-  // deregister itself on destruction. Using a RefPtr would extend the life-
-  // span of the CairoPathContext. This causes a problem when
-  // PathBuilderCairo.Finish()
-  mutable CairoPathContext* mPathObserver;
+  static cairo_surface_t *mDummySurface;
 };
 
 }

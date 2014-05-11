@@ -79,19 +79,6 @@
   font-weight: bold;
 }
 
-/* ::::: edit message bar ::::: */
-
-#editMessageBox {
-  min-width: 1px;
-  border-bottom-left-radius: 0.2em;
-  border-bottom-right-radius: 0.2em;
-}
-
-#editMessageDescription {
-  font-style: italic;
-  font-weight: bolder;
-}
-
 /* ::::: attachment view ::::: */
 
 #attachmentList {
@@ -540,12 +527,12 @@ toolbarpaletteitem .msgHeaderView-button {
 
 .headerValueUrl {
   cursor: pointer;
-  color: #0000FF;
+  color: -moz-hyperlinktext;
   text-decoration: underline;
 }
 
 .headerValueUrl:hover {
-  color: red;
+  color: -moz-activehyperlinktext;
 }
 
 .headerField {
@@ -576,14 +563,14 @@ toolbarpaletteitem .msgHeaderView-button {
 
 .messageIdDisplayButton {
   cursor: pointer;
-  color: -moz-nativehyperlinktext;
+  color: -moz-hyperlinktext;
   text-decoration: underline;
   margin: 0;
   background-color: transparent;
 }
 
 .messageIdDisplayButton:hover {
-  color: #FF0000;
+  color: -moz-activehyperlinktext;
 }
 
 .messageIdDisplayImage {

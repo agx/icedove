@@ -5,11 +5,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-
-#include "tests.h"
-
 #include "jsatom.h"
 
+#include "jsapi-tests/tests.h"
 #include "vm/StringBuffer.h"
 
 BEGIN_TEST(testStringBuffer_finishString)
@@ -17,7 +15,7 @@ BEGIN_TEST(testStringBuffer_finishString)
     JSString *str = JS_NewStringCopyZ(cx, "foopy");
     CHECK(str);
 
-    JS::Rooted<JSAtom*> atom(cx, js::AtomizeString<js::CanGC>(cx, str));
+    JS::Rooted<JSAtom*> atom(cx, js::AtomizeString(cx, str));
     CHECK(atom);
 
     js::StringBuffer buffer(cx);

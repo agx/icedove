@@ -2,33 +2,11 @@
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
 MARIONETTE_TIMEOUT = 60000;
+MARIONETTE_HEAD_JS = 'head.js';
 
-SpecialPowers.addPermission("telephony", true, document);
-
-let telephony = window.navigator.mozTelephony;
 let number = "911";
 let outgoing;
 let calls;
-
-function verifyInitialState() {
-  log("Verifying initial state.");
-  ok(telephony);
-  is(telephony.active, null);
-  ok(telephony.calls);
-  is(telephony.calls.length, 0);
-  calls = telephony.calls;
-
-  runEmulatorCmd("gsm list", function(result) {
-    log("Initial call list: " + result);
-    is(result[0], "OK");
-    if (result[0] == "OK") {
-      dial();
-    } else {
-      log("Call exists from a previous test, failing out.");
-      cleanUp();
-    }
-  });
-}
 
 function dial() {
   log("Make an emergency call.");
@@ -48,7 +26,7 @@ function dial() {
     is(outgoing, event.call);
     is(outgoing.state, "alerting");
 
-    runEmulatorCmd("gsm list", function(result) {
+    emulator.run("gsm list", function(result) {
       log("Call list is now: " + result);
       is(result[0], "outbound to  " + number + "        : ringing");
       is(result[1], "OK");
@@ -69,15 +47,15 @@ function answer() {
 
     is(outgoing, telephony.active);
 
-    runEmulatorCmd("gsm list", function(result) {
+    emulator.run("gsm list", function(result) {
       log("Call list is now: " + result);
       is(result[0], "outbound to  " + number + "        : active");
       is(result[1], "OK");
       hangUp();
     });
   };
-  runEmulatorCmd("gsm accept " + number);
-};
+  emulator.run("gsm accept " + number);
+}
 
 function hangUp() {
   log("Hanging up the emergency call.");
@@ -92,18 +70,19 @@ function hangUp() {
     is(telephony.active, null);
     is(telephony.calls.length, 0);
 
-    runEmulatorCmd("gsm list", function(result) {
+    emulator.run("gsm list", function(result) {
       log("Call list is now: " + result);
       is(result[0], "OK");
       cleanUp();
     });
   };
-  runEmulatorCmd("gsm cancel " + number);
+  emulator.run("gsm cancel " + number);
 }
 
 function cleanUp() {
-  SpecialPowers.removePermission("telephony", document);
   finish();
 }
 
-verifyInitialState();
+startTest(function() {
+  dial();
+});

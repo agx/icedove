@@ -8,6 +8,9 @@
 
 #include "nsIScriptContext.h"
 
+#include "mozilla/ContentEvents.h"
+#include "mozilla/dom/IDBOpenDBRequestBinding.h"
+#include "mozilla/dom/UnionTypes.h"
 #include "nsComponentManagerUtils.h"
 #include "nsDOMClassInfoID.h"
 #include "nsDOMJSUtils.h"
@@ -16,13 +19,16 @@
 #include "nsEventDispatcher.h"
 #include "nsJSUtils.h"
 #include "nsPIDOMWindow.h"
-#include "nsStringGlue.h"
+#include "nsString.h"
 #include "nsThreadUtils.h"
 #include "nsWrapperCacheInlines.h"
 
 #include "AsyncConnectionHelper.h"
+#include "IDBCursor.h"
 #include "IDBEvents.h"
 #include "IDBFactory.h"
+#include "IDBIndex.h"
+#include "IDBObjectStore.h"
 #include "IDBTransaction.h"
 
 namespace {
@@ -34,6 +40,8 @@ uint64_t gNextSerialNumber = 1;
 } // anonymous namespace
 
 USING_INDEXEDDB_NAMESPACE
+using mozilla::dom::OwningIDBObjectStoreOrIDBIndexOrIDBCursor;
+using namespace mozilla;
 
 IDBRequest::IDBRequest()
 : mResultVal(JSVAL_VOID),
@@ -46,6 +54,8 @@ IDBRequest::IDBRequest()
   mHaveResultOrErrorCode(false)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+
+  SetIsDOMBinding();
 }
 
 IDBRequest::~IDBRequest()
@@ -56,20 +66,78 @@ IDBRequest::~IDBRequest()
 
 // static
 already_AddRefed<IDBRequest>
-IDBRequest::Create(nsISupports* aSource,
-                   IDBWrapperCache* aOwnerCache,
+IDBRequest::Create(IDBDatabase* aDatabase,
                    IDBTransaction* aTransaction)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   nsRefPtr<IDBRequest> request(new IDBRequest());
 
-  request->mSource = aSource;
   request->mTransaction = aTransaction;
-  request->BindToOwner(aOwnerCache);
-  request->SetScriptOwner(aOwnerCache->GetScriptOwner());
-  request->CaptureCaller();
+  request->BindToOwner(aDatabase);
+  request->SetScriptOwner(aDatabase->GetScriptOwner());
+
+  if (!aDatabase->Factory()->FromIPC()) {
+    request->CaptureCaller();
+  }
+
 
   return request.forget();
+}
+
+// static
+already_AddRefed<IDBRequest>
+IDBRequest::Create(IDBObjectStore* aSourceAsObjectStore,
+                   IDBDatabase* aDatabase,
+                   IDBTransaction* aTransaction)
+{
+  nsRefPtr<IDBRequest> request = Create(aDatabase, aTransaction);
+
+  request->mSourceAsObjectStore = aSourceAsObjectStore;
+
+  return request.forget();
+}
+
+// static
+already_AddRefed<IDBRequest>
+IDBRequest::Create(IDBIndex* aSourceAsIndex,
+                   IDBDatabase* aDatabase,
+                   IDBTransaction* aTransaction)
+{
+  nsRefPtr<IDBRequest> request = Create(aDatabase, aTransaction);
+
+  request->mSourceAsIndex = aSourceAsIndex;
+
+  return request.forget();
+}
+
+#ifdef DEBUG
+void
+IDBRequest::AssertSourceIsCorrect() const
+{
+  // At most one of mSourceAs* is allowed to be non-null.  Check that by
+  // summing the double negation of each one and asserting the sum is at most
+  // 1.
+
+  MOZ_ASSERT(!!mSourceAsObjectStore + !!mSourceAsIndex + !!mSourceAsCursor <= 1);
+}
+#endif
+
+void
+IDBRequest::GetSource(Nullable<OwningIDBObjectStoreOrIDBIndexOrIDBCursor>& aSource) const
+{
+  MOZ_ASSERT(NS_IsMainThread());
+
+  AssertSourceIsCorrect();
+
+  if (mSourceAsObjectStore) {
+    aSource.SetValue().SetAsIDBObjectStore() = mSourceAsObjectStore;
+  } else if (mSourceAsIndex) {
+    aSource.SetValue().SetAsIDBIndex() = mSourceAsIndex;
+  } else if (mSourceAsCursor) {
+    aSource.SetValue().SetAsIDBCursor() = mSourceAsCursor;
+  } else {
+    aSource.SetNull();
+  }
 }
 
 void
@@ -113,7 +181,7 @@ IDBRequest::NotifyHelperCompleted(HelperBase* aHelper)
     return rv;
   }
 
-  JS::Rooted<JSObject*> global(cx, GetParentObject());
+  JS::Rooted<JSObject*> global(cx, IDBWrapperCache::GetParentObject());
   NS_ASSERTION(global, "This should never be null!");
 
   JSAutoCompartment ac(cx, global);
@@ -210,10 +278,6 @@ IDBRequest::CaptureCaller()
   const char* filename = nullptr;
   uint32_t lineNo = 0;
   if (!nsJSUtils::GetCallingLocation(cx, &filename, &lineNo)) {
-    // If our caller is in another process, we won't have a JSContext on the
-    // stack, and AutoJSContext will push the SafeJSContext. But that won't have
-    // any script on it (certainly not after the push), so GetCallingLocation
-    // will fail when it calls JS_DescribeScriptedCaller. That's fine.
     NS_WARNING("Failed to get caller.");
     return;
   }
@@ -223,59 +287,41 @@ IDBRequest::CaptureCaller()
 }
 
 void
-IDBRequest::FillScriptErrorEvent(nsScriptErrorEvent* aEvent) const
+IDBRequest::FillScriptErrorEvent(InternalScriptErrorEvent* aEvent) const
 {
   aEvent->lineNr = mLineNo;
   aEvent->fileName = mFilename.get();
 }
 
-NS_IMETHODIMP
-IDBRequest::GetReadyState(nsAString& aReadyState)
+mozilla::dom::IDBRequestReadyState
+IDBRequest::ReadyState() const
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
   if (IsPending()) {
-    aReadyState.AssignLiteral("pending");
-  }
-  else {
-    aReadyState.AssignLiteral("done");
+    return IDBRequestReadyState::Pending;
   }
 
-  return NS_OK;
+  return IDBRequestReadyState::Done;
 }
 
-NS_IMETHODIMP
-IDBRequest::GetSource(nsISupports** aSource)
+JSObject*
+IDBRequest::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
 {
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  nsCOMPtr<nsISupports> source(mSource);
-  source.forget(aSource);
-  return NS_OK;
+  return IDBRequestBinding::Wrap(aCx, aScope, this);
 }
 
-NS_IMETHODIMP
-IDBRequest::GetTransaction(nsIIDBTransaction** aTransaction)
-{
-  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-  nsCOMPtr<nsIIDBTransaction> transaction(mTransaction);
-  transaction.forget(aTransaction);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-IDBRequest::GetResult(jsval* aResult)
+JS::Value
+IDBRequest::GetResult(JSContext* aCx, mozilla::ErrorResult& aRv) const
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
   if (!mHaveResultOrErrorCode) {
     // XXX Need a real error code here.
-    return NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR;
+    aRv.Throw(NS_ERROR_DOM_INDEXEDDB_NOT_ALLOWED_ERR);
   }
 
-  *aResult = mResultVal;
-  return NS_OK;
+  return mResultVal;
 }
 
 mozilla::dom::DOMError*
@@ -291,26 +337,23 @@ IDBRequest::GetError(mozilla::ErrorResult& aRv)
   return mError;
 }
 
-NS_IMETHODIMP
-IDBRequest::GetError(nsISupports** aError)
-{
-  ErrorResult rv;
-  *aError = GetError(rv);
-  NS_IF_ADDREF(*aError);
-  return rv.ErrorCode();
-}
+NS_IMPL_CYCLE_COLLECTION_CLASS(IDBRequest)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBRequest, IDBWrapperCache)
   // Don't need NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS because
   // nsDOMEventTargetHelper does it for us.
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSource)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSourceAsObjectStore)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSourceAsIndex)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSourceAsCursor)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTransaction)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mError)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBRequest, IDBWrapperCache)
   tmp->mResultVal = JSVAL_VOID;
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSource)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSourceAsObjectStore)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSourceAsIndex)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mSourceAsCursor)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTransaction)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mError)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
@@ -322,17 +365,10 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(IDBRequest, IDBWrapperCache)
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBRequest)
-  NS_INTERFACE_MAP_ENTRY(nsIIDBRequest)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(IDBRequest)
 NS_INTERFACE_MAP_END_INHERITING(IDBWrapperCache)
 
 NS_IMPL_ADDREF_INHERITED(IDBRequest, IDBWrapperCache)
 NS_IMPL_RELEASE_INHERITED(IDBRequest, IDBWrapperCache)
-
-DOMCI_DATA(IDBRequest, IDBRequest)
-
-NS_IMPL_EVENT_HANDLER(IDBRequest, success)
-NS_IMPL_EVENT_HANDLER(IDBRequest, error)
 
 nsresult
 IDBRequest::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
@@ -342,6 +378,13 @@ IDBRequest::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
   aVisitor.mCanHandle = true;
   aVisitor.mParentTarget = mTransaction;
   return NS_OK;
+}
+
+IDBOpenDBRequest::IDBOpenDBRequest()
+{
+  NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+
+  SetIsDOMBinding();
 }
 
 IDBOpenDBRequest::~IDBOpenDBRequest()
@@ -362,8 +405,11 @@ IDBOpenDBRequest::Create(IDBFactory* aFactory,
 
   request->BindToOwner(aOwner);
   request->SetScriptOwner(aScriptOwner);
-  request->CaptureCaller();
   request->mFactory = aFactory;
+
+  if (!aFactory->FromIPC()) {
+    request->CaptureCaller();
+  }
 
   return request.forget();
 }
@@ -379,6 +425,8 @@ IDBOpenDBRequest::SetTransaction(IDBTransaction* aTransaction)
   mTransaction = aTransaction;
 }
 
+NS_IMPL_CYCLE_COLLECTION_CLASS(IDBOpenDBRequest)
+
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBOpenDBRequest,
                                                   IDBRequest)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFactory)
@@ -390,20 +438,19 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(IDBOpenDBRequest,
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(IDBOpenDBRequest)
-  NS_INTERFACE_MAP_ENTRY(nsIIDBOpenDBRequest)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(IDBOpenDBRequest)
 NS_INTERFACE_MAP_END_INHERITING(IDBRequest)
 
 NS_IMPL_ADDREF_INHERITED(IDBOpenDBRequest, IDBRequest)
 NS_IMPL_RELEASE_INHERITED(IDBOpenDBRequest, IDBRequest)
 
-DOMCI_DATA(IDBOpenDBRequest, IDBOpenDBRequest)
-
-NS_IMPL_EVENT_HANDLER(IDBOpenDBRequest, blocked)
-NS_IMPL_EVENT_HANDLER(IDBOpenDBRequest, upgradeneeded)
-
 nsresult
 IDBOpenDBRequest::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
 {
   return IndexedDatabaseManager::FireWindowOnError(GetOwner(), aVisitor);
+}
+
+JSObject*
+IDBOpenDBRequest::WrapObject(JSContext* aCx, JS::Handle<JSObject*> aScope)
+{
+  return IDBOpenDBRequestBinding::Wrap(aCx, aScope, this);
 }

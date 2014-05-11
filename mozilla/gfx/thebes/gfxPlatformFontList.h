@@ -16,6 +16,7 @@
 
 #include "nsIMemoryReporter.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/MemoryReporting.h"
 
 class CharMapHashKey : public PLDHashEntryHdr
 {
@@ -140,7 +141,7 @@ public:
 
     void AddPostscriptName(gfxFontEntry *aFontEntry, nsAString& aPostscriptName);
 
-    bool NeedFullnamePostscriptNames() { return mNeedFullnamePostscriptNames; }
+    bool NeedFullnamePostscriptNames() { return mExtraNames != nullptr; }
 
     // pure virtual functions, to be provided by concrete subclasses
 
@@ -161,10 +162,10 @@ public:
     // (platforms may override, eg Mac)
     virtual bool GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName);
 
-    virtual void SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                     FontListSizes*    aSizes) const;
-    virtual void SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf,
-                                     FontListSizes*    aSizes) const;
+    virtual void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontListSizes* aSizes) const;
+    virtual void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
+                                        FontListSizes* aSizes) const;
 
     // search for existing cmap that matches the input
     // return the input if no match is found
@@ -177,12 +178,12 @@ public:
     void RemoveCmap(const gfxCharacterMap *aCharMap);
 
 protected:
-    class MemoryReporter MOZ_FINAL
-        : public nsIMemoryMultiReporter
+    class MemoryReporter MOZ_FINAL : public mozilla::MemoryMultiReporter
     {
     public:
-        NS_DECL_ISUPPORTS
-        NS_DECL_NSIMEMORYMULTIREPORTER
+        MemoryReporter();
+        NS_IMETHOD CollectReports(nsIMemoryReporterCallback *aCb,
+                                  nsISupports *aClosure);
     };
 
     gfxPlatformFontList(bool aNeedFullnamePostscriptNames = true);
@@ -252,7 +253,7 @@ protected:
     static size_t
     SizeOfFamilyNameEntryExcludingThis(const nsAString&               aKey,
                                        const nsRefPtr<gfxFontFamily>& aFamily,
-                                       nsMallocSizeOfFun              aMallocSizeOf,
+                                       mozilla::MallocSizeOf          aMallocSizeOf,
                                        void*                          aUserArg);
 
     // canonical family name ==> family entry (unique, one name per family entry)
@@ -268,14 +269,14 @@ protected:
     // flag set after fullname and Postcript name lists are populated
     bool mFaceNamesInitialized;
 
-    // whether these are needed for a given platform
-    bool mNeedFullnamePostscriptNames;
-
-    // fullname ==> font entry (unique, one name per font entry)
-    nsRefPtrHashtable<nsStringHashKey, gfxFontEntry> mFullnames;
-
-    // Postscript name ==> font entry (unique, one name per font entry)
-    nsRefPtrHashtable<nsStringHashKey, gfxFontEntry> mPostscriptNames;
+    struct ExtraNames {
+      ExtraNames() : mFullnames(100), mPostscriptNames(100) {}
+      // fullname ==> font entry (unique, one name per font entry)
+      nsRefPtrHashtable<nsStringHashKey, gfxFontEntry> mFullnames;
+      // Postscript name ==> font entry (unique, one name per font entry)
+      nsRefPtrHashtable<nsStringHashKey, gfxFontEntry> mPostscriptNames;
+    };
+    nsAutoPtr<ExtraNames> mExtraNames;
 
     // cached pref font lists
     // maps list of family names ==> array of family entries, one per lang group

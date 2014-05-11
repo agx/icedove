@@ -843,14 +843,13 @@ FileSystemDataSource::EndUpdateBatch()
 nsresult
 FileSystemDataSource::GetVolumeList(nsISimpleEnumerator** aResult)
 {
-    nsresult rv;
     nsCOMArray<nsIRDFResource> volumes;
     nsCOMPtr<nsIRDFResource> vol;
 
 #ifdef XP_WIN
 
     int32_t         driveType;
-    PRUnichar       drive[32];
+    wchar_t         drive[32];
     int32_t         volNum;
 
     for (volNum = 0; volNum < 26; volNum++)
@@ -862,11 +861,11 @@ FileSystemDataSource::GetVolumeList(nsISimpleEnumerator** aResult)
         {
           nsAutoCString url;
           url.AppendPrintf("file:///%c|/", volNum + 'A');
-          rv = mRDFService->GetResource(url, getter_AddRefs(vol));
+          nsresult rv = mRDFService->GetResource(url, getter_AddRefs(vol));
           if (NS_FAILED(rv))
             return rv;
 
-                volumes.AppendObject(vol);
+          volumes.AppendObject(vol);
         }
     }
 #endif
@@ -880,7 +879,7 @@ FileSystemDataSource::GetVolumeList(nsISimpleEnumerator** aResult)
     ULONG ulDriveNo = 0;
     ULONG ulDriveMap = 0;
 
-    rv = DosQueryCurrentDisk(&ulDriveNo, &ulDriveMap);
+    nsresult rv = DosQueryCurrentDisk(&ulDriveNo, &ulDriveMap);
     if (NS_FAILED(rv))
         return rv;
 
@@ -1109,11 +1108,7 @@ FileSystemDataSource::GetLastMod(nsIRDFResource *source, nsIRDFDate **aResult)
         return(rv);
 
     // convert from milliseconds to seconds
-    PRTime      temp64, thousand;
-    LL_I2L(thousand, PR_MSEC_PER_SEC);
-    temp64 = lastModDate * thousand;
-
-    mRDFService->GetDateLiteral(temp64, aResult);
+    mRDFService->GetDateLiteral(lastModDate * PR_MSEC_PER_SEC, aResult);
 
     return(NS_OK);
 }

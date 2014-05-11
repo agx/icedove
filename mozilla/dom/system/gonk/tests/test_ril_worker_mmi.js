@@ -45,7 +45,8 @@ function testSendMMI(mmi, error) {
 
   do_print("worker.postMessage " + worker.postMessage);
 
-  worker.RIL.sendMMI({mmi: mmi});
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
+  worker.RIL.sendMMI({rilMessageType: "sendMMI", mmi: mmi});
 
   let postedMessage = workerhelper.postedMessage;
 
@@ -69,10 +70,40 @@ add_test(function test_parseMMI_undefined() {
   run_next_test();
 });
 
-add_test(function test_parseMMI_invalid() {
-  let mmi = parseMMI("**");
+add_test(function test_parseMMI_one_digit_short_code() {
+  let mmi = parseMMI("1");
+
+  do_check_eq(mmi.fullMMI, "1");
+  do_check_eq(mmi.procedure, undefined);
+  do_check_eq(mmi.serviceCode, undefined);
+  do_check_eq(mmi.sia, undefined);
+  do_check_eq(mmi.sib, undefined);
+  do_check_eq(mmi.sic, undefined);
+  do_check_eq(mmi.pwd, undefined);
+  do_check_eq(mmi.dialNumber, undefined);
+
+  run_next_test();
+});
+
+add_test(function test_parseMMI_invalid_short_code() {
+  let mmi = parseMMI("11");
 
   do_check_null(mmi);
+
+  run_next_test();
+});
+
+add_test(function test_parseMMI_short_code() {
+  let mmi = parseMMI("21");
+
+  do_check_eq(mmi.fullMMI, "21");
+  do_check_eq(mmi.procedure, undefined);
+  do_check_eq(mmi.serviceCode, undefined);
+  do_check_eq(mmi.sia, undefined);
+  do_check_eq(mmi.sib, undefined);
+  do_check_eq(mmi.sic, undefined);
+  do_check_eq(mmi.pwd, undefined);
+  do_check_eq(mmi.dialNumber, undefined);
 
   run_next_test();
 });
@@ -81,6 +112,21 @@ add_test(function test_parseMMI_dial_string() {
   let mmi = parseMMI("12345");
 
   do_check_null(mmi);
+
+  run_next_test();
+});
+
+add_test(function test_parseMMI_USSD_without_asterisk_prefix() {
+  let mmi = parseMMI("123#");
+
+  do_check_eq(mmi.fullMMI, "123#");
+  do_check_eq(mmi.procedure, undefined);
+  do_check_eq(mmi.serviceCode, undefined);
+  do_check_eq(mmi.sia, undefined);
+  do_check_eq(mmi.sib, undefined);
+  do_check_eq(mmi.sic, undefined);
+  do_check_eq(mmi.pwd, undefined);
+  do_check_eq(mmi.dialNumber, undefined);
 
   run_next_test();
 });
@@ -305,25 +351,51 @@ add_test(function test_parseMMI_erasure() {
  */
 
 add_test(function test_sendMMI_empty() {
-  testSendMMI("", "NO_VALID_MMI_STRING");
+  testSendMMI("", MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_undefined() {
-  testSendMMI({}, "NO_VALID_MMI_STRING");
+  testSendMMI({}, MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_invalid() {
-  testSendMMI("**", "NO_VALID_MMI_STRING");
+  testSendMMI("11", MMI_ERROR_KS_ERROR);
+
+  run_next_test();
+});
+
+add_test(function test_sendMMI_short_code() {
+  let workerhelper = getWorker();
+  let worker = workerhelper.worker;
+
+  let ussdOptions;
+
+  worker.RIL.sendUSSD = function fakeSendUSSD(options){
+    ussdOptions = options;
+    worker.RIL[REQUEST_SEND_USSD](0, {
+      rilRequestError: ERROR_SUCCESS
+    });
+
+  };
+
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
+  worker.RIL.sendMMI({mmi: "**"});
+
+  let postedMessage = workerhelper.postedMessage;
+  do_check_eq(ussdOptions.ussd, "**");
+  do_check_eq (postedMessage.errorMsg, GECKO_ERROR_SUCCESS);
+  do_check_true(postedMessage.success);
+  do_check_true(worker.RIL._ussdSession);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_dial_string() {
-  testSendMMI("123", "NO_VALID_MMI_STRING");
+  testSendMMI("123", MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
@@ -338,6 +410,7 @@ function setCallForwardSuccess(mmi) {
     });
   };
 
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
   worker.RIL.sendMMI({mmi: mmi});
 
   let postedMessage = workerhelper.postedMessage;
@@ -362,7 +435,7 @@ add_test(function test_sendMMI_call_forwarding_interrogation() {
   let workerhelper = getWorker();
   let worker = workerhelper.worker;
 
-  worker.Buf.readUint32 = function fakeReadUint32() {
+  worker.Buf.readInt32 = function fakeReadUint32() {
     return worker.Buf.int32Array.pop();
   };
 
@@ -384,6 +457,7 @@ add_test(function test_sendMMI_call_forwarding_interrogation() {
     });
   };
 
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
   worker.RIL.sendMMI({mmi: "*#21#"});
 
   let postedMessage = workerhelper.postedMessage;
@@ -403,7 +477,7 @@ add_test(function test_sendMMI_call_forwarding_interrogation_no_rules() {
   let workerhelper = getWorker();
   let worker = workerhelper.worker;
 
-  worker.Buf.readUint32 = function fakeReadUint32() {
+  worker.Buf.readInt32 = function fakeReadUint32() {
     return 0;
   };
 
@@ -413,12 +487,12 @@ add_test(function test_sendMMI_call_forwarding_interrogation_no_rules() {
     });
   };
 
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
   worker.RIL.sendMMI({mmi: "*#21#"});
 
   let postedMessage = workerhelper.postedMessage;
 
-  do_check_eq(postedMessage.errorMsg,
-              "Invalid rule length while querying call forwarding status.");
+  do_check_eq(postedMessage.errorMsg, GECKO_ERROR_GENERIC_FAILURE);
   do_check_false(postedMessage.success);
 
   run_next_test();
@@ -475,8 +549,9 @@ add_test(function test_sendMMI_change_PIN() {
     worker.RIL[REQUEST_ENTER_SIM_PIN](0, {
       rilRequestError: ERROR_SUCCESS
     });
-  }
+  };
 
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
   worker.RIL.sendMMI({mmi: "**04*1234*4567*4567#"});
 
   let postedMessage = workerhelper.postedMessage;
@@ -488,25 +563,25 @@ add_test(function test_sendMMI_change_PIN() {
 });
 
 add_test(function test_sendMMI_change_PIN_no_new_PIN() {
-  testSendMMI("**04*1234**4567#", "MISSING_SUPPLEMENTARY_INFORMATION");
+  testSendMMI("**04*1234**4567#", MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_change_PIN_no_old_PIN() {
-  testSendMMI("**04**1234*4567#", "MISSING_SUPPLEMENTARY_INFORMATION");
+  testSendMMI("**04**1234*4567#", MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_change_PIN_wrong_procedure() {
-  testSendMMI("*04*1234*4567*4567#", "WRONG_MMI_PROCEDURE");
+  testSendMMI("*04*1234*4567*4567#", MMI_ERROR_KS_INVALID_ACTION);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_change_PIN_new_PIN_mismatch() {
-  testSendMMI("**04*4567*1234*4567#", "NEW_PIN_MISMATCH");
+  testSendMMI("**04*4567*1234*4567#", MMI_ERROR_KS_MISMATCH_PIN);
 
   run_next_test();
 });
@@ -519,8 +594,9 @@ add_test(function test_sendMMI_change_PIN2() {
     worker.RIL[REQUEST_ENTER_SIM_PIN2](0, {
       rilRequestError: ERROR_SUCCESS
     });
-  }
+  };
 
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
   worker.RIL.sendMMI({mmi: "**042*1234*4567*4567#"});
 
   let postedMessage = workerhelper.postedMessage;
@@ -532,25 +608,25 @@ add_test(function test_sendMMI_change_PIN2() {
 });
 
 add_test(function test_sendMMI_change_PIN2_no_new_PIN2() {
-  testSendMMI("**042*1234**4567#", "MISSING_SUPPLEMENTARY_INFORMATION");
+  testSendMMI("**042*1234**4567#", MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_change_PIN2_no_old_PIN2() {
-  testSendMMI("**042**1234*4567#", "MISSING_SUPPLEMENTARY_INFORMATION");
+  testSendMMI("**042**1234*4567#", MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_change_PIN2_wrong_procedure() {
-  testSendMMI("*042*1234*4567*4567#", "WRONG_MMI_PROCEDURE");
+  testSendMMI("*042*1234*4567*4567#", MMI_ERROR_KS_INVALID_ACTION);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_change_PIN2_new_PIN2_mismatch() {
-  testSendMMI("**042*4567*1234*4567#", "NEW_PIN_MISMATCH");
+  testSendMMI("**042*4567*1234*4567#", MMI_ERROR_KS_MISMATCH_PIN);
 
   run_next_test();
 });
@@ -563,8 +639,9 @@ add_test(function test_sendMMI_unblock_PIN() {
     worker.RIL[REQUEST_ENTER_SIM_PUK](0, {
       rilRequestError: ERROR_SUCCESS
     });
-  }
+  };
 
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
   worker.RIL.sendMMI({mmi: "**05*1234*4567*4567#"});
 
   let postedMessage = workerhelper.postedMessage;
@@ -576,25 +653,25 @@ add_test(function test_sendMMI_unblock_PIN() {
 });
 
 add_test(function test_sendMMI_unblock_PIN_no_new_PIN() {
-  testSendMMI("**05*1234**4567#", "MISSING_SUPPLEMENTARY_INFORMATION");
+  testSendMMI("**05*1234**4567#", MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_unblock_PIN_no_PUK() {
-  testSendMMI("**05**1234*4567#", "MISSING_SUPPLEMENTARY_INFORMATION");
+  testSendMMI("**05**1234*4567#", MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_unblock_PIN_wrong_procedure() {
-  testSendMMI("*05*1234*4567*4567#", "WRONG_MMI_PROCEDURE");
+  testSendMMI("*05*1234*4567*4567#", MMI_ERROR_KS_INVALID_ACTION);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_unblock_PIN_new_PIN_mismatch() {
-  testSendMMI("**05*4567*1234*4567#", "NEW_PIN_MISMATCH");
+  testSendMMI("**05*4567*1234*4567#", MMI_ERROR_KS_MISMATCH_PIN);
 
   run_next_test();
 });
@@ -607,8 +684,9 @@ add_test(function test_sendMMI_unblock_PIN2() {
     worker.RIL[REQUEST_ENTER_SIM_PUK2](0, {
       rilRequestError: ERROR_SUCCESS
     });
-  }
+  };
 
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
   worker.RIL.sendMMI({mmi: "**052*1234*4567*4567#"});
 
   let postedMessage = workerhelper.postedMessage;
@@ -620,25 +698,25 @@ add_test(function test_sendMMI_unblock_PIN2() {
 });
 
 add_test(function test_sendMMI_unblock_PIN2_no_new_PIN2() {
-  testSendMMI("**052*1234**4567#", "MISSING_SUPPLEMENTARY_INFORMATION");
+  testSendMMI("**052*1234**4567#", MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_unblock_PIN2_no_PUK2() {
-  testSendMMI("**052**1234*4567#", "MISSING_SUPPLEMENTARY_INFORMATION");
+  testSendMMI("**052**1234*4567#", MMI_ERROR_KS_ERROR);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_unblock_PIN2_wrong_procedure() {
-  testSendMMI("*052*1234*4567*4567#", "WRONG_MMI_PROCEDURE");
+  testSendMMI("*052*1234*4567*4567#", MMI_ERROR_KS_INVALID_ACTION);
 
   run_next_test();
 });
 
 add_test(function test_sendMMI_unblock_PIN2_new_PIN_mismatch() {
-  testSendMMI("**052*4567*1234*4567#", "NEW_PIN_MISMATCH");
+  testSendMMI("**052*4567*1234*4567#", MMI_ERROR_KS_MISMATCH_PIN);
 
   run_next_test();
 });
@@ -653,13 +731,13 @@ add_test(function test_sendMMI_get_IMEI() {
     worker.RIL[REQUEST_SEND_USSD](0, {
       rilRequestError: ERROR_SUCCESS,
     });
-  }
+  };
 
   worker.RIL.sendMMI({mmi: "*#06#"});
 
   let postedMessage = workerhelper.postedMessage;
 
-  do_check_true(mmiOptions.mmi);
+  do_check_neq(mmiOptions.mmi, null);
   do_check_eq (postedMessage.errorMsg, GECKO_ERROR_SUCCESS);
   do_check_true(postedMessage.success);
 
@@ -676,27 +754,105 @@ add_test(function test_sendMMI_get_IMEI_error() {
     worker.RIL[REQUEST_SEND_USSD](0, {
       rilRequestError: ERROR_RADIO_NOT_AVAILABLE,
     });
-  }
+  };
 
   worker.RIL.sendMMI({mmi: "*#06#"});
 
   let postedMessage = workerhelper.postedMessage;
 
-  do_check_true(mmiOptions.mmi);
+  do_check_neq(mmiOptions.mmi, null);
   do_check_eq (postedMessage.errorMsg, GECKO_ERROR_RADIO_NOT_AVAILABLE);
   do_check_false(postedMessage.success);
 
   run_next_test();
 });
 
-add_test(function test_sendMMI_call_barring() {
-  testSendMMI("*33#", "CALL_BARRING_NOT_SUPPORTED_VIA_MMI");
+add_test(function test_sendMMI_call_barring_BAIC_interrogation_voice() {
+  let workerhelper = getWorker();
+  let worker = workerhelper.worker;
+
+  worker.Buf.readInt32List = function fakeReadUint32List() {
+    return [1];
+  };
+
+  worker.RIL.queryICCFacilityLock =
+    function fakeQueryICCFacilityLock(options){
+      worker.RIL[REQUEST_QUERY_FACILITY_LOCK](1, {
+        rilMessageType: "sendMMI",
+        rilRequestError: ERROR_SUCCESS
+      });
+  };
+
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
+  worker.RIL.sendMMI({mmi: "*#33#"});
+
+  let postedMessage = workerhelper.postedMessage;
+
+  do_check_true(postedMessage.success);
+  do_check_true(postedMessage.enabled);
+  do_check_eq(postedMessage.statusMessage,  MMI_SM_KS_SERVICE_ENABLED_FOR);
+  do_check_true(Array.isArray(postedMessage.additionalInformation));
+  do_check_eq(postedMessage.additionalInformation[0], "serviceClassVoice");
 
   run_next_test();
 });
 
-add_test(function test_sendMMI_call_waiting() {
-  testSendMMI("*43#", "CALL_WAITING_NOT_SUPPORTED_VIA_MMI");
+add_test(function test_sendMMI_call_barring_BAIC_activation() {
+  let workerhelper = getWorker();
+  let worker = workerhelper.worker;
+  let mmiOptions;
+
+  worker.RIL.setICCFacilityLock =
+    function fakeSetICCFacilityLock(options){
+      mmiOptions = options;
+      worker.RIL[REQUEST_SET_FACILITY_LOCK](0, {
+        rilMessageType: "sendMMI",
+        procedure: MMI_PROCEDURE_ACTIVATION,
+        rilRequestError: ERROR_SUCCESS
+      });
+  };
+
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
+  worker.RIL.sendMMI({mmi: "*33#"});
+
+  let postedMessage = workerhelper.postedMessage;
+
+  do_check_eq(mmiOptions.procedure, MMI_PROCEDURE_ACTIVATION);
+  do_check_true(postedMessage.success);
+  do_check_eq(postedMessage.statusMessage,  MMI_SM_KS_SERVICE_ENABLED);
+
+  run_next_test();
+});
+
+add_test(function test_sendMMI_call_barring_BAIC_deactivation() {
+  let workerhelper = getWorker();
+  let worker = workerhelper.worker;
+  let mmiOptions;
+
+  worker.RIL.setICCFacilityLock =
+    function fakeSetICCFacilityLock(options){
+      mmiOptions = options;
+      worker.RIL[REQUEST_SET_FACILITY_LOCK](0, {
+        rilMessageType: "sendMMI",
+        procedure: MMI_PROCEDURE_DEACTIVATION,
+        rilRequestError: ERROR_SUCCESS
+      });
+  };
+
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
+  worker.RIL.sendMMI({mmi: "#33#"});
+
+  let postedMessage = workerhelper.postedMessage;
+
+  do_check_eq(mmiOptions.procedure, MMI_PROCEDURE_DEACTIVATION);
+  do_check_true(postedMessage.success);
+  do_check_eq(postedMessage.statusMessage,  MMI_SM_KS_SERVICE_DISABLED);
+
+  run_next_test();
+});
+
+add_test(function test_sendMMI_call_barring_BAIC_procedure_not_supported() {
+  testSendMMI("**33*0000#", MMI_ERROR_KS_NOT_SUPPORTED);
 
   run_next_test();
 });
@@ -711,8 +867,9 @@ add_test(function test_sendMMI_USSD() {
     worker.RIL[REQUEST_SEND_USSD](0, {
       rilRequestError: ERROR_SUCCESS
     });
-  }
+  };
 
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
   worker.RIL.sendMMI({mmi: "*123#"});
 
   let postedMessage = workerhelper.postedMessage;
@@ -735,8 +892,9 @@ add_test(function test_sendMMI_USSD_error() {
     worker.RIL[REQUEST_SEND_USSD](0, {
       rilRequestError: ERROR_GENERIC_FAILURE
     });
-  }
+  };
 
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
   worker.RIL.sendMMI({mmi: "*123#"});
 
   let postedMessage = workerhelper.postedMessage;
@@ -746,5 +904,79 @@ add_test(function test_sendMMI_USSD_error() {
   do_check_false(postedMessage.success);
   do_check_false(worker.RIL._ussdSession);
 
+  run_next_test();
+});
+
+function setCallWaitingSuccess(mmi) {
+  let workerhelper = getWorker();
+  let worker = workerhelper.worker;
+
+  worker.RIL.setCallWaiting = function fakeSetCallWaiting(options) {
+    worker.RIL[REQUEST_SET_CALL_WAITING](0, {
+      rilRequestError: ERROR_SUCCESS
+    });
+  };
+
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
+  worker.RIL.sendMMI({mmi: mmi});
+
+  let postedMessage = workerhelper.postedMessage;
+
+  do_check_eq(postedMessage.errorMsg, GECKO_ERROR_SUCCESS);
+  do_check_true(postedMessage.success);
+}
+
+add_test(function test_sendMMI_call_waiting_activation() {
+  setCallWaitingSuccess("*43*10#");
+
+  run_next_test();
+});
+
+add_test(function test_sendMMI_call_waiting_deactivation() {
+  setCallWaitingSuccess("#43#");
+
+  run_next_test();
+});
+
+add_test(function test_sendMMI_call_waiting_registration() {
+  testSendMMI("**43#", MMI_ERROR_KS_NOT_SUPPORTED);
+
+  run_next_test();
+});
+
+add_test(function test_sendMMI_call_waiting_erasure() {
+  testSendMMI("##43#", MMI_ERROR_KS_NOT_SUPPORTED);
+
+  run_next_test();
+});
+
+add_test(function test_sendMMI_call_waiting_interrogation() {
+  let workerhelper = getWorker();
+  let worker = workerhelper.worker;
+
+  worker.Buf.readInt32 = function fakeReadUint32() {
+    return worker.Buf.int32Array.pop();
+  };
+
+  worker.RIL.queryCallWaiting = function fakeQueryCallWaiting(options) {
+    worker.Buf.int32Array = [
+      7,   // serviceClass
+      1,   // enabled
+      2    // length
+    ];
+    worker.RIL[REQUEST_QUERY_CALL_WAITING](1, {
+      rilRequestError: ERROR_SUCCESS
+    });
+  };
+
+  worker.RIL.radioState = GECKO_RADIOSTATE_READY;
+  worker.RIL.sendMMI({mmi: "*#43#"});
+
+  let postedMessage = workerhelper.postedMessage;
+
+  do_check_eq(postedMessage.errorMsg, GECKO_ERROR_SUCCESS);
+  do_check_true(postedMessage.success);
+  do_check_eq(postedMessage.length, 2);
+  do_check_true(postedMessage.enabled);
   run_next_test();
 });

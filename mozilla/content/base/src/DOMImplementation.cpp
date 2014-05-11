@@ -4,10 +4,12 @@
 
 #include "mozilla/dom/DOMImplementation.h"
 
+#include "mozilla/ContentEvents.h"
 #include "mozilla/dom/DOMImplementationBinding.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentUtils.h"
 #include "nsDOMClassInfoID.h"
+#include "nsIDOMDocument.h"
 #include "DocumentType.h"
 #include "nsTextNode.h"
 

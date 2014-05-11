@@ -49,6 +49,8 @@ const kReferenceDpi = 240; // standard "pixel" size used in some preferences
 
 const kStateActive = 0x00000001; // :active pseudoclass for elements
 
+const kZoomToElementMargin = 16; // in px
+
 /*
  * getBoundingContentRect
  *
@@ -121,8 +123,6 @@ let Content = {
   },
 
   init: function init() {
-    this._isZoomedToElement = false;
-
     // Asyncronous messages sent from the browser
     addMessageListener("Browser:Blur", this);
     addMessageListener("Browser:SaveAs", this);
@@ -130,6 +130,8 @@ let Content = {
     addMessageListener("Browser:SetCharset", this);
     addMessageListener("Browser:CanUnload", this);
     addMessageListener("Browser:PanBegin", this);
+    addMessageListener("Gesture:SingleTap", this);
+    addMessageListener("Gesture:DoubleTap", this);
 
     addEventListener("touchstart", this, false);
     addEventListener("click", this, true);
@@ -140,8 +142,8 @@ let Content = {
     addEventListener("MozApplicationManifest", this, false);
     addEventListener("DOMContentLoaded", this, false);
     addEventListener("DOMAutoComplete", this, false);
+    addEventListener("DOMFormHasPassword", this, false);
     addEventListener("blur", this, false);
-    addEventListener("pagehide", this, false);
     // Attach a listener to watch for "click" events bubbling up from error
     // pages and other similar page. This lets us fix bugs like 401575 which
     // require error page UI to do privileged things, without letting error
@@ -168,25 +170,32 @@ let Content = {
         break;
       }
 
-      case "keydown":
-        if (aEvent.keyCode == aEvent.DOM_VK_ESCAPE)
-          this.formAssistant.close();
-        break;
-
       case "keyup":
         // If after a key is pressed we still have no input, then close
-        // the autocomplete.  Perhaps the user used backspace or delete.
-        if (!aEvent.target.value)
+        // the autocomplete. Perhaps the user used backspace or delete.
+        // Allow down arrow to trigger autofill popup on empty input.
+        if ((!aEvent.target.value && aEvent.keyCode != aEvent.DOM_VK_DOWN)
+          || aEvent.keyCode == aEvent.DOM_VK_ESCAPE)
           this.formAssistant.close();
         else
-          this.formAssistant.open(aEvent.target);
+          this.formAssistant.open(aEvent.target, aEvent);
         break;
 
       case "click":
+        // Workaround for bug 925457: we sometimes don't recognize the
+        // correct tap target or are unable to identify if it's editable.
+        // Instead always save tap co-ordinates for the keyboard to look for
+        // when it is up.
+        SelectionHandler.onClickCoords(aEvent.clientX, aEvent.clientY);
+
         if (aEvent.eventPhase == aEvent.BUBBLING_PHASE)
           this._onClickBubble(aEvent);
         else
           this._onClickCapture(aEvent);
+        break;
+
+      case "DOMFormHasPassword":
+        LoginManagerContent.onFormPassword(aEvent);
         break;
 
       case "DOMContentLoaded":
@@ -197,11 +206,6 @@ let Content = {
       case "DOMAutoComplete":
       case "blur":
         LoginManagerContent.onUsernameInput(aEvent);
-        break;
-
-      case "pagehide":
-        if (aEvent.target == content.document)
-          this._resetFontSize();          
         break;
 
       case "touchstart":
@@ -215,7 +219,6 @@ let Content = {
     let json = aMessage.json;
     let x = json.x;
     let y = json.y;
-    let modifiers = json.modifiers;
 
     switch (aMessage.name) {
       case "Browser:Blur":
@@ -250,6 +253,14 @@ let Content = {
 
       case "Browser:PanBegin":
         this._cancelTapHighlight();
+        break;
+
+      case "Gesture:SingleTap":
+        this._onSingleTap(json.x, json.y, json.modifiers);
+        break;
+
+      case "Gesture:DoubleTap":
+        this._onDoubleTap(json.x, json.y);
         break;
     }
   },
@@ -291,13 +302,15 @@ let Content = {
     this.formAssistant.focusSync = false;
 
     // A tap on a form input triggers touch input caret selection
-    if (Util.isTextInput(element) &&
+    if (Util.isEditable(element) &&
         aEvent.mozInputSource == Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH) {
       let { offsetX, offsetY } = Util.translateToTopLevelWindow(element);
       sendAsyncMessage("Content:SelectionCaret", {
         xPos: aEvent.clientX + offsetX,
         yPos: aEvent.clientY + offsetY
       });
+    } else {
+      SelectionHandler.closeSelection();
     }
   },
 
@@ -353,37 +366,136 @@ let Content = {
     }
   },
 
+  _onSingleTap: function (aX, aY, aModifiers) {
+    let utils = Util.getWindowUtils(content);
+    for (let type of ["mousemove", "mousedown", "mouseup"]) {
+      utils.sendMouseEventToWindow(type, aX, aY, 0, 1, aModifiers, true, 1.0,
+          Ci.nsIDOMMouseEvent.MOZ_SOURCE_TOUCH);
+    }
+  },
+
+  _onDoubleTap: function (aX, aY) {
+    let { element } = Content.getCurrentWindowAndOffset(aX, aY);
+    while (element && !this._shouldZoomToElement(element)) {
+      element = element.parentNode;
+    }
+
+    if (!element) {
+      this._zoomOut();
+    } else {
+      this._zoomToElement(element);
+    }
+  },
+
+  /******************************************************
+   * Zoom utilities
+   */
+  _zoomOut: function() {
+    let rect = new Rect(0,0,0,0);
+    this._zoomToRect(rect);
+  },
+
+  _zoomToElement: function(aElement) {
+    let rect = getBoundingContentRect(aElement);
+    this._inflateRect(rect, kZoomToElementMargin);
+    this._zoomToRect(rect);
+  },
+
+  _inflateRect: function(aRect, aMargin) {
+    aRect.left -= aMargin;
+    aRect.top -= aMargin;
+    aRect.bottom += aMargin;
+    aRect.right += aMargin;
+  },
+
+  _zoomToRect: function (aRect) {
+    let utils = Util.getWindowUtils(content);
+    let viewId = utils.getViewId(content.document.documentElement);
+    let presShellId = {};
+    utils.getPresShellId(presShellId);
+    sendAsyncMessage("Content:ZoomToRect", {
+      rect: aRect,
+      presShellId: presShellId.value,
+      viewId: viewId,
+    });
+  },
+
+  _shouldZoomToElement: function(aElement) {
+    let win = aElement.ownerDocument.defaultView;
+    if (win.getComputedStyle(aElement, null).display == "inline") {
+      return false;
+    }
+    else if (aElement instanceof Ci.nsIDOMHTMLLIElement) {
+      return false;
+    }
+    else if (aElement instanceof Ci.nsIDOMHTMLQuoteElement) {
+      return false;
+    }
+    else {
+      return true;
+    }
+  },
+
 
   /******************************************************
    * General utilities
    */
 
-  _getContentClientRects: function getContentClientRects(aElement) {
-    let offset = ContentScroll.getScrollOffset(content);
-    offset = new Point(offset.x, offset.y);
+  /*
+   * Retrieve the total offset from the window's origin to the sub frame
+   * element including frame and scroll offsets. The resulting offset is
+   * such that:
+   * sub frame coords + offset = root frame position
+   */
+  getCurrentWindowAndOffset: function(x, y) {
+    // If the element at the given point belongs to another document (such
+    // as an iframe's subdocument), the element in the calling document's
+    // DOM (e.g. the iframe) is returned.
+    let utils = Util.getWindowUtils(content);
+    let element = utils.elementFromPoint(x, y, true, false);
+    let offset = { x:0, y:0 };
 
-    let nativeRects = aElement.getClientRects();
-    // step out of iframes and frames, offsetting scroll values
-    for (let frame = aElement.ownerDocument.defaultView; frame != content;
-         frame = frame.parent) {
-      // adjust client coordinates' origin to be top left of iframe viewport
-      let rect = frame.frameElement.getBoundingClientRect();
-      let left = frame.getComputedStyle(frame.frameElement, "").borderLeftWidth;
-      let top = frame.getComputedStyle(frame.frameElement, "").borderTopWidth;
-      offset.add(rect.left + parseInt(left), rect.top + parseInt(top));
+    while (element && (element instanceof HTMLIFrameElement ||
+                       element instanceof HTMLFrameElement)) {
+      // get the child frame position in client coordinates
+      let rect = element.getBoundingClientRect();
+
+      // calculate offsets for digging down into sub frames
+      // using elementFromPoint:
+
+      // Get the content scroll offset in the child frame
+      scrollOffset = ContentScroll.getScrollOffset(element.contentDocument.defaultView);
+      // subtract frame and scroll offset from our elementFromPoint coordinates
+      x -= rect.left + scrollOffset.x;
+      y -= rect.top + scrollOffset.y;
+
+      // calculate offsets we'll use to translate to client coords:
+
+      // add frame client offset to our total offset result
+      offset.x += rect.left;
+      offset.y += rect.top;
+
+      // get the frame's nsIDOMWindowUtils
+      utils = element.contentDocument
+                     .defaultView
+                     .QueryInterface(Ci.nsIInterfaceRequestor)
+                     .getInterface(Ci.nsIDOMWindowUtils);
+
+      // retrieve the target element in the sub frame at x, y
+      element = utils.elementFromPoint(x, y, true, false);
     }
 
-    let result = [];
-    for (let i = nativeRects.length - 1; i >= 0; i--) {
-      let r = nativeRects[i];
-      result.push({ left: r.left + offset.x,
-                    top: r.top + offset.y,
-                    width: r.width,
-                    height: r.height
-                  });
-    }
-    return result;
+    if (!element)
+      return {};
+
+    return {
+      element: element,
+      contentWindow: element.ownerDocument.defaultView,
+      offset: offset,
+      utils: utils
+    };
   },
+
 
   _maybeNotifyErrorPage: function _maybeNotifyErrorPage() {
     // Notify browser that an error page is being shown instead
@@ -391,11 +503,6 @@ let Content = {
     // updates on chrome for error pages.
     if (content.location.href !== content.document.documentURI)
       sendAsyncMessage("Browser:ErrorPage", null);
-  },
-
-  _resetFontSize: function _resetFontSize() {
-    this._isZoomedToElement = false;
-    this._setMinFontSize(0);
   },
 
   _highlightElement: null,
@@ -409,62 +516,6 @@ let Content = {
     gDOMUtils.setContentState(content.document.documentElement, kStateActive);
     this._highlightElement = null;
   },
-
-  /*
-   * _sendMouseEvent
-   *
-   * Delivers mouse events directly to the content window, bypassing
-   * the input overlay.
-   */
-  _sendMouseEvent: function _sendMouseEvent(aName, aElement, aX, aY, aButton) {
-    // Elements can be off from the aX/aY point because due to touch radius.
-    // If outside, we move the touch point to the center of the element.
-    if (!(aElement instanceof HTMLHtmlElement)) {
-      let isTouchClick = true;
-      let rects = this._getContentClientRects(aElement);
-      for (let i = 0; i < rects.length; i++) {
-        let rect = rects[i];
-        // We might be able to deal with fractional pixels, but mouse
-        // events won't. Deflate the bounds in by 1 pixel to deal with
-        // any fractional scroll offset issues.
-        let inBounds = 
-          (aX > rect.left + 1 && aX < (rect.left + rect.width - 1)) &&
-          (aY > rect.top + 1 && aY < (rect.top + rect.height - 1));
-        if (inBounds) {
-          isTouchClick = false;
-          break;
-        }
-      }
-
-      if (isTouchClick) {
-        let rect = new Rect(rects[0].left, rects[0].top,
-                            rects[0].width, rects[0].height);
-        if (rect.isEmpty())
-          return;
-
-        let point = rect.center();
-        aX = point.x;
-        aY = point.y;
-      }
-    }
-
-    let button = aButton || 0;
-    let scrollOffset = ContentScroll.getScrollOffset(content);
-    let x = aX - scrollOffset.x;
-    let y = aY - scrollOffset.y;
-
-    // setting touch source here is important so that when this gets
-    // captured by our precise input detection we can ignore it.
-    let windowUtils = Util.getWindowUtils(content);
-    windowUtils.sendMouseEventToWindow(aName, x, y, button, 1, 0, true,
-                                       1.0, Ci.nsIDOMMouseEvent.MOZ_SOURCE_MOUSE);
-  },
-
-  _setMinFontSize: function _setMinFontSize(aSize) {
-    let viewer = docShell.contentViewer.QueryInterface(Ci.nsIMarkupDocumentViewer);
-    if (viewer)
-      viewer.minFontSize = aSize;
-  }
 };
 
 Content.init();

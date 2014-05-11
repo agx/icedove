@@ -4,7 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "DateTime.h"
+#include "vm/DateTime.h"
 
 #include <time.h>
 
@@ -69,7 +69,7 @@ UTCToLocalStandardOffsetSeconds()
 #endif
 
     // Get the current time.
-    time_t currentMaybeWithDST = time(NULL);
+    time_t currentMaybeWithDST = time(nullptr);
     if (currentMaybeWithDST == time_t(-1))
         return 0;
 

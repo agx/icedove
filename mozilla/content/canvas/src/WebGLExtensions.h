@@ -11,9 +11,8 @@ namespace mozilla {
 class WebGLContext;
 
 class WebGLExtensionBase
-    : public nsISupports
+    : public nsWrapperCache
     , public WebGLContextBoundObject
-    , public nsWrapperCache
 {
 public:
     WebGLExtensionBase(WebGLContext*);
@@ -23,8 +22,8 @@ public:
         return Context();
     }
 
-    NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(WebGLExtensionBase)
+    NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(WebGLExtensionBase)
+    NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(WebGLExtensionBase)
 };
 
 #define DECL_WEBGL_EXTENSION_GOOP                                           \
@@ -110,6 +109,18 @@ public:
     DECL_WEBGL_EXTENSION_GOOP
 };
 
+class WebGLExtensionSRGB
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionSRGB(WebGLContext*);
+    virtual ~WebGLExtensionSRGB();
+
+    static bool IsSupported(const WebGLContext* context);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
 class WebGLExtensionStandardDerivatives
     : public WebGLExtensionBase
 {
@@ -168,6 +179,42 @@ public:
      for GL_MAX_DRAW_BUFFERS = 4 at least to be able to use all requested color attachements.
      See DrawBuffersWEBGL in WebGLExtensionDrawBuffers.cpp inner comments for more informations.
      */
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionVertexArray
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionVertexArray(WebGLContext*);
+    virtual ~WebGLExtensionVertexArray();
+
+    already_AddRefed<WebGLVertexArray> CreateVertexArrayOES();
+    void DeleteVertexArrayOES(WebGLVertexArray* array);
+    bool IsVertexArrayOES(WebGLVertexArray* array);
+    void BindVertexArrayOES(WebGLVertexArray* array);
+
+    static bool IsSupported(const WebGLContext* context);
+
+    DECL_WEBGL_EXTENSION_GOOP
+};
+
+class WebGLExtensionInstancedArrays
+    : public WebGLExtensionBase
+{
+public:
+    WebGLExtensionInstancedArrays(WebGLContext* context);
+    virtual ~WebGLExtensionInstancedArrays();
+
+    void DrawArraysInstancedANGLE(GLenum mode, GLint first,
+                                  GLsizei count, GLsizei primcount);
+    void DrawElementsInstancedANGLE(GLenum mode, GLsizei count,
+                                    GLenum type, WebGLintptr offset,
+                                    GLsizei primcount);
+    void VertexAttribDivisorANGLE(GLuint index, GLuint divisor);
+
+    static bool IsSupported(const WebGLContext* context);
 
     DECL_WEBGL_EXTENSION_GOOP
 };

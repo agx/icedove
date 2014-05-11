@@ -81,6 +81,17 @@ label.label {
 }
 
 /*--------------------------------------------------------------------
+ *   Event dialog statusbarpanels
+ *-------------------------------------------------------------------*/
+
+#status-privacy,
+#status-priority,
+#status-status,
+#status-freebusy {
+    overflow: hidden;
+}
+
+/*--------------------------------------------------------------------
  *   priority "low" image
  *-------------------------------------------------------------------*/
 
@@ -451,7 +462,7 @@ dialog[systemcolors] .addressingWidgetCell {
 }
 
 .selection-bar-spacer {
-    cursor: -moz-grab;
+    cursor: grab;
 }
 
 .checkbox-no-label > .checkbox-label-box {

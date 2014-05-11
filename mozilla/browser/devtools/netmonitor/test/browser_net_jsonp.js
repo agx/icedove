@@ -9,7 +9,7 @@ function test() {
   initNetMonitor(JSONP_URL).then(([aTab, aDebuggee, aMonitor]) => {
     info("Starting test... ");
 
-    let { document, L10N, SourceEditor, NetMonitorView } = aMonitor.panelWin;
+    let { document, L10N, NetMonitorView } = aMonitor.panelWin;
     let { RequestsMenu } = NetMonitorView;
 
     RequestsMenu.lazyUpdate = false;
@@ -30,8 +30,11 @@ function test() {
       EventUtils.sendMouseEvent({ type: "mousedown" },
         document.querySelectorAll("#details-pane tab")[3]);
 
-      testResponseTab();
-      teardown(aMonitor).then(finish);
+      let RESPONSE_BODY_DISPLAYED = aMonitor.panelWin.EVENTS.RESPONSE_BODY_DISPLAYED;
+      waitFor(aMonitor.panelWin, RESPONSE_BODY_DISPLAYED)
+        .then(testResponseTab)
+        .then(() => teardown(aMonitor))
+        .then(finish);
 
       function testResponseTab() {
         let tab = document.querySelectorAll("#details-pane tab")[3];
@@ -74,7 +77,7 @@ function test() {
         is(jsonScope.querySelectorAll(".variables-view-property .name")[1].getAttribute("value"),
           "__proto__", "The second json property name was incorrect.");
         is(jsonScope.querySelectorAll(".variables-view-property .value")[1].getAttribute("value"),
-          "[object Object]", "The second json property value was incorrect.");
+          "Object", "The second json property value was incorrect.");
       }
     });
 

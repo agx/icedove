@@ -16,6 +16,7 @@
         persist="width height screenX screenY"
         onload="SubscribeOnLoad()"
         onunload="SubscribeOnUnload()"
+        windowtype="mailnews:subscribe"
         ondialogaccept="return subscribeOK();"
         ondialogcancel="return subscribeCancel();">   
      
@@ -25,7 +26,6 @@
 <script type="application/javascript" src="chrome://global/content/globalOverlay.js"/>
 <script type="application/javascript" src="chrome://messenger/content/mailWindow.js"/>
 <script type="application/javascript" src="chrome://messenger/content/subscribe.js"/>
-<script type="application/javascript" src="chrome://messenger/content/widgetglue.js"/>
 
   <grid flex="1" style="width: 40em; height: 25em;">
     <columns>

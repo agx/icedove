@@ -2,6 +2,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+"use strict";
+
 /**
  * Session Storage and Restoration
  *
@@ -39,12 +41,15 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/TelemetryStopwatch.jsm");
 Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
-Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
+Cu.import("resource://gre/modules/Promise.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "_SessionFile",
-  "resource:///modules/sessionstore/_SessionFile.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "SessionFile",
+  "resource:///modules/sessionstore/SessionFile.jsm");
 
 const STATE_RUNNING_STR = "running";
+
+// 'browser.startup.page' preference value to resume the previous session.
+const BROWSER_STARTUP_RESUME_SESSION = 3;
 
 function debug(aMsg) {
   aMsg = ("SessionStartup: " + aMsg).replace(/\S{80}/g, "$&\n");
@@ -78,8 +83,9 @@ SessionStartup.prototype = {
       return;
     }
 
-    _SessionFile.read().then(
-      this._onSessionFileRead.bind(this)
+    SessionFile.read().then(
+      this._onSessionFileRead.bind(this),
+      Cu.reportError
     );
   },
 
@@ -135,7 +141,7 @@ SessionStartup.prototype = {
 
       let doResumeSessionOnce = Services.prefs.getBoolPref("browser.sessionstore.resume_session_once");
       let doResumeSession = doResumeSessionOnce ||
-            Services.prefs.getIntPref("browser.startup.page") == 3;
+            Services.prefs.getIntPref("browser.startup.page") == BROWSER_STARTUP_RESUME_SESSION;
 
       // If this is a normal restore then throw away any previous session
       if (!doResumeSessionOnce)
@@ -223,14 +229,26 @@ SessionStartup.prototype = {
   },
 
   /**
-   * Determines whether there is a pending session restore and makes sure that
-   * we're initialized before returning. If we're not yet this will read the
-   * session file synchronously.
+   * Determines whether there is a pending session restore. Should only be
+   * called after initialization has completed.
+   * @throws Error if initialization is not complete yet.
    * @returns bool
    */
   doRestore: function sss_doRestore() {
     this._ensureInitialized();
     return this._willRestore();
+  },
+
+  /**
+   * Determines whether automatic session restoration is enabled for this
+   * launch of the browser. This does not include crash restoration. In
+   * particular, if session restore is configured to restore only in case of
+   * crash, this method returns false.
+   * @returns bool
+   */
+  isAutomaticRestoreEnabled: function () {
+    return Services.prefs.getBoolPref("browser.sessionstore.resume_session_once") ||
+           Services.prefs.getIntPref("browser.startup.page") == BROWSER_STARTUP_RESUME_SESSION;
   },
 
   /**
@@ -272,20 +290,12 @@ SessionStartup.prototype = {
     return this._sessionType;
   },
 
-  // Ensure that initialization is complete.
-  // If initialization is not complete yet, fall back to a synchronous
-  // initialization and kill ongoing asynchronous initialization
+  // Ensure that initialization is complete. If initialization is not complete
+  // yet, something is attempting to use the old synchronous initialization,
+  // throw an error.
   _ensureInitialized: function sss__ensureInitialized() {
-    try {
-      if (this._initialized) {
-        // Initialization is complete, nothing else to do
-        return;
-      }
-      let contents = _SessionFile.syncRead();
-      this._onSessionFileRead(contents);
-    } catch(ex) {
-      debug("ensureInitialized: could not read session " + ex + ", " + ex.stack);
-      throw ex;
+    if (!this._initialized) {
+      throw new Error("Session Store is not initialized.");
     }
   },
 

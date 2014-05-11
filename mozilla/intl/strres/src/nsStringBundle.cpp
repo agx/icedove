@@ -6,43 +6,31 @@
 #include "nsStringBundle.h"
 #include "nsID.h"
 #include "nsString.h"
-#include "nsReadableUtils.h"
 #include "nsIStringBundle.h"
 #include "nsStringBundleService.h"
-#include "nsStringBundle.h"
 #include "nsStringBundleTextOverride.h"
-#include "nsXPCOM.h"
 #include "nsISupportsPrimitives.h"
 #include "nsIMutableArray.h"
 #include "nsArrayEnumerator.h"
 #include "nscore.h"
 #include "nsHashtable.h"
 #include "nsMemory.h"
-#include "plstr.h"
 #include "nsNetUtil.h"
-#include "nsIURL.h"
-#include "nsIComponentManager.h"
-#include "nsIMemory.h"
 #include "nsIObserverService.h"
 #include "nsCOMArray.h"
 #include "nsTextFormatter.h"
 #include "nsIErrorService.h"
 #include "nsICategoryManager.h"
 
-#include "nsPrintfCString.h"
 // for async loading
 #ifdef ASYNC_LOADING
 #include "nsIBinaryInputStream.h"
 #include "nsIStringStream.h"
 #endif
 
-#include "prenv.h"
-#include "nsCRT.h"
-
 using namespace mozilla;
 
 static NS_DEFINE_CID(kErrorServiceCID, NS_ERRORSERVICE_CID);
-static NS_DEFINE_CID(kPersistentPropertiesCID, NS_IPERSISTENTPROPERTIES_CID);
 
 nsStringBundle::~nsStringBundle()
 {
@@ -95,7 +83,8 @@ nsStringBundle::LoadProperties()
 
   NS_ASSERTION(NS_SUCCEEDED(rv) && in, "Error in OpenBlockingStream");
   NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && in, NS_ERROR_FAILURE);
-    
+
+  static NS_DEFINE_CID(kPersistentPropertiesCID, NS_IPERSISTENTPROPERTIES_CID);
   mProps = do_CreateInstance(kPersistentPropertiesCID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
   
@@ -198,8 +187,7 @@ nsStringBundle::FormatStringFromName(const PRUnichar *aName,
 }
                                      
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsStringBundle,
-                              nsIStringBundle)
+NS_IMPL_ISUPPORTS1(nsStringBundle, nsIStringBundle)
 
 /* void GetStringFromID (in long aID, out wstring aResult); */
 NS_IMETHODIMP
@@ -522,10 +510,10 @@ nsStringBundleService::nsStringBundleService() :
 
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS3(nsStringBundleService,
-                              nsIStringBundleService,
-                              nsIObserver,
-                              nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS3(nsStringBundleService,
+                   nsIStringBundleService,
+                   nsIObserver,
+                   nsISupportsWeakReference)
 
 nsStringBundleService::~nsStringBundleService()
 {
@@ -772,7 +760,7 @@ nsStringBundleService::FormatStatusMessage(nsresult aStatus,
 
   // XXX hack for mailnews who has already formatted their messages:
   if (aStatus == NS_OK && aStatusArg) {
-    *result = nsCRT::strdup(aStatusArg);
+    *result = NS_strdup(aStatusArg);
     NS_ENSURE_TRUE(*result, NS_ERROR_OUT_OF_MEMORY);
     return NS_OK;
   }

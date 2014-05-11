@@ -7,21 +7,32 @@
 TEST_DIRS += ['test']
 
 XPIDL_SOURCES += [
+    'nsIApplicationReputation.idl',
     'nsIDownload.idl',
     'nsIDownloadManager.idl',
     'nsIDownloadManagerUI.idl',
     'nsIDownloadProgressListener.idl',
 ]
 
-MODULE = 'downloads'
+XPIDL_MODULE = 'downloads'
 
-CPP_SOURCES += [
-    'SQLFunctions.cpp',
+UNIFIED_SOURCES += [
     'nsDownloadManager.cpp',
 ]
 
+# SQLFunctions.cpp cannot be built in unified mode because of Windows headers.
+SOURCES += [
+    'SQLFunctions.cpp',
+]
+
+if CONFIG['MOZ_URL_CLASSIFIER']:
+    UNIFIED_SOURCES += [
+        'ApplicationReputation.cpp',
+        'csd.pb.cc'
+    ]
+
 if CONFIG['OS_ARCH'] == 'WINNT':
-    CPP_SOURCES += [
+    UNIFIED_SOURCES += [
         'nsDownloadScanner.cpp',
     ]
 
@@ -32,3 +43,7 @@ if not CONFIG['MOZ_SUITE']:
         'nsDownloadManagerUI.js',
         'nsDownloadManagerUI.manifest',
     ]
+
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'toolkitcomps'

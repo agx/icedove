@@ -25,6 +25,7 @@
 #include "ipc/IndexedDBChild.h"
 #include "ipc/IndexedDBParent.h"
 
+using namespace mozilla;
 USING_INDEXEDDB_NAMESPACE
 using mozilla::dom::quota::QuotaManager;
 
@@ -78,7 +79,7 @@ ConvertCloneReadInfosToArrayInternal(
         return NS_ERROR_DOM_DATA_CLONE_ERR;
       }
 
-      if (!JS_SetElement(aCx, array, index, val.address())) {
+      if (!JS_SetElement(aCx, array, index, &val)) {
         NS_WARNING("Failed to set array element!");
         return NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR;
       }
@@ -119,11 +120,12 @@ HelperBase::WrapNative(JSContext* aCx,
   NS_ASSERTION(aResult.address(), "Null pointer!");
   NS_ASSERTION(mRequest, "Null request!");
 
-  JS::Rooted<JSObject*> global(aCx, mRequest->GetParentObject());
+  nsRefPtr<IDBWrapperCache> wrapper = static_cast<IDBWrapperCache*>(mRequest);
+  JS::Rooted<JSObject*> global(aCx, wrapper->GetParentObject());
   NS_ASSERTION(global, "This should never be null!");
 
   nsresult rv =
-    nsContentUtils::WrapNative(aCx, global, aNative, aResult.address());
+    nsContentUtils::WrapNative(aCx, global, aNative, aResult);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
   return NS_OK;
@@ -173,11 +175,10 @@ AsyncConnectionHelper::~AsyncConnectionHelper()
 
     if (mainThread) {
       if (database) {
-        NS_ProxyRelease(mainThread, static_cast<nsIIDBDatabase*>(database));
+        NS_ProxyRelease(mainThread, static_cast<IDBWrapperCache*>(database));
       }
       if (transaction) {
-        NS_ProxyRelease(mainThread,
-                        static_cast<nsIIDBTransaction*>(transaction));
+        NS_ProxyRelease(mainThread, static_cast<IDBWrapperCache*>(transaction));
       }
     }
   }
@@ -185,8 +186,8 @@ AsyncConnectionHelper::~AsyncConnectionHelper()
   NS_ASSERTION(!mOldProgressHandler, "Should not have anything here!");
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(AsyncConnectionHelper, nsIRunnable,
-                                                     mozIStorageProgressHandler)
+NS_IMPL_ISUPPORTS2(AsyncConnectionHelper, nsIRunnable,
+                   mozIStorageProgressHandler)
 
 NS_IMETHODIMP
 AsyncConnectionHelper::Run()
@@ -254,7 +255,7 @@ AsyncConnectionHelper::Run()
       }
 
       default:
-        MOZ_NOT_REACHED("Unknown value for ChildProcessSendResult!");
+        MOZ_CRASH("Unknown value for ChildProcessSendResult!");
     }
 
     NS_ASSERTION(gCurrentTransaction == mTransaction, "Should be unchanged!");
@@ -466,7 +467,7 @@ AsyncConnectionHelper::OnSuccess()
   nsresult rv = mRequest->DispatchEvent(event, &dummy);
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_INDEXEDDB_UNKNOWN_ERR);
 
-  nsEvent* internalEvent = event->GetInternalNSEvent();
+  WidgetEvent* internalEvent = event->GetInternalNSEvent();
   NS_ASSERTION(internalEvent, "This should never be null!");
 
   NS_ASSERTION(!mTransaction ||
@@ -509,7 +510,7 @@ AsyncConnectionHelper::OnError()
                  mTransaction->IsAborted(),
                  "How else can this be closed?!");
 
-    nsEvent* internalEvent = event->GetInternalNSEvent();
+    WidgetEvent* internalEvent = event->GetInternalNSEvent();
     NS_ASSERTION(internalEvent, "This should never be null!");
 
     if (internalEvent->mFlags.mExceptionHasBeenRisen &&

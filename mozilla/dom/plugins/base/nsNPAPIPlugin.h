@@ -10,7 +10,6 @@
 #include "npfunctions.h"
 #include "nsPluginHost.h"
 
-#include "jsapi.h"
 #include "nsCxPusher.h"
 
 #include "mozilla/PluginLibrary.h"
@@ -47,7 +46,7 @@ public:
 
   NS_DECL_ISUPPORTS
 
-  // Constructs and initializes an nsNPAPIPlugin object. A NULL file path
+  // Constructs and initializes an nsNPAPIPlugin object. A nullptr file path
   // will prevent this from calling NP_Initialize.
   static nsresult CreatePlugin(nsPluginTag *aPluginTag, nsNPAPIPlugin** aResult);
 

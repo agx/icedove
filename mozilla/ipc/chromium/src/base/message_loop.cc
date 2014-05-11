@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "mozilla/Atomics.h"
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -86,11 +87,11 @@ MessageLoop* MessageLoop::current() {
   return lazy_tls_ptr.Pointer()->Get();
 }
 
-int32_t message_loop_id_seq = 0;
+static mozilla::Atomic<int32_t> message_loop_id_seq(0);
 
 MessageLoop::MessageLoop(Type type)
     : type_(type),
-      id_(PR_ATOMIC_INCREMENT(&message_loop_id_seq)),
+      id_(++message_loop_id_seq),
       nestable_tasks_allowed_(true),
       exception_restoration_(false),
       state_(NULL),
@@ -98,6 +99,8 @@ MessageLoop::MessageLoop(Type type)
 #ifdef OS_WIN
       os_modal_loop_(false),
 #endif  // OS_WIN
+      transient_hang_timeout_(0),
+      permanent_hang_timeout_(0),
       next_sequence_num_(0) {
   DCHECK(!current()) << "should only have one message loop per thread";
   lazy_tls_ptr.Pointer()->Set(this);

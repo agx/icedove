@@ -35,6 +35,7 @@
 #include "nsIErrorService.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsJSUtils.h"
+#include "nsIXPConnect.h"
 
 using namespace mozilla::dom;
 
@@ -290,6 +291,8 @@ private:
 /**
  * txMozillaXSLTProcessor
  */
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(txMozillaXSLTProcessor)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(txMozillaXSLTProcessor)
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mEmbeddedStylesheetRoot)
@@ -1438,10 +1441,11 @@ txVariable::Convert(nsIVariant *aValue, txAExprResult** aResult)
                 JSContext* cx = nsContentUtils::GetCurrentJSContext();
                 NS_ENSURE_TRUE(cx, NS_ERROR_NOT_AVAILABLE);
 
-                JS::RootedObject jsobj(cx, holder->GetJSObject());
+                JS::Rooted<JSObject*> jsobj(cx, holder->GetJSObject());
                 NS_ENSURE_STATE(jsobj);
 
-                JS::RootedString str(cx, JS_ValueToString(cx, OBJECT_TO_JSVAL(jsobj)));
+                JS::Rooted<JS::Value> v(cx, JS::ObjectValue(*jsobj));
+                JS::Rooted<JSString*> str(cx, JS::ToString(cx, v));
                 NS_ENSURE_TRUE(str, NS_ERROR_FAILURE);
 
                 nsDependentJSString value;

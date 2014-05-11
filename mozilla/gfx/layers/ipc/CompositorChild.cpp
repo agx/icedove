@@ -5,9 +5,21 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CompositorChild.h"
-#include "CompositorParent.h"
-#include "LayerManagerOGL.h"
+#include <stddef.h>                     // for size_t
+#include "ClientLayerManager.h"         // for ClientLayerManager
+#include "base/message_loop.h"          // for MessageLoop
+#include "base/process_util.h"          // for OpenProcessHandle
+#include "base/task.h"                  // for NewRunnableMethod, etc
+#include "base/tracked.h"               // for FROM_HERE
 #include "mozilla/layers/LayerTransactionChild.h"
+#include "mozilla/layers/PLayerTransactionChild.h"
+#include "mozilla/mozalloc.h"           // for operator new, etc
+#include "nsDebug.h"                    // for NS_RUNTIMEABORT
+#include "nsIObserver.h"                // for nsIObserver
+#include "nsTArray.h"                   // for nsTArray, nsTArray_Impl
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR, etc
+#include "nsXULAppAPI.h"                // for XRE_GetIOMessageLoop, etc
+#include "FrameLayerBuilder.h"
 
 using mozilla::layers::LayerTransactionChild;
 
@@ -16,7 +28,7 @@ namespace layers {
 
 /*static*/ CompositorChild* CompositorChild::sCompositor;
 
-CompositorChild::CompositorChild(LayerManager *aLayerManager)
+CompositorChild::CompositorChild(ClientLayerManager *aLayerManager)
   : mLayerManager(aLayerManager)
 {
   MOZ_COUNT_CTOR(CompositorChild);
@@ -31,7 +43,7 @@ void
 CompositorChild::Destroy()
 {
   mLayerManager->Destroy();
-  mLayerManager = NULL;
+  mLayerManager = nullptr;
   while (size_t len = ManagedPLayerTransactionChild().Length()) {
     LayerTransactionChild* layers =
       static_cast<LayerTransactionChild*>(ManagedPLayerTransactionChild()[len - 1]);
@@ -53,8 +65,7 @@ CompositorChild::Create(Transport* aTransport, ProcessId aOtherProcess)
     NS_RUNTIMEABORT("Couldn't OpenProcessHandle() to parent process.");
     return nullptr;
   }
-  if (!child->Open(aTransport, handle, XRE_GetIOMessageLoop(),
-                AsyncChannel::Child)) {
+  if (!child->Open(aTransport, handle, XRE_GetIOMessageLoop(), ipc::ChildSide)) {
     NS_RUNTIMEABORT("Couldn't Open() Compositor channel.");
     return nullptr;
   }
@@ -71,17 +82,27 @@ CompositorChild::Get()
 }
 
 PLayerTransactionChild*
-CompositorChild::AllocPLayerTransaction(const LayersBackend& aBackendHint,
-                                        const uint64_t& aId,
-                                        TextureFactoryIdentifier*)
+CompositorChild::AllocPLayerTransactionChild(const nsTArray<LayersBackend>& aBackendHints,
+                                             const uint64_t& aId,
+                                             TextureFactoryIdentifier*,
+                                             bool*)
 {
-  return new LayerTransactionChild();
+  LayerTransactionChild* c = new LayerTransactionChild();
+  c->AddIPDLReference();
+  return c;
 }
 
 bool
-CompositorChild::DeallocPLayerTransaction(PLayerTransactionChild* actor)
+CompositorChild::DeallocPLayerTransactionChild(PLayerTransactionChild* actor)
 {
-  delete actor;
+  static_cast<LayerTransactionChild*>(actor)->ReleaseIPDLReference();
+  return true;
+}
+
+bool
+CompositorChild::RecvInvalidateAll()
+{
+  FrameLayerBuilder::InvalidateAllLayers(mLayerManager);
   return true;
 }
 
@@ -90,11 +111,17 @@ CompositorChild::ActorDestroy(ActorDestroyReason aWhy)
 {
   MOZ_ASSERT(sCompositor == this);
 
+#ifdef MOZ_B2G
+  // Due to poor lifetime management of gralloc (and possibly shmems) we will
+  // crash at some point in the future when we get destroyed due to abnormal
+  // shutdown. Its better just to crash here. On desktop though, we have a chance
+  // of recovering.
   if (aWhy == AbnormalShutdown) {
     NS_RUNTIMEABORT("ActorDestroy by IPC channel failure at CompositorChild");
   }
+#endif
 
-  sCompositor = NULL;
+  sCompositor = nullptr;
   // We don't want to release the ref to sCompositor here, during
   // cleanup, because that will cause it to be deleted while it's
   // still being used.  So defer the deletion to after it's not in

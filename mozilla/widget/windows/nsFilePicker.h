@@ -25,7 +25,6 @@
 #include "nsISimpleEnumerator.h"
 #include "nsCOMArray.h"
 #include "nsAutoPtr.h"
-#include "nsICharsetConverterManager.h"
 #include "nsBaseFilePicker.h"
 #include "nsString.h"
 #include "nsdefs.h"
@@ -95,9 +94,8 @@ protected:
 
   /* method from nsBaseFilePicker */
   virtual void InitNative(nsIWidget *aParent,
-                          const nsAString& aTitle,
-                          int16_t aMode);
-  static void GetQualifiedPath(const PRUnichar *aInPath, nsString &aOutPath);
+                          const nsAString& aTitle);
+  static void GetQualifiedPath(const wchar_t *aInPath, nsString &aOutPath);
   void GetFilterListArray(nsString& aFilterList);
   bool FilePickerWrapper(OPENFILENAMEW* ofn, PickerType aType);
   bool ShowXPFolderPicker(const nsString& aInitialDir);
@@ -118,7 +116,6 @@ protected:
   nsCOMPtr<nsILoadContext> mLoadContext;
   nsCOMPtr<nsIWidget>    mParentWidget;
   nsString               mTitle;
-  int16_t                mMode;
   nsCString              mFile;
   nsString               mFilterList;
   int16_t                mSelectedType;

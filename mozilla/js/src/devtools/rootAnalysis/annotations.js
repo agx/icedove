@@ -11,6 +11,12 @@ var ignoreIndirectCalls = {
     "__convf" : true,
     "prerrortable.c:callback_newtable" : true,
     "mozalloc_oom.cpp:void (* gAbortHandler)(size_t)" : true,
+
+    // I don't know why these are getting truncated
+    "nsTraceRefcntImpl.cpp:void (* leakyLogAddRef)(void*": true,
+    "nsTraceRefcntImpl.cpp:void (* leakyLogAddRef)(void*, int, int)": true,
+    "nsTraceRefcntImpl.cpp:void (* leakyLogRelease)(void*": true,
+    "nsTraceRefcntImpl.cpp:void (* leakyLogRelease)(void*, int, int)": true,
 };
 
 function indirectCallCannotGC(caller, name)
@@ -22,6 +28,13 @@ function indirectCallCannotGC(caller, name)
         return true;
 
     if (name == "params" && caller == "PR_ExplodeTime")
+        return true;
+
+    if (name == "op" && /GetWeakmapKeyDelegate/.test(caller))
+        return true;
+
+    var CheckCallArgs = "AsmJS.cpp:uint8 CheckCallArgs(FunctionCompiler*, js::frontend::ParseNode*, (uint8)(FunctionCompiler*,js::frontend::ParseNode*,Type)*, FunctionCompiler::Call*)";
+    if (name == "checkArg" && caller == CheckCallArgs)
         return true;
 
     // hook called during script finalization which cannot GC.
@@ -56,14 +69,17 @@ var ignoreCallees = {
     "js::Class.trace" : true,
     "js::Class.finalize" : true,
     "JSRuntime.destroyPrincipals" : true,
-    "nsISupports.AddRef" : true,
-    "nsISupports.Release" : true, // makes me a bit nervous; this is a bug but can happen
+    "nsIGlobalObject.GetGlobalJSObject" : true, // virtual but no implementation can GC
     "nsAXPCNativeCallContext.GetJSContext" : true,
-    "js::ion::MDefinition.op" : true, // macro generated virtuals just return a constant
-    "js::ion::MDefinition.opName" : true, // macro generated virtuals just return a constant
-    "js::ion::LInstruction.getDef" : true, // virtual but no implementation can GC
-    "js::ion::IonCache.kind" : true, // macro generated virtuals just return a constant
+    "js::jit::MDefinition.op" : true, // macro generated virtuals just return a constant
+    "js::jit::MDefinition.opName" : true, // macro generated virtuals just return a constant
+    "js::jit::LInstruction.getDef" : true, // virtual but no implementation can GC
+    "js::jit::IonCache.kind" : true, // macro generated virtuals just return a constant
     "icu_50::UObject.__deleting_dtor" : true, // destructors in ICU code can't cause GC
+    "mozilla::CycleCollectedJSRuntime.DescribeCustomObjects" : true, // During tracing, cannot GC.
+    "mozilla::CycleCollectedJSRuntime.NoteCustomGCThingXPCOMChildren" : true, // During tracing, cannot GC.
+    "nsIThreadManager.GetIsMainThread" : true,
+    "PLDHashTableOps.hashKey" : true,
 };
 
 function fieldCallCannotGC(csu, fullfield)
@@ -94,11 +110,9 @@ function ignoreEdgeUse(edge, variable)
             var name = callee.Variable.Name[0];
             if (/~Anchor/.test(name))
                 return true;
-            if (/::Unrooted\(\)/.test(name))
-                return true;
-            if (/::~Unrooted\(\)/.test(name))
-                return true;
             if (/~DebugOnly/.test(name))
+                return true;
+            if (/~ScopedThreadSafeStringInspector/.test(name))
                 return true;
         }
     }
@@ -131,6 +145,33 @@ var ignoreFunctions = {
     "PR_ErrorInstallTable" : true,
     "PR_SetThreadPrivate" : true,
     "JSObject* js::GetWeakmapKeyDelegate(JSObject*)" : true, // FIXME: mark with AutoAssertNoGC instead
+    "uint8 NS_IsMainThread()" : true,
+
+    // FIXME!
+    "NS_LogInit": true,
+    "NS_LogTerm": true,
+    "NS_LogAddRef": true,
+    "NS_LogRelease": true,
+    "NS_LogCtor": true,
+    "NS_LogDtor": true,
+    "NS_LogCOMPtrAddRef": true,
+    "NS_LogCOMPtrRelease": true,
+
+    // FIXME!
+    "NS_DebugBreak": true,
+
+    // Bug 940765 - fetching preferences should not GC
+    "PrefHashEntry* pref_HashTableLookup(void*)": true,
+    "uint8 mozilla::Preferences::InitStaticMembers()": true, // Temporary, see bug 940765
+
+    // These are a little overzealous -- these destructors *can* GC if they end
+    // up wrapping a pending exception. See bug 898815 for the heavyweight fix.
+    "void js::AutoCompartment::~AutoCompartment(int32)" : true,
+    "void JSAutoCompartment::~JSAutoCompartment(int32)" : true,
+
+    // And these are workarounds to avoid even more analysis work,
+    // which would sadly still be needed even with bug 898815.
+    "void js::AutoCompartment::AutoCompartment(js::ExclusiveContext*, JSCompartment*)": true,
 };
 
 function ignoreGCFunction(fun)
@@ -151,6 +192,8 @@ function ignoreGCFunction(fun)
 function isRootedTypeName(name)
 {
     if (name == "mozilla::ErrorResult" ||
+        name == "JSErrorResult" ||
+        name == "WrappableJSErrorResult" ||
         name == "js::frontend::TokenStream" ||
         name == "js::frontend::TokenStream::Position" ||
         name == "ModuleCompiler")
@@ -174,6 +217,8 @@ function isRootedPointerTypeName(name)
         name = name.substr(4);
     if (name.startsWith('JS::'))
         name = name.substr(4);
+    if (name.startsWith('mozilla::dom::'))
+        name = name.substr(14);
 
     if (name.startsWith('MaybeRooted<'))
         return /\(js::AllowGC\)1u>::RootType/.test(name);
@@ -184,5 +229,6 @@ function isRootedPointerTypeName(name)
 function isSuppressConstructor(name)
 {
     return /::AutoSuppressGC/.test(name)
-        || /::AutoEnterAnalysis/.test(name);
+        || /::AutoEnterAnalysis/.test(name)
+        || /::AutoAssertNoGC/.test(name);
 }

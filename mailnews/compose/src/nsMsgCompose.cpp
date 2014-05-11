@@ -6,6 +6,7 @@
 #include "nsMsgCompose.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIScriptContext.h"
+#include "nsIDOMDocument.h"
 #include "nsIDOMNode.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMText.h"
@@ -77,6 +78,7 @@
 #include "nsIAbManager.h"
 #include "nsCRT.h"
 #include "mozilla/Services.h"
+#include "nsISelection.h"
 
 static void GetReplyHeaderInfo(int32_t* reply_header_type,
                                nsString& reply_header_locale,
@@ -180,15 +182,8 @@ nsMsgCompose::~nsMsgCompose()
 }
 
 /* the following macro actually implement addref, release and query interface for our component. */
-NS_IMPL_THREADSAFE_ADDREF(nsMsgCompose)
-NS_IMPL_THREADSAFE_RELEASE(nsMsgCompose)
-
-NS_INTERFACE_MAP_BEGIN(nsMsgCompose)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIMsgCompose)
-  NS_INTERFACE_MAP_ENTRY(nsIMsgCompose)
-  NS_INTERFACE_MAP_ENTRY(nsIMsgSendListener)
-  NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
-NS_INTERFACE_MAP_END
+NS_IMPL_ISUPPORTS3(nsMsgCompose, nsIMsgCompose, nsIMsgSendListener,
+  nsISupportsWeakReference)
 
 //
 // Once we are here, convert the data which we know to be UTF-8 to UTF-16
@@ -1031,7 +1026,7 @@ NS_IMETHODIMP nsMsgCompose::RemoveMsgSendListener( nsIMsgSendListener *aMsgSendL
 }
 
 nsresult nsMsgCompose::_SendMsg(MSG_DeliverMode deliverMode, nsIMsgIdentity *identity,
-                                const char *accountKey, bool entityConversionDone)
+                                const char *accountKey)
 {
   nsresult rv = NS_OK;
 
@@ -1066,31 +1061,6 @@ nsresult nsMsgCompose::_SendMsg(MSG_DeliverMode deliverMode, nsIMsgIdentity *ide
     if (mMsgSend)
     {
       nsCString bodyString(m_compFields->GetBody());
-      const char  attachment1_type[] = TEXT_HTML;  // we better be "text/html" at this point
-
-      if (!entityConversionDone)
-      {
-        // Convert body to mail charset
-        nsAutoCString outCString;
-
-        if (!bodyString.IsEmpty())
-        {
-          // Apply entity conversion then convert to a mail charset.
-          bool isAsciiOnly;
-          rv = nsMsgI18NSaveAsCharset(attachment1_type, m_compFields->GetCharacterSet(),
-                                      NS_ConvertUTF8toUTF16(bodyString).get(),
-                                      getter_Copies(outCString),
-                                      nullptr, &isAsciiOnly);
-          if (NS_SUCCEEDED(rv))
-          {
-            if (m_compFields->GetForceMsgEncoding())
-              isAsciiOnly = false;
-
-            m_compFields->SetBodyIsAsciiOnly(isAsciiOnly);
-            bodyString = outCString;
-          }
-        }
-      }
 
       // Create the listener for the send operation...
       nsCOMPtr<nsIMsgComposeSendListener> composeSendListener = do_CreateInstance(NS_MSGCOMPOSESENDLISTENER_CONTRACTID);
@@ -1153,87 +1123,93 @@ nsresult nsMsgCompose::_SendMsg(MSG_DeliverMode deliverMode, nsIMsgIdentity *ide
 
 NS_IMETHODIMP nsMsgCompose::SendMsg(MSG_DeliverMode deliverMode, nsIMsgIdentity *identity, const char *accountKey, nsIMsgWindow *aMsgWindow, nsIMsgProgress *progress)
 {
+
+  NS_ENSURE_TRUE(m_compFields, NS_ERROR_NOT_INITIALIZED);
   nsresult rv = NS_OK;
-  bool entityConversionDone = false;
   nsCOMPtr<nsIPrompt> prompt;
 
   // i'm assuming the compose window is still up at this point...
   if (!prompt && m_window)
      m_window->GetPrompter(getter_AddRefs(prompt));
 
-  if (m_compFields && !m_composeHTML)
+  // Set content type based on which type of compose window we had.
+  nsString contentType = (m_composeHTML) ? NS_LITERAL_STRING("text/html"):
+                                           NS_LITERAL_STRING("text/plain");
+  nsString msgBody;
+  if (m_editor)
   {
-    // The plain text compose window was used
-    const char contentType[] = "text/plain";
-    nsString msgBody;
-    uint32_t flags = nsIDocumentEncoder::OutputFormatted | nsIDocumentEncoder::OutputCRLineBreak |
-      nsIDocumentEncoder::OutputLFLineBreak;
-    if (m_editor)
+    // Reset message body previously stored in the compose fields
+    // There is 2 nsIMsgCompFields::SetBody() functions using a pointer as argument,
+    // therefore a casting is required.
+    m_compFields->SetBody((const char *)nullptr);
+
+    const char *charset = m_compFields->GetCharacterSet();
+    uint32_t flags = nsIDocumentEncoder::OutputFormatted |
+                     nsIDocumentEncoder::OutputCRLineBreak |
+                     nsIDocumentEncoder::OutputLFLineBreak;
+    if (UseFormatFlowed(charset))
+        flags |= nsIDocumentEncoder::OutputFormatFlowed;
+    rv = m_editor->OutputToString(contentType, flags, msgBody);
+    NS_ENSURE_SUCCESS(rv, rv);
+  }
+  else
+  {
+    m_compFields->GetBody(msgBody);
+  }
+  if (!msgBody.IsEmpty())
+  {
+    // Convert body to mail charset
+    nsCString outCString;
+    nsCString fallbackCharset;
+    bool isAsciiOnly;
+    // Check if the body text is covered by the current charset.
+    rv = nsMsgI18NSaveAsCharset(NS_ConvertUTF16toUTF8(contentType).get(),
+                                m_compFields->GetCharacterSet(),
+                                msgBody.get(), getter_Copies(outCString),
+                                getter_Copies(fallbackCharset), &isAsciiOnly);
+    if (m_compFields->GetForceMsgEncoding())
+      isAsciiOnly = false;
+    if (NS_SUCCEEDED(rv) && !outCString.IsEmpty())
     {
-      // Reset message body previously stored in the compose fields
-      // There is 2 nsIMsgCompFields::SetBody() functions using a pointer as argument,
-      // therefore a casting is required.
-      m_compFields->SetBody((const char *)nullptr);
-
-      const char *charset = m_compFields->GetCharacterSet();
-      if(UseFormatFlowed(charset))
-          flags |= nsIDocumentEncoder::OutputFormatFlowed;
-
-      rv = m_editor->OutputToString(NS_LITERAL_STRING("text/plain"), flags, msgBody);
+      // If the body contains characters outside the repertoire of the current
+      // charset, just convert to UTF-8 and be done with it
+      // unless disable_fallback_to_utf8 is set for this charset.
+      if (NS_ERROR_UENC_NOMAPPING == rv && m_editor)
+      {
+        bool needToCheckCharset;
+        m_compFields->GetNeedToCheckCharset(&needToCheckCharset);
+        if (needToCheckCharset)
+        {
+          bool disableFallback = false;
+          nsCOMPtr<nsIPrefBranch> prefBranch (do_GetService(NS_PREFSERVICE_CONTRACTID, &rv));
+          if (prefBranch)
+          {
+            nsCString prefName("mailnews.disable_fallback_to_utf8.");
+            prefName.Append(m_compFields->GetCharacterSet());
+            prefBranch->GetBoolPref(prefName.get(), &disableFallback);
+          }
+          if (!disableFallback)
+          {
+            CopyUTF16toUTF8(msgBody, outCString);
+            m_compFields->SetCharacterSet("UTF-8");
+            SetDocumentCharset("UTF-8");
+          }
+        }
+      }
+      else if (!fallbackCharset.IsEmpty())
+      {
+        // re-label to the fallback charset
+        m_compFields->SetCharacterSet(fallbackCharset.get());
+        SetDocumentCharset(fallbackCharset.get());
+      }
+      m_compFields->SetBodyIsAsciiOnly(isAsciiOnly);
+      m_compFields->SetBody(outCString.get());
     }
     else
     {
-      m_compFields->GetBody(msgBody);
-    }
-    if (NS_SUCCEEDED(rv) && !msgBody.IsEmpty())
-    {
-      // Convert body to mail charset
-      nsCString outCString;
-      nsCString fallbackCharset;
-      bool isAsciiOnly;
-      // check if the body text is covered by the current charset.
-      rv = nsMsgI18NSaveAsCharset(contentType, m_compFields->GetCharacterSet(),
-                                  msgBody.get(), getter_Copies(outCString),
-                                  getter_Copies(fallbackCharset), &isAsciiOnly);
-      if (m_compFields->GetForceMsgEncoding())
-        isAsciiOnly = false;
-      if (NS_SUCCEEDED(rv) && !outCString.IsEmpty())
-      {
-        // If the body contains characters outside the repertoire of the current
-        // charset, just convert to UTF-8 and be done with it
-        // unless disable_fallback_to_utf8 is set for this charset.
-        if (NS_ERROR_UENC_NOMAPPING == rv && m_editor)
-        {
-          bool needToCheckCharset;
-          m_compFields->GetNeedToCheckCharset(&needToCheckCharset);
-          if (needToCheckCharset)
-          {
-            bool disableFallback = false;
-            nsCOMPtr<nsIPrefBranch> prefBranch (do_GetService(NS_PREFSERVICE_CONTRACTID, &rv));
-            if (prefBranch)
-            {
-              nsCString prefName("mailnews.disable_fallback_to_utf8.");
-              prefName.Append(m_compFields->GetCharacterSet());
-              prefBranch->GetBoolPref(prefName.get(), &disableFallback);
-            }
-            if (!disableFallback)
-            {
-              CopyUTF16toUTF8(msgBody, outCString);
-              m_compFields->SetCharacterSet("UTF-8");
-            }
-          }
-        }
-        else if (!fallbackCharset.IsEmpty())
-        {
-          // re-label to the fallback charset
-          m_compFields->SetCharacterSet(fallbackCharset.get());
-        }
-        m_compFields->SetBodyIsAsciiOnly(isAsciiOnly);
-        m_compFields->SetBody(outCString.get());
-        entityConversionDone = true;
-      }
-      else
-        m_compFields->SetBody(NS_LossyConvertUTF16toASCII(msgBody).get());
+      m_compFields->SetBody(NS_LossyConvertUTF16toASCII(msgBody).get());
+      m_compFields->SetCharacterSet("US-ASCII");
+      SetDocumentCharset("US-ASCII");
     }
   }
 
@@ -1272,8 +1248,7 @@ NS_IMETHODIMP nsMsgCompose::SendMsg(MSG_DeliverMode deliverMode, nsIMsgIdentity 
   }
 
   bool attachVCard = false;
-  if (m_compFields)
-      m_compFields->GetAttachVCard(&attachVCard);
+  m_compFields->GetAttachVCard(&attachVCard);
 
   if (attachVCard && identity &&
       (deliverMode == nsIMsgCompDeliverMode::Now ||
@@ -1327,7 +1302,7 @@ NS_IMETHODIMP nsMsgCompose::SendMsg(MSG_DeliverMode deliverMode, nsIMsgIdentity 
   // Save the identity being sent for later use.
   m_identity = identity;
 
-  rv = _SendMsg(deliverMode, identity, accountKey, entityConversionDone);
+  rv = _SendMsg(deliverMode, identity, accountKey);
   if (NS_FAILED(rv))
   {
     nsCOMPtr<nsIMsgSendReport> sendReport;
@@ -1564,7 +1539,6 @@ NS_IMETHODIMP nsMsgCompose::InitEditor(nsIEditor* aEditor, nsIDOMWindow* aConten
   {
     nsCOMPtr<nsIMarkupDocumentViewer> markupCV = do_QueryInterface(childCV);
     if (markupCV) {
-      NS_ENSURE_SUCCESS(markupCV->SetDefaultCharacterSet(msgCharSet), NS_ERROR_FAILURE);
       NS_ENSURE_SUCCESS(markupCV->SetForceCharacterSet(msgCharSet), NS_ERROR_FAILURE);
     }
   }
@@ -1657,7 +1631,6 @@ nsresult nsMsgCompose::CreateMessage(const char * originalMsgURI,
                                      nsIMsgCompFields * compFields)
 {
   nsresult rv = NS_OK;
-
   mType = type;
   mDraftDisposition = nsIMsgFolder::nsMsgDispositionState_None;
 
@@ -1707,7 +1680,7 @@ nsresult nsMsgCompose::CreateMessage(const char * originalMsgURI,
     do_GetService(NS_MAILNEWS_MIME_HEADER_PARSER_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (m_identity)
+  if (m_identity && mType != nsIMsgCompType::Draft)
   {
     // Setup reply-to field.
     nsCString replyTo;
@@ -1767,16 +1740,15 @@ nsresult nsMsgCompose::CreateMessage(const char * originalMsgURI,
   if (mType == nsIMsgCompType::Draft)
   {
     nsCString curDraftIdURL;
-
     rv = m_compFields->GetDraftId(getter_Copies(curDraftIdURL));
-    NS_ASSERTION(NS_SUCCEEDED(rv) && !curDraftIdURL.IsEmpty(), "RemoveCurrentDraftMessage can't get draft id");
+    NS_ASSERTION(NS_SUCCEEDED(rv) && !curDraftIdURL.IsEmpty(), "CreateMessage can't get draft id");
 
     // Skip if no draft id (probably a new draft msg).
     if (NS_SUCCEEDED(rv) && !curDraftIdURL.IsEmpty())
     {
       nsCOMPtr <nsIMsgDBHdr> msgDBHdr;
       rv = GetMsgDBHdrFromURI(curDraftIdURL.get(), getter_AddRefs(msgDBHdr));
-      NS_ASSERTION(NS_SUCCEEDED(rv), "RemoveCurrentDraftMessage can't get msg header DB interface pointer.");
+      NS_ASSERTION(NS_SUCCEEDED(rv), "CreateMessage can't get msg header DB interface pointer.");
       if (msgDBHdr)
       {
         nsCString queuedDisposition;
@@ -3285,8 +3257,8 @@ NS_IMETHODIMP nsMsgCompose::RememberQueuedDisposition()
 {
   // need to find the msg hdr in the saved folder and then set a property on
   // the header that we then look at when we actually send the message.
-
-  const char *dispositionSetting = nullptr;
+  nsresult rv;
+  nsAutoCString dispositionSetting;
 
   if (mType == nsIMsgCompType::Reply ||
       mType == nsIMsgCompType::ReplyAll ||
@@ -3294,10 +3266,26 @@ NS_IMETHODIMP nsMsgCompose::RememberQueuedDisposition()
       mType == nsIMsgCompType::ReplyToGroup ||
       mType == nsIMsgCompType::ReplyToSender ||
       mType == nsIMsgCompType::ReplyToSenderAndGroup)
-    dispositionSetting = "replied";
+  {
+    dispositionSetting.AssignLiteral("replied");
+  }
   else if (mType == nsIMsgCompType::ForwardAsAttachment ||
            mType == nsIMsgCompType::ForwardInline)
-    dispositionSetting = "forwarded";
+  {
+    dispositionSetting.AssignLiteral("forwarded");
+  }
+  else if (mType == nsIMsgCompType::Draft)
+  {
+    nsAutoCString curDraftIdURL;
+    rv = m_compFields->GetDraftId(getter_Copies(curDraftIdURL));
+    NS_ENSURE_SUCCESS(rv, rv);
+    if (!curDraftIdURL.IsEmpty()) {
+      nsCOMPtr <nsIMsgDBHdr> draftHdr;
+      rv = GetMsgDBHdrFromURI(curDraftIdURL.get(), getter_AddRefs(draftHdr));
+      NS_ENSURE_SUCCESS(rv, rv);
+      draftHdr->GetStringProperty(QUEUED_DISPOSITION_PROPERTY, getter_Copies(dispositionSetting));
+    }
+  }
 
   nsMsgKey msgKey;
   if (mMsgSend)
@@ -3313,54 +3301,40 @@ NS_IMETHODIMP nsMsgCompose::RememberQueuedDisposition()
     msgUri.Append('#');
     msgUri.AppendInt(msgKey);
     nsCOMPtr <nsIMsgDBHdr> msgHdr;
-    nsresult rv = GetMsgDBHdrFromURI(msgUri.get(), getter_AddRefs(msgHdr));
+    rv = GetMsgDBHdrFromURI(msgUri.get(), getter_AddRefs(msgHdr));
     NS_ENSURE_SUCCESS(rv, rv);
-    // If we did't find the msg hdr, and it's an IMAP message,
-    // we must not have downloaded the header. So we're going to set some
-    // pending attributes on the header for the queued disposition, so that
-    // we can associate them with the header, once we've downloaded it from
-    // the imap server.
-    if (!msgHdr && insertIndex == 4)
+    uint32_t pseudoHdrProp = 0;
+    msgHdr->GetUint32Property("pseudoHdr", &pseudoHdrProp);
+    if (pseudoHdrProp)
     {
-      nsCOMPtr<nsIRDFService> rdfService (do_GetService("@mozilla.org/rdf/rdf-service;1", &rv));
-      NS_ENSURE_SUCCESS(rv, rv);
+      // Use SetAttributeOnPendingHdr for IMAP pseudo headers, as those
+      // will get deleted (and properties set using SetStringProperty lost.)
+      nsCOMPtr<nsIMsgFolder> folder;
+      rv = msgHdr->GetFolder(getter_AddRefs(folder));
+      NS_ENSURE_SUCCESS(rv,rv);
+      nsCOMPtr<nsIMsgDatabase> msgDB;
+      rv = folder->GetMsgDatabase(getter_AddRefs(msgDB));
+      NS_ENSURE_SUCCESS(rv,rv);
 
-      nsCOMPtr <nsIRDFResource> resource;
-      rv = rdfService->GetResource(m_folderName, getter_AddRefs(resource));
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      nsCOMPtr <nsIMsgFolder> msgFolder(do_QueryInterface(resource));
-      if (msgFolder)
+      nsCString messageId;
+      mMsgSend->GetMessageId(messageId);
+      msgHdr->SetMessageId(messageId.get());
+      if (!mOriginalMsgURI.IsEmpty())
       {
-        nsCOMPtr <nsIMsgDatabase> msgDB;
-        msgFolder->GetMsgDatabase(getter_AddRefs(msgDB));
-        if (msgDB)
-        {
-          msgDB->CreateNewHdr(msgKey, getter_AddRefs(msgHdr));
-          if (msgHdr)
-          {
-            nsCString messageId;
-            mMsgSend->GetMessageId(messageId);
-            msgHdr->SetMessageId(messageId.get());
-            if (!mOriginalMsgURI.IsEmpty())
-            {
-              msgDB->SetAttributeOnPendingHdr(msgHdr, ORIG_URI_PROPERTY, mOriginalMsgURI.get());
-              if (dispositionSetting)
-                msgDB->SetAttributeOnPendingHdr(msgHdr, QUEUED_DISPOSITION_PROPERTY, dispositionSetting);
-            }
-            msgDB->SetAttributeOnPendingHdr(msgHdr, HEADER_X_MOZILLA_IDENTITY_KEY, identityKey.get());
-            msgDB->RemoveHeaderMdbRow(msgHdr);
-          }
-        }
+        msgDB->SetAttributeOnPendingHdr(msgHdr, ORIG_URI_PROPERTY, mOriginalMsgURI.get());
+        if (!dispositionSetting.IsEmpty())
+          msgDB->SetAttributeOnPendingHdr(msgHdr, QUEUED_DISPOSITION_PROPERTY,
+                                          dispositionSetting.get());
       }
+      msgDB->SetAttributeOnPendingHdr(msgHdr, HEADER_X_MOZILLA_IDENTITY_KEY, identityKey.get());
     }
     else if (msgHdr)
     {
       if (!mOriginalMsgURI.IsEmpty())
       {
         msgHdr->SetStringProperty(ORIG_URI_PROPERTY, mOriginalMsgURI.get());
-        if (dispositionSetting)
-          msgHdr->SetStringProperty(QUEUED_DISPOSITION_PROPERTY, dispositionSetting);
+        if (!dispositionSetting.IsEmpty())
+          msgHdr->SetStringProperty(QUEUED_DISPOSITION_PROPERTY, dispositionSetting.get());
       }
       msgHdr->SetStringProperty(HEADER_X_MOZILLA_IDENTITY_KEY, identityKey.get());
     }
@@ -3400,7 +3374,7 @@ nsresult nsMsgCompose::ProcessReplyFlags()
           msgHdr->GetFolder(getter_AddRefs(msgFolder));
           if (msgFolder)
           {
-            // assume reply. If a draft with disposition, use that, otherwise,
+            // If it's a draft with disposition, default to replied, otherwise,
             // check if it's a forward.
             nsMsgDispositionState dispositionSetting = nsIMsgFolder::nsMsgDispositionState_Replied;
             if (mDraftDisposition != nsIMsgFolder::nsMsgDispositionState_None)
@@ -3841,9 +3815,9 @@ nsMsgComposeSendListener::RemoveCurrentDraftMessage(nsIMsgCompose *compObj, bool
     else
     {
       // If we get here we have the case where the draft folder
-                  // is on the server and
+      // is on the server and
       // it's not currently open (in thread pane), so draft
-                  // msgs are saved to the server
+      // msgs are saved to the server
       // but they're not in our local DB. In this case,
       // GetMsgDBHdrFromURI() will never
       // find the msg. If the draft folder is a local one
@@ -4934,10 +4908,10 @@ nsMsgCompose::CheckAndPopulateRecipients(bool aPopulateMailList,
   nsCOMPtr<nsIPrefBranch> prefBranch (do_GetService(NS_PREFSERVICE_CONTRACTID));
   if (prefBranch)
   {
-    NS_GetLocalizedUnicharPreferenceWithDefault(prefBranch, "mailnews.plaintext_domains", EmptyString(),
-                                                plaintextDomains);
-    NS_GetLocalizedUnicharPreferenceWithDefault(prefBranch, "mailnews.html_domains", EmptyString(),
-                                                htmlDomains);
+    NS_GetUnicharPreferenceWithDefault(prefBranch, "mailnews.plaintext_domains",
+                                       EmptyString(), plaintextDomains);
+    NS_GetUnicharPreferenceWithDefault(prefBranch, "mailnews.html_domains",
+                                       EmptyString(), htmlDomains);
   }
 
   bool atLeastOneRecipientPrefersUnknown = false;

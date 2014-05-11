@@ -4,25 +4,22 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jscntxt.h"
-
-#ifdef JS_THREADSAFE
-#  include "prthread.h"
-#  include "prprf.h"
-#endif
-
 #include "vm/ForkJoin.h"
 
-#if defined(JS_THREADSAFE)
-#include "jit/BaselineJIT.h"
-#include "vm/Monitor.h"
+#include "jscntxt.h"
+#include "jslock.h"
+#include "jsprf.h"
+
+#ifdef JS_THREADSAFE
+# include "jit/BaselineJIT.h"
+# include "vm/Monitor.h"
 #endif
 
 #if defined(DEBUG) && defined(JS_THREADSAFE) && defined(JS_ION)
-#  include "jit/Ion.h"
-#  include "jit/MIR.h"
-#  include "jit/MIRGraph.h"
-#  include "jit/IonCompartment.h"
+# include "jit/Ion.h"
+# include "jit/JitCompartment.h"
+# include "jit/MIR.h"
+# include "jit/MIRGraph.h"
 #endif // DEBUG && THREADSAFE && ION
 
 #include "vm/Interpreter-inl.h"
@@ -59,7 +56,7 @@ js::ForkJoinSlices(JSContext *cx)
 JSContext *
 ForkJoinSlice::acquireContext()
 {
-    return NULL;
+    return nullptr;
 }
 
 void
@@ -82,26 +79,32 @@ ForkJoinSlice::InitializeTLS()
 JSRuntime *
 ForkJoinSlice::runtime()
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 bool
 ForkJoinSlice::check()
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
-    return true;
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 void
 ForkJoinSlice::requestGC(JS::gcreason::Reason reason)
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 void
 ForkJoinSlice::requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason)
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
+}
+
+bool
+ForkJoinSlice::setPendingAbortFatal(ParallelBailoutCause cause)
+{
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
+    return false;
 }
 
 void
@@ -110,20 +113,29 @@ ParallelBailoutRecord::setCause(ParallelBailoutCause cause,
                                 JSScript *currentScript,
                                 jsbytecode *currentPc)
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
+}
+
+void
+js::ParallelBailoutRecord::updateCause(ParallelBailoutCause cause,
+                                       JSScript *outermostScript,
+                                       JSScript *currentScript,
+                                       jsbytecode *currentPc)
+{
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 void
 ParallelBailoutRecord::addTrace(JSScript *script,
                                 jsbytecode *pc)
 {
-    JS_NOT_REACHED("Not THREADSAFE build");
+    MOZ_ASSUME_UNREACHABLE("Not THREADSAFE build");
 }
 
 bool
-js::InSequentialOrExclusiveParallelSection()
+js::InExclusiveParallelSection()
 {
-    return true;
+    return false;
 }
 
 bool
@@ -143,9 +155,9 @@ static bool
 ExecuteSequentially(JSContext *cx, HandleValue funVal, bool *complete)
 {
     uint32_t numSlices = ForkJoinSlices(cx);
-    FastInvokeGuard fig(cx, funVal);
     bool allComplete = true;
     for (uint32_t i = 0; i < numSlices; i++) {
+        FastInvokeGuard fig(cx, funVal);
         InvokeArgs &args = fig.args();
         if (!args.init(3))
             return false;
@@ -215,7 +227,7 @@ class ParallelDo
 {
   public:
     // For tests, make sure to keep this in sync with minItemsTestingThreshold.
-    const static uint32_t MAX_BAILOUTS = 3;
+    static const uint32_t MAX_BAILOUTS = 3;
     uint32_t bailouts;
 
     // Information about the bailout:
@@ -317,7 +329,7 @@ class ForkJoinShared : public TaskExecutor, public Monitor
     uint32_t rendezvousIndex_;      // Number of rendezvous attempts
     bool gcRequested_;              // True if a worker requested a GC
     JS::gcreason::Reason gcReason_; // Reason given to request GC
-    Zone *gcZone_;                  // Zone for GC, or NULL for full
+    Zone *gcZone_;                  // Zone for GC, or nullptr for full
 
     /////////////////////////////////////////////////////////////////////////
     // Asynchronous Flags
@@ -392,8 +404,12 @@ class ForkJoinShared : public TaskExecutor, public Monitor
     // Requests that computation abort.
     void setAbortFlag(bool fatal);
 
+    // Set the fatal flag for the next abort.
+    void setPendingAbortFatal() { fatal_ = true; }
+
     JSRuntime *runtime() { return cx_->runtime(); }
     JS::Zone *zone() { return cx_->zone(); }
+    JSCompartment *compartment() { return cx_->compartment(); }
 
     JSContext *acquireContext() { PR_Lock(cxLock_); return cx_; }
     void releaseContext() { PR_Unlock(cxLock_); }
@@ -433,11 +449,48 @@ class AutoSetForkJoinSlice
     }
 
     ~AutoSetForkJoinSlice() {
-        PR_SetThreadPrivate(ForkJoinSlice::ThreadPrivateIndex, NULL);
+        PR_SetThreadPrivate(ForkJoinSlice::ThreadPrivateIndex, nullptr);
     }
 };
 
 } // namespace js
+
+///////////////////////////////////////////////////////////////////////////
+// ForkJoinActivation
+//
+// Takes care of tidying up GC before we enter a fork join section. Also
+// pauses the barrier verifier, as we cannot enter fork join with the runtime
+// or the zone needing barriers.
+
+ForkJoinActivation::ForkJoinActivation(JSContext *cx)
+  : Activation(cx, ForkJoin),
+    prevIonTop_(cx->mainThread().ionTop),
+    av_(cx->runtime(), false)
+{
+    // Note: we do not allow GC during parallel sections.
+    // Moreover, we do not wish to worry about making
+    // write barriers thread-safe.  Therefore, we guarantee
+    // that there is no incremental GC in progress and force
+    // a minor GC to ensure no cross-generation pointers get
+    // created:
+
+    if (JS::IsIncrementalGCInProgress(cx->runtime())) {
+        JS::PrepareForIncrementalGC(cx->runtime());
+        JS::FinishIncrementalGC(cx->runtime(), JS::gcreason::API);
+    }
+
+    MinorGC(cx->runtime(), JS::gcreason::API);
+
+    cx->runtime()->gcHelperThread.waitBackgroundSweepEnd();
+
+    JS_ASSERT(!cx->runtime()->needsBarrier());
+    JS_ASSERT(!cx->zone()->needsBarrier());
+}
+
+ForkJoinActivation::~ForkJoinActivation()
+{
+    cx_->mainThread().ionTop = prevIonTop_;
+}
 
 ///////////////////////////////////////////////////////////////////////////
 // js::ForkJoin() and ParallelDo class
@@ -527,7 +580,7 @@ js::ParallelDo::ParallelDo(JSContext *cx,
   : bailouts(0),
     bailoutCause(ParallelBailoutNone),
     bailoutScript(cx),
-    bailoutBytecode(NULL),
+    bailoutBytecode(nullptr),
     cx_(cx),
     fun_(fun),
     bailoutRecords_(cx),
@@ -595,12 +648,12 @@ js::ParallelDo::apply()
         // compiled scripts were collected.
         if (ParallelTestsShouldPass(cx_) && worklist_.length() != 0) {
             JS_ReportError(cx_, "ForkJoin: compilation required in par or bailout mode");
-            return ExecutionFatal;
+            return SpewEndOp(ExecutionFatal);
         }
         break;
 
       case NumForkJoinModes:
-        JS_NOT_REACHED("Invalid mode");
+        MOZ_ASSUME_UNREACHABLE("Invalid mode");
     }
 
     while (bailouts < MAX_BAILOUTS) {
@@ -979,7 +1032,7 @@ BailoutExplanation(ParallelBailoutCause cause)
       case ParallelBailoutInterrupt:
         return "interrupted";
       case ParallelBailoutFailedIC:
-        return "at runtime, the behavior changed, invalidating compiled code (IC update)";
+        return "failed to attach stub to IC";
       case ParallelBailoutHeapBusy:
         return "heap busy flag set during interrupt";
       case ParallelBailoutMainScriptNotPresent:
@@ -996,10 +1049,10 @@ BailoutExplanation(ParallelBailoutCause cause)
         return "out of memory";
       case ParallelBailoutUnsupported:
         return "unsupported";
+      case ParallelBailoutUnsupportedVM:
+        return "unsupported operation in VM call";
       case ParallelBailoutUnsupportedStringComparison:
         return "unsupported string comparison";
-      case ParallelBailoutUnsupportedSparseArray:
-        return "unsupported sparse array";
       case ParallelBailoutRequestedGC:
         return "requested GC";
       case ParallelBailoutRequestedZoneGC:
@@ -1126,39 +1179,6 @@ js::ParallelDo::warmupExecution(bool stopIfComplete,
     return GreenLight;
 }
 
-class AutoEnterParallelSection
-{
-  private:
-    JSContext *cx_;
-    uint8_t *prevIonTop_;
-
-  public:
-    AutoEnterParallelSection(JSContext *cx)
-      : cx_(cx),
-        prevIonTop_(cx->mainThread().ionTop)
-    {
-        // Note: we do not allow GC during parallel sections.
-        // Moreover, we do not wish to worry about making
-        // write barriers thread-safe.  Therefore, we guarantee
-        // that there is no incremental GC in progress and force
-        // a minor GC to ensure no cross-generation pointers get
-        // created:
-
-        if (JS::IsIncrementalGCInProgress(cx->runtime())) {
-            JS::PrepareForIncrementalGC(cx->runtime());
-            JS::FinishIncrementalGC(cx->runtime(), JS::gcreason::API);
-        }
-
-        MinorGC(cx->runtime(), JS::gcreason::API);
-
-        cx->runtime()->gcHelperThread.waitBackgroundSweepEnd();
-    }
-
-    ~AutoEnterParallelSection() {
-        cx_->mainThread().ionTop = prevIonTop_;
-    }
-};
-
 js::ParallelDo::TrafficLight
 js::ParallelDo::parallelExecution(ExecutionStatus *status)
 {
@@ -1168,9 +1188,9 @@ js::ParallelDo::parallelExecution(ExecutionStatus *status)
     // Recursive use of the ThreadPool is not supported.  Right now we
     // cannot get here because parallel code cannot invoke native
     // functions such as ForkJoin().
-    JS_ASSERT(ForkJoinSlice::Current() == NULL);
+    JS_ASSERT(ForkJoinSlice::Current() == nullptr);
 
-    AutoEnterParallelSection enter(cx_);
+    ForkJoinActivation activation(cx_);
 
     ThreadPool *threadPool = &cx_->runtime()->threadPool;
     uint32_t numSlices = ForkJoinSlices(cx_);
@@ -1251,7 +1271,7 @@ class ParallelIonInvoke
   public:
     Value *args;
 
-    ParallelIonInvoke(JSCompartment *compartment,
+    ParallelIonInvoke(JSRuntime *rt,
                       HandleFunction callee,
                       uint32_t argc)
       : argc_(argc),
@@ -1267,13 +1287,14 @@ class ParallelIonInvoke
         IonScript *ion = callee->nonLazyScript()->parallelIonScript();
         IonCode *code = ion->method();
         jitcode_ = code->raw();
-        enter_ = compartment->ionCompartment()->enterJIT();
-        calleeToken_ = CalleeToParallelToken(callee);
+        enter_ = rt->jitRuntime()->enterIon();
+        calleeToken_ = CalleeToToken(callee);
     }
 
     bool invoke(PerThreadData *perThread) {
         RootedValue result(perThread);
-        enter_(jitcode_, argc_ + 1, argv_ + 1, NULL, calleeToken_, NULL, 0, result.address());
+        enter_(jitcode_, argc_ + 1, argv_ + 1, nullptr, calleeToken_, nullptr, 0,
+               result.address());
         return !result.isMagic();
     }
 };
@@ -1292,8 +1313,8 @@ ForkJoinShared::ForkJoinShared(JSContext *cx,
     threadPool_(threadPool),
     fun_(fun),
     numSlices_(numSlices),
-    rendezvousEnd_(NULL),
-    cxLock_(NULL),
+    rendezvousEnd_(nullptr),
+    cxLock_(nullptr),
     records_(records),
     allocators_(cx),
     uncompleted_(uncompleted),
@@ -1301,7 +1322,7 @@ ForkJoinShared::ForkJoinShared(JSContext *cx,
     rendezvousIndex_(0),
     gcRequested_(false),
     gcReason_(JS::gcreason::NUM_REASONS),
-    gcZone_(NULL),
+    gcZone_(nullptr),
     abort_(false),
     fatal_(false),
     rendezvous_(false)
@@ -1407,7 +1428,7 @@ ForkJoinShared::transferArenasToCompartmentAndProcessGCRequests()
         else
             TriggerZoneGC(gcZone_, gcReason_);
         gcRequested_ = false;
-        gcZone_ = NULL;
+        gcZone_ = nullptr;
     }
 }
 
@@ -1417,13 +1438,17 @@ ForkJoinShared::executeFromWorker(uint32_t workerId, uintptr_t stackLimit)
     JS_ASSERT(workerId < numSlices_ - 1);
 
     PerThreadData thisThread(cx_->runtime());
+    if (!thisThread.init()) {
+        setAbortFlag(true);
+        return;
+    }
     TlsPerThreadData.set(&thisThread);
 
     // Don't use setIonStackLimit() because that acquires the ionStackLimitLock, and the
     // lock has not been initialized in these cases.
     thisThread.ionStackLimit = stackLimit;
     executePortion(&thisThread, workerId);
-    TlsPerThreadData.set(NULL);
+    TlsPerThreadData.set(nullptr);
 
     AutoLockMonitor lock(*this);
     uncompleted_ -= 1;
@@ -1448,6 +1473,11 @@ ForkJoinShared::executePortion(PerThreadData *perThread,
     // WARNING: This code runs ON THE PARALLEL WORKER THREAD.
     // Therefore, it should NOT access `cx_` in any way!
 
+    // ForkJoinSlice already contains an AutoAssertNoGC; however, the analysis
+    // does not propagate this type information. We duplicate the assertion
+    // here for maximum clarity.
+    JS::AutoAssertNoGC nogc(runtime());
+
     Allocator *allocator = allocators_[threadId];
     ForkJoinSlice slice(perThread, threadId, numSlices_, allocator,
                         this, &records_[threadId]);
@@ -1457,9 +1487,11 @@ ForkJoinShared::executePortion(PerThreadData *perThread,
 
     // Make a new IonContext for the slice, which is needed if we need to
     // re-enter the VM.
-    IonContext icx(cx_->compartment(), NULL);
+    IonContext icx(CompileRuntime::get(cx_->runtime()),
+                   CompileCompartment::get(cx_->compartment()),
+                   nullptr);
 
-    JS_ASSERT(slice.bailoutRecord->topScript == NULL);
+    JS_ASSERT(slice.bailoutRecord->topScript == nullptr);
 
     RootedObject fun(perThread, fun_);
     JS_ASSERT(fun->is<JSFunction>());
@@ -1470,11 +1502,10 @@ ForkJoinShared::executePortion(PerThreadData *perThread,
         // op and reaching this point.  In that case, we just fail
         // and fallback.
         Spew(SpewOps, "Down (Script no longer present)");
-        slice.bailoutRecord->setCause(ParallelBailoutMainScriptNotPresent,
-                                      NULL, NULL, NULL);
+        slice.bailoutRecord->setCause(ParallelBailoutMainScriptNotPresent);
         setAbortFlag(false);
     } else {
-        ParallelIonInvoke<3> fii(cx_->compartment(), callee, 3);
+        ParallelIonInvoke<3> fii(cx_->runtime(), callee, 3);
 
         fii.args[0] = Int32Value(slice.sliceId);
         fii.args[1] = Int32Value(slice.numSlices);
@@ -1511,8 +1542,7 @@ ForkJoinShared::check(ForkJoinSlice &slice)
             // AutoRendezvous autoRendezvous(slice);
             // if (!js_HandleExecutionInterrupt(cx_))
             //     return setAbortFlag(true);
-            slice.bailoutRecord->setCause(ParallelBailoutInterrupt,
-                                          NULL, NULL, NULL);
+            slice.bailoutRecord->setCause(ParallelBailoutInterrupt);
             setAbortFlag(false);
             return false;
         }
@@ -1613,7 +1643,9 @@ ForkJoinShared::setAbortFlag(bool fatal)
     abort_ = true;
     fatal_ = fatal_ || fatal;
 
-    cx_->runtime()->triggerOperationCallback();
+    // Note: DontStopIon here avoids the expensive memory protection needed to
+    // interrupt Ion code compiled for sequential execution.
+    cx_->runtime()->triggerOperationCallback(JSRuntime::TriggerCallbackAnyThreadDontStopIon);
 }
 
 void
@@ -1621,7 +1653,7 @@ ForkJoinShared::requestGC(JS::gcreason::Reason reason)
 {
     AutoLockMonitor lock(*this);
 
-    gcZone_ = NULL;
+    gcZone_ = nullptr;
     gcReason_ = reason;
     gcRequested_ = true;
 }
@@ -1634,7 +1666,7 @@ ForkJoinShared::requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason)
     if (gcRequested_ && gcZone_ != zone) {
         // If a full GC has been requested, or a GC for another zone,
         // issue a request for a full GC.
-        gcZone_ = NULL;
+        gcZone_ = nullptr;
         gcReason_ = reason;
         gcRequested_ = true;
     } else {
@@ -1658,13 +1690,21 @@ ForkJoinSlice::ForkJoinSlice(PerThreadData *perThreadData,
     numSlices(numSlices),
     bailoutRecord(bailoutRecord),
     shared(shared),
-    acquiredContext_(false)
+    acquiredContext_(false),
+    nogc_(shared->runtime())
 {
     /*
      * Unsafely set the zone. This is used to track malloc counters and to
      * trigger GCs and is otherwise not thread-safe to access.
      */
     zone_ = shared->zone();
+
+    /*
+     * Unsafely set the compartment. This is used to get read-only access to
+     * shared tables.
+     */
+    compartment_ = shared->compartment();
+
     allocator_ = allocator;
 }
 
@@ -1716,9 +1756,9 @@ bool
 ForkJoinSlice::InitializeTLS()
 {
     if (!TLSInitialized) {
+        if (PR_NewThreadPrivateIndex(&ThreadPrivateIndex, nullptr) != PR_SUCCESS)
+            return false;
         TLSInitialized = true;
-        PRStatus status = PR_NewThreadPrivateIndex(&ThreadPrivateIndex, NULL);
-        return status == PR_SUCCESS;
     }
     return true;
 }
@@ -1727,8 +1767,7 @@ void
 ForkJoinSlice::requestGC(JS::gcreason::Reason reason)
 {
     shared->requestGC(reason);
-    bailoutRecord->setCause(ParallelBailoutRequestedGC,
-                            NULL, NULL, NULL);
+    bailoutRecord->setCause(ParallelBailoutRequestedGC);
     shared->setAbortFlag(false);
 }
 
@@ -1736,9 +1775,16 @@ void
 ForkJoinSlice::requestZoneGC(JS::Zone *zone, JS::gcreason::Reason reason)
 {
     shared->requestZoneGC(zone, reason);
-    bailoutRecord->setCause(ParallelBailoutRequestedZoneGC,
-                            NULL, NULL, NULL);
+    bailoutRecord->setCause(ParallelBailoutRequestedZoneGC);
     shared->setAbortFlag(false);
+}
+
+bool
+ForkJoinSlice::setPendingAbortFatal(ParallelBailoutCause cause)
+{
+    shared->setPendingAbortFatal();
+    bailoutRecord->setCause(cause);
+    return false;
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -1762,7 +1808,7 @@ js::ParallelBailoutRecord::init(JSContext *cx)
 void
 js::ParallelBailoutRecord::reset(JSContext *cx)
 {
-    topScript = NULL;
+    topScript = nullptr;
     cause = ParallelBailoutNone;
     depth = 0;
 }
@@ -1773,20 +1819,29 @@ js::ParallelBailoutRecord::setCause(ParallelBailoutCause cause,
                                     JSScript *currentScript,
                                     jsbytecode *currentPc)
 {
+    this->cause = cause;
+    updateCause(cause, outermostScript, currentScript, currentPc);
+}
+
+void
+js::ParallelBailoutRecord::updateCause(ParallelBailoutCause cause,
+                                       JSScript *outermostScript,
+                                       JSScript *currentScript,
+                                       jsbytecode *currentPc)
+{
     JS_ASSERT_IF(outermostScript, currentScript);
     JS_ASSERT_IF(outermostScript, outermostScript->hasParallelIonScript());
     JS_ASSERT_IF(currentScript, outermostScript);
     JS_ASSERT_IF(!currentScript, !currentPc);
 
-    this->cause = cause;
+    if (this->cause == ParallelBailoutNone)
+        this->cause = cause;
 
-    if (outermostScript) {
+    if (outermostScript)
         this->topScript = outermostScript;
-    }
 
-    if (currentScript) {
+    if (currentScript)
         addTrace(currentScript, currentPc);
-    }
 }
 
 void
@@ -1796,7 +1851,7 @@ js::ParallelBailoutRecord::addTrace(JSScript *script,
     // Ideally, this should never occur, because we should always have
     // a script when we invoke setCause, but I havent' fully
     // refactored things to that point yet:
-    if (topScript == NULL && script != NULL)
+    if (topScript == nullptr && script != nullptr)
         topScript = script;
 
     if (depth < MaxDepth) {
@@ -1906,11 +1961,11 @@ class ParallelSpewer
         }
     }
 
-    bool isActive(SpewChannel channel) {
+    bool isActive(js::parallel::SpewChannel channel) {
         return active[channel];
     }
 
-    void spewVA(SpewChannel channel, const char *fmt, va_list ap) {
+    void spewVA(js::parallel::SpewChannel channel, const char *fmt, va_list ap) {
         if (!active[channel])
             return;
 
@@ -1919,22 +1974,22 @@ class ParallelSpewer
         char buf[BufferSize];
 
         if (ForkJoinSlice *slice = ForkJoinSlice::Current()) {
-            PR_snprintf(buf, BufferSize, "[%sParallel:%u%s] ",
+            JS_snprintf(buf, BufferSize, "[%sParallel:%u%s] ",
                         sliceColor(slice->sliceId), slice->sliceId, reset());
         } else {
-            PR_snprintf(buf, BufferSize, "[Parallel:M] ");
+            JS_snprintf(buf, BufferSize, "[Parallel:M] ");
         }
 
         for (uint32_t i = 0; i < depth; i++)
-            PR_snprintf(buf + strlen(buf), BufferSize, "  ");
+            JS_snprintf(buf + strlen(buf), BufferSize, "  ");
 
-        PR_vsnprintf(buf + strlen(buf), BufferSize, fmt, ap);
-        PR_snprintf(buf + strlen(buf), BufferSize, "\n");
+        JS_vsnprintf(buf + strlen(buf), BufferSize, fmt, ap);
+        JS_snprintf(buf + strlen(buf), BufferSize, "\n");
 
         fprintf(stderr, "%s", buf);
     }
 
-    void spew(SpewChannel channel, const char *fmt, ...) {
+    void spew(js::parallel::SpewChannel channel, const char *fmt, ...) {
         va_list ap;
         va_start(ap, fmt);
         spewVA(channel, fmt, ap);
@@ -2050,26 +2105,25 @@ class ParallelSpewer
             return;
 
         char buf[BufferSize];
-        PR_vsnprintf(buf, BufferSize, fmt, ap);
+        JS_vsnprintf(buf, BufferSize, fmt, ap);
 
         JSScript *script = mir->block()->info().script();
         spew(SpewCompile, "%s%s%s: %s (%s:%u)", cyan(), mir->opName(), reset(), buf,
              script->filename(), PCToLineNumber(script, mir->trackedPc()));
     }
 
-    void spewBailoutIR(uint32_t bblockId, uint32_t lirId,
-                       const char *lir, const char *mir, JSScript *script, jsbytecode *pc) {
+    void spewBailoutIR(IonLIRTraceData *data) {
         if (!active[SpewBailouts])
             return;
 
         // If we didn't bail from a LIR/MIR but from a propagated parallel
         // bailout, don't bother printing anything since we've printed it
         // elsewhere.
-        if (mir && script) {
+        if (data->mirOpName && data->script) {
             spew(SpewBailouts, "%sBailout%s: %s / %s%s%s (block %d lir %d) (%s:%u)", yellow(), reset(),
-                 lir, cyan(), mir, reset(),
-                 bblockId, lirId,
-                 script->filename(), PCToLineNumber(script, pc));
+                 data->lirOpName, cyan(), data->mirOpName, reset(),
+                 data->blockIndex, data->lirIndex, data->script->filename(),
+                 PCToLineNumber(data->script, data->pc));
         }
     }
 };
@@ -2135,19 +2189,17 @@ parallel::SpewMIR(MDefinition *mir, const char *fmt, ...)
 }
 
 void
-parallel::SpewBailoutIR(uint32_t bblockId, uint32_t lirId,
-                        const char *lir, const char *mir,
-                        JSScript *script, jsbytecode *pc)
+parallel::SpewBailoutIR(IonLIRTraceData *data)
 {
-    spewer.spewBailoutIR(bblockId, lirId, lir, mir, script, pc);
+    spewer.spewBailoutIR(data);
 }
 
 #endif // DEBUG
 
 bool
-js::InSequentialOrExclusiveParallelSection()
+js::InExclusiveParallelSection()
 {
-    return !InParallelSection() || ForkJoinSlice::Current()->hasAcquiredContext();
+    return InParallelSection() && ForkJoinSlice::Current()->hasAcquiredContext();
 }
 
 bool

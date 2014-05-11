@@ -5,14 +5,12 @@
 
 /* state and methods used while laying out a single line of a block frame */
 
+// This has to be defined before nsLineLayout.h is included, because
+// nsLineLayout.h has a #include for plarena.h, which needs this defined:
 #define PL_ARENA_CONST_ALIGN_MASK (sizeof(void*)-1)
-#include "plarena.h"
-
-#include "mozilla/Util.h"
-#include "nsCOMPtr.h"
 #include "nsLineLayout.h"
+
 #include "nsBlockFrame.h"
-#include "nsInlineFrame.h"
 #include "nsStyleConsts.h"
 #include "nsContainerFrame.h"
 #include "nsFloatManager.h"
@@ -20,13 +18,10 @@
 #include "nsPresContext.h"
 #include "nsRenderingContext.h"
 #include "nsGkAtoms.h"
-#include "nsPlaceholderFrame.h"
 #include "nsIContent.h"
-#include "nsTextFragment.h"
-#include "nsBidiUtils.h"
 #include "nsLayoutUtils.h"
 #include "nsTextFrame.h"
-#include "nsCSSRendering.h"
+#include "nsStyleStructInlines.h"
 #include <algorithm>
 
 #ifdef DEBUG
@@ -690,7 +685,7 @@ IsPercentageAware(const nsIFrame* aFrame)
     if (f->GetIntrinsicRatio() != nsSize(0, 0) &&
         // Some percents are treated like 'auto', so check != coord
         pos->mHeight.GetUnit() != eStyleUnit_Coord) {
-      const nsIFrame::IntrinsicSize &intrinsicSize = f->GetIntrinsicSize();
+      const IntrinsicSize &intrinsicSize = f->GetIntrinsicSize();
       if (intrinsicSize.width.GetUnit() == eStyleUnit_None &&
           intrinsicSize.height.GetUnit() == eStyleUnit_None) {
         return true;
@@ -778,7 +773,7 @@ nsLineLayout::ReflowFrame(nsIFrame* aFrame,
     pfd->mMargin = reflowState.mComputedMargin;
     pfd->mBorderPadding = reflowState.mComputedBorderPadding;
     pfd->SetFlag(PFD_RELATIVEPOS,
-                 (reflowState.mStyleDisplay->mPosition == NS_STYLE_POSITION_RELATIVE));
+                 reflowState.mStyleDisplay->IsRelativelyPositionedStyle());
     if (pfd->GetFlag(PFD_RELATIVEPOS)) {
       pfd->mOffsets = reflowState.mComputedOffsets;
     }
@@ -1071,7 +1066,7 @@ nsLineLayout::ApplyStartMargin(PerFrameData* pfd,
   // only live on the first continuation, but we don't want to apply
   // the start margin for later continuations anyway.
   if (pfd->mFrame->GetPrevContinuation() ||
-      nsLayoutUtils::FrameIsNonFirstInIBSplit(pfd->mFrame)) {
+      pfd->mFrame->FrameIsNonFirstInIBSplit()) {
     // Zero this out so that when we compute the max-element-width of
     // the frame we will properly avoid adding in the starting margin.
     if (ltr)
@@ -1150,8 +1145,8 @@ nsLineLayout::CanPlaceFrame(PerFrameData* pfd,
      * However, none of that applies if this is a letter frame (XXXbz why?)
      */
     if ((NS_FRAME_IS_NOT_COMPLETE(aStatus) ||
-         pfd->mFrame->GetLastInFlow()->GetNextContinuation() ||
-         nsLayoutUtils::FrameIsNonLastInIBSplit(pfd->mFrame))
+         pfd->mFrame->LastInFlow()->GetNextContinuation() ||
+         pfd->mFrame->FrameIsNonLastInIBSplit())
         && !pfd->GetFlag(PFD_ISLETTERFRAME)) {
       if (ltr)
         pfd->mMargin.right = 0;
@@ -1767,8 +1762,12 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
     else {
       // For other elements the logical height is the same as the
       // frames height plus its margins.
-      logicalHeight = pfd->mBounds.height + pfd->mMargin.top +
-        pfd->mMargin.bottom;
+      logicalHeight = pfd->mBounds.height + pfd->mMargin.TopBottom();
+      if (logicalHeight < 0 &&
+          mPresContext->CompatibilityMode() == eCompatibility_NavQuirks) {
+        pfd->mAscent -= logicalHeight;
+        logicalHeight = 0;
+      }
     }
 
     // Get vertical-align property
@@ -1949,8 +1948,8 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
     // Update minY/maxY for frames that we just placed. Do not factor
     // text into the equation.
     if (pfd->mVerticalAlign == VALIGN_OTHER) {
-      // Text frames do not contribute to the min/max Y values for the
-      // line (instead their parent frame's font-size contributes).
+      // Text frames and bullets do not contribute to the min/max Y values for
+      // the line (instead their parent frame's font-size contributes).
       // XXXrbs -- relax this restriction because it causes text frames
       //           to jam together when 'font-size-adjust' is enabled
       //           and layout is using dynamic font heights (bug 20394)
@@ -1961,17 +1960,15 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
       //           For example in quirks mode, avoiding empty text frames prevents
       //           "tall" lines around elements like <hr> since the rules of <hr>
       //           in quirks.css have pseudo text contents with LF in them.
-#if 0
-      if (!pfd->GetFlag(PFD_ISTEXTFRAME)) {
-#else
-      // Only consider non empty text frames when line-height=normal
       bool canUpdate = !pfd->GetFlag(PFD_ISTEXTFRAME);
-      if (!canUpdate && pfd->GetFlag(PFD_ISNONWHITESPACETEXTFRAME)) {
+      if ((!canUpdate && pfd->GetFlag(PFD_ISNONWHITESPACETEXTFRAME)) ||
+          (canUpdate && (pfd->GetFlag(PFD_ISBULLET) ||
+                         nsGkAtoms::bulletFrame == frame->GetType()))) {
+        // Only consider bullet / non-empty text frames when line-height:normal.
         canUpdate =
           frame->StyleText()->mLineHeight.GetUnit() == eStyleUnit_Normal;
       }
       if (canUpdate) {
-#endif
         nscoord yTop, yBottom;
         if (frameSpan) {
           // For spans that were are now placing, use their position
@@ -2202,9 +2199,13 @@ nsLineLayout::VerticalAlignFrames(PerSpanData* psd)
 
 static void SlideSpanFrameRect(nsIFrame* aFrame, nscoord aDeltaWidth)
 {
-  nsRect r = aFrame->GetRect();
-  r.x -= aDeltaWidth;
-  aFrame->SetRect(r);
+  // This should not use nsIFrame::MovePositionBy because it happens
+  // prior to relative positioning.  In particular, because
+  // nsBlockFrame::PlaceLine calls aLineLayout.TrimTrailingWhiteSpace()
+  // prior to calling aLineLayout.RelativePositionFrames().
+  nsPoint p = aFrame->GetPosition();
+  p.x -= aDeltaWidth;
+  aFrame->SetPosition(p);
 }
 
 bool
@@ -2470,32 +2471,33 @@ nsLineLayout::HorizontalAlignFrames(nsRect& aLineBounds,
   nscoord availWidth = psd->mRightEdge - psd->mLeftEdge;
   nscoord remainingWidth = availWidth - aLineBounds.width;
 #ifdef NOISY_HORIZONTAL_ALIGN
-    nsFrame::ListTag(stdout, mBlockReflowState->frame);
-    printf(": availWidth=%d lineWidth=%d delta=%d\n",
-           availWidth, aLineBounds.width, remainingWidth);
+  nsFrame::ListTag(stdout, mBlockReflowState->frame);
+  printf(": availWidth=%d lineWidth=%d delta=%d\n",
+         availWidth, aLineBounds.width, remainingWidth);
 #endif
+
+  // 'text-align-last: auto' is equivalent to the value of the 'text-align'
+  // property except when 'text-align' is set to 'justify', in which case it
+  // is 'justify' when 'text-justify' is 'distribute' and 'start' otherwise.
+  //
+  // XXX: the code below will have to change when we implement text-justify
+  //
   nscoord dx = 0;
-
-  if (remainingWidth > 0 &&
-      !(mBlockReflowState->frame->IsSVGText())) {
-    uint8_t textAlign = mStyleText->mTextAlign;
-
-    /* 
-     * 'text-align-last: auto' is equivalent to the value of the 'text-align'
-     * property except when 'text-align' is set to 'justify', in which case it
-     * is 'justify' when 'text-justify' is 'distribute' and 'start' otherwise.
-     *
-     * XXX: the code below will have to change when we implement text-justify
-     */
-    if (aIsLastLine) {
-      if (mStyleText->mTextAlignLast == NS_STYLE_TEXT_ALIGN_AUTO) {
-        if (textAlign == NS_STYLE_TEXT_ALIGN_JUSTIFY) {
-          textAlign = NS_STYLE_TEXT_ALIGN_DEFAULT;
-        }
-      } else {
-        textAlign = mStyleText->mTextAlignLast;
+  uint8_t textAlign = mStyleText->mTextAlign;
+  bool textAlignTrue = mStyleText->mTextAlignTrue;
+  if (aIsLastLine) {
+    textAlignTrue = mStyleText->mTextAlignLastTrue;
+    if (mStyleText->mTextAlignLast == NS_STYLE_TEXT_ALIGN_AUTO) {
+      if (textAlign == NS_STYLE_TEXT_ALIGN_JUSTIFY) {
+        textAlign = NS_STYLE_TEXT_ALIGN_DEFAULT;
       }
+    } else {
+      textAlign = mStyleText->mTextAlignLast;
     }
+  }
+
+  if ((remainingWidth > 0 || textAlignTrue) &&
+      !(mBlockReflowState->frame->IsSVGText())) {
 
     switch (textAlign) {
       case NS_STYLE_TEXT_ALIGN_JUSTIFY:
@@ -2549,7 +2551,7 @@ nsLineLayout::HorizontalAlignFrames(nsRect& aLineBounds,
         break;
     }
   }
-  else if (remainingWidth < 0) {
+  else if (remainingWidth < 0 || textAlignTrue) {
     if (NS_STYLE_DIRECTION_RTL == psd->mDirection) {
       dx = remainingWidth;
       psd->mX += dx;
@@ -2628,8 +2630,9 @@ nsLineLayout::RelativePositionFrames(PerSpanData* psd, nsOverflowAreas& aOverflo
     if (pfd->GetFlag(PFD_RELATIVEPOS)) {
       // right and bottom are handled by
       // nsHTMLReflowState::ComputeRelativeOffsets
-      nsPoint change(pfd->mOffsets.left, pfd->mOffsets.top);
-      origin += change;
+      nsHTMLReflowState::ApplyRelativePositioning(pfd->mFrame,
+                                                  pfd->mOffsets,
+                                                  &origin);
       frame->SetPosition(origin);
     }
 

@@ -73,6 +73,9 @@ function WifiGeoPositionProvider() {
   this.timer = null;
   this.hasSeenWiFi = false;
   this.started = false;
+  // this is only used when logging is enabled, to debug interactions with the
+  // geolocation service
+  this.highAccuracy = false;
 }
 
 WifiGeoPositionProvider.prototype = {
@@ -132,10 +135,12 @@ WifiGeoPositionProvider.prototype = {
   },
 
   setHighAccuracy: function(enable) {
+    this.highAccuracy = enable;
+    LOG("setting highAccuracy to " + (this.highAccuracy?"TRUE":"FALSE"));
   },
 
   onChange: function(accessPoints) {
-    LOG("onChange called");
+    LOG("onChange called, highAccuracy = " + (this.highAccuracy?"TRUE":"FALSE"));
     this.hasSeenWiFi = true;
 
     let url = Services.urlFormatter.formatURLPref("geo.wifi.uri");
@@ -170,22 +175,30 @@ WifiGeoPositionProvider.prototype = {
 
     // This is a background load
   
-    xhr.open("POST", url, true);
+    try {
+        xhr.open("POST", url, true);
+    } catch (e) {
+       triggerError();
+       return;
+    }
     xhr.setRequestHeader("Content-Type", "application/json; charset=UTF-8");
     xhr.responseType = "json";
     xhr.mozBackgroundRequest = true;
     xhr.channel.loadFlags = Ci.nsIChannel.LOAD_ANONYMOUS;
     xhr.onerror = function() {
         LOG("onerror: " + xhr);
+        triggerError();
     };
 
     xhr.onload = function() {  
         LOG("gls returned status: " + xhr.status + " --> " +  JSON.stringify(xhr.response));
-        if (xhr.status != 200) {
+        if (xhr.channel instanceof Ci.nsIHttpChannel && xhr.status != 200) {
+            triggerError();
             return;
         }
 
         if (!xhr.response || !xhr.response.location) {
+            triggerError();
             return;
         }
 
@@ -218,4 +231,8 @@ WifiGeoPositionProvider.prototype = {
   },
 };
 
+function triggerError() {
+    Cc["@mozilla.org/geolocation/service;1"].getService(Ci.nsIGeolocationUpdate)
+        .notifyError(Ci.nsIDOMGeoPositionError.POSITION_UNAVAILABLE);
+}
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([WifiGeoPositionProvider]);

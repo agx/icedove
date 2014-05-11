@@ -29,6 +29,8 @@ let tests = [];
 tests.push({
   description: "Export to bookmarks.html if autoExportHTML is true.",
   exec: function() {
+    remove_all_JSON_backups();
+
     // Sanity check: we should have bookmarks on the toolbar.
     do_check_true(bs.getIdForItemAt(bs.toolbarFolder, 0) > 0);
 
@@ -43,7 +45,7 @@ tests.push({
     // Check bookmarks.html has been created.
     check_bookmarks_html();
     // Check JSON backup has been created.
-    check_JSON_backup();
+    check_JSON_backup(true);
 
     // Check preferences have not been reverted.
     do_check_true(ps.getBoolPref(PREF_AUTO_EXPORT_HTML));
@@ -67,8 +69,11 @@ tests.push({
 
     // Create a bookmarks.html in the profile.
     let profileBookmarksHTMLFile = create_bookmarks_html("bookmarks.glue.html");
-    // Get file lastModified and size.
-    let lastMod = profileBookmarksHTMLFile.lastModifiedTime;
+
+    // set the file's lastModifiedTime to one minute ago and get its size.
+    let lastMod = Date.now() - 60*1000;
+    profileBookmarksHTMLFile.lastModifiedTime = lastMod;
+
     let fileSize = profileBookmarksHTMLFile.fileSize;
 
     // Force nsBrowserGlue::_shutdownPlaces().
@@ -78,16 +83,8 @@ tests.push({
 
     // Check a new bookmarks.html has been created.
     let profileBookmarksHTMLFile = check_bookmarks_html();
-    //XXX not working on Linux unit boxes. Could be filestats caching issue.
-    let isLinux = ("@mozilla.org/gnome-gconf-service;1" in Cc);
-    if (!isLinux) {
-      //XXX this test does not working on Mac boxes as well.
-      let isOSX = ("nsILocalFileMac" in Ci);
-      if (!isOSX) {
-        do_check_true(profileBookmarksHTMLFile.lastModifiedTime > lastMod);
-      }
-      do_check_neq(profileBookmarksHTMLFile.fileSize, fileSize);
-    }
+    do_check_true(profileBookmarksHTMLFile.lastModifiedTime > lastMod);
+    do_check_neq(profileBookmarksHTMLFile.fileSize, fileSize);
 
     // Check preferences have not been reverted.
     do_check_true(ps.getBoolPref(PREF_AUTO_EXPORT_HTML));
@@ -128,16 +125,10 @@ tests.push({
 
 //------------------------------------------------------------------------------
 
-function finish_test() {
-  do_test_finished();
-}
-
 var testIndex = 0;
 function next_test() {
   // Remove bookmarks.html from profile.
   remove_bookmarks_html();
-  // Remove JSON backups from profile.
-  remove_all_JSON_backups();
 
   // Execute next test.
   let test = tests.shift();

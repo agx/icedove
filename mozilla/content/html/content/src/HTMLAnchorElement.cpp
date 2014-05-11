@@ -5,15 +5,17 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/HTMLAnchorElement.h"
-#include "mozilla/dom/HTMLAnchorElementBinding.h"
 
+#include "mozilla/dom/HTMLAnchorElementBinding.h"
+#include "mozilla/MemoryReporting.h"
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
 #include "nsGkAtoms.h"
-#include "nsIPresShell.h"
-#include "nsIDocument.h"
-#include "nsPresContext.h"
 #include "nsHTMLDNSPrefetch.h"
+#include "nsIDocument.h"
+#include "nsIPresShell.h"
+#include "nsPresContext.h"
+#include "nsIURI.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Anchor)
 
@@ -39,19 +41,8 @@ HTMLAnchorElement::~HTMLAnchorElement()
 {
 }
 
-NS_IMPL_ADDREF_INHERITED(HTMLAnchorElement, Element)
-NS_IMPL_RELEASE_INHERITED(HTMLAnchorElement, Element)
-
-// QueryInterface implementation for HTMLAnchorElement
-NS_INTERFACE_TABLE_HEAD(HTMLAnchorElement)
-  NS_HTML_CONTENT_INTERFACES(nsGenericHTMLElement)
-  NS_INTERFACE_TABLE_INHERITED3(HTMLAnchorElement,
-                                nsIDOMHTMLAnchorElement,
-                                nsILink,
-                                Link)
-  NS_INTERFACE_TABLE_TO_MAP_SEGUE
-NS_ELEMENT_INTERFACE_MAP_END
-
+NS_IMPL_ISUPPORTS_INHERITED2(HTMLAnchorElement, nsGenericHTMLElement,
+                             nsIDOMHTMLAnchorElement, Link)
 
 NS_IMPL_ELEMENT_CLONE(HTMLAnchorElement)
 
@@ -413,7 +404,7 @@ HTMLAnchorElement::IntrinsicState() const
 }
 
 size_t
-HTMLAnchorElement::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+HTMLAnchorElement::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
 {
   return nsGenericHTMLElement::SizeOfExcludingThis(aMallocSizeOf) +
          Link::SizeOfExcludingThis(aMallocSizeOf);

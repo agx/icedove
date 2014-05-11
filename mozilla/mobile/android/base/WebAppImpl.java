@@ -71,6 +71,11 @@ public class WebAppImpl extends GeckoApp {
         try {
             mOrigin = new URL(origin);
         } catch (java.net.MalformedURLException ex) {
+            // If we can't parse the this is an app protocol, just settle for not having an origin
+            if (!origin.startsWith("app://")) {
+                return;
+            }
+
             // If that failed fall back to the origin stored in the shortcut
             Log.i(LOGTAG, "Webapp is not registered with allocator");
             try {
@@ -147,9 +152,9 @@ public class WebAppImpl extends GeckoApp {
     }
 
     @Override
-    protected int getSessionRestoreState(Bundle savedInstanceState) {
+    protected boolean getSessionRestoreState(Bundle savedInstanceState) {
         // for now webapps never restore your session
-        return RESTORE_NONE;
+        return false;
     }
 
     @Override
@@ -212,11 +217,5 @@ public class WebAppImpl extends GeckoApp {
                 break;
         }
         super.onTabChanged(tab, msg, data);
-    }
-
-    @Override
-    protected void geckoConnected() {
-        super.geckoConnected();
-        mLayerView.setOverScrollMode(View.OVER_SCROLL_NEVER);
     }
 };

@@ -16,6 +16,13 @@ var gSmallTests = [
   { name:"bogus.duh", type:"bogus/duh" }
 ];
 
+// Used by test_bug654550.html, for videoStats preference
+var gVideoTests = [
+  { name:"320x240.ogv", type:"video/ogg", width:320, height:240, duration:0.266 },
+  { name:"seek.webm", type:"video/webm", width:320, height:240, duration:3.966 },
+  { name:"bogus.duh", type:"bogus/duh" }
+];
+
 // Used by test_progress to ensure we get the correct progress information
 // during resource download.
 var gProgressTests = [
@@ -31,11 +38,11 @@ var gProgressTests = [
 // Used by test_played.html
 var gPlayedTests = [
   { name:"big.wav", type:"audio/x-wav", duration:9.0 },
-  { name:"sound.ogg", type:"audio/ogg", duration:4.0 },
   { name:"seek.ogv", type:"video/ogg", duration:3.966 },
   { name:"seek.webm", type:"video/webm", duration:3.966 },
   { name:"gizmo.mp4", type:"video/mp4", duration:5.56 },
   { name:"owl.mp3", type:"audio/mpeg", duration:3.29 },
+  { name:"vbr.mp3", type:"audio/mpeg", duration:10.0 }
 ];
 
 // Used by test_mozLoadFrom.  Need one test file per decoder backend, plus
@@ -70,6 +77,12 @@ var gTrackTests = [
   { name:"short-video.ogv", type:"video/ogg", duration:1.081, hasAudio:true, hasVideo:true },
   { name:"seek.webm", type:"video/webm", duration:3.966, size:215529, hasAudio:false, hasVideo:true },
   { name:"bogus.duh", type:"bogus/duh" }
+];
+
+// Used by any media recorder test. Need one test file per decoder backend
+// currently supported by the media encoder.
+var gMediaRecorderTests = [
+  { name:"detodos.opus", type:"audio/ogg; codecs=opus", duration:2.9135 }
 ];
 
 // These are files that we want to make sure we can play through.  We can
@@ -142,10 +155,10 @@ var gPlayTests = [
 
   // Test playback of a WebM file with non-zero start time.
   { name:"split.webm", type:"video/webm", duration:1.967 },
-  
+
   // Test playback of a raw file
   { name:"seek.yuv", type:"video/x-raw-yuv", duration:1.833 },
-  
+
   // A really short, low sample rate, single channel file. This tests whether
   // we can handle playing files when only push very little audio data to the
   // hardware.
@@ -169,6 +182,22 @@ var gPlayTests = [
   { name:"small-shot.m4a", type:"audio/mp4", duration:0.29 },
   { name:"small-shot.mp3", type:"audio/mpeg", duration:0.27 },
   { name:"owl.mp3", type:"audio/mpeg", duration:3.29 },
+  // owl.mp3 as above, but with something funny going on in the ID3v2 tag
+  // that causes DirectShow to fail.
+  { name:"owl-funny-id3.mp3", type:"audio/mpeg", duration:3.29 },
+  // owl.mp3 as above, but with something even funnier going on in the ID3v2 tag
+  // that causes DirectShow to fail.
+  { name:"owl-funnier-id3.mp3", type:"audio/mpeg", duration:3.29 },
+  // One second of silence with ~140KB of ID3 tags. Usually when the first MP3
+  // frame is at such a high offset into the file, MP3FrameParser will give up
+  // and report that the stream is not MP3. However, it does not count ID3 tags
+  // in that offset. This test case makes sure that ID3 exclusion holds.
+  { name:"huge-id3.mp3", type:"audio/mpeg", duration:1.00 },
+  // A truncated VBR MP3 with just enough frames to keep most decoders happy.
+  // The Xing header reports the length of the file to be around 10 seconds, but
+  // there is really only one second worth of data. We want MP3FrameParser to
+  // trust the header, so this should be reported as 10 seconds.
+  { name:"vbr-head.mp3", type:"audio/mpeg", duration:10.00 },
 
   // Invalid file
   { name:"bogus.duh", type:"bogus/duh", duration:Number.NaN }
@@ -204,7 +233,7 @@ var gInvalidTests = [
 // we've specified.
 function fileUriToSrc(path, mustExist) {
   // android mochitest doesn't support file://
-  if (navigator.appVersion.indexOf("Android") != -1)
+  if (navigator.appVersion.indexOf("Android") != -1 || SpecialPowers.Services.appinfo.name == "B2G")
     return path;
 
   const Ci = SpecialPowers.Ci;
@@ -404,6 +433,13 @@ var gChainingTests = [
   { name:"bogus.duh", type:"bogus/duh" }
 ];
 
+// Videos with an aspect ratio. Used for testing that displaying frames
+// on a canvas works correctly in the case of non-standard aspect ratios.
+// See bug 874897 for an example.
+var gAspectRatioTests = [
+  { name:"VID_0001.ogg", type:"video/ogg", duration:19.966 }
+];
+
 // These are files with non-trivial tag sets.
 // Used by test_metadata.html.
 var gMetadataTests = [
@@ -551,7 +587,7 @@ const DEBUG_TEST_LOOP_FOREVER = false;
 //   1. Create a new MediaTestManager object.
 //   2. Create a test startTest function. This takes a test object and a token,
 //      and performs anything necessary to start the test. The test object is an
-//      element in one of the g*Tests above. Your startTest function must call 
+//      element in one of the g*Tests above. Your startTest function must call
 //      MediaTestManager.start(token) if it starts a test. The test object is
 //      guaranteed to be playable by our supported decoders; you don't need to
 //      check canPlayType.
@@ -562,12 +598,12 @@ function MediaTestManager() {
 
   // Sets up a MediaTestManager to runs through the 'tests' array, which needs
   // to be one of, or have the same fields as, the g*Test arrays of tests. Uses
-  // the user supplied 'startTest' function to initialize the test. This 
+  // the user supplied 'startTest' function to initialize the test. This
   // function must accept two arguments, the test entry from the 'tests' array,
   // and a token. Call MediaTestManager.started(token) if you start the test,
   // and MediaTestManager.finished(token) when the test finishes. You don't have
   // to start every test, but if you call started() you *must* call finish()
-  // else you'll timeout. 
+  // else you'll timeout.
   this.runTests = function(tests, startTest) {
     this.startTime = new Date();
     SimpleTest.info("Started " + this.startTime + " (" + this.startTime.getTime()/1000 + "s)");
@@ -581,7 +617,7 @@ function MediaTestManager() {
     SimpleTest.waitForExplicitFinish();
     this.nextTest();
   }
-  
+
   // Registers that the test corresponding to 'token' has been started.
   // Don't call more than once per token.
   this.started = function(token) {
@@ -589,7 +625,7 @@ function MediaTestManager() {
     this.numTestsRunning++;
     is(this.numTestsRunning, this.tokens.length, "[started " + token + "] Length of array should match number of running tests");
   }
-  
+
   // Registers that the test corresponding to 'token' has finished. Call when
   // you've finished your test. If all tests are complete this will finish the
   // run, otherwise it may start up the next run. It's ok to call multiple times
@@ -610,44 +646,44 @@ function MediaTestManager() {
   // Starts the next batch of tests, or finishes if they're all done.
   // Don't call this directly, call finished(token) when you're done.
   this.nextTest = function() {
-    // Force a GC after every completed testcase. This ensures that any decoders
-    // with live threads waiting for the GC are killed promptly, to free up the
-    // thread stacks' address space.
-    SpecialPowers.forceGC();
-    
-    while (this.testNum < this.tests.length && this.tokens.length < PARALLEL_TESTS) {
-      var test = this.tests[this.testNum];
-      var token = (test.name ? (test.name + "-"): "") + this.testNum;
-      this.testNum++;
+    // Force an exact  GC after every completed testcase. This ensures that any
+    // decoders with live threads waiting for the GC are killed promptly, to free
+    // up the thread stacks' address space, and destroy decoder resources.
+    SpecialPowers.exactGC(window, function(){
+      while (this.testNum < this.tests.length && this.tokens.length < PARALLEL_TESTS) {
+        var test = this.tests[this.testNum];
+        var token = (test.name ? (test.name + "-"): "") + this.testNum;
+        this.testNum++;
 
-      if (DEBUG_TEST_LOOP_FOREVER && this.testNum == this.tests.length) {
-        this.testNum = 0;
-      }
-      
-      // Ensure we can play the resource type.
-      if (test.type && !document.createElement('video').canPlayType(test.type))
-        continue;
-      
-      // Do the init. This should start the test.
-      this.startTest(test, token);
-    }
+        if (DEBUG_TEST_LOOP_FOREVER && this.testNum == this.tests.length) {
+          this.testNum = 0;
+        }
 
-    if (this.testNum == this.tests.length &&
-        !DEBUG_TEST_LOOP_FOREVER &&
-        this.tokens.length == 0 &&
-        !this.isShutdown)
-    {
-      this.isShutdown = true;
-      if (this.onFinished) {
-        this.onFinished();
+        // Ensure we can play the resource type.
+        if (test.type && !document.createElement('video').canPlayType(test.type))
+          continue;
+
+        // Do the init. This should start the test.
+        this.startTest(test, token);
       }
-      mediaTestCleanup();
-      var end = new Date();
-      SimpleTest.info("Finished at " + end + " (" + (end.getTime() / 1000) + "s)");
-      SimpleTest.info("Running time: " + (end.getTime() - this.startTime.getTime())/1000 + "s");
-      SimpleTest.finish();
-      return;
-    }
+
+      if (this.testNum == this.tests.length &&
+          !DEBUG_TEST_LOOP_FOREVER &&
+          this.tokens.length == 0 &&
+          !this.isShutdown)
+      {
+        this.isShutdown = true;
+        if (this.onFinished) {
+          this.onFinished();
+        }
+        mediaTestCleanup();
+        var end = new Date();
+        SimpleTest.info("Finished at " + end + " (" + (end.getTime() / 1000) + "s)");
+        SimpleTest.info("Running time: " + (end.getTime() - this.startTime.getTime())/1000 + "s");
+        SimpleTest.finish();
+        return;
+      }
+    }.bind(this));
   }
 }
 
@@ -676,28 +712,34 @@ function mediaTestCleanup() {
   var branch = prefService.getBranch("media.");
   var oldDefault = 2;
   var oldAuto = 3;
+  var oldAppleMedia = undefined;
   var oldGStreamer = undefined;
   var oldOpus = undefined;
 
-  try { oldGStreamer = branch.getBoolPref("gstreamer.enabled"); } catch(ex) { }
-  try { oldDefault   = branch.getIntPref("preload.default"); } catch(ex) { }
-  try { oldAuto      = branch.getIntPref("preload.auto"); } catch(ex) { }
-  try { oldOpus      = branch.getBoolPref("opus.enabled"); } catch(ex) { }
+  try { oldAppleMedia = SpecialPowers.getBoolPref("media.apple.mp3.enabled"); } catch(ex) { }
+  try { oldGStreamer = SpecialPowers.getBoolPref("media.gstreamer.enabled"); } catch(ex) { }
+  try { oldDefault   = SpecialPowers.getIntPref("media.preload.default"); } catch(ex) { }
+  try { oldAuto      = SpecialPowers.getIntPref("media.preload.auto"); } catch(ex) { }
+  try { oldOpus      = SpecialPowers.getBoolPref("media.opus.enabled"); } catch(ex) { }
 
-  branch.setIntPref("preload.default", 2); // preload_metadata
-  branch.setIntPref("preload.auto", 3); // preload_enough
+  SpecialPowers.setIntPref("media.preload.default", 2); // preload_metadata
+  SpecialPowers.setIntPref("media.preload.auto", 3); // preload_enough
   // test opus playback iff the pref exists
   if (oldOpus !== undefined)
-    branch.setBoolPref("opus.enabled", true);
+    SpecialPowers.setBoolPref("media.opus.enabled", true);
   if (oldGStreamer !== undefined)
-    branch.setBoolPref("gstreamer.enabled", true);
+    SpecialPowers.setBoolPref("media.gstreamer.enabled", true);
+  if (oldAppleMedia !== undefined)
+    SpecialPowers.setBoolPref("media.apple.mp3.enabled", true);
 
   window.addEventListener("unload", function() {
     if (oldGStreamer !== undefined)
-      branch.setBoolPref("gstreamer.enabled", oldGStreamer);
-    branch.setIntPref("preload.default", oldDefault);
-    branch.setIntPref("preload.auto", oldAuto);
+      SpecialPowers.setBoolPref("media.gstreamer.enabled", oldGStreamer);
+    if (oldAppleMedia !== undefined)
+      SpecialPowers.setBoolPref("media.apple.mp3.enabled", oldAppleMedia);
+    SpecialPowers.setIntPref("media.preload.default", oldDefault);
+    SpecialPowers.setIntPref("media.preload.auto", oldAuto);
     if (oldOpus !== undefined)
-      branch.setBoolPref("opus.enabled", oldOpus);
+      SpecialPowers.setBoolPref("media.opus.enabled", oldOpus);
   }, false);
  })();

@@ -73,16 +73,16 @@ static void do_qt_pixmap_unref (void *data)
     delete pmap;
 }
 
-static gfxImageFormat sOffscreenFormat = gfxASurface::ImageFormatRGB24;
+static gfxImageFormat sOffscreenFormat = gfxImageFormatRGB24;
 
 #ifndef MOZ_PANGO
 typedef nsDataHashtable<nsStringHashKey, nsRefPtr<FontFamily> > FontTable;
 typedef nsDataHashtable<nsCStringHashKey, nsTArray<nsRefPtr<FontEntry> > > PrefFontTable;
-static FontTable *gPlatformFonts = NULL;
-static FontTable *gPlatformFontAliases = NULL;
-static PrefFontTable *gPrefFonts = NULL;
-static gfxSparseBitSet *gCodepointsWithNoFonts = NULL;
-static FT_Library gPlatformFTLibrary = NULL;
+static FontTable *gPlatformFonts = nullptr;
+static FontTable *gPlatformFontAliases = nullptr;
+static PrefFontTable *gPrefFonts = nullptr;
+static gfxSparseBitSet *gCodepointsWithNoFonts = nullptr;
+static FT_Library gPlatformFTLibrary = nullptr;
 #endif
 
 gfxQtPlatform::gfxQtPlatform()
@@ -134,7 +134,7 @@ gfxQtPlatform::gfxQtPlatform()
     // around this by checking what type of graphicssystem a test QPixmap uses.
     QPixmap pixmap(1, 1);
     if (pixmap.depth() == 16) {
-        sOffscreenFormat = gfxASurface::ImageFormatRGB16_565;
+        sOffscreenFormat = gfxImageFormatRGB16_565;
     }
     mScreenDepth = pixmap.depth();
 #if (QT_VERSION < QT_VERSION_CHECK(4,8,0))
@@ -152,18 +152,18 @@ gfxQtPlatform::~gfxQtPlatform()
     gfxPangoFontGroup::Shutdown();
 #else
     delete gPlatformFonts;
-    gPlatformFonts = NULL;
+    gPlatformFonts = nullptr;
     delete gPlatformFontAliases;
-    gPlatformFontAliases = NULL;
+    gPlatformFontAliases = nullptr;
     delete gPrefFonts;
-    gPrefFonts = NULL;
+    gPrefFonts = nullptr;
     delete gCodepointsWithNoFonts;
-    gCodepointsWithNoFonts = NULL;
+    gCodepointsWithNoFonts = nullptr;
 
     cairo_debug_reset_static_data();
 
     FT_Done_FreeType(gPlatformFTLibrary);
-    gPlatformFTLibrary = NULL;
+    gPlatformFTLibrary = nullptr;
 #endif
 
 #if 0
@@ -211,11 +211,11 @@ gfxQtPlatform::GetXScreen(QWidget* aWindow)
 
 already_AddRefed<gfxASurface>
 gfxQtPlatform::CreateOffscreenSurface(const gfxIntSize& size,
-                                      gfxASurface::gfxContentType contentType)
+                                      gfxContentType contentType)
 {
     nsRefPtr<gfxASurface> newSurface = nullptr;
 
-    gfxASurface::gfxImageFormat imageFormat = OptimalFormatForContent(contentType);
+    gfxImageFormat imageFormat = OptimalFormatForContent(contentType);
 
 #ifdef CAIRO_HAS_QT_SURFACE
     if (mRenderMode == RENDER_QPAINTER) {
@@ -260,14 +260,14 @@ nsresult
 gfxQtPlatform::UpdateFontList()
 {
 #ifndef MOZ_PANGO
-    FcPattern *pat = NULL;
-    FcObjectSet *os = NULL;
-    FcFontSet *fs = NULL;
+    FcPattern *pat = nullptr;
+    FcObjectSet *os = nullptr;
+    FcFontSet *fs = nullptr;
 
     pat = FcPatternCreate();
-    os = FcObjectSetBuild(FC_FAMILY, FC_FILE, FC_INDEX, FC_WEIGHT, FC_SLANT, FC_WIDTH, NULL);
+    os = FcObjectSetBuild(FC_FAMILY, FC_FILE, FC_INDEX, FC_WEIGHT, FC_SLANT, FC_WIDTH, nullptr);
 
-    fs = FcFontList(NULL, pat, os);
+    fs = FcFontList(nullptr, pat, os);
 
 
     for (int i = 0; i < fs->nfont; i++) {
@@ -383,8 +383,8 @@ gfxQtPlatform::ResolveFontName(const nsAString& aFontName,
 
     FcPattern *npat = FcPatternCreate();
     FcPatternAddString(npat, FC_FAMILY, (FcChar8*)utf8Name.get());
-    FcObjectSet *nos = FcObjectSetBuild(FC_FAMILY, NULL);
-    FcFontSet *nfs = FcFontList(NULL, npat, nos);
+    FcObjectSet *nos = FcObjectSetBuild(FC_FAMILY, nullptr);
+    FcFontSet *nfs = FcFontList(nullptr, npat, nos);
 
     for (int k = 0; k < nfs->nfont; k++) {
         FcChar8 *str;
@@ -407,15 +407,15 @@ gfxQtPlatform::ResolveFontName(const nsAString& aFontName,
     npat = FcPatternCreate();
     FcPatternAddString(npat, FC_FAMILY, (FcChar8*)utf8Name.get());
     FcPatternDel(npat, FC_LANG);
-    FcConfigSubstitute(NULL, npat, FcMatchPattern);
+    FcConfigSubstitute(nullptr, npat, FcMatchPattern);
     FcDefaultSubstitute(npat);
 
-    nos = FcObjectSetBuild(FC_FAMILY, NULL);
-    nfs = FcFontList(NULL, npat, nos);
+    nos = FcObjectSetBuild(FC_FAMILY, nullptr);
+    nfs = FcFontList(nullptr, npat, nos);
 
     FcResult fresult;
 
-    FcPattern *match = FcFontMatch(NULL, npat, &fresult);
+    FcPattern *match = FcFontMatch(nullptr, npat, &fresult);
     if (match)
         FcFontSetAdd(nfs, match);
 

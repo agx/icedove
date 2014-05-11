@@ -18,7 +18,7 @@
 #include "nsMemory.h"
 
 /* the following macro actually implement addref, release and query interface for our component. */
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsMsgCompFields, nsIMsgCompFields)
+NS_IMPL_ISUPPORTS1(nsMsgCompFields, nsIMsgCompFields)
 
 nsMsgCompFields::nsMsgCompFields()
 {
@@ -37,6 +37,7 @@ nsMsgCompFields::nsMsgCompFields()
   m_bodyIsAsciiOnly = false;
   m_forceMsgEncoding = false;
   m_needToCheckCharset = true;
+  m_attachmentReminder = false;
 
   // Get the default charset from pref, use this as a mail charset.
   nsString charset;
@@ -212,18 +213,6 @@ NS_IMETHODIMP nsMsgCompFields::GetSubject(nsAString &_retval)
   return GetUnicodeHeader(MSG_SUBJECT_HEADER_ID, _retval);
 }
 
-NS_IMETHODIMP nsMsgCompFields::SetTemporaryFiles(const char *value)
-{
-  NS_ERROR("nsMsgCompFields::SetTemporaryFiles is not supported anymore, please use nsMsgCompFields::AddAttachment");
-  return SetAsciiHeader(MSG_TEMPORARY_FILES_HEADER_ID, value);
-}
-
-NS_IMETHODIMP nsMsgCompFields::GetTemporaryFiles(char **_retval)
-{
-  *_retval = strdup(GetAsciiHeader(MSG_TEMPORARY_FILES_HEADER_ID));
-  return *_retval ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
-}
-
 NS_IMETHODIMP nsMsgCompFields::SetOrganization(const nsAString &value)
 {
   return SetUnicodeHeader(MSG_ORGANIZATION_HEADER_ID, value);
@@ -366,6 +355,18 @@ NS_IMETHODIMP nsMsgCompFields::SetAttachVCard(bool value)
 NS_IMETHODIMP nsMsgCompFields::GetAttachVCard(bool *_retval)
 {
   *_retval = m_attachVCard;
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsMsgCompFields::GetAttachmentReminder(bool *_retval)
+{
+  *_retval = m_attachmentReminder;
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsMsgCompFields::SetAttachmentReminder(bool value)
+{
+  m_attachmentReminder = value;
   return NS_OK;
 }
 

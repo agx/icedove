@@ -19,6 +19,8 @@ const ACCESSFU_DISABLE = 0;
 const ACCESSFU_ENABLE = 1;
 const ACCESSFU_AUTO = 2;
 
+const SCREENREADER_SETTING = 'accessibility.screenreader';
+
 this.AccessFu = {
   /**
    * Initialize chrome-layer accessibility functionality.
@@ -29,14 +31,21 @@ this.AccessFu = {
     Utils.init(aWindow);
 
     try {
-      Cc['@mozilla.org/android/bridge;1'].
-        getService(Ci.nsIAndroidBridge).handleGeckoMessage(
+      let bridgeCc = Cc['@mozilla.org/android/bridge;1'];
+      bridgeCc.getService(Ci.nsIAndroidBridge).handleGeckoMessage(
           JSON.stringify({ type: 'Accessibility:Ready' }));
       Services.obs.addObserver(this, 'Accessibility:Settings', false);
     } catch (x) {
       // Not on Android
-      if (Utils.MozBuildApp === 'b2g') {
-        aWindow.addEventListener('ContentStart', this, false);
+      if (aWindow.navigator.mozSettings) {
+        let lock = aWindow.navigator.mozSettings.createLock();
+        let req = lock.get(SCREENREADER_SETTING);
+        req.addEventListener('success', () => {
+          this._systemPref = req.result[SCREENREADER_SETTING];
+          this._enableOrDisable();
+        });
+        aWindow.navigator.mozSettings.addObserver(
+          SCREENREADER_SETTING, this.handleEvent.bind(this));
       }
     }
 
@@ -56,10 +65,9 @@ this.AccessFu = {
     }
     if (Utils.MozBuildApp === 'mobile/android') {
       Services.obs.removeObserver(this, 'Accessibility:Settings');
-    } else if (Utils.MozBuildApp === 'b2g') {
-      Utils.win.shell.contentBrowser.contentWindow.removeEventListener(
-        'mozContentEvent', this);
-      Utils.win.removeEventListener('ContentStart', this);
+    } else if (Utils.win.navigator.mozSettings) {
+      Utils.win.navigator.mozSettings.removeObserver(
+        SCREENREADER_SETTING, this.handleEvent.bind(this));
     }
     delete this._activatePref;
     Utils.uninit();
@@ -78,7 +86,7 @@ this.AccessFu = {
     Cu.import('resource://gre/modules/accessibility/TouchAdapter.jsm');
     Cu.import('resource://gre/modules/accessibility/Presentation.jsm');
 
-    Logger.info('enable');
+    Logger.info('Enabled');
 
     for each (let mm in Utils.AllMessageManagers) {
       this._addMessageListeners(mm);
@@ -116,7 +124,8 @@ this.AccessFu = {
     Services.obs.addObserver(this, 'Accessibility:PreviousObject', false);
     Services.obs.addObserver(this, 'Accessibility:Focus', false);
     Services.obs.addObserver(this, 'Accessibility:ActivateObject', false);
-    Services.obs.addObserver(this, 'Accessibility:MoveCaret', false);
+    Services.obs.addObserver(this, 'Accessibility:LongPress', false);
+    Services.obs.addObserver(this, 'Accessibility:MoveByGranularity', false);
     Utils.win.addEventListener('TabOpen', this);
     Utils.win.addEventListener('TabClose', this);
     Utils.win.addEventListener('TabSelect', this);
@@ -136,7 +145,7 @@ this.AccessFu = {
 
     this._enabled = false;
 
-    Logger.info('disable');
+    Logger.info('Disabled');
 
     Utils.win.document.removeChild(this.stylesheet.get());
 
@@ -159,7 +168,11 @@ this.AccessFu = {
     Services.obs.removeObserver(this, 'Accessibility:PreviousObject');
     Services.obs.removeObserver(this, 'Accessibility:Focus');
     Services.obs.removeObserver(this, 'Accessibility:ActivateObject');
-    Services.obs.removeObserver(this, 'Accessibility:MoveCaret');
+    Services.obs.removeObserver(this, 'Accessibility:LongPress');
+    Services.obs.removeObserver(this, 'Accessibility:MoveByGranularity');
+
+    delete this._quicknavModesPref;
+    delete this._notifyOutputPref;
 
     if (this.doneCallback) {
       this.doneCallback();
@@ -169,6 +182,9 @@ this.AccessFu = {
 
   _enableOrDisable: function _enableOrDisable() {
     try {
+      if (!this._activatePref) {
+        return;
+      }
       let activatePref = this._activatePref.value;
       if (activatePref == ACCESSFU_ENABLE ||
           this._systemPref && activatePref == ACCESSFU_AUTO)
@@ -200,6 +216,9 @@ this.AccessFu = {
         break;
       case 'AccessFu:ActivateContextMenu':
         this.Input.activateContextMenu(aMessage.json);
+        break;
+      case 'AccessFu:DoScroll':
+        this.Input.doScroll(aMessage.json);
         break;
     }
   },
@@ -240,6 +259,7 @@ this.AccessFu = {
     aMessageManager.addMessageListener('AccessFu:Input', this);
     aMessageManager.addMessageListener('AccessFu:Ready', this);
     aMessageManager.addMessageListener('AccessFu:ActivateContextMenu', this);
+    aMessageManager.addMessageListener('AccessFu:DoScroll', this);
   },
 
   _removeMessageListeners: function _removeMessageListeners(aMessageManager) {
@@ -247,6 +267,7 @@ this.AccessFu = {
     aMessageManager.removeMessageListener('AccessFu:Input', this);
     aMessageManager.removeMessageListener('AccessFu:Ready', this);
     aMessageManager.removeMessageListener('AccessFu:ActivateContextMenu', this);
+    aMessageManager.removeMessageListener('AccessFu:DoScroll', this);
   },
 
   _handleMessageManager: function _handleMessageManager(aMessageManager) {
@@ -269,18 +290,19 @@ this.AccessFu = {
         this.Input.moveCursor('movePrevious', 'Simple', 'gesture');
         break;
       case 'Accessibility:ActivateObject':
-        this.Input.activateCurrent();
+        this.Input.activateCurrent(JSON.parse(aData));
+        break;
+      case 'Accessibility:LongPress':
+        this.Input.sendContextMenuMessage();
         break;
       case 'Accessibility:Focus':
         this._focused = JSON.parse(aData);
         if (this._focused) {
-          let mm = Utils.getMessageManager(Utils.CurrentBrowser);
-          mm.sendAsyncMessage('AccessFu:VirtualCursor',
-                              {action: 'whereIsIt', move: true});
+          this.showCurrent(true);
         }
         break;
-      case 'Accessibility:MoveCaret':
-        this.Input.moveCaret(JSON.parse(aData));
+      case 'Accessibility:MoveByGranularity':
+        this.Input.moveByGranularity(JSON.parse(aData));
         break;
       case 'remote-browser-frame-shown':
       case 'in-process-browser-or-app-frame-shown':
@@ -294,20 +316,6 @@ this.AccessFu = {
 
   handleEvent: function handleEvent(aEvent) {
     switch (aEvent.type) {
-      case 'ContentStart':
-      {
-        Utils.win.shell.contentBrowser.contentWindow.addEventListener(
-          'mozContentEvent', this, false, true);
-        break;
-      }
-      case 'mozContentEvent':
-      {
-        if (aEvent.detail.type == 'accessibility-screenreader') {
-          this._systemPref = aEvent.detail.enabled;
-          this._enableOrDisable();
-        }
-        break;
-      }
       case 'TabOpen':
       {
         let mm = Utils.getMessageManager(aEvent.target);
@@ -327,18 +335,31 @@ this.AccessFu = {
       case 'TabSelect':
       {
         if (this._focused) {
-          let mm = Utils.getMessageManager(Utils.CurrentBrowser);
           // We delay this for half a second so the awesomebar could close,
           // and we could use the current coordinates for the content item.
           // XXX TODO figure out how to avoid magic wait here.
           Utils.win.setTimeout(
             function () {
-              mm.sendAsyncMessage('AccessFu:VirtualCursor', {action: 'whereIsIt'});
-            }, 500);
+              this.showCurrent(false);
+            }.bind(this), 500);
+        }
+        break;
+      }
+      default:
+      {
+        // A settings change, it does not have an event type
+        if (aEvent.settingName == SCREENREADER_SETTING) {
+          this._systemPref = aEvent.settingValue;
+          this._enableOrDisable();
         }
         break;
       }
     }
+  },
+
+  showCurrent: function showCurrent(aMove) {
+    let mm = Utils.getMessageManager(Utils.CurrentBrowser);
+    mm.sendAsyncMessage('AccessFu:ShowCurrent', { move: aMove });
   },
 
   announce: function announce(aAnnouncement) {
@@ -354,10 +375,178 @@ this.AccessFu = {
 
   // Keep track of message managers tha already have a 'content-script.js'
   // injected.
-  _processedMessageManagers: []
+  _processedMessageManagers: [],
+
+  /**
+   * Adjusts the given bounds relative to the given browser. Converts from screen
+   * or device pixels to either device or CSS pixels.
+   * @param {Rect} aJsonBounds the bounds to adjust
+   * @param {browser} aBrowser the browser we want the bounds relative to
+   * @param {bool} aToCSSPixels whether to convert to CSS pixels (as opposed to
+   *               device pixels)
+   * @param {bool} aFromDevicePixels whether to convert from device pixels (as
+   *               opposed to screen pixels)
+   */
+  adjustContentBounds: function(aJsonBounds, aBrowser, aToCSSPixels, aFromDevicePixels) {
+    let bounds = new Rect(aJsonBounds.left, aJsonBounds.top,
+                          aJsonBounds.right - aJsonBounds.left,
+                          aJsonBounds.bottom - aJsonBounds.top);
+    let win = Utils.win;
+    let dpr = win.devicePixelRatio;
+    let vp = Utils.getViewport(win);
+    let offset = { left: -win.mozInnerScreenX, top: -win.mozInnerScreenY };
+
+    if (!aBrowser.contentWindow) {
+      // OOP browser, add offset of browser.
+      // The offset of the browser element in relation to its parent window.
+      let clientRect = aBrowser.getBoundingClientRect();
+      let win = aBrowser.ownerDocument.defaultView;
+      offset.left += clientRect.left + win.mozInnerScreenX;
+      offset.top += clientRect.top + win.mozInnerScreenY;
+    }
+
+    // Here we scale from screen pixels to layout device pixels by dividing by
+    // the resolution (caused by pinch-zooming). The resolution is the viewport
+    // zoom divided by the devicePixelRatio. If there's no viewport, then we're
+    // on a platform without pinch-zooming and we can just ignore this.
+    if (!aFromDevicePixels && vp) {
+      bounds = bounds.scale(vp.zoom / dpr, vp.zoom / dpr);
+    }
+
+    // Add the offset; the offset is in CSS pixels, so multiply the
+    // devicePixelRatio back in before adding to preserve unit consistency.
+    bounds = bounds.translate(offset.left * dpr, offset.top * dpr);
+
+    // If we want to get to CSS pixels from device pixels, this needs to be
+    // further divided by the devicePixelRatio due to widget scaling.
+    if (aToCSSPixels) {
+      bounds = bounds.scale(1 / dpr, 1 / dpr);
+    }
+
+    return bounds.expandToIntegers();
+  }
 };
 
 var Output = {
+  brailleState: {
+    startOffset: 0,
+    endOffset: 0,
+    text: '',
+    selectionStart: 0,
+    selectionEnd: 0,
+
+    init: function init(aOutput) {
+      if (aOutput && 'output' in aOutput) {
+        this.startOffset = aOutput.startOffset;
+        this.endOffset = aOutput.endOffset;
+        // We need to append a space at the end so that the routing key corresponding
+        // to the end of the output (i.e. the space) can be hit to move the caret there.
+        this.text = aOutput.output + ' ';
+        this.selectionStart = typeof aOutput.selectionStart === 'number' ?
+                              aOutput.selectionStart : this.selectionStart;
+        this.selectionEnd = typeof aOutput.selectionEnd === 'number' ?
+                            aOutput.selectionEnd : this.selectionEnd;
+
+        return { text: this.text,
+                 selectionStart: this.selectionStart,
+                 selectionEnd: this.selectionEnd };
+      }
+
+      return null;
+    },
+
+    adjustText: function adjustText(aText) {
+      let newBraille = [];
+      let braille = {};
+
+      let prefix = this.text.substring(0, this.startOffset).trim();
+      if (prefix) {
+        prefix += ' ';
+        newBraille.push(prefix);
+      }
+
+      newBraille.push(aText);
+
+      let suffix = this.text.substring(this.endOffset).trim();
+      if (suffix) {
+        suffix = ' ' + suffix;
+        newBraille.push(suffix);
+      }
+
+      this.startOffset = braille.startOffset = prefix.length;
+      this.text = braille.text = newBraille.join('') + ' ';
+      this.endOffset = braille.endOffset = braille.text.length - suffix.length;
+      braille.selectionStart = this.selectionStart;
+      braille.selectionEnd = this.selectionEnd;
+
+      return braille;
+    },
+
+    adjustSelection: function adjustSelection(aSelection) {
+      let braille = {};
+
+      braille.startOffset = this.startOffset;
+      braille.endOffset = this.endOffset;
+      braille.text = this.text;
+      this.selectionStart = braille.selectionStart = aSelection.selectionStart + this.startOffset;
+      this.selectionEnd = braille.selectionEnd = aSelection.selectionEnd + this.startOffset;
+
+      return braille;
+    }
+  },
+
+  speechHelper: {
+    EARCONS: ['virtual_cursor_move.ogg',
+              'virtual_cursor_key.ogg',
+              'clicked.ogg'],
+
+    earconBuffers: {},
+
+    inited: false,
+
+    webspeechEnabled: false,
+
+    init: function init() {
+      let window = Utils.win;
+      this.webspeechEnabled = !!window.speechSynthesis;
+
+      for (let earcon of this.EARCONS) {
+        let earconName = /(^.*)\..*$/.exec(earcon)[1];
+        this.earconBuffers[earconName] = new WeakMap();
+        this.earconBuffers[earconName].set(
+          window, new window.Audio('chrome://global/content/accessibility/' + earcon));
+      }
+
+      this.inited = true;
+    },
+
+    output: function output(aActions) {
+      if (!this.inited) {
+        this.init();
+      }
+
+      for (let action of aActions) {
+        let window = Utils.win;
+        Logger.debug('tts.' + action.method, '"' + action.data + '"',
+                     JSON.stringify(action.options));
+
+        if (!action.options.enqueue && this.webspeechEnabled) {
+          window.speechSynthesis.cancel();
+        }
+
+        if (action.method === 'speak' && this.webspeechEnabled) {
+          window.speechSynthesis.speak(
+            new window.SpeechSynthesisUtterance(action.data));
+        } else if (action.method === 'playEarcon') {
+          let audioBufferWeakMap = this.earconBuffers[action.data];
+          if (audioBufferWeakMap) {
+            audioBufferWeakMap.get(window).cloneNode(false).play();
+          }
+        }
+      }
+    }
+  },
+
   start: function start() {
     Cu.import('resource://gre/modules/Geometry.jsm');
   },
@@ -375,8 +564,7 @@ var Output = {
   },
 
   Speech: function Speech(aDetails, aBrowser) {
-    for each (let action in aDetails.actions)
-      Logger.info('tts.' + action.method, '"' + action.data + '"', JSON.stringify(action.options));
+    this.speechHelper.output(aDetails.actions);
   },
 
   Visual: function Visual(aDetails, aBrowser) {
@@ -403,7 +591,7 @@ var Output = {
         }
 
         let padding = aDetails.padding;
-        let r = this._adjustBounds(aDetails.bounds, aBrowser);
+        let r = AccessFu.adjustContentBounds(aDetails.bounds, aBrowser, true);
 
         // First hide it to avoid flickering when changing the style.
         highlightBox.style.display = 'none';
@@ -458,13 +646,28 @@ var Output = {
   },
 
   Android: function Android(aDetails, aBrowser) {
+    const ANDROID_VIEW_TEXT_CHANGED = 0x10;
+    const ANDROID_VIEW_TEXT_SELECTION_CHANGED = 0x2000;
+
     if (!this._bridge)
       this._bridge = Cc['@mozilla.org/android/bridge;1'].getService(Ci.nsIAndroidBridge);
 
     for each (let androidEvent in aDetails) {
       androidEvent.type = 'Accessibility:Event';
       if (androidEvent.bounds)
-        androidEvent.bounds = this._adjustBounds(androidEvent.bounds, aBrowser);
+        androidEvent.bounds = AccessFu.adjustContentBounds(androidEvent.bounds, aBrowser);
+
+      switch(androidEvent.eventType) {
+        case ANDROID_VIEW_TEXT_CHANGED:
+          androidEvent.brailleOutput = this.brailleState.adjustText(androidEvent.text);
+          break;
+        case ANDROID_VIEW_TEXT_SELECTION_CHANGED:
+          androidEvent.brailleOutput = this.brailleState.adjustSelection(androidEvent.brailleOutput);
+          break;
+        default:
+          androidEvent.brailleOutput = this.brailleState.init(androidEvent.brailleOutput);
+          break;
+      }
       this._bridge.handleGeckoMessage(JSON.stringify(androidEvent));
     }
   },
@@ -475,28 +678,6 @@ var Output = {
 
   Braille: function Braille(aDetails, aBrowser) {
     Logger.debug('Braille output: ' + aDetails.text);
-  },
-
-  _adjustBounds: function(aJsonBounds, aBrowser) {
-    let bounds = new Rect(aJsonBounds.left, aJsonBounds.top,
-                          aJsonBounds.right - aJsonBounds.left,
-                          aJsonBounds.bottom - aJsonBounds.top);
-    let vp = Utils.getViewport(Utils.win) || { zoom: 1.0, offsetY: 0 };
-    let root = Utils.win;
-    let offset = { left: -root.mozInnerScreenX, top: -root.mozInnerScreenY };
-    let scale = 1 / Utils.getPixelsPerCSSPixel(Utils.win);
-
-    if (!aBrowser.contentWindow) {
-      // OOP browser, add offset of browser.
-      // The offset of the browser element in relation to its parent window.
-      let clientRect = aBrowser.getBoundingClientRect();
-      let win = aBrowser.ownerDocument.defaultView;
-      offset.left += clientRect.left + win.mozInnerScreenX;
-      offset.top += clientRect.top + win.mozInnerScreenY;
-    }
-
-    return bounds.scale(scale, scale).translate(offset.left, offset.top).
-      scale(vp.zoom, vp.zoom).expandToIntegers();
   }
 };
 
@@ -536,14 +717,13 @@ var Input = {
 
   _handleGesture: function _handleGesture(aGesture) {
     let gestureName = aGesture.type + aGesture.touches.length;
-    Logger.info('Gesture', aGesture.type,
-                '(fingers: ' + aGesture.touches.length + ')');
+    Logger.debug('Gesture', aGesture.type,
+                 '(fingers: ' + aGesture.touches.length + ')');
 
     switch (gestureName) {
       case 'dwell1':
       case 'explore1':
-        this.moveCursor('moveToPoint', 'Simple', 'gesture',
-                        aGesture.x, aGesture.y);
+        this.moveToPoint('Simple', aGesture.x, aGesture.y);
         break;
       case 'doubletap1':
         this.activateCurrent();
@@ -557,17 +737,27 @@ var Input = {
       case 'swipeleft1':
         this.moveCursor('movePrevious', 'Simple', 'gesture');
         break;
+      case 'swipeup1':
+        this.contextAction('backward');
+        break;
+      case 'swipedown1':
+        this.contextAction('forward');
+        break;
+      case 'exploreend1':
+      case 'dwellend1':
+        this.activateCurrent(null, true);
+        break;
       case 'swiperight2':
-        this.scroll(-1, true);
+        this.sendScrollMessage(-1, true);
         break;
       case 'swipedown2':
-        this.scroll(-1);
+        this.sendScrollMessage(-1);
         break;
       case 'swipeleft2':
-        this.scroll(1, true);
+        this.sendScrollMessage(1, true);
         break;
       case 'swipeup2':
-        this.scroll(1);
+        this.sendScrollMessage(1);
         break;
       case 'explore2':
         Utils.CurrentBrowser.contentWindow.scrollBy(
@@ -664,29 +854,52 @@ var Input = {
     aEvent.stopPropagation();
   },
 
-  moveCursor: function moveCursor(aAction, aRule, aInputType, aX, aY) {
+  moveToPoint: function moveToPoint(aRule, aX, aY) {
     let mm = Utils.getMessageManager(Utils.CurrentBrowser);
-    mm.sendAsyncMessage('AccessFu:VirtualCursor',
-                        {action: aAction, rule: aRule,
-                         x: aX, y: aY, origin: 'top',
-                         inputType: aInputType});
+    mm.sendAsyncMessage('AccessFu:MoveToPoint', {rule: aRule,
+                                                 x: aX, y: aY,
+                                                 origin: 'top'});
   },
 
-  moveCaret: function moveCaret(aDetails) {
+  moveCursor: function moveCursor(aAction, aRule, aInputType) {
+    let mm = Utils.getMessageManager(Utils.CurrentBrowser);
+    mm.sendAsyncMessage('AccessFu:MoveCursor',
+                        {action: aAction, rule: aRule,
+                         origin: 'top', inputType: aInputType});
+  },
+
+  contextAction: function contextAction(aDirection) {
+    // XXX: For now, the only supported context action is adjusting a range.
+    let mm = Utils.getMessageManager(Utils.CurrentBrowser);
+    mm.sendAsyncMessage('AccessFu:AdjustRange', {direction: aDirection});
+  },
+
+  moveByGranularity: function moveByGranularity(aDetails) {
+    const MOVEMENT_GRANULARITY_PARAGRAPH = 8;
+
     if (!this.editState.editing) {
-      return;
+      if (aDetails.granularity === MOVEMENT_GRANULARITY_PARAGRAPH) {
+        this.moveCursor('move' + aDetails.direction, 'Paragraph', 'gesture');
+        return;
+      }
+    } else {
+      aDetails.atStart = this.editState.atStart;
+      aDetails.atEnd = this.editState.atEnd;
     }
 
-    aDetails.atStart = this.editState.atStart;
-    aDetails.atEnd = this.editState.atEnd;
-
     let mm = Utils.getMessageManager(Utils.CurrentBrowser);
-    mm.sendAsyncMessage('AccessFu:MoveCaret', aDetails);
+    let type = this.editState.editing ? 'AccessFu:MoveCaret' :
+                                        'AccessFu:MoveByGranularity';
+    mm.sendAsyncMessage(type, aDetails);
   },
 
-  activateCurrent: function activateCurrent() {
+  activateCurrent: function activateCurrent(aData, aActivateIfKey = false) {
     let mm = Utils.getMessageManager(Utils.CurrentBrowser);
-    mm.sendAsyncMessage('AccessFu:Activate', {});
+    let offset = aData && typeof aData.keyIndex === 'number' ?
+                 aData.keyIndex - Output.brailleState.startOffset : -1;
+
+    mm.sendAsyncMessage('AccessFu:Activate',
+                        {offset: offset, activateIfKey: aActivateIfKey});
   },
 
   sendContextMenuMessage: function sendContextMenuMessage() {
@@ -694,19 +907,40 @@ var Input = {
     mm.sendAsyncMessage('AccessFu:ContextMenu', {});
   },
 
-  activateContextMenu: function activateContextMenu(aMessage) {
-    if (Utils.MozBuildApp === 'mobile/android')
+  activateContextMenu: function activateContextMenu(aDetails) {
+    if (Utils.MozBuildApp === 'mobile/android') {
+      let p = AccessFu.adjustContentBounds(aDetails.bounds, Utils.CurrentBrowser,
+                                           true, true).center();
       Services.obs.notifyObservers(null, 'Gesture:LongPress',
-                                   JSON.stringify({x: aMessage.x, y: aMessage.y}));
+                                   JSON.stringify({x: p.x, y: p.y}));
+    }
   },
 
   setEditState: function setEditState(aEditState) {
     this.editState = aEditState;
   },
 
+  // XXX: This is here for backwards compatability with screen reader simulator
+  // it should be removed when the extension is updated on amo.
   scroll: function scroll(aPage, aHorizontal) {
+    this.sendScrollMessage(aPage, aHorizontal);
+  },
+
+  sendScrollMessage: function sendScrollMessage(aPage, aHorizontal) {
     let mm = Utils.getMessageManager(Utils.CurrentBrowser);
     mm.sendAsyncMessage('AccessFu:Scroll', {page: aPage, horizontal: aHorizontal, origin: 'top'});
+  },
+
+  doScroll: function doScroll(aDetails) {
+    let horizontal = aDetails.horizontal;
+    let page = aDetails.page;
+    let p = AccessFu.adjustContentBounds(aDetails.bounds, Utils.CurrentBrowser,
+                                         true, true).center();
+    let wu = Utils.win.QueryInterface(Ci.nsIInterfaceRequestor).
+      getInterface(Ci.nsIDOMWindowUtils);
+    wu.sendWheelEvent(p.x, p.y,
+                      horizontal ? page : 0, horizontal ? 0 : page, 0,
+                      Utils.win.WheelEvent.DOM_DELTA_PAGE, 0, 0, 0, 0);
   },
 
   get keyMap() {
@@ -718,6 +952,8 @@ var Input = {
       B: ['movePrevious', 'Button'],
       c: ['moveNext', 'Combobox'],
       C: ['movePrevious', 'Combobox'],
+      d: ['moveNext', 'Landmark'],
+      D: ['movePrevious', 'Landmark'],
       e: ['moveNext', 'Entry'],
       E: ['movePrevious', 'Entry'],
       f: ['moveNext', 'FormElement'],

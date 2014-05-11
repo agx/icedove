@@ -39,10 +39,15 @@ toolbar:only-of-type {
   color: MenuText;
 }
 
+menu > #folderLocationPopup > menu > .menu-iconic-left,
+menu > #folderLocationPopup > menuitem > .menu-iconic-left {
+  -moz-padding-start: 2px;
+}
+
 #folderTree {
   border-bottom: 1px solid ThreeDShadow;
   background-color: -moz-OddTreeRow;
-  background-image: url("chrome://messenger/skin/grain.png");
+  background-image: url("chrome://messenger/skin/noise.png");
 }
 
 #threadTree {

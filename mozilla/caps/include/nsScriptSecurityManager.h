@@ -9,8 +9,6 @@
 
 #include "nsIScriptSecurityManager.h"
 #include "nsIPrincipal.h"
-#include "jsapi.h"
-#include "jsdbgapi.h"
 #include "nsIXPCSecurityManager.h"
 #include "nsInterfaceHashtable.h"
 #include "nsHashtable.h"
@@ -20,8 +18,9 @@
 #include "pldhash.h"
 #include "plstr.h"
 #include "nsIScriptExternalNameSet.h"
+#include "js/TypeDecls.h"
 
-#include "mozilla/StandardInteger.h"
+#include <stdint.h>
 
 class nsIDocShell;
 class nsString;
@@ -363,6 +362,8 @@ public:
     AppAttributesEqual(nsIPrincipal* aFirst,
                        nsIPrincipal* aSecond);
 
+    void DeactivateDomainPolicy();
+
 private:
 
     // GetScriptSecurityManager is the only call that can make one
@@ -371,23 +372,21 @@ private:
 
     bool SubjectIsPrivileged();
 
-    static JSBool
+    static bool
     CheckObjectAccess(JSContext *cx, JS::Handle<JSObject*> obj,
                       JS::Handle<jsid> id, JSAccessMode mode,
                       JS::MutableHandle<JS::Value> vp);
-    
+
     // Decides, based on CSP, whether or not eval() and stuff can be executed.
-    static JSBool
+    static bool
     ContentSecurityPolicyPermitsJSAction(JSContext *cx);
+
+    static bool
+    JSPrincipalsSubsume(JSPrincipals *first, JSPrincipals *second);
 
     // Returns null if a principal cannot be found; generally callers
     // should error out at that point.
-    static nsIPrincipal* doGetObjectPrincipal(JS::Handle<JSObject*> obj);
-#ifdef DEBUG
-    static nsIPrincipal*
-    old_doGetObjectPrincipal(JS::Handle<JSObject*> obj,
-                             bool aAllowShortCircuit = true);
-#endif
+    static nsIPrincipal* doGetObjectPrincipal(JSObject* obj);
 
     // Returns null if a principal cannot be found.  Note that rv can be NS_OK
     // when this happens -- this means that there was no JS running.
@@ -410,7 +409,8 @@ private:
 
     nsresult
     LookupPolicy(nsIPrincipal* principal,
-                 ClassInfoData& aClassData, jsid aProperty,
+                 ClassInfoData& aClassData,
+                 JS::Handle<jsid> aProperty,
                  uint32_t aAction,
                  ClassPolicy** aCachedClassPolicy,
                  SecurityLevel* result);
@@ -467,15 +467,6 @@ private:
                         nsIPrincipal* aSubjectPrincipal,
                         const char* aObjectSecurityLevel);
 
-    /**
-     * Helper for CanExecuteScripts that allows the caller to specify
-     * whether execution should be allowed if cx has no
-     * nsIScriptContext.
-     */
-    nsresult
-    CanExecuteScripts(JSContext* cx, nsIPrincipal *aPrincipal,
-                      bool aAllowIfNoScriptContext, bool *result);
-
     nsresult
     Init();
 
@@ -489,9 +480,6 @@ private:
     InitDomainPolicy(JSContext* cx, const char* aPolicyName,
                      DomainPolicy* aDomainPolicy);
 
-    // JS strings we need to clean up on shutdown
-    static jsid sEnabledID;
-
     inline void
     ScriptSecurityPrefChanged();
 
@@ -503,6 +491,10 @@ private:
     bool mPrefInitialized;
     bool mIsJavaScriptEnabled;
     bool mPolicyPrefsChanged;
+
+    // This machinery controls new-style domain policies. The old-style
+    // policy machinery will be removed soon.
+    nsCOMPtr<nsIDomainPolicy> mDomainPolicy;
 
     static bool sStrictFileOriginPolicy;
 
@@ -530,9 +522,9 @@ public:
 namespace mozilla {
 
 void
-GetExtendedOrigin(nsIURI* aURI, uint32_t aAppid,
-                  bool aInMozBrowser,
-                  nsACString& aExtendedOrigin);
+GetJarPrefix(uint32_t aAppid,
+             bool aInMozBrowser,
+             nsACString& aJarPrefix);
 
 } // namespace mozilla
 

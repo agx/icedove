@@ -9,14 +9,13 @@
 #include "gfxTypes.h"
 
 #include "gfxASurface.h"
-#include "gfxColor.h"
 #include "gfxPoint.h"
 #include "gfxRect.h"
 #include "gfxMatrix.h"
 #include "gfxPattern.h"
 #include "gfxPath.h"
-#include "nsISupportsImpl.h"
 #include "nsTArray.h"
+#include "nsAutoPtr.h"
 
 #include "mozilla/gfx/2D.h"
 
@@ -67,7 +66,7 @@ public:
      */
     already_AddRefed<gfxASurface> CurrentSurface(gfxFloat *dx, gfxFloat *dy);
     already_AddRefed<gfxASurface> CurrentSurface() {
-        return CurrentSurface(NULL, NULL);
+        return CurrentSurface(nullptr, nullptr);
     }
 
     /**
@@ -132,12 +131,12 @@ public:
     /**
      * Copies the current path and returns the copy.
      */
-    already_AddRefed<gfxPath> CopyPath() const;
+    already_AddRefed<gfxPath> CopyPath();
 
     /**
      * Appends the given path to the current path.
      */
-    void AppendPath(gfxPath* path);
+    void SetPath(gfxPath* path);
 
     /**
      * Moves the pen to a new point without drawing a line.
@@ -204,6 +203,7 @@ public:
      * @param snapToPixels ?
      */
     void Rectangle(const gfxRect& rect, bool snapToPixels = false);
+    void SnappedRectangle(const gfxRect& rect) { return Rectangle(rect, true); }
 
     /**
      * Draw an ellipse at the center corner with the given dimensions.
@@ -452,7 +452,7 @@ public:
     void SetDash(gfxLineType ltype);
     void SetDash(gfxFloat *dashes, int ndash, gfxFloat offset);
     // Return true if dashing is set, false if it's not enabled or the
-    // context is in an error state.  |offset| can be NULL to mean
+    // context is in an error state.  |offset| can be nullptr to mean
     // "don't care".
     bool CurrentDash(FallibleTArray<gfxFloat>& dashes, gfxFloat* offset) const;
     // Returns 0.0 if dashing isn't enabled.
@@ -616,10 +616,10 @@ public:
     /**
      * Groups
      */
-    void PushGroup(gfxASurface::gfxContentType content = gfxASurface::CONTENT_COLOR);
+    void PushGroup(gfxContentType content = GFX_CONTENT_COLOR);
     /**
-     * Like PushGroup, but if the current surface is CONTENT_COLOR and
-     * content is CONTENT_COLOR_ALPHA, makes the pushed surface CONTENT_COLOR
+     * Like PushGroup, but if the current surface is GFX_CONTENT_COLOR and
+     * content is GFX_CONTENT_COLOR_ALPHA, makes the pushed surface GFX_CONTENT_COLOR
      * instead and copies the contents of the current surface to the pushed
      * surface. This is good for pushing opacity groups, since blending the
      * group back to the current surface with some alpha applied will give
@@ -628,7 +628,7 @@ public:
      * This API really only makes sense if you do a PopGroupToSource and
      * immediate Paint with OPERATOR_OVER.
      */
-    void PushGroupAndCopyBackground(gfxASurface::gfxContentType content = gfxASurface::CONTENT_COLOR);
+    void PushGroupAndCopyBackground(gfxContentType content = GFX_CONTENT_COLOR);
     already_AddRefed<gfxPattern> PopGroup();
     void PopGroupToSource();
 
@@ -644,11 +644,6 @@ public:
     gfxRect GetUserPathExtent();
     gfxRect GetUserFillExtent();
     gfxRect GetUserStrokeExtent();
-
-    /**
-     ** Obtaining a "flattened" path - path converted to all line segments
-     **/
-    already_AddRefed<gfxFlattenedPath> GetFlattenedPath();
 
     /**
      ** Flags
@@ -708,6 +703,8 @@ public:
     void CopyAsDataURL();
 #endif
 
+    static mozilla::gfx::UserDataKey sDontUseAsSourceKey;
+
 private:
   friend class GeneralPattern;
   friend struct GlyphBufferAzure;
@@ -740,6 +737,7 @@ private:
     nsRefPtr<gfxPattern> pattern;
     nsRefPtr<gfxASurface> sourceSurfCairo;
     mozilla::RefPtr<SourceSurface> sourceSurface;
+    mozilla::gfx::Point sourceSurfaceDeviceOffset;
     Matrix surfTransform;
     Matrix transform;
     struct PushedClip {
@@ -772,7 +770,7 @@ private:
   Rect GetAzureDeviceSpaceClipBounds();
   Matrix GetDeviceTransform() const;
   Matrix GetDTTransform() const;
-  void PushNewDT(gfxASurface::gfxContentType content);
+  void PushNewDT(gfxContentType content);
 
   bool mPathIsRect;
   bool mTransformChanged;
@@ -883,8 +881,7 @@ public:
     void Restore()
     {
         if (mPath) {
-            mContext->NewPath();
-            mContext->AppendPath(mPath);
+            mContext->SetPath(mPath);
             mPath = nullptr;
         }
     }
@@ -903,6 +900,11 @@ private:
 class gfxContextMatrixAutoSaveRestore
 {
 public:
+    gfxContextMatrixAutoSaveRestore() :
+        mContext(nullptr)
+    {
+    }
+
     gfxContextMatrixAutoSaveRestore(gfxContext *aContext) :
         mContext(aContext), mMatrix(aContext->CurrentMatrix())
     {
@@ -910,11 +912,28 @@ public:
 
     ~gfxContextMatrixAutoSaveRestore()
     {
-        mContext->SetMatrix(mMatrix);
+        if (mContext) {
+            mContext->SetMatrix(mMatrix);
+        }
+    }
+
+    void SetContext(gfxContext *aContext)
+    {
+        NS_ASSERTION(!mContext, "Not going to restore the matrix on some context!");
+        mContext = aContext;
+        mMatrix = aContext->CurrentMatrix();
+    }
+
+    void Restore()
+    {
+        if (mContext) {
+            mContext->SetMatrix(mMatrix);
+        }
     }
 
     const gfxMatrix& Matrix()
     {
+        MOZ_ASSERT(mContext, "mMatrix doesn't contain a useful matrix");
         return mMatrix;
     }
 

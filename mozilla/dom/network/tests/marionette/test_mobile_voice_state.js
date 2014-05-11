@@ -2,152 +2,166 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 MARIONETTE_TIMEOUT = 30000;
+MARIONETTE_HEAD_JS = "mobile_header.js";
 
-SpecialPowers.addPermission("mobileconnection", true, document);
-
-let connection = navigator.mozMobileConnection;
-ok(connection instanceof MozMobileConnection,
-   "connection is instanceof " + connection.constructor);
-
-let emulatorCmdPendingCount = 0;
 function setEmulatorVoiceState(state) {
-  emulatorCmdPendingCount++;
-  runEmulatorCmd("gsm voice " + state, function (result) {
-    emulatorCmdPendingCount--;
-    is(result[0], "OK");
+  emulatorHelper.sendCommand("gsm voice " + state);
+}
+
+function waitForVoiceChangeEvent(callback) {
+  mobileConnection.addEventListener("voicechange", function onvoicechange() {
+    mobileConnection.removeEventListener("voicechange", onvoicechange);
+
+    if (callback && typeof callback === "function") {
+      callback();
+    }
   });
 }
 
-function setEmulatorGsmLocation(lac, cid) {
-  emulatorCmdPendingCount++;
-  runEmulatorCmd("gsm location " + lac + " " + cid, function (result) {
-    emulatorCmdPendingCount--;
-    is(result[0], "OK");
-  });
-}
+/* Test Initial Connection Info */
+taskHelper.push(function testInitialVoiceInfo() {
+  log("Test initial voice connection info");
 
-function testConnectionInfo() {
-  let voice = connection.voice;
-  is(voice.connected, true);
-  is(voice.state, "registered");
-  is(voice.emergencyCallsOnly, false);
-  is(voice.roaming, false);
+  let voice = mobileConnection.voice;
+  is(voice.state, "registered", "check voice.state");
+  is(voice.connected, true, "check voice.connected");
+  is(voice.emergencyCallsOnly, false, "check voice.emergencyCallsOnly");
+  is(voice.roaming, false, "check voice.roaming");
+  // Android emulator initializes the signal strength to -99 dBm
+  is(voice.signalStrength, -99, "check voice.signalStrength");
+  is(voice.relSignalStrength, 44, "check voice.relSignalStrength");
 
-  testCellLocation();
-}
+  let cell = voice.cell;
+  ok(cell, "location available");
+  // Initial LAC/CID. Android emulator initializes both value to
+  // 0xffff/0xffffffff.
+  is(cell.gsmLocationAreaCode, 65535, "check voice.cell.gsmLocationAreaCode");
+  is(cell.gsmCellId, 268435455, "check voice.cell.gsmCellId");
+  is(cell.cdmaBaseStationId, -1, "check voice.cell.cdmaBaseStationId");
+  is(cell.cdmaBaseStationLatitude, -2147483648,
+     "check voice.cell.cdmaBaseStationLatitude");
+  is(cell.cdmaBaseStationLongitude, -2147483648,
+     "check voice.cell.cdmaBaseStationLongitude");
+  is(cell.cdmaSystemId, -1, "check voice.cell.cdmaSystemId");
+  is(cell.cdmaNetworkId, -1, "check voice.cell.cdmaNetworkId");
 
-function testCellLocation() {
-  let voice = connection.voice;
+  taskHelper.runNext();
+});
 
-  // Emulator always reports valid lac/cid value because its AT command parser
-  // insists valid value for every complete response. See source file
-  // hardare/ril/reference-ril/at_tok.c, function at_tok_nexthexint().
-  ok(voice.cell, "location available");
+/* Test Voice State Changed */
+taskHelper.push(function testVoiceStateUpdate() {
+  // Set emulator's lac/cid and wait for 'onvoicechange' event.
+  function doTestVoiceState(state, expect, callback) {
+    log("Test voice info with state='" + state + "'");
 
-  // Initial LAC/CID. Android emulator initializes both value to -1.
-  is(voice.cell.gsmLocationAreaCode, 65535);
-  is(voice.cell.gsmCellId, 268435455);
+    waitForVoiceChangeEvent(function() {
+      let voice = mobileConnection.voice;
+      is(voice.state, expect.state, "check voice.state");
+      is(voice.connected, expect.connected, "check voice.connected");
+      is(voice.emergencyCallsOnly, expect.emergencyCallsOnly,
+         "check voice.emergencyCallsOnly");
+      is(voice.roaming, expect.roaming, "check voice.roaming");
+      is(voice.signalStrength, expect.signalStrength,
+         "check voice.signalStrength");
+      is(voice.relSignalStrength, expect.relSignalStrength,
+         "check voice.relSignalStrength");
 
-  connection.addEventListener("voicechange", function onvoicechange() {
-    connection.removeEventListener("voicechange", onvoicechange);
+      let cell = voice.cell;
+      if (!expect.cell) {
+        ok(!cell, "check voice.cell");
+      } else {
+        is(cell.gsmLocationAreaCode, expect.cell.gsmLocationAreaCode,
+           "check voice.cell.gsmLocationAreaCode");
+        is(cell.gsmCellId, expect.cell.gsmCellId, "check voice.cell.gsmCellId");
+        is(cell.cdmaBaseStationId, -1, "check voice.cell.cdmaBaseStationId");
+        is(cell.cdmaBaseStationLatitude, -2147483648,
+           "check voice.cell.cdmaBaseStationLatitude");
+        is(cell.cdmaBaseStationLongitude, -2147483648,
+           "check voice.cell.cdmaBaseStationLongitude");
+        is(cell.cdmaSystemId, -1, "check voice.cell.cdmaSystemId");
+        is(cell.cdmaNetworkId, -1, "check voice.cell.cdmaNetworkId");
+      }
 
-    is(voice.cell.gsmLocationAreaCode, 100);
-    is(voice.cell.gsmCellId, 100);
+      if (callback && typeof callback === "function") {
+        callback();
+      }
+    });
 
-    testUnregistered();
-  });
-
-  setEmulatorGsmLocation(100, 100);
-}
-
-function testUnregistered() {
-  setEmulatorVoiceState("unregistered");
-
-  connection.addEventListener("voicechange", function onvoicechange() {
-    connection.removeEventListener("voicechange", onvoicechange);
-
-    is(connection.voice.connected, false);
-    is(connection.voice.state, "notSearching");
-    is(connection.voice.emergencyCallsOnly, false);
-    is(connection.voice.roaming, false);
-
-    testSearching();
-  });
-}
-
-function testSearching() {
-  // For some reason, requesting the "searching" state puts the fake modem
-  // into "registered"... Skipping this test for now.
-  testDenied();
-  return;
-
-  setEmulatorVoiceState("searching");
-
-  connection.addEventListener("voicechange", function onvoicechange() {
-    connection.removeEventListener("voicechange", onvoicechange);
-
-    is(connection.voice.connected, false);
-    is(connection.voice.state, "searching");
-    is(connection.voice.emergencyCallsOnly, false);
-    is(connection.voice.roaming, false);
-
-    testDenied();
-  });
-}
-
-function testDenied() {
-  setEmulatorVoiceState("denied");
-
-  connection.addEventListener("voicechange", function onvoicechange() {
-    connection.removeEventListener("voicechange", onvoicechange);
-
-    is(connection.voice.connected, false);
-    is(connection.voice.state, "denied");
-    is(connection.voice.emergencyCallsOnly, false);
-    is(connection.voice.roaming, false);
-
-    testRoaming();
-  });
-}
-
-function testRoaming() {
-  setEmulatorVoiceState("roaming");
-
-  connection.addEventListener("voicechange", function onvoicechange() {
-    connection.removeEventListener("voicechange", onvoicechange);
-
-    is(connection.voice.connected, true);
-    is(connection.voice.state, "registered");
-    is(connection.voice.emergencyCallsOnly, false);
-    is(connection.voice.roaming, true);
-
-    testHome();
-  });
-}
-
-function testHome() {
-  setEmulatorVoiceState("home");
-
-  connection.addEventListener("voicechange", function onvoicechange() {
-    connection.removeEventListener("voicechange", onvoicechange);
-
-    is(connection.voice.connected, true);
-    is(connection.voice.state, "registered");
-    is(connection.voice.emergencyCallsOnly, false);
-    is(connection.voice.roaming, false);
-
-    cleanUp();
-  });
-}
-
-function cleanUp() {
-  if (emulatorCmdPendingCount > 0) {
-    setTimeout(cleanUp, 100);
-    return;
+    setEmulatorVoiceState(state);
   }
 
-  SpecialPowers.removePermission("mobileconnection", document);
-  finish();
-}
+  let testData = [
+    // Test state becomes to "unregistered"
+    {state: "unregistered",
+     expect: {
+      state: "notSearching",
+      connected: false,
+      emergencyCallsOnly: true,
+      roaming: false,
+      signalStrength: null,
+      relSignalStrength: null,
+      cell: null
+    }},
+    // Test state becomes to "searching"
+    {state: "searching",
+     expect: {
+      state: "searching",
+      connected: false,
+      emergencyCallsOnly: true,
+      roaming: false,
+      signalStrength: null,
+      relSignalStrength: null,
+      cell: null
+    }},
+    // Test state becomes to "denied"
+    {state: "denied",
+     expect: {
+      state: "denied",
+      connected: false,
+      emergencyCallsOnly: true,
+      roaming: false,
+      signalStrength: null,
+      relSignalStrength: null,
+      cell: null
+    }},
+    // Test state becomes to "roaming"
+    {state: "roaming",
+     expect: {
+      state: "registered",
+      connected: true,
+      emergencyCallsOnly: false,
+      roaming: true,
+      signalStrength: -99,
+      relSignalStrength: 44,
+      cell: {
+        gsmLocationAreaCode: 65535,
+        gsmCellId: 268435455
+    }}},
+    // Reset state to default value.
+    {state: "home",
+     expect: {
+      state: "registered",
+      connected: true,
+      emergencyCallsOnly: false,
+      roaming: false,
+      signalStrength: -99,
+      relSignalStrength: 44,
+      cell: {
+        gsmLocationAreaCode: 65535,
+        gsmCellId: 268435455
+    }}}
+  ];
 
-testConnectionInfo();
+  // Run all test data.
+  (function do_call() {
+    let next = testData.shift();
+    if (!next) {
+      taskHelper.runNext();
+      return;
+    }
+    doTestVoiceState(next.state, next.expect, do_call);
+  })();
+});
+
+// Start test
+taskHelper.runNext();

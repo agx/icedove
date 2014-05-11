@@ -1,4 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* -*- Mode: Javascript; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ft=javascript ts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -7,13 +7,26 @@
 const {Cu, Cc, Ci} = require("chrome");
 
 Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource:///modules/devtools/LayoutHelpers.jsm");
+Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 let EventEmitter = require("devtools/shared/event-emitter");
 
 const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
   // add ":visited" and ":link" after bug 713106 is fixed
+
+exports._forceBasic = {value: false};
+
+exports.Highlighter = function Highlighter(aTarget, aInspector, aToolbox) {
+  if (aTarget.isLocalTab && !exports._forceBasic.value) {
+    return new LocalHighlighter(aTarget, aInspector, aToolbox);
+  } else {
+    return new BasicHighlighter(aTarget, aInspector, aToolbox);
+  }
+}
+
+exports.LocalHighlighter = LocalHighlighter;
+exports.BasicHighlighter = BasicHighlighter;
 
 /**
  * A highlighter mechanism.
@@ -71,7 +84,7 @@ const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
  * @param aInspector Inspector panel.
  * @param aToolbox The toolbox holding the inspector.
  */
-function Highlighter(aTarget, aInspector, aToolbox)
+function LocalHighlighter(aTarget, aInspector, aToolbox)
 {
   this.target = aTarget;
   this.tab = aTarget.tab;
@@ -80,21 +93,21 @@ function Highlighter(aTarget, aInspector, aToolbox)
   this.chromeDoc = this.tab.ownerDocument;
   this.chromeWin = this.chromeDoc.defaultView;
   this.inspector = aInspector
+  this.layoutHelpers = new LayoutHelpers(this.browser.contentWindow);
 
   EventEmitter.decorate(this);
 
   this._init();
 }
 
-exports.Highlighter = Highlighter;
-
-Highlighter.prototype = {
+LocalHighlighter.prototype = {
   get selection() {
     return this.inspector.selection;
   },
 
-  _init: function Highlighter__init()
+  _init: function LocalHighlighter__init()
   {
+    this.toggleLockState = this.toggleLockState.bind(this);
     this.unlockAndFocus = this.unlockAndFocus.bind(this);
     this.updateInfobar = this.updateInfobar.bind(this);
     this.highlight = this.highlight.bind(this);
@@ -128,8 +141,6 @@ Highlighter.prototype = {
     this.transitionDisabler = null;
     this.pageEventsMuter = null;
 
-    this.unlockAndFocus();
-
     this.selection.on("new-node", this.highlight);
     this.selection.on("new-node", this.updateInfobar);
     this.selection.on("pseudoclass", this.updateInfobar);
@@ -158,7 +169,7 @@ Highlighter.prototype = {
   /**
    * Destroy the nodes. Remove listeners.
    */
-  destroy: function Highlighter_destroy()
+  destroy: function LocalHighlighter_destroy()
   {
     this.inspectButton.removeEventListener("command", this.unlockAndFocus);
     this.inspectButton = null;
@@ -196,7 +207,7 @@ Highlighter.prototype = {
   /**
    * Show the outline, and select a node.
    */
-  highlight: function Highlighter_highlight()
+  highlight: function LocalHighlighter_highlight()
   {
     if (this.selection.reason != "highlighter") {
       this.lock();
@@ -215,7 +226,7 @@ Highlighter.prototype = {
       this.invalidateSize();
       if (!this._highlighting &&
           this.selection.reason != "highlighter") {
-        LayoutHelpers.scrollIntoViewIfNeeded(this.selection.node);
+        this.layoutHelpers.scrollIntoViewIfNeeded(this.selection.node);
       }
     } else {
       this.disabled = true;
@@ -226,7 +237,7 @@ Highlighter.prototype = {
   /**
    * Update the highlighter size and position.
    */
-  invalidateSize: function Highlighter_invalidateSize()
+  invalidateSize: function LocalHighlighter_invalidateSize()
   {
     let canHiglightNode = this.selection.isNode() &&
                           this.selection.isConnected() &&
@@ -235,8 +246,17 @@ Highlighter.prototype = {
     if (!canHiglightNode)
       return;
 
+    // The highlighter runs locally while the selection runs remotely,
+    // so we can't quite trust the selection's isConnected to protect us
+    // here, do the check manually.
+    if (!this.selection.node ||
+        !this.selection.node.ownerDocument ||
+        !this.selection.node.ownerDocument.defaultView) {
+      return;
+    }
+
     let clientRect = this.selection.node.getBoundingClientRect();
-    let rect = LayoutHelpers.getDirtyRect(this.selection.node);
+    let rect = this.layoutHelpers.getDirtyRect(this.selection.node);
     this.highlightRectangle(rect);
 
     this.moveInfobar();
@@ -310,9 +330,22 @@ Highlighter.prototype = {
   },
 
   /**
+   * Toggle between locked and unlocked
+   */
+  toggleLockState: function() {
+    if (this.locked) {
+      this.startNode = this.selection.node;
+      this.unlockAndFocus();
+    } else {
+      this.selection.setNode(this.startNode);
+      this.lock();
+    }
+  },
+
+  /**
    * Focus the browser before unlocking.
    */
-  unlockAndFocus: function Highlighter_unlockAndFocus() {
+  unlockAndFocus: function LocalHighlighter_unlockAndFocus() {
     if (this.locked === false) return;
     this.chromeWin.focus();
     this.unlock();
@@ -321,7 +354,7 @@ Highlighter.prototype = {
   /**
    * Hide the infobar
    */
-   hideInfobar: function Highlighter_hideInfobar() {
+   hideInfobar: function LocalHighlighter_hideInfobar() {
      this.nodeInfo.container.setAttribute("force-transitions", "true");
      this.nodeInfo.container.setAttribute("hidden", "true");
    },
@@ -329,7 +362,7 @@ Highlighter.prototype = {
   /**
    * Show the infobar
    */
-   showInfobar: function Highlighter_showInfobar() {
+   showInfobar: function LocalHighlighter_showInfobar() {
      this.nodeInfo.container.removeAttribute("hidden");
      this.moveInfobar();
      this.nodeInfo.container.removeAttribute("force-transitions");
@@ -338,14 +371,14 @@ Highlighter.prototype = {
   /**
    * Hide the outline
    */
-   hideOutline: function Highlighter_hideOutline() {
+   hideOutline: function LocalHighlighter_hideOutline() {
      this.outline.setAttribute("hidden", "true");
    },
 
   /**
    * Show the outline
    */
-   showOutline: function Highlighter_showOutline() {
+   showOutline: function LocalHighlighter_showOutline() {
      if (this._highlighting)
        this.outline.removeAttribute("hidden");
    },
@@ -354,7 +387,7 @@ Highlighter.prototype = {
    * Build the node Infobar.
    *
    * <box class="highlighter-nodeinfobar-container">
-   *   <box class="Highlighter-nodeinfobar-arrow-top"/>
+   *   <box class="highlighter-nodeinfobar-arrow-top"/>
    *   <hbox class="highlighter-nodeinfobar">
    *     <toolbarbutton class="highlighter-nodeinfobar-button highlighter-nodeinfobar-inspectbutton"/>
    *     <hbox class="highlighter-nodeinfobar-text">
@@ -365,13 +398,13 @@ Highlighter.prototype = {
    *     </hbox>
    *     <toolbarbutton class="highlighter-nodeinfobar-button highlighter-nodeinfobar-menu"/>
    *   </hbox>
-   *   <box class="Highlighter-nodeinfobar-arrow-bottom"/>
+   *   <box class="highlighter-nodeinfobar-arrow-bottom"/>
    * </box>
    *
    * @param nsIDOMElement aParent
    *        The container of the infobar.
    */
-  buildInfobar: function Highlighter_buildInfobar(aParent)
+  buildInfobar: function LocalHighlighter_buildInfobar(aParent)
   {
     let container = this.chromeDoc.createElement("box");
     container.className = "highlighter-nodeinfobar-container";
@@ -408,7 +441,7 @@ Highlighter.prototype = {
     this.inspectButton.className = "highlighter-nodeinfobar-button highlighter-nodeinfobar-inspectbutton"
     let toolbarInspectButton = this.inspector.panelDoc.getElementById("inspector-inspect-toolbutton");
     this.inspectButton.setAttribute("tooltiptext", toolbarInspectButton.getAttribute("tooltiptext"));
-    this.inspectButton.addEventListener("command", this.unlockAndFocus);
+    this.inspectButton.addEventListener("command", this.toggleLockState);
 
     let nodemenu = this.chromeDoc.createElement("toolbarbutton");
     nodemenu.setAttribute("type", "menu");
@@ -429,7 +462,7 @@ Highlighter.prototype = {
     texthbox.addEventListener("mousedown", function(aEvent) {
       // On click, show the node:
       if (this.selection.isElementNode()) {
-        LayoutHelpers.scrollIntoViewIfNeeded(this.selection.node);
+        this.layoutHelpers.scrollIntoViewIfNeeded(this.selection.node);
       }
     }.bind(this), true);
 
@@ -468,7 +501,7 @@ Highlighter.prototype = {
    * @returns boolean
    *          True if the rectangle was highlighted, false otherwise.
    */
-  highlightRectangle: function Highlighter_highlightRectangle(aRect)
+  highlightRectangle: function LocalHighlighter_highlightRectangle(aRect)
   {
     if (!aRect) {
       this.unhighlight();
@@ -482,7 +515,7 @@ Highlighter.prototype = {
       return; // same rectangle
     }
 
-    let aRectScaled = LayoutHelpers.getZoomedRect(this.win, aRect);
+    let aRectScaled = this.layoutHelpers.getZoomedRect(this.win, aRect);
 
     if (aRectScaled.left >= 0 && aRectScaled.top >= 0 &&
         aRectScaled.width > 0 && aRectScaled.height > 0) {
@@ -511,7 +544,7 @@ Highlighter.prototype = {
   /**
    * Clear the highlighter surface.
    */
-  unhighlight: function Highlighter_unhighlight()
+  unhighlight: function LocalHighlighter_unhighlight()
   {
     this._highlighting = false;
     this.hideOutline();
@@ -520,7 +553,7 @@ Highlighter.prototype = {
   /**
    * Update node information (tagName#id.class)
    */
-  updateInfobar: function Highlighter_updateInfobar()
+  updateInfobar: function LocalHighlighter_updateInfobar()
   {
     if (!this.selection.isElementNode()) {
       this.nodeInfo.tagNameLabel.textContent = "";
@@ -556,7 +589,7 @@ Highlighter.prototype = {
   /**
    * Move the Infobar to the right place in the highlighter.
    */
-  moveInfobar: function Highlighter_moveInfobar()
+  moveInfobar: function LocalHighlighter_moveInfobar()
   {
     if (this._highlightRect) {
       let winHeight = this.win.innerHeight * this.zoom;
@@ -623,7 +656,7 @@ Highlighter.prototype = {
   /**
    * Store page zoom factor.
    */
-  computeZoomFactor: function Highlighter_computeZoomFactor() {
+  computeZoomFactor: function LocalHighlighter_computeZoomFactor() {
     this.zoom =
       this.win.QueryInterface(Ci.nsIInterfaceRequestor)
       .getInterface(Ci.nsIDOMWindowUtils)
@@ -633,7 +666,7 @@ Highlighter.prototype = {
   /////////////////////////////////////////////////////////////////////////
   //// Event Handling
 
-  attachMouseListeners: function Highlighter_attachMouseListeners()
+  attachMouseListeners: function LocalHighlighter_attachMouseListeners()
   {
     this.browser.addEventListener("mousemove", this, true);
     this.browser.addEventListener("click", this, true);
@@ -642,7 +675,7 @@ Highlighter.prototype = {
     this.browser.addEventListener("mouseup", this, true);
   },
 
-  detachMouseListeners: function Highlighter_detachMouseListeners()
+  detachMouseListeners: function LocalHighlighter_detachMouseListeners()
   {
     this.browser.removeEventListener("mousemove", this, true);
     this.browser.removeEventListener("click", this, true);
@@ -651,14 +684,14 @@ Highlighter.prototype = {
     this.browser.removeEventListener("mouseup", this, true);
   },
 
-  attachPageListeners: function Highlighter_attachPageListeners()
+  attachPageListeners: function LocalHighlighter_attachPageListeners()
   {
     this.browser.addEventListener("resize", this, true);
     this.browser.addEventListener("scroll", this, true);
     this.browser.addEventListener("MozAfterPaint", this, true);
   },
 
-  detachPageListeners: function Highlighter_detachPageListeners()
+  detachPageListeners: function LocalHighlighter_detachPageListeners()
   {
     this.browser.removeEventListener("resize", this, true);
     this.browser.removeEventListener("scroll", this, true);
@@ -671,7 +704,7 @@ Highlighter.prototype = {
    * @param nsIDOMEvent aEvent
    *        The DOM event object.
    */
-  handleEvent: function Highlighter_handleEvent(aEvent)
+  handleEvent: function LocalHighlighter_handleEvent(aEvent)
   {
     switch (aEvent.type) {
       case "click":
@@ -702,7 +735,7 @@ Highlighter.prototype = {
    * Disable the CSS transitions for a short time to avoid laggy animations
    * during scrolling or resizing.
    */
-  brieflyDisableTransitions: function Highlighter_brieflyDisableTransitions()
+  brieflyDisableTransitions: function LocalHighlighter_brieflyDisableTransitions()
   {
     if (this.transitionDisabler) {
       this.chromeWin.clearTimeout(this.transitionDisabler);
@@ -721,7 +754,7 @@ Highlighter.prototype = {
   /**
    * Don't listen to page events while inspecting with the mouse.
    */
-  brieflyIgnorePageEvents: function Highlighter_brieflyIgnorePageEvents()
+  brieflyIgnorePageEvents: function LocalHighlighter_brieflyIgnorePageEvents()
   {
     // The goal is to keep smooth animations while inspecting.
     // CSS Transitions might be interrupted because of a MozAfterPaint
@@ -752,7 +785,7 @@ Highlighter.prototype = {
    * @param nsIDOMEvent aEvent
    *        The DOM event.
    */
-  handleClick: function Highlighter_handleClick(aEvent)
+  handleClick: function LocalHighlighter_handleClick(aEvent)
   {
     // Stop inspection when the user clicks on a node.
     if (aEvent.button == 0) {
@@ -770,14 +803,14 @@ Highlighter.prototype = {
    * @param nsiDOMEvent aEvent
    *        The MouseEvent triggering the method.
    */
-  handleMouseMove: function Highlighter_handleMouseMove(aEvent)
+  handleMouseMove: function LocalHighlighter_handleMouseMove(aEvent)
   {
     let doc = aEvent.target.ownerDocument;
 
     // This should never happen, but just in case, we don't let the
     // highlighter highlight browser nodes.
     if (doc && doc != this.chromeDoc) {
-      let element = LayoutHelpers.getElementFromPoint(aEvent.target.ownerDocument,
+      let element = this.layoutHelpers.getElementFromPoint(aEvent.target.ownerDocument,
         aEvent.clientX, aEvent.clientY);
       if (element && element != this.selection.node) {
         this.selection.setNode(element, "highlighter");
@@ -786,13 +819,59 @@ Highlighter.prototype = {
   },
 };
 
+// BasicHighlighter. Doesn't implement any fancy features. Just change
+// the outline of the selected node. Works with remote target.
+
+function BasicHighlighter(aTarget, aInspector)
+{
+  this.walker = aInspector.walker;
+  this.selection = aInspector.selection;
+  this.highlight = this.highlight.bind(this);
+  this.selection.on("new-node-front", this.highlight);
+  EventEmitter.decorate(this);
+  this.locked = true;
+}
+
+BasicHighlighter.prototype = {
+  destroy: function() {
+    this.walker.highlight(null);
+    this.selection.off("new-node-front", this.highlight);
+    this.walker = null;
+    this.selection = null;
+  },
+  toggleLockState: function() {
+    this.locked = !this.locked;
+    if (this.locked) {
+      this.walker.cancelPick();
+    } else {
+      this.emit("unlocked");
+      this.walker.pick().then(
+        (node) => this._onPick(node),
+        () => this._onPick(null)
+      );
+    }
+  },
+  highlight: function() {
+    this.walker.highlight(this.selection.nodeFront);
+  },
+  _onPick: function(node) {
+    if (node) {
+      this.selection.setNodeFront(node);
+    }
+    this.locked = true;
+    this.emit("locked");
+  },
+  hide: function() {},
+  show: function() {},
+}
+
 ///////////////////////////////////////////////////////////////////////////
 
 XPCOMUtils.defineLazyGetter(this, "DOMUtils", function () {
   return Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils)
 });
 
-XPCOMUtils.defineLazyGetter(Highlighter.prototype, "strings", function () {
+XPCOMUtils.defineLazyGetter(LocalHighlighter.prototype, "strings", function () {
     return Services.strings.createBundle(
             "chrome://browser/locale/devtools/inspector.properties");
 });

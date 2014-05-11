@@ -1,6 +1,7 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+"use strict";
 
 /*
  * SelectionPrototype - common base class used by both chrome and content selection logic.
@@ -150,9 +151,11 @@ SelectionPrototype.prototype = {
     let containedCoords = this._restrictCoordinateToEditBounds(aX, aY);
     let cp = this._contentWindow.document.caretPositionFromPoint(containedCoords.xPos,
                                                                  containedCoords.yPos);
-    let input = cp.offsetNode;
-    let offset = cp.offset;
-    input.selectionStart = input.selectionEnd = offset;
+    if (cp) {
+      let input = cp.offsetNode;
+      let offset = cp.offset;
+      input.selectionStart = input.selectionEnd = offset;
+    }
   },
 
   /*
@@ -243,7 +246,7 @@ SelectionPrototype.prototype = {
     clientPoint.yPos -= halfLineHeight;
 
     // Modify selection based on monocle movement
-    if (this._targetIsEditable) {
+    if (this._targetIsEditable && !Util.isEditableContent(this._targetElement)) {
       this._adjustEditableSelection(aMarker, clientPoint, aEndOfSelection);
     } else {
       this._adjustSelectionAtPoint(aMarker, clientPoint, aEndOfSelection);
@@ -296,27 +299,38 @@ SelectionPrototype.prototype = {
       let constrainedPoint =
         this._constrainPointWithinControl(aAdjustedClientPoint);
 
-      // For textareas we fall back on the selectAtPoint logic due to various
-      // issues with caretPositionFromPoint (bug 882149).
-      if (Util.isMultilineInput(this._targetElement)) {
-        this._adjustSelectionAtPoint(aMarker, constrainedPoint, aEndOfSelection);
-        return;
-      }
-
       //  Add or subtract selection
       let cp =
         this._contentWindow.document.caretPositionFromPoint(constrainedPoint.xPos,
                                                             constrainedPoint.yPos);
-      if (!cp || (cp.offsetNode != this._targetElement &&
-          this._contentWindow.document.getBindingParent(cp.offsetNode) != this._targetElement)) {
+
+      // For textareas or if cpfp fails we fall back on the selectAtPoint
+      // logic (bugs 882149, 943071).
+      if (Util.isMultilineInput(this._targetElement) || !cp ||
+          !this._offsetNodeIsValid(cp.offsetNode)) {
+        this._adjustSelectionAtPoint(aMarker, constrainedPoint, aEndOfSelection);
         return;
       }
+
       if (aMarker == "start") {
         this._targetElement.selectionStart = cp.offset;
       } else {
         this._targetElement.selectionEnd = cp.offset;
       }
     }
+  },
+
+  /*
+   * Make sure caretPositionFromPoint gave us an offset node that equals our
+   * editable, or in the case of getBindingParent identifies an anonymous
+   * element in chrome content within our target element. (navbar)
+   */
+  _offsetNodeIsValid: function (aNode) {
+    if (aNode == this._targetElement ||
+        this._contentWindow.document.getBindingParent(aNode) == this._targetElement) {
+      return true;
+    }
+    return false;
   },
 
   /*
@@ -764,7 +778,7 @@ SelectionPrototype.prototype = {
     }
 
     // Store the client rect of target element
-    r = this._getTargetClientRect();
+    let r = this._getTargetClientRect();
     seldata.element.left = r.left + this._contentOffset.x;
     seldata.element.top = r.top + this._contentOffset.y;
     seldata.element.right = r.right + this._contentOffset.x;

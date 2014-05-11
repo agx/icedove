@@ -6,8 +6,9 @@
 #include "base/basictypes.h"
 
 /* This must occur *after* layers/PLayerTransaction.h to avoid typedefs conflicts. */
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
+#include "pratom.h"
 #include "prmem.h"
 #include "prenv.h"
 #include "prclist.h"
@@ -92,7 +93,7 @@ using mozilla::plugins::PluginModuleParent;
 
 #ifdef XP_WIN
 #include <windows.h>
-#include "nsWindowsHelpers.h"
+#include "mozilla/WindowsVersion.h"
 #ifdef ACCESSIBILITY
 #include "mozilla/a11y/Compatibility.h"
 #endif
@@ -166,8 +167,8 @@ static NPNetscapeFuncs sBrowserFuncs = {
   _unscheduletimer,
   _popupcontextmenu,
   _convertpoint,
-  NULL, // handleevent, unimplemented
-  NULL, // unfocusinstance, unimplemented
+  nullptr, // handleevent, unimplemented
+  nullptr, // unfocusinstance, unimplemented
   _urlredirectresponse,
   _initasyncsurface,
   _finalizeasyncsurface,
@@ -182,8 +183,6 @@ enum eNPPStreamTypeInternal {
   eNPPStreamTypeInternal_Get,
   eNPPStreamTypeInternal_Post
 };
-
-static NS_DEFINE_IID(kMemoryCID, NS_MEMORY_CID);
 
 PRIntervalTime NS_NotifyBeginPluginCall(NSPluginCallReentry aReentryState)
 {
@@ -498,7 +497,7 @@ nsNPAPIPlugin::RetainStream(NPStream *pstream, nsISupports **aRetainedPeer)
   if (!aRetainedPeer)
     return NS_ERROR_NULL_POINTER;
 
-  *aRetainedPeer = NULL;
+  *aRetainedPeer = nullptr;
 
   if (!pstream || !pstream->ndata)
     return NS_ERROR_NULL_POINTER;
@@ -561,13 +560,15 @@ MakeNewNPAPIStreamInternal(NPP npp, const char *relativeURL, const char *target,
   case eNPPStreamTypeInternal_Get:
     {
       if (NS_FAILED(pluginHost->GetURL(inst, relativeURL, target, listener,
-                                       NULL, NULL, false)))
+                                       nullptr, nullptr, false)))
         return NPERR_GENERIC_ERROR;
       break;
     }
   case eNPPStreamTypeInternal_Post:
     {
-      if (NS_FAILED(pluginHost->PostURL(inst, relativeURL, len, buf, file, target, listener, NULL, NULL, false, 0, NULL)))
+      if (NS_FAILED(pluginHost->PostURL(inst, relativeURL, len, buf, file,
+                                        target, listener, nullptr, nullptr,
+                                        false, 0, nullptr)))
         return NPERR_GENERIC_ERROR;
       break;
     }
@@ -684,11 +685,10 @@ doGetIdentifier(JSContext *cx, const NPUTF8* name)
 {
   NS_ConvertUTF8toUTF16 utf16name(name);
 
-  JSString *str = ::JS_InternUCStringN(cx, (jschar *)utf16name.get(),
-                                       utf16name.Length());
+  JSString *str = ::JS_InternUCStringN(cx, utf16name.get(), utf16name.Length());
 
   if (!str)
-    return NULL;
+    return nullptr;
 
   return StringToNPIdentifier(cx, str);
 }
@@ -699,7 +699,7 @@ InHeap(HANDLE hHeap, LPVOID lpMem)
 {
   BOOL success = FALSE;
   PROCESS_HEAP_ENTRY he;
-  he.lpData = NULL;
+  he.lpData = nullptr;
   while (HeapWalk(hHeap, &he) != 0) {
     if (he.lpData == lpMem) {
       success = TRUE;
@@ -1246,7 +1246,7 @@ _getpluginelement(NPP npp)
   NS_ENSURE_TRUE(xpc, nullptr);
 
   nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
-  xpc->WrapNative(cx, ::JS_GetGlobalForScopeChain(cx), element,
+  xpc->WrapNative(cx, ::JS::CurrentGlobalOrNull(cx), element,
                   NS_GET_IID(nsIDOMElement),
                   getter_AddRefs(holder));
   NS_ENSURE_TRUE(holder, nullptr);
@@ -1262,7 +1262,7 @@ _getstringidentifier(const NPUTF8* name)
 {
   if (!name) {
     NPN_PLUGIN_LOG(PLUGIN_LOG_ALWAYS, ("NPN_getstringidentifier: passed null name"));
-    return NULL;
+    return nullptr;
   }
   if (!NS_IsMainThread()) {
     NPN_PLUGIN_LOG(PLUGIN_LOG_ALWAYS,("NPN_getstringidentifier called from the wrong thread\n"));
@@ -1287,7 +1287,7 @@ _getstringidentifiers(const NPUTF8** names, int32_t nameCount,
       identifiers[i] = doGetIdentifier(cx, names[i]);
     } else {
       NPN_PLUGIN_LOG(PLUGIN_LOG_ALWAYS, ("NPN_getstringidentifiers: passed null name"));
-      identifiers[i] = NULL;
+      identifiers[i] = nullptr;
     }
   }
 }
@@ -1308,7 +1308,7 @@ _utf8fromidentifier(NPIdentifier id)
     NPN_PLUGIN_LOG(PLUGIN_LOG_ALWAYS,("NPN_utf8fromidentifier called from the wrong thread\n"));
   }
   if (!id)
-    return NULL;
+    return nullptr;
 
   if (!NPIdentifierIsString(id)) {
     return nullptr;
@@ -1923,7 +1923,7 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
         return NPERR_NO_ERROR;
       }
     }
-#ifdef MOZ_WIDGET_GTK2
+#if (MOZ_WIDGET_GTK == 2)
     // adobe nppdf calls XtGetApplicationNameAndClass(display,
     // &instance, &class) we have to init Xt toolkit before get
     // XtDisplay just call gtk_xtbin_new(w,0) once
@@ -1944,7 +1944,7 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
     return NPERR_GENERIC_ERROR;
 #endif
 
-#if defined(XP_WIN) || defined(XP_OS2) || defined(MOZ_WIDGET_GTK2) \
+#if defined(XP_WIN) || defined(XP_OS2) || (MOZ_WIDGET_GTK == 2) \
  || defined(MOZ_WIDGET_QT)
   case NPNVnetscapeWindow: {
     if (!npp || !npp->ndata)
@@ -2261,11 +2261,7 @@ _getvalue(NPP npp, NPNVariable variable, void *result)
     }  
 
     case kJavaContext_ANPGetValue: {
-      AndroidBridge *bridge = AndroidBridge::Bridge();
-      if (!bridge)
-        return NPERR_GENERIC_ERROR;
-
-      jobject ret = bridge->GetContext();
+      jobject ret = GeckoAppShell::GetContext();
       if (!ret)
         return NPERR_GENERIC_ERROR;
 
@@ -2502,7 +2498,7 @@ void* NP_CALLBACK /* OJI type: JRIEnv* */
 _getJavaEnv()
 {
   NPN_PLUGIN_LOG(PLUGIN_LOG_NORMAL, ("NPN_GetJavaEnv\n"));
-  return NULL;
+  return nullptr;
 }
 
 const char * NP_CALLBACK
@@ -2543,7 +2539,7 @@ void* NP_CALLBACK /* OJI type: jref */
 _getJavaPeer(NPP npp)
 {
   NPN_PLUGIN_LOG(PLUGIN_LOG_NORMAL, ("NPN_GetJavaPeer: npp=%p\n", (void*)npp));
-  return NULL;
+  return nullptr;
 }
 
 void NP_CALLBACK
@@ -2553,7 +2549,7 @@ _pushpopupsenabledstate(NPP npp, NPBool enabled)
     NPN_PLUGIN_LOG(PLUGIN_LOG_ALWAYS,("NPN_pushpopupsenabledstate called from the wrong thread\n"));
     return;
   }
-  nsNPAPIPluginInstance *inst = npp ? (nsNPAPIPluginInstance *)npp->ndata : NULL;
+  nsNPAPIPluginInstance *inst = npp ? (nsNPAPIPluginInstance *)npp->ndata : nullptr;
   if (!inst)
     return;
 
@@ -2567,7 +2563,7 @@ _poppopupsenabledstate(NPP npp)
     NPN_PLUGIN_LOG(PLUGIN_LOG_ALWAYS,("NPN_poppopupsenabledstate called from the wrong thread\n"));
     return;
   }
-  nsNPAPIPluginInstance *inst = npp ? (nsNPAPIPluginInstance *)npp->ndata : NULL;
+  nsNPAPIPluginInstance *inst = npp ? (nsNPAPIPluginInstance *)npp->ndata : nullptr;
   if (!inst)
     return;
 
@@ -2681,15 +2677,12 @@ _setvalueforurl(NPP instance, NPNURLVariable variable, const char *url,
       if (NS_FAILED(rv))
         return NPERR_GENERIC_ERROR;
 
-      nsCOMPtr<nsIPrompt> prompt;
-      nsPluginHost::GetPrompt(nullptr, getter_AddRefs(prompt));
-
       nsCOMPtr<nsIChannel> channel = GetChannelFromNPP(instance);
 
       char *cookie = (char*)value;
       char c = cookie[len];
       cookie[len] = '\0';
-      rv = cookieService->SetCookieString(uriIn, prompt, cookie, channel);
+      rv = cookieService->SetCookieString(uriIn, nullptr, cookie, channel);
       cookie[len] = c;
       if (NS_SUCCEEDED(rv))
         return NPERR_NO_ERROR;

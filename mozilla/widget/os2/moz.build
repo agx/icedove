@@ -4,9 +4,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-MODULE = 'widget'
-
-CPP_SOURCES += [
+SOURCES += [
     'nsAppShell.cpp',
     'nsBidiKeyboard.cpp',
     'nsClipboard.cpp',
@@ -16,8 +14,8 @@ CPP_SOURCES += [
     'nsIdleServiceOS2.cpp',
     'nsLookAndFeel.cpp',
     'nsOS2Uni.cpp',
-    'nsPrintOS2.cpp',
     'nsPrintOptionsOS2.cpp',
+    'nsPrintOS2.cpp',
     'nsRwsService.cpp',
     'nsScreenManagerOS2.cpp',
     'nsScreenOS2.cpp',
@@ -29,3 +27,12 @@ CPP_SOURCES += [
 
 LIBRARY_NAME = 'wdgtos2'
 
+FINAL_LIBRARY = 'xul'
+LOCAL_INCLUDES += [
+    '../xpwidgets',
+]
+
+
+DEFINES['USE_OS2_TOOLKIT_HEADERS'] = True
+
+DEFINES['MOZ_APP_DISPLAYNAME'] = '"%s"' % CONFIG['MOZ_APP_DISPLAYNAME']

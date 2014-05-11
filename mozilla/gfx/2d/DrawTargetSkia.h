@@ -38,6 +38,10 @@ public:
                            const Rect &aSource,
                            const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
                            const DrawOptions &aOptions = DrawOptions());
+  virtual void DrawFilter(FilterNode *aNode,
+                          const Rect &aSourceRect,
+                          const Point &aDestPoint,
+                          const DrawOptions &aOptions = DrawOptions());
   virtual void DrawSurfaceWithShadow(SourceSurface *aSurface,
                                      const Point &aDest,
                                      const Color &aColor,
@@ -78,7 +82,7 @@ public:
   virtual void MaskSurface(const Pattern &aSource,
                            SourceSurface *aMask,
                            Point aOffset,
-                           const DrawOptions &aOptions = DrawOptions()) { MOZ_ASSERT(0); };
+                           const DrawOptions &aOptions = DrawOptions());
   virtual void PushClip(const Path *aPath);
   virtual void PushClipRect(const Rect& aRect);
   virtual void PopClip();
@@ -93,14 +97,27 @@ public:
     CreateSimilarDrawTarget(const IntSize &aSize, SurfaceFormat aFormat) const;
   virtual TemporaryRef<PathBuilder> CreatePathBuilder(FillRule aFillRule = FILL_WINDING) const;
   virtual TemporaryRef<GradientStops> CreateGradientStops(GradientStop *aStops, uint32_t aNumStops, ExtendMode aExtendMode = EXTEND_CLAMP) const;
+  virtual TemporaryRef<FilterNode> CreateFilter(FilterType aType);
   virtual void SetTransform(const Matrix &aTransform);
 
   bool Init(const IntSize &aSize, SurfaceFormat aFormat);
   void Init(unsigned char* aData, const IntSize &aSize, int32_t aStride, SurfaceFormat aFormat);
+
 #ifdef USE_SKIA_GPU
-  void InitWithFBO(unsigned int aFBOID, GrContext* aGrContext, const IntSize &aSize, SurfaceFormat aFormat);
+  virtual GenericRefCountedBase* GetGLContext() const MOZ_OVERRIDE { return mGLContext; }
+  void InitWithGLContextAndGrGLInterface(GenericRefCountedBase* aGLContext,
+                                         GrGLInterface* aGrGLInterface,
+                                         const IntSize &aSize,
+                                         SurfaceFormat aFormat) MOZ_OVERRIDE;
+
+  void SetCacheLimits(int aCount, int aSizeInBytes);
+  void PurgeCaches();
+
+  static void SetGlobalCacheLimits(int aCount, int aSizeInBytes);
+  static void RebalanceCacheLimits();
+  static void PurgeAllCaches();
 #endif
-  
+
   operator std::string() const {
     std::stringstream stream;
     stream << "DrawTargetSkia(" << this << ")";
@@ -109,14 +126,30 @@ public:
 
 private:
   friend class SourceSurfaceSkia;
-  void AppendSnapshot(SourceSurfaceSkia* aSnapshot);
-  void RemoveSnapshot(SourceSurfaceSkia* aSnapshot);
+  void SnapshotDestroyed();
 
   void MarkChanged();
 
+  SkRect SkRectCoveringWholeSurface() const;
+
+#ifdef USE_SKIA_GPU
+  /*
+   * These members have inter-dependencies, but do not keep each other alive, so
+   * destruction order is very important here: mGrContext uses mGrGLInterface, and
+   * through it, uses mGLContext, so it is important that they be declared in the
+   * present order.
+   */
+  RefPtr<GenericRefCountedBase> mGLContext;
+  SkRefPtr<GrGLInterface> mGrGLInterface;
+  SkRefPtr<GrContext> mGrContext;
+
+  static int sTextureCacheCount;
+  static int sTextureCacheSizeInBytes;
+#endif
+
   IntSize mSize;
   SkRefPtr<SkCanvas> mCanvas;
-  std::vector<SourceSurfaceSkia*> mSnapshots;
+  SourceSurfaceSkia* mSnapshot;
 };
 
 }

@@ -3,23 +3,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "nsMathMLChar.h"
 #include "mozilla/MathAlgorithms.h"
 
 #include "nsCOMPtr.h"
-#include "nsFrame.h"
+#include "nsIFrame.h"
 #include "nsPresContext.h"
 #include "nsStyleContext.h"
-#include "nsStyleConsts.h"
-#include "nsString.h"
 #include "nsUnicharUtils.h"
 #include "nsRenderingContext.h"
-#include "gfxPlatform.h"
 
 #include "mozilla/Preferences.h"
-#include "nsISupportsPrimitives.h"
-#include "nsIComponentManager.h"
 #include "nsIPersistentProperties2.h"
-#include "nsIServiceManager.h"
 #include "nsIObserverService.h"
 #include "nsIObserver.h"
 #include "nsNetUtil.h"
@@ -31,7 +26,6 @@
 #include "nsDisplayList.h"
 
 #include "nsMathMLOperators.h"
-#include "nsMathMLChar.h"
 #include <algorithm>
 
 using namespace mozilla;
@@ -39,7 +33,6 @@ using namespace mozilla;
 //#define NOISY_SEARCH 1
 
 // -----------------------------------------------------------------------------
-static const PRUnichar   kSpaceCh   = PRUnichar(' ');
 static const nsGlyphCode kNullGlyph = {{0, 0}, 0};
 typedef enum {eExtension_base, eExtension_variants, eExtension_parts}
   nsMathfontPrefExtension;
@@ -397,7 +390,7 @@ NS_IMPL_ISUPPORTS1(nsGlyphTableList, nsIObserver)
 // Here is the global list of applicable glyph tables that we will be using
 static nsGlyphTableList* gGlyphTableList = nullptr;
 
-static bool gInitialized = false;
+static bool gGlyphTableInitialized = false;
 
 // XPCOM shutdown observer
 NS_IMETHODIMP
@@ -435,7 +428,7 @@ nsGlyphTableList::Finalize()
   else
     rv = NS_ERROR_FAILURE;
 
-  gInitialized = false;
+  gGlyphTableInitialized = false;
   // our oneself will be destroyed when our |Release| is called by the observer
   return rv;
 }
@@ -561,8 +554,8 @@ MathFontEnumCallback(const nsString& aFamily, bool aGeneric, void *aData)
 static nsresult
 InitGlobals(nsPresContext* aPresContext)
 {
-  NS_ASSERTION(!gInitialized, "Error -- already initialized");
-  gInitialized = true;
+  NS_ASSERTION(!gGlyphTableInitialized, "Error -- already initialized");
+  gGlyphTableInitialized = true;
 
   // Allocate the placeholders for the preferred parts and variants
   nsresult rv = NS_ERROR_OUT_OF_MEMORY;
@@ -613,6 +606,12 @@ InitGlobals(nsPresContext* aPresContext)
 // -----------------------------------------------------------------------------
 // And now the implementation of nsMathMLChar
 
+nsMathMLChar::~nsMathMLChar()
+{
+  MOZ_COUNT_DTOR(nsMathMLChar);
+  mStyleContext->Release();
+}
+
 nsStyleContext*
 nsMathMLChar::GetStyleContext() const
 {
@@ -638,7 +637,7 @@ void
 nsMathMLChar::SetData(nsPresContext* aPresContext,
                       nsString&       aData)
 {
-  if (!gInitialized) {
+  if (!gGlyphTableInitialized) {
     InitGlobals(aPresContext);
   }
   mData = aData;
@@ -925,6 +924,7 @@ SetFontFamily(nsStyleContext*      aStyleContext,
     aRenderingContext.DeviceContext()->GetMetricsFor(font,
       aStyleContext->StyleFont()->mLanguage,
       aStyleContext->PresContext()->GetUserFontSet(),
+      aStyleContext->PresContext()->GetTextPerfMetrics(),
       *getter_AddRefs(fm));
     // Set the font if it is an unicode table
     // or if the same family name has been found
@@ -1251,7 +1251,7 @@ nsMathMLChar::StretchEnumContext::EnumCallback(const nsString& aFamily,
   nsStyleContext *sc = context->mChar->mStyleContext;
   nsFont font = sc->StyleFont()->mFont;
   if (!aGeneric && !SetFontFamily(sc, context->mRenderingContext,
-                                  font, NULL, kNullGlyph, aFamily))
+                                  font, nullptr, kNullGlyph, aFamily))
      return true; // Could not set the family
 
   context->mGlyphTable = glyphTable;
@@ -1313,7 +1313,8 @@ nsMathMLChar::StretchInternal(nsPresContext*           aPresContext,
   nsRefPtr<nsFontMetrics> fm;
   aRenderingContext.DeviceContext()->GetMetricsFor(font,
     mStyleContext->StyleFont()->mLanguage,
-    aPresContext->GetUserFontSet(), *getter_AddRefs(fm));
+    aPresContext->GetUserFontSet(),
+    aPresContext->GetTextPerfMetrics(), *getter_AddRefs(fm));
   aRenderingContext.SetFont(fm);
   aDesiredStretchSize =
     aRenderingContext.GetBoundingMetrics(mData.get(), uint32_t(mData.Length()));
@@ -1644,6 +1645,9 @@ public:
   }
 #endif
 
+  virtual void ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                         const nsDisplayItemGeometry* aGeometry,
+                                         nsRegion *aInvalidRegion) MOZ_OVERRIDE;
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      nsRenderingContext* aCtx);
   NS_DISPLAY_DECL_NAME("MathMLCharBackground", TYPE_MATHML_CHAR_BACKGROUND)
@@ -1651,6 +1655,16 @@ private:
   nsStyleContext* mStyleContext;
   nsRect          mRect;
 };
+
+void
+nsDisplayMathMLCharBackground::ComputeInvalidationRegion(nsDisplayListBuilder* aBuilder,
+                                                         const nsDisplayItemGeometry* aGeometry,
+                                                         nsRegion *aInvalidRegion)
+{
+  AddInvalidRegionForSyncDecodeBackgroundImages(aBuilder, aGeometry, aInvalidRegion);
+
+  nsDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry, aInvalidRegion);
+}
 
 void nsDisplayMathMLCharBackground::Paint(nsDisplayListBuilder* aBuilder,
                                           nsRenderingContext* aCtx)
@@ -1856,7 +1870,7 @@ nsMathMLChar::PaintForeground(nsPresContext* aPresContext,
   nsRefPtr<nsFontMetrics> fm;
   aRenderingContext.DeviceContext()->GetMetricsFor(theFont,
     styleContext->StyleFont()->mLanguage,
-    aPresContext->GetUserFontSet(),
+    aPresContext->GetUserFontSet(), aPresContext->GetTextPerfMetrics(),
     *getter_AddRefs(fm));
   aRenderingContext.SetFont(fm);
 

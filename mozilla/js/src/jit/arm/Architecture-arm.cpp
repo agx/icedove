@@ -4,18 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#define HWCAP_ARMv7 (1 << 31)
-#include <mozilla/StandardInteger.h>
+#include "jit/arm/Architecture-arm.h"
 
-#include <sys/types.h>
-#include <sys/stat.h>
+#include <elf.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <elf.h>
 
-// lame check for kernel version
-// see bug 586550
+#include "jit/arm/Assembler-arm.h"
+
 #if !(defined(ANDROID) || defined(MOZ_B2G))
+#define HWCAP_ARMv7 (1 << 29)
 #include <asm/hwcap.h>
 #else
 #define HWCAP_VFP      (1<<0)
@@ -27,12 +25,11 @@
 #define HWCAP_NEON     (1<<6)
 #define HWCAP_ARMv7    (1<<7)
 #endif
-#include "jit/arm/Architecture-arm.h"
-#include "jit/arm/Assembler-arm.h"
+
 namespace js {
 namespace jit {
 
-uint32_t getFlags()
+uint32_t GetARMFlags()
 {
     static bool isSet = false;
     static uint32_t flags = 0;
@@ -61,13 +58,21 @@ uint32_t getFlags()
         }
         close(fd);
     }
+
+#if defined(__ARM_ARCH_7__) || defined (__ARM_ARCH_7A__)
+    flags = HWCAP_ARMv7;
+#endif
+    isSet = true;
+    return flags;
+
 #elif defined(WTF_OS_ANDROID) || defined(MOZ_B2G)
     FILE *fp = fopen("/proc/cpuinfo", "r");
     if (!fp)
         return false;
 
     char buf[1024];
-    fread(buf, sizeof(char), sizeof(buf), fp);
+    memset(buf, 0, sizeof(buf));
+    fread(buf, sizeof(char), sizeof(buf)-1, fp);
     fclose(fp);
     if (strstr(buf, "vfp"))
         flags |= HWCAP_VFP;
@@ -99,29 +104,38 @@ uint32_t getFlags()
     return flags;
 #endif
 
-    return false;
+    return 0;
 }
 
 bool hasMOVWT()
 {
-    return js::jit::getFlags() & HWCAP_ARMv7;
+    return js::jit::GetARMFlags() & HWCAP_ARMv7;
 }
 bool hasVFPv3()
 {
-    return js::jit::getFlags() & HWCAP_VFPv3;
+    return js::jit::GetARMFlags() & HWCAP_VFPv3;
 }
 bool hasVFP()
 {
-    return js::jit::getFlags() & HWCAP_VFP;
+    return js::jit::GetARMFlags() & HWCAP_VFP;
 }
 
 bool has32DP()
 {
-    return !(js::jit::getFlags() & HWCAP_VFPv3D16 && !(js::jit::getFlags() & HWCAP_NEON));
+    return !(js::jit::GetARMFlags() & HWCAP_VFPv3D16 && !(js::jit::GetARMFlags() & HWCAP_NEON));
 }
 bool useConvReg()
 {
     return has32DP();
+}
+
+bool hasIDIV()
+{
+#if defined HWCAP_IDIVA
+    return js::jit::GetARMFlags() & HWCAP_IDIVA;
+#else
+    return false;
+#endif
 }
 
 } // namespace jit

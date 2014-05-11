@@ -57,32 +57,29 @@
 namespace JSC {
 
     class AssemblerBuffer {
-        static const int inlineCapacity = 256;
+        static const size_t inlineCapacity = 256;
     public:
         AssemblerBuffer()
             : m_buffer(m_inlineBuffer)
             , m_capacity(inlineCapacity)
             , m_size(0)
             , m_oom(false)
-#if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
-            , m_skipInline(js::TlsPerThreadData.get(), &m_inlineBuffer)
-#endif
         {
         }
 
         ~AssemblerBuffer()
         {
             if (m_buffer != m_inlineBuffer)
-                free(m_buffer);
+                js_free(m_buffer);
         }
 
-        void ensureSpace(int space)
+        void ensureSpace(size_t space)
         {
             if (m_size > m_capacity - space)
                 grow();
         }
 
-        bool isAligned(int alignment) const
+        bool isAligned(size_t alignment) const
         {
             return !(m_size & (alignment - 1));
         }
@@ -141,7 +138,7 @@ namespace JSC {
             return m_buffer;
         }
 
-        int size() const
+        size_t size() const
         {
             return m_size;
         }
@@ -180,7 +177,7 @@ namespace JSC {
         }
 
     protected:
-        void append(const char* data, int size)
+        void append(const char* data, size_t size)
         {
             if (m_size > m_capacity - size)
                 grow(size);
@@ -207,25 +204,34 @@ namespace JSC {
          * See also the |executableAllocAndCopy| and |buffer| methods.
          */
 
-        void grow(int extraCapacity = 0)
+        void grow(size_t extraCapacity = 0)
         {
+            char* newBuffer;
+
             /*
              * If |extraCapacity| is zero (as it almost always is) this is an
              * allocator-friendly doubling growth strategy.
              */
-            int newCapacity = m_capacity + m_capacity + extraCapacity;
-            char* newBuffer;
+            size_t doubleCapacity = m_capacity + m_capacity;
 
-            // Do not allow offsets to grow beyond INT_MAX / 2. This mirrors
-            // Assembler-shared.h.
-            if (newCapacity >= INT_MAX / 2) {
+            // Check for overflow.
+            if (doubleCapacity < m_capacity) {
+                m_size = 0;
+                m_oom = true;
+                return;
+            }
+
+            size_t newCapacity = doubleCapacity + extraCapacity;
+
+            // Check for overflow.
+            if (newCapacity < doubleCapacity) {
                 m_size = 0;
                 m_oom = true;
                 return;
             }
 
             if (m_buffer == m_inlineBuffer) {
-                newBuffer = static_cast<char*>(malloc(newCapacity));
+                newBuffer = static_cast<char*>(js_malloc(newCapacity));
                 if (!newBuffer) {
                     m_size = 0;
                     m_oom = true;
@@ -233,7 +239,7 @@ namespace JSC {
                 }
                 memcpy(newBuffer, m_buffer, m_size);
             } else {
-                newBuffer = static_cast<char*>(realloc(m_buffer, newCapacity));
+                newBuffer = static_cast<char*>(js_realloc(m_buffer, newCapacity));
                 if (!newBuffer) {
                     m_size = 0;
                     m_oom = true;
@@ -247,20 +253,9 @@ namespace JSC {
 
         char m_inlineBuffer[inlineCapacity];
         char* m_buffer;
-        int m_capacity;
-        int m_size;
+        size_t m_capacity;
+        size_t m_size;
         bool m_oom;
-
-#if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
-        /*
-         * GC Pointers baked into the code can get stored on the stack here
-         * through the inline assembler buffer. We need to protect these from
-         * being poisoned by the rooting analysis, however, they do not need to
-         * actually be traced: the compiler is only allowed to bake in
-         * non-nursery-allocated pointers, such as Shapes.
-         */
-        js::SkipRoot m_skipInline;
-#endif
     };
 
     class GenericAssembler

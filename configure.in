@@ -203,6 +203,8 @@ non_global_defines = mozbuildcfg.non_global_defines
 dnl Fix up substitutitons
 def remap_subst(pair):
     name, value = pair
+    if isinstance(value, set):
+        return name, value
     value = value.replace('\$(DEPTH)', '\$(DEPTH)/mozilla')
     value = value.replace('\$(topsrcdir)', '\$(topsrcdir)/mozilla')
     if name == 'ac_configure_args':
@@ -216,11 +218,7 @@ def remap_subst(pair):
 substs = map(remap_subst, mozbuildcfg.substs)
 substs.append(('COMM_BUILD', '1'))
 
-dnl These are what we output
-files = ['config/autoconf.mk']
-headers = []
-
-__all__ = ['topobjdir', 'topsrcdir', 'defines', 'non_global_defines', 'substs', 'files', 'headers']
+__all__ = ['topobjdir', 'topsrcdir', 'defines', 'non_global_defines', 'substs']
 
 dnl Do the actual work
 if __name__ == '__main__':
@@ -271,6 +269,7 @@ if test -n "$MOZ_CURRENT_PROJECT"; then
     export MOZ_BUILD_APP="$MOZ_CURRENT_PROJECT"
 fi
 
+export MOZ_PSEUDO_DERECURSE=
 AC_OUTPUT_SUBDIRS(mozilla)
 MOZ_BUILD_APP="$MOZ_BUILD_APP_CACHED"
 

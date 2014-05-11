@@ -35,13 +35,13 @@ geolocation API in Firefox.
 ## Using Geolocation in an Add-on ##
 
 Suppose we want to use the
-[geolocation API built into Firefox](https://developer.mozilla.org/en/using_geolocation).
+[geolocation API built into Firefox](https://developer.mozilla.org/en-US/docs/WebAPI/Using_geolocation).
 The SDK doesn't provide an API to access geolocation, but we can
 [access the underlying XPCOM API using `require("chrome")`](dev-guide/guides/xul-migration.html#xpcom).
 
 The following add-on adds a [button to the toolbar](dev-guide/tutorials/adding-toolbar-button.html):
 when the user clicks the button, it loads the
-[XPCOM nsIDOMGeoGeolocation](https://developer.mozilla.org/en/XPCOM_Interface_Reference/NsIDOMGeoGeolocation)
+[XPCOM nsIDOMGeoGeolocation](https://developer.mozilla.org/en-US/docs/XPCOM_Interface_Reference/NsIDOMGeoGeolocation)
 object, and retrieves the user's current position:
 
     var {Cc, Ci} = require("chrome");
@@ -88,7 +88,7 @@ info: longitude:  93.0785269
 </pre>
 
 So far, so good. But the geolocation guide on MDN tells us that we must
-[ask the user for permission](https://developer.mozilla.org/en/using_geolocation#Prompting_for_permission)
+[ask the user for permission](https://developer.mozilla.org/en-US/docs/WebAPI/Using_geolocation#Prompting_for_permission)
 before using the API.
 
 So we'll extend the add-on to include an adapted version of the code in
@@ -370,27 +370,6 @@ Next we'll repackage the geolocation module.
 * create a new directory called "geolocation", and run `cfx init` in it.
 * delete the "main.js" that `cfx` generated, and copy "geolocation.js"
 there instead.
-
-### Documentation ###
-
-If you document your modules, people who install your package and
-execute `cfx docs` will see the documentation
-integrated with the SDK's own documentation.
-
-You can document the geolocation module by creating a file called
-"geolocation.md" in your package's "doc" directory. This file is also
-written in Markdown, although you can optionally use some
-[extended syntax](https://wiki.mozilla.org/Jetpack/SDK/Writing_Documentation#APIDoc_Syntax)
-to document APIs.
-
-Try it:
-
-* add a "geolocation.md" under "doc"
-* copy your geolocation package under the "packages" directory in the SDK root
-* execute `cfx docs`
-
-Once `cfx docs` has finished, you should see a new entry appear in the
-sidebar called "Third-Party APIs", which lists the geolocation module.
 
 ### Editing "package.json" ###
 

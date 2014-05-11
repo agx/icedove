@@ -476,9 +476,9 @@ struct MessageWindow {
     }
 
     // Class name: appName + "MessageWindow"
-    static const PRUnichar *className() {
-        static PRUnichar classNameBuffer[128];
-        static PRUnichar *mClassName = 0;
+    static const wchar_t *className() {
+        static wchar_t classNameBuffer[128];
+        static wchar_t *mClassName = 0;
         if ( !mClassName ) {
             ::_snwprintf(classNameBuffer,
                          128,   // size of classNameBuffer in PRUnichars
@@ -533,7 +533,7 @@ struct MessageWindow {
             //  the same thread.
             BOOL desRes = DestroyWindow( mHandle );
             if ( FALSE != desRes ) {
-                mHandle = NULL;
+                mHandle = nullptr;
             }
             else {
                 retval = NS_ERROR_FAILURE;
@@ -643,7 +643,8 @@ nsNativeAppSupportWin::Start( bool *aResult ) {
     // Grab mutex first.
 
     // Build mutex name from app name.
-    ::_snwprintf(mMutexName, sizeof mMutexName / sizeof(PRUnichar), L"%s%s%s", 
+    ::_snwprintf(reinterpret_cast<wchar_t*>(mMutexName),
+                 sizeof mMutexName / sizeof(PRUnichar), L"%s%s%s",
                  MOZ_MUTEX_NAMESPACE,
                  NS_ConvertUTF8toUTF16(gAppData->name).get(),
                  MOZ_STARTUP_MUTEX_NAME );
@@ -858,7 +859,7 @@ static nsCString uTypeDesc( UINT uType ) {
 static nsCString hszValue( DWORD instance, HSZ hsz ) {
     // Extract string from HSZ.
     nsCString result("[");
-    DWORD len = DdeQueryString( instance, hsz, NULL, NULL, CP_WINANSI );
+    DWORD len = DdeQueryString( instance, hsz, nullptr, nullptr, CP_WINANSI );
     if ( len ) {
         char buffer[ 256 ];
         DdeQueryString( instance, hsz, buffer, sizeof buffer, CP_WINANSI );
@@ -1211,14 +1212,14 @@ void nsNativeAppSupportWin::ParseDDEArg( const WCHAR* args, int index, nsString&
 
 // Utility to parse out argument from a DDE item string.
 void nsNativeAppSupportWin::ParseDDEArg( HSZ args, int index, nsString& aString) {
-    DWORD argLen = DdeQueryStringW( mInstance, args, NULL, 0, CP_WINUNICODE );
+    DWORD argLen = DdeQueryStringW( mInstance, args, nullptr, 0, CP_WINUNICODE );
     // there wasn't any string, so return empty string
     if ( !argLen ) return;
     nsAutoString temp;
     // Ensure result's buffer is sufficiently big.
     temp.SetLength( argLen );
     // Now get the string contents.
-    DdeQueryString( mInstance, args, temp.BeginWriting(), temp.Length(), CP_WINUNICODE );
+    DdeQueryString( mInstance, args, reinterpret_cast<wchar_t*>(temp.BeginWriting()), temp.Length(), CP_WINUNICODE );
     // Parse out the given arg.
     ParseDDEArg(temp.get(), index, aString);
     return;

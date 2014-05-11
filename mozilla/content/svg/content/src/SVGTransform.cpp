@@ -6,12 +6,10 @@
 
 #include "mozilla/dom/SVGTransform.h"
 #include "mozilla/dom/SVGMatrix.h"
+#include "mozilla/dom/SVGTransformBinding.h"
 #include "nsError.h"
-#include "nsContentUtils.h"
-#include "nsAttrValueInlines.h"
 #include "nsSVGAnimatedTransformList.h"
 #include "nsSVGAttrTearoffTable.h"
-#include "mozilla/dom/SVGTransformBinding.h"
 
 namespace mozilla {
 namespace dom {
@@ -29,6 +27,8 @@ SVGMatrixTearoffTable()
 // clear our list's weak ref to us to be safe. (The other option would be to
 // not unlink and rely on the breaking of the other edges in the cycle, as
 // NS_SVG_VAL_IMPL_CYCLE_COLLECTION does.)
+NS_IMPL_CYCLE_COLLECTION_CLASS(SVGTransform)
+
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(SVGTransform)
   // We may not belong to a list, so we must null check tmp->mList.
   if (tmp->mList) {

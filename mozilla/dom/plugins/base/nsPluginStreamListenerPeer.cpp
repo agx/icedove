@@ -737,7 +737,7 @@ nsresult nsPluginStreamListenerPeer::ServeStreamAsFile(nsIRequest *request,
   if (owner) {
     NPWindow* window = nullptr;
     owner->GetWindow(window);
-#if defined(MOZ_WIDGET_GTK2) || defined(MOZ_WIDGET_QT)
+#if (MOZ_WIDGET_GTK == 2) || defined(MOZ_WIDGET_QT)
     // Should call GetPluginPort() here.
     // This part is copied from nsPluginInstanceOwner::GetPluginPort(). 
     nsCOMPtr<nsIWidget> widget;
@@ -788,9 +788,11 @@ NS_IMETHODIMP nsPluginStreamListenerPeer::OnDataAvailable(nsIRequest *request,
                                                           uint64_t sourceOffset,
                                                           uint32_t aLength)
 {
-  NS_ASSERTION(mRequests.IndexOfObject(GetBaseRequest(request)) != -1,
-               "Received OnDataAvailable for untracked request.");
-  
+  if (mRequests.IndexOfObject(GetBaseRequest(request)) == -1) {
+    MOZ_ASSERT(false, "Received OnDataAvailable for untracked request.");
+    return NS_ERROR_UNEXPECTED;
+  }
+
   if (mRequestFailed)
     return NS_ERROR_FAILURE;
   
@@ -828,7 +830,7 @@ NS_IMETHODIMP nsPluginStreamListenerPeer::OnDataAvailable(nsIRequest *request,
       if (!mDataForwardToRequest)
         return NS_ERROR_FAILURE;
       
-      int64_t absoluteOffset64 = LL_ZERO;
+      int64_t absoluteOffset64 = 0;
       brr->GetStartRange(&absoluteOffset64);
       
       // XXX handle 64-bit for real
@@ -909,7 +911,7 @@ NS_IMETHODIMP nsPluginStreamListenerPeer::OnStopRequest(nsIRequest *request,
   // for ByteRangeRequest we're just updating the mDataForwardToRequest hash and return.
   nsCOMPtr<nsIByteRangeRequest> brr = do_QueryInterface(request);
   if (brr) {
-    int64_t absoluteOffset64 = LL_ZERO;
+    int64_t absoluteOffset64 = 0;
     brr->GetStartRange(&absoluteOffset64);
     // XXX support 64-bit offsets
     int32_t absoluteOffset = (int32_t)int64_t(absoluteOffset64);

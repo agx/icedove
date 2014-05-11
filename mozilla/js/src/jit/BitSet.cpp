@@ -4,30 +4,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "jsutil.h"
-#include "BitSet.h"
-
-#include "jsscriptinlines.h"
+#include "jit/BitSet.h"
 
 using namespace js;
 using namespace js::jit;
 
 BitSet *
-BitSet::New(unsigned int max)
+BitSet::New(TempAllocator &alloc, unsigned int max)
 {
-    BitSet *result = new BitSet(max);
-    if (!result->init())
-        return NULL;
+    BitSet *result = new(alloc) BitSet(max);
+    if (!result->init(alloc))
+        return nullptr;
     return result;
 }
 
 bool
-BitSet::init()
+BitSet::init(TempAllocator &alloc)
 {
     size_t sizeRequired = numWords() * sizeof(*bits_);
 
-    TempAllocator *alloc = GetIonContext()->temp;
-    bits_ = (uint32_t *)alloc->allocate(sizeRequired);
+    bits_ = (uint32_t *)alloc.allocate(sizeRequired);
     if (!bits_)
         return false;
 

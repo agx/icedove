@@ -15,18 +15,24 @@
 #include "nsTArray.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsISupportsImpl.h"
-#include "jsapi.h"
+#include "js/TypeDecls.h"
 
 class nsXBLPrototypeBinding;
 class nsIContent;
 class nsIAtom;
 class nsIDocument;
 class nsIScriptContext;
-class nsObjectHashtable;
-class nsXBLInsertionPoint;
-typedef nsTArray<nsRefPtr<nsXBLInsertionPoint> > nsInsertionPointList;
-struct JSContext;
-class JSObject;
+
+namespace mozilla {
+namespace dom {
+
+class ShadowRoot;
+class XBLChildrenElement;
+
+} // namespace dom
+} // namespace mozilla
+
+class nsAnonymousContentList;
 
 // *********************************************************************/
 // The XBLBinding class
@@ -35,6 +41,7 @@ class nsXBLBinding
 {
 public:
   nsXBLBinding(nsXBLPrototypeBinding* aProtoBinding);
+  nsXBLBinding(mozilla::dom::ShadowRoot* aShadowRoot, nsXBLPrototypeBinding* aProtoBinding);
   ~nsXBLBinding();
 
   /**
@@ -51,10 +58,11 @@ public:
 
   NS_DECL_CYCLE_COLLECTION_NATIVE_CLASS(nsXBLBinding)
 
-  nsXBLPrototypeBinding* PrototypeBinding() { return mPrototypeBinding; }
+  nsXBLPrototypeBinding* PrototypeBinding() const { return mPrototypeBinding; }
   nsIContent* GetAnonymousContent() { return mContent.get(); }
+  nsXBLBinding* GetBindingWithContent();
 
-  nsXBLBinding* GetBaseBinding() { return mNextBinding; }
+  nsXBLBinding* GetBaseBinding() const { return mNextBinding; }
   void SetBaseBinding(nsXBLBinding *aBinding);
 
   nsIContent* GetBoundElement() { return mBoundElement; }
@@ -65,9 +73,6 @@ public:
     mJSClass = aClass;
   }
 
-  bool IsStyleBinding() const { return mIsStyleBinding; }
-  void SetIsStyleBinding(bool aIsStyle) { mIsStyleBinding = aIsStyle; }
-
   /*
    * Does a lookup for a method or attribute provided by one of the bindings'
    * prototype implementation. If found, |desc| will be set up appropriately,
@@ -76,7 +81,8 @@ public:
    * May only be called when XBL code is being run in a separate scope, because
    * otherwise we don't have untainted data with which to do a proper lookup.
    */
-  bool LookupMember(JSContext* aCx, JS::HandleId aId, JSPropertyDescriptor* aDesc);
+  bool LookupMember(JSContext* aCx, JS::Handle<jsid> aId,
+                    JS::MutableHandle<JSPropertyDescriptor> aDesc);
 
   /*
    * Determines whether the binding has a field with the given name.
@@ -88,8 +94,10 @@ protected:
   /*
    * Internal version. Requires that aCx is in appropriate xbl scope.
    */
-  bool LookupMemberInternal(JSContext* aCx, nsString& aName, JS::HandleId aNameAsId,
-                            JSPropertyDescriptor* aDesc, JS::Handle<JSObject*> aXBLScope);
+  bool LookupMemberInternal(JSContext* aCx, nsString& aName,
+                            JS::Handle<jsid> aNameAsId,
+                            JS::MutableHandle<JSPropertyDescriptor> aDesc,
+                            JS::Handle<JSObject*> aXBLScope);
 
 public:
 
@@ -114,25 +122,10 @@ public:
 
   nsIAtom* GetBaseTag(int32_t* aNameSpaceID);
   nsXBLBinding* RootBinding();
-  nsXBLBinding* GetFirstStyleBinding();
 
   // Resolve all the fields for this binding and all ancestor bindings on the
   // object |obj|.  False return means a JS exception was set.
   bool ResolveAllFields(JSContext *cx, JS::Handle<JSObject*> obj) const;
-
-  // Get the list of insertion points for aParent. The nsInsertionPointList
-  // is owned by the binding, you should not delete it.
-  void GetInsertionPointsFor(nsIContent* aParent,
-                             nsInsertionPointList** aResult);
-
-  nsInsertionPointList* GetExistingInsertionPointsFor(nsIContent* aParent);
-
-  // XXXbz this aIndex has nothing to do with an index into the child
-  // list of the insertion parent or anything.
-  nsIContent* GetInsertionPoint(const nsIContent* aChild, uint32_t* aIndex);
-
-  nsIContent* GetSingleInsertionPoint(uint32_t* aIndex,
-                                      bool* aMultipleInsertionPoints);
 
   void AttributeChanged(nsIAtom* aAttribute, int32_t aNameSpaceID,
                         bool aRemoveFlag, bool aNotify);
@@ -141,8 +134,6 @@ public:
 
   void WalkRules(nsIStyleRuleProcessor::EnumFunc aFunc, void* aData);
 
-  nsINodeList* GetAnonymousNodes();
-
   static nsresult DoInitJSClass(JSContext *cx, JS::Handle<JSObject*> global,
                                 JS::Handle<JSObject*> obj,
                                 const nsAFlatCString& aClassName,
@@ -150,15 +141,30 @@ public:
                                 JS::MutableHandle<JSObject*> aClassObject,
                                 bool* aNew);
 
-  bool AllowScripts();  // XXX make const
+  bool AllowScripts();
 
-  void RemoveInsertionParent(nsIContent* aParent);
-  bool HasInsertionParent(nsIContent* aParent);
+  mozilla::dom::XBLChildrenElement* FindInsertionPointFor(nsIContent* aChild);
+
+  bool HasFilteredInsertionPoints()
+  {
+    return !mInsertionPoints.IsEmpty();
+  }
+
+  mozilla::dom::XBLChildrenElement* GetDefaultInsertionPoint()
+  {
+    return mDefaultInsertionPoint;
+  }
+
+  // Removes all inserted node from <xbl:children> insertion points under us.
+  void ClearInsertionPoints();
+
+  // Returns a live node list that iterates over the anonymous nodes generated
+  // by this binding.
+  nsAnonymousContentList* GetAnonymousNodeList();
 
 // MEMBER VARIABLES
 protected:
 
-  bool mIsStyleBinding;
   bool mMarkedForDeath;
   bool mUsingXBLScope;
 
@@ -168,11 +174,20 @@ protected:
   nsRefPtr<nsXBLJSClass> mJSClass; // Strong. The class object also holds a strong reference,
                                    // which might be somewhat redundant, but be safe to avoid
                                    // worrying about edge cases.
-  
+
   nsIContent* mBoundElement; // [WEAK] We have a reference, but we don't own it.
-  
-  // A hash from nsIContent* -> (a sorted array of nsXBLInsertionPoint)
-  nsClassHashtable<nsISupportsHashKey, nsInsertionPointList>* mInsertionPointTable;
+
+  // The <xbl:children> elements that we found in our <xbl:content> when we
+  // processed this binding. The default insertion point has no includes
+  // attribute and all other insertion points must have at least one includes
+  // attribute. These points must be up-to-date with respect to their parent's
+  // children, even if their parent has another binding attached to it,
+  // preventing us from rendering their contents directly.
+  nsRefPtr<mozilla::dom::XBLChildrenElement> mDefaultInsertionPoint;
+  nsTArray<nsRefPtr<mozilla::dom::XBLChildrenElement> > mInsertionPoints;
+  nsRefPtr<nsAnonymousContentList> mAnonymousContentList;
+
+  mozilla::dom::XBLChildrenElement* FindInsertionPointForInternal(nsIContent* aChild);
 };
 
 #endif // nsXBLBinding_h_

@@ -21,6 +21,68 @@ var AccessFuTest = {
     }
   },
 
+  _registerListener: function AccessFuTest__registerListener(aWaitForMessage, aListenerFunc) {
+    var listener = {
+      observe: function observe(aMessage) {
+        // Ignore unexpected messages.
+        if (!(aMessage instanceof Components.interfaces.nsIConsoleMessage)) {
+          return;
+        }
+        if (aMessage.message.indexOf(aWaitForMessage) < 0) {
+          return;
+        }
+        aListenerFunc.apply(listener);
+      }
+    };
+    Services.console.registerListener(listener);
+    return listener;
+  },
+
+  on_log: function AccessFuTest_on_log(aWaitForMessage, aListenerFunc) {
+    return this._registerListener(aWaitForMessage, aListenerFunc);
+  },
+
+  off_log: function AccessFuTest_off_log(aListener) {
+    Services.console.unregisterListener(aListener);
+  },
+
+  once_log: function AccessFuTest_once_log(aWaitForMessage, aListenerFunc) {
+    return this._registerListener(aWaitForMessage,
+      function listenAndUnregister() {
+        Services.console.unregisterListener(this);
+        aListenerFunc();
+      });
+  },
+
+  _addObserver: function AccessFuTest__addObserver(aWaitForData, aListener) {
+    var listener = function listener(aSubject, aTopic, aData) {
+      var data = JSON.parse(aData)[1];
+      // Ignore non-relevant outputs.
+      if (!data) {
+        return;
+      }
+      isDeeply(data.details.actions, aWaitForData, "Data is correct");
+      aListener.apply(listener);
+    };
+    Services.obs.addObserver(listener, 'accessfu-output', false);
+    return listener;
+  },
+
+  on: function AccessFuTest_on(aWaitForData, aListener) {
+    return this._addObserver(aWaitForData, aListener);
+  },
+
+  off: function AccessFuTest_off(aListener) {
+    Services.obs.removeObserver(aListener, 'accessfu-output');
+  },
+
+  once: function AccessFuTest_once(aWaitForData, aListener) {
+    return this._addObserver(aWaitForData, function observerAndRemove() {
+      Services.obs.removeObserver(this, 'accessfu-output');
+      aListener();
+    });
+  },
+
   _waitForExplicitFinish: false,
 
   waitForExplicitFinish: function AccessFuTest_waitForExplicitFinish() {
@@ -30,6 +92,7 @@ var AccessFuTest = {
   finish: function AccessFuTest_finish() {
     // Disable the console service logging.
     Logger.test = false;
+    Logger.logLevel = Logger.INFO;
     AccessFu.doneCallback = function doneCallback() {
       // This is being called once AccessFu has been shut down.
       // Detach AccessFu from everything it attached itself to.
@@ -38,6 +101,7 @@ var AccessFuTest = {
       SimpleTest.finish();
     };
     // Tear down accessibility and make AccessFu stop.
+    SpecialPowers.setIntPref("accessibility.accessfu.notify_output", 0);
     SpecialPowers.setIntPref("accessibility.accessfu.activate", 0);
   },
 
@@ -73,6 +137,7 @@ var AccessFuTest = {
     AccessFu.readyCallback = function readyCallback() {
       // Enable logging to the console service.
       Logger.test = true;
+      Logger.logLevel = Logger.DEBUG;
       // This is being called once accessibility has been turned on.
 
       if (AccessFuTest._waitForExplicitFinish) {
@@ -87,5 +152,6 @@ var AccessFuTest = {
 
     // Invoke the whole thing.
     SpecialPowers.setIntPref("accessibility.accessfu.activate", 1);
+    SpecialPowers.setIntPref("accessibility.accessfu.notify_output", 1);
   }
 };

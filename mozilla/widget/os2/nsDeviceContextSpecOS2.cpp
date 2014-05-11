@@ -432,28 +432,35 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::GetSurfaceForPrinter(gfxASurface **surface
 
 // Helper function to convert the string to the native codepage,
 // similar to UnicodeToCodepage() in nsDragService.cpp.
-char *GetACPString(const PRUnichar* aStr)
+char *GetACPString(const nsAString& aStr)
 {
-   nsString str(aStr);
-   if (str.Length() == 0) {
+   if (aStr.Length() == 0) {
       return nullptr;
    }
 
    nsAutoCharBuffer buffer;
    int32_t bufLength;
-   WideCharToMultiByte(0, PromiseFlatString(str).get(), str.Length(),
+   WideCharToMultiByte(0, PromiseFlatString(aStr).get(), aStr.Length(),
                        buffer, bufLength);
    return ToNewCString(nsDependentCString(buffer.Elements()));
 }
 
-NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(PRUnichar* aTitle,
+// Helper function to convert the string to the native codepage,
+// similar to UnicodeToCodepage() in nsDragService.cpp.
+char *GetACPString(const PRUnichar* aStr)
+{
+   nsString str(aStr);
+   return GetACPString(str);
+}
+
+NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(const nsAString& aTitle,
                                                     PRUnichar* aPrintToFileName,
                                                     int32_t aStartPage,
                                                     int32_t aEndPage)
 {
 #ifdef debug_thebes_print
   printf("nsDeviceContextSpecOS2[%#x]::BeginPrinting(%s, %s)\n", (unsigned)this,
-         NS_LossyConvertUTF16toASCII(nsString(aTitle)).get(),
+         NS_LossyConvertUTF16toASCII(aTitle).get(),
          NS_LossyConvertUTF16toASCII(nsString(aPrintToFileName)).get());
 #endif
   // don't try to send device escapes for non-native output (like PDF)
@@ -468,7 +475,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::BeginDocument(PRUnichar* aTitle,
   PCSZ pszDocName = title ? title : pszGenericDocName;
   LONG lResult = DevEscape(mPrintDC, DEVESC_STARTDOC,
                            strlen(pszDocName) + 1, const_cast<BYTE*>(pszDocName),
-                           (PLONG)NULL, (PBYTE)NULL);
+                           (PLONG)nullptr, (PBYTE)nullptr);
   mPrintingStarted = true;
   if (title) {
     nsMemory::Free(title);
@@ -484,7 +491,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::EndDocument()
   int16_t outputFormat;
   mPrintSettings->GetOutputFormat(&outputFormat);
   if (outputFormat != nsIPrintSettings::kOutputFormatNative) {
-    mPrintSettings->SetToFileName(NULL);
+    mPrintSettings->SetToFileName(nullptr);
     nsCOMPtr<nsIPrintSettingsService> pss = do_GetService("@mozilla.org/gfx/printsettings-service;1");
     if (pss)
       pss->SavePrintSettingsToPrefs(mPrintSettings, true, nsIPrintSettings::kInitSaveToFileName);
@@ -493,7 +500,7 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::EndDocument()
 
   LONG lOutCount = 2;
   USHORT usJobID = 0;
-  LONG lResult = DevEscape(mPrintDC, DEVESC_ENDDOC, 0L, (PBYTE)NULL,
+  LONG lResult = DevEscape(mPrintDC, DEVESC_ENDDOC, 0L, (PBYTE)nullptr,
                            &lOutCount, (PBYTE)&usJobID);
   return lResult == DEV_OK ? NS_OK : NS_ERROR_GFX_PRINTER_ENDDOC;
 }
@@ -511,8 +518,8 @@ NS_IMETHODIMP nsDeviceContextSpecOS2::BeginPage()
     mPrintingStarted = false;
     return NS_OK;
   }
-  LONG lResult = DevEscape(mPrintDC, DEVESC_NEWFRAME, 0L, (PBYTE)NULL,
-                           (PLONG)NULL, (PBYTE)NULL);
+  LONG lResult = DevEscape(mPrintDC, DEVESC_NEWFRAME, 0L, (PBYTE)nullptr,
+                           (PLONG)nullptr, (PBYTE)nullptr);
   return lResult == DEV_OK ? NS_OK : NS_ERROR_GFX_PRINTER_STARTPAGE;
 }
 

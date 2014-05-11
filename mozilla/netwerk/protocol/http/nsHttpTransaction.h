@@ -7,30 +7,29 @@
 #define nsHttpTransaction_h__
 
 #include "nsHttp.h"
-#include "nsHttpHeaderArray.h"
 #include "nsAHttpTransaction.h"
 #include "nsAHttpConnection.h"
 #include "EventTokenBucket.h"
 #include "nsCOMPtr.h"
-
-#include "nsIPipe.h"
-#include "nsIInputStream.h"
+#include "nsThreadUtils.h"
 #include "nsILoadGroup.h"
-#include "nsIOutputStream.h"
 #include "nsIInterfaceRequestor.h"
-#include "nsISocketTransportService.h"
-#include "nsITransport.h"
-#include "nsIEventTarget.h"
 #include "TimingStruct.h"
+#include "nsProxyRelease.h"
+
+#ifdef MOZ_WIDGET_GONK
+#include "nsINetworkManager.h"
+#endif
 
 //-----------------------------------------------------------------------------
 
-class nsHttpTransaction;
 class nsHttpRequestHead;
 class nsHttpResponseHead;
 class nsHttpChunkedDecoder;
 class nsIHttpActivityObserver;
-class UpdateSecurityCallbacks;
+class nsIEventTarget;
+class nsIInputStream;
+class nsIOutputStream;
 
 //-----------------------------------------------------------------------------
 // nsHttpTransaction represents a single HTTP transaction.  It is thread-safe,
@@ -43,7 +42,7 @@ class nsHttpTransaction : public nsAHttpTransaction
                         , public nsIOutputStreamCallback
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSAHTTPTRANSACTION
     NS_DECL_NSIINPUTSTREAMCALLBACK
     NS_DECL_NSIOUTPUTSTREAMCALLBACK
@@ -211,6 +210,12 @@ private:
 
     uint16_t                        mRestartCount;        // the number of times this transaction has been restarted
     uint32_t                        mCaps;
+    // mCapsToClear holds flags that should be cleared in mCaps, e.g. unset
+    // NS_HTTP_REFRESH_DNS when DNS refresh request has completed to avoid
+    // redundant requests on the network. To deal with raciness, only unsetting
+    // bitfields should be allowed: 'lost races' will thus err on the
+    // conservative side, e.g. by going ahead with a 2nd DNS refresh.
+    uint32_t                        mCapsToClear;
     enum Classifier                 mClassification;
     int32_t                         mPipelinePosition;
     int64_t                         mMaxPipelineObjectSize;
@@ -338,6 +343,26 @@ private:
     bool mPassedRatePacing;
     bool mSynchronousRatePaceRequest;
     nsCOMPtr<nsICancelable> mTokenBucketCancel;
+
+// These members are used for network per-app metering (bug 746073)
+// Currently, they are only available on gonk.
+    uint64_t                           mCountRecv;
+    uint64_t                           mCountSent;
+    uint32_t                           mAppId;
+#ifdef MOZ_WIDGET_GONK
+    nsMainThreadPtrHandle<nsINetworkInterface> mActiveNetwork;
+#endif
+    nsresult                           SaveNetworkStats(bool);
+    void                               CountRecvBytes(uint64_t recvBytes)
+    {
+        mCountRecv += recvBytes;
+        SaveNetworkStats(false);
+    }
+    void                               CountSentBytes(uint64_t sentBytes)
+    {
+        mCountSent += sentBytes;
+        SaveNetworkStats(false);
+    }
 };
 
 #endif // nsHttpTransaction_h__

@@ -9,11 +9,12 @@
 
 #ifdef JS_ION
 
+#include "jit/BaselineFrame.h"
+
 #include "jscntxt.h"
 #include "jscompartment.h"
 
-#include "IonFrames.h"
-#include "vm/ScopeObject-inl.h"
+#include "vm/ScopeObject.h"
 
 namespace js {
 namespace jit {

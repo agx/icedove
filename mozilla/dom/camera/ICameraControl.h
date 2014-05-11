@@ -5,14 +5,12 @@
 #ifndef DOM_CAMERA_ICAMERACONTROL_H
 #define DOM_CAMERA_ICAMERACONTROL_H
 
-#include "jsapi.h"
 #include "nsIFile.h"
 #include "nsIDOMCameraManager.h"
 #include "DictionaryHelpers.h"
 #include "CameraCommon.h"
 
 namespace mozilla {
-
 
 class DOMCameraPreview;
 class RecorderProfileManager;
@@ -26,7 +24,7 @@ public:
   virtual nsresult StartPreview(DOMCameraPreview* aDOMPreview) = 0;
   virtual void StopPreview() = 0;
   virtual nsresult AutoFocus(nsICameraAutoFocusCallback* onSuccess, nsICameraErrorCallback* onError) = 0;
-  virtual nsresult TakePicture(idl::CameraSize aSize, int32_t aRotation, const nsAString& aFileFormat, idl::CameraPosition aPosition, uint64_t aDateTime, nsICameraTakePictureCallback* onSuccess, nsICameraErrorCallback* onError) = 0;
+  virtual nsresult TakePicture(const idl::CameraSize& aSize, int32_t aRotation, const nsAString& aFileFormat, idl::CameraPosition aPosition, uint64_t aDateTime, nsICameraTakePictureCallback* onSuccess, nsICameraErrorCallback* onError) = 0;
   virtual nsresult StartRecording(idl::CameraStartRecordingOptions* aOptions, nsIFile* aFolder, const nsAString& aFilename, nsICameraStartRecordingCallback* onSuccess, nsICameraErrorCallback* onError) = 0;
   virtual nsresult StopRecording() = 0;
   virtual nsresult GetPreviewStreamVideoMode(idl::CameraRecorderOptions* aOptions, nsICameraPreviewStreamCallback* onSuccess, nsICameraErrorCallback* onError) = 0;
@@ -44,6 +42,11 @@ public:
   virtual nsresult Get(nsICameraClosedCallback** aOnClosed) = 0;
   virtual nsresult Set(nsICameraRecorderStateChange* aOnRecorderStateChange) = 0;
   virtual nsresult Get(nsICameraRecorderStateChange** aOnRecorderStateChange) = 0;
+  virtual nsresult Set(nsICameraPreviewStateChange* aOnPreviewStateChange) = 0;
+  virtual nsresult Get(nsICameraPreviewStateChange** aOnPreviewStateChange) = 0;
+  virtual nsresult Set(uint32_t aKey, const idl::CameraSize& aSize) = 0;
+  virtual nsresult Get(uint32_t aKey, idl::CameraSize& aSize) = 0;
+  virtual nsresult Get(uint32_t aKey, int32_t* aValue) = 0;
   virtual nsresult SetFocusAreas(JSContext* aCx, const JS::Value& aValue) = 0;
   virtual nsresult SetMeteringAreas(JSContext* aCx, const JS::Value& aValue) = 0;
   virtual nsresult GetVideoSizes(nsTArray<idl::CameraSize>& aVideoSizes) = 0;

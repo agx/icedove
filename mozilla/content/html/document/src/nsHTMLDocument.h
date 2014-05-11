@@ -12,7 +12,6 @@
 #include "nsIDOMHTMLDocument.h"
 #include "nsIDOMHTMLCollection.h"
 #include "nsIScriptElement.h"
-#include "jsapi.h"
 #include "nsTArray.h"
 
 #include "pldhash.h"
@@ -32,6 +31,12 @@ class nsICachingChannel;
 class nsIWyciwygChannel;
 class nsILoadGroup;
 
+namespace mozilla {
+namespace dom {
+class HTMLAllCollection;
+} // namespace dom
+} // namespace mozilla
+
 class nsHTMLDocument : public nsDocument,
                        public nsIHTMLDocument,
                        public nsIDOMHTMLDocument
@@ -45,8 +50,7 @@ public:
   virtual nsresult Init() MOZ_OVERRIDE;
 
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(nsHTMLDocument,
-                                                         nsDocument)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsHTMLDocument, nsDocument)
 
   // nsIDocument
   virtual void Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup) MOZ_OVERRIDE;
@@ -68,12 +72,6 @@ public:
 
   virtual void BeginLoad() MOZ_OVERRIDE;
   virtual void EndLoad() MOZ_OVERRIDE;
-
-  virtual NS_HIDDEN_(void) Destroy() MOZ_OVERRIDE
-  {
-    mAll = nullptr;
-    nsDocument::Destroy();
-  }
 
   // nsIHTMLDocument
   virtual void SetCompatibilityMode(nsCompatibility aMode) MOZ_OVERRIDE;
@@ -103,11 +101,6 @@ public:
 
   // nsIDOMHTMLDocument interface
   NS_DECL_NSIDOMHTMLDOCUMENT
-
-  void RouteEvent(nsDOMEvent& aEvent)
-  {
-    RouteEvent(&aEvent);
-  }
 
   /**
    * Returns the result of document.all[aID] which can either be a node
@@ -173,8 +166,8 @@ public:
     return nsDocument::GetElementById(aElementId);
   }
 
-  virtual void DocSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const MOZ_OVERRIDE;
-  // DocSizeOfIncludingThis is inherited from nsIDocument.
+  virtual void DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const MOZ_OVERRIDE;
+  // DocAddSizeOfIncludingThis is inherited from nsIDocument.
 
   virtual bool WillIgnoreCharsetOverride() MOZ_OVERRIDE;
 
@@ -249,7 +242,6 @@ public:
   already_AddRefed<nsISelection> GetSelection(mozilla::ErrorResult& rv);
   // The XPCOM CaptureEvents works fine for us.
   // The XPCOM ReleaseEvents works fine for us.
-  // The XPCOM RouteEvent works fine for us.
   // We're picking up GetLocation from Document
   already_AddRefed<nsIDOMLocation> GetLocation() const {
     return nsIDocument::GetLocation();
@@ -302,7 +294,7 @@ protected:
   nsRefPtr<nsContentList> mForms;
   nsRefPtr<nsContentList> mFormControls;
 
-  JS::Heap<JSObject*> mAll;
+  nsRefPtr<mozilla::dom::HTMLAllCollection> mAll;
 
   /** # of forms in the document, synchronously set */
   int32_t mNumForms;
@@ -319,15 +311,9 @@ protected:
   static void TryCacheCharset(nsICachingChannel* aCachingChannel,
                                 int32_t& aCharsetSource,
                                 nsACString& aCharset);
-  // aParentDocument could be null.
   void TryParentCharset(nsIDocShell*  aDocShell,
-                        nsIDocument* aParentDocument,
                         int32_t& charsetSource, nsACString& aCharset);
-  static void TryWeakDocTypeDefault(int32_t& aCharsetSource,
-                                    nsACString& aCharset);
-  static void TryDefaultCharset(nsIMarkupDocumentViewer* aMarkupDV,
-                                int32_t& aCharsetSource,
-                                nsACString& aCharset);
+  static void TryFallback(int32_t& aCharsetSource, nsACString& aCharset);
 
   // Override so we can munge the charset on our wyciwyg channel as needed.
   virtual void SetDocumentCharacterSet(const nsACString& aCharSetID) MOZ_OVERRIDE;

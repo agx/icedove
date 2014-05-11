@@ -33,7 +33,7 @@ public:
     }
 
     already_AddRefed<gfxASurface> CreateOffscreenSurface(const gfxIntSize& size,
-                                                         gfxASurface::gfxContentType contentType);
+                                                         gfxContentType contentType);
 
     mozilla::TemporaryRef<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);
@@ -91,26 +91,15 @@ public:
 #endif
 
 #if (MOZ_WIDGET_GTK == 2)
-    static void SetGdkDrawable(gfxASurface *target,
+    static void SetGdkDrawable(cairo_surface_t *target,
                                GdkDrawable *drawable);
-    static GdkDrawable *GetGdkDrawable(gfxASurface *target);
+    static GdkDrawable *GetGdkDrawable(cairo_surface_t *target);
 #endif
 
     static int32_t GetDPI();
 
     bool UseXRender() {
-#if defined(MOZ_X11) && defined(MOZ_PLATFORM_MAEMO)
-        // XRender is not accelerated on the Maemo at the moment, and 
-        // X server pixman is out of our control; it's likely to be 
-        // older than (our) cairo's.   So fall back on software 
-        // rendering for more predictable performance.
-        // This setting will likely not be relevant when we have
-        // GL-accelerated compositing. We know of other platforms 
-        // with bad drivers where we'd like to also use client side 
-        // rendering, but until we have the ability to featuer test 
-        // this, we'll only disable this for maemo.
-        return true;
-#elif defined(MOZ_X11)
+#if defined(MOZ_X11)
         if (GetContentBackend() != mozilla::gfx::BACKEND_NONE &&
             GetContentBackend() != mozilla::gfx::BACKEND_CAIRO)
             return false;

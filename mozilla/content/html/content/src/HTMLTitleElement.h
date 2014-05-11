@@ -16,9 +16,9 @@ class ErrorResult;
 
 namespace dom {
 
-class HTMLTitleElement : public nsGenericHTMLElement,
-                         public nsIDOMHTMLTitleElement,
-                         public nsStubMutationObserver
+class HTMLTitleElement MOZ_FINAL : public nsGenericHTMLElement,
+                                   public nsIDOMHTMLTitleElement,
+                                   public nsStubMutationObserver
 {
 public:
   using Element::GetText;
@@ -29,15 +29,6 @@ public:
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
-
-  // nsIDOMNode
-  NS_FORWARD_NSIDOMNODE_TO_NSINODE
-
-  // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
-
-  // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLTitleElement
   NS_DECL_NSIDOMHTMLTITLEELEMENT
@@ -65,8 +56,6 @@ public:
                               bool aNullParent = true) MOZ_OVERRIDE;
 
   virtual void DoneAddingChildren(bool aHaveNotified) MOZ_OVERRIDE;
-
-  virtual nsIDOMNode* AsDOMNode() MOZ_OVERRIDE { return this; }
 
 protected:
 

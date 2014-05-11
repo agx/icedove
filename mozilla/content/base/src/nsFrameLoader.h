@@ -37,6 +37,7 @@ class mozIApplication;
 
 namespace mozilla {
 namespace dom {
+class ContentParent;
 class PBrowserParent;
 class TabParent;
 struct StructuredCloneData;
@@ -102,7 +103,7 @@ public:
     float mYScale;
   };
 
-  nsContentView(nsFrameLoader* aFrameLoader, ViewID aScrollId,
+  nsContentView(nsFrameLoader* aFrameLoader, ViewID aScrollId, bool aIsRoot,
                 ViewConfig aConfig = ViewConfig())
     : mViewportSize(0, 0)
     , mContentSize(0, 0)
@@ -110,10 +111,14 @@ public:
     , mParentScaleY(1.0)
     , mFrameLoader(aFrameLoader)
     , mScrollId(aScrollId)
+    , mIsRoot(aIsRoot)
     , mConfig(aConfig)
   {}
 
-  bool IsRoot() const;
+  bool IsRoot() const
+  {
+    return mIsRoot;
+  }
 
   ViewID GetId() const
   {
@@ -136,6 +141,7 @@ private:
   nsresult Update(const ViewConfig& aConfig);
 
   ViewID mScrollId;
+  bool mIsRoot;
   ViewConfig mConfig;
 };
 
@@ -154,13 +160,7 @@ protected:
   nsFrameLoader(mozilla::dom::Element* aOwner, bool aNetworkCreated);
 
 public:
-  ~nsFrameLoader() {
-    mNeedsAsyncDestroy = true;
-    if (mMessageManager) {
-      mMessageManager->Disconnect();
-    }
-    nsFrameLoader::Destroy();
-  }
+  ~nsFrameLoader();
 
   bool AsyncScrollEnabled() const
   {
@@ -186,8 +186,11 @@ public:
    * MessageManagerCallback methods that we override.
    */
   virtual bool DoLoadFrameScript(const nsAString& aURL) MOZ_OVERRIDE;
-  virtual bool DoSendAsyncMessage(const nsAString& aMessage,
-                                  const mozilla::dom::StructuredCloneData& aData) MOZ_OVERRIDE;
+  virtual bool DoSendAsyncMessage(JSContext* aCx,
+                                  const nsAString& aMessage,
+                                  const mozilla::dom::StructuredCloneData& aData,
+                                  JS::Handle<JSObject *> aCpows,
+                                  nsIPrincipal* aPrincipal) MOZ_OVERRIDE;
   virtual bool CheckPermission(const nsAString& aPermission) MOZ_OVERRIDE;
   virtual bool CheckManifestURL(const nsAString& aManifestURL) MOZ_OVERRIDE;
   virtual bool CheckAppHasPermission(const nsAString& aPermission) MOZ_OVERRIDE;
@@ -306,6 +309,15 @@ public:
    */
   nsView* GetDetachedSubdocView(nsIDocument** aContainerDoc) const;
 
+  /**
+   * Applies a new set of sandbox flags. These are merged with the sandbox
+   * flags from our owning content's owning document with a logical OR, this
+   * ensures that we can only add restrictions and never remove them.
+   */
+  void ApplySandboxFlags(uint32_t sandboxFlags);
+
+  void GetURL(nsString& aURL);
+
 private:
 
   void SetOwnerContent(mozilla::dom::Element* aContent);
@@ -354,7 +366,6 @@ private:
    */
   nsresult MaybeCreateDocShell();
   nsresult EnsureMessageManager();
-  NS_HIDDEN_(void) GetURL(nsString& aURL);
 
   // Properly retrieves documentSize of any subdocument type.
   nsresult GetWindowDimensions(nsRect& aRect);
@@ -433,10 +444,12 @@ private:
   // doesn't necessarily correlate with docshell/document visibility.
   bool mVisible : 1;
 
-  // XXX leaking
-  nsCOMPtr<nsIObserver> mChildHost;
+  // The ContentParent associated with mRemoteBrowser.  This was added as a
+  // strong ref in bug 545237, and we're not sure if we can get rid of it.
+  nsRefPtr<mozilla::dom::ContentParent> mContentParent;
   RenderFrameParent* mCurrentRemoteFrame;
   TabParent* mRemoteBrowser;
+  uint64_t mChildID;
 
   // See nsIFrameLoader.idl.  Short story, if !(mRenderMode &
   // RENDER_MODE_ASYNC_SCROLL), all the fields below are ignored in
@@ -446,6 +459,9 @@ private:
   // See nsIFrameLoader.idl. EVENT_MODE_NORMAL_DISPATCH automatically
   // forwards some input events to out-of-process content.
   uint32_t mEventMode;
+
+  // Indicate if we have sent 'remote-browser-frame-pending'.
+  bool mPendingFrameSent;
 };
 
 #endif

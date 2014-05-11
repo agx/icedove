@@ -7,64 +7,34 @@
 
 #include "nsCOMPtr.h"
 #include "nsTextControlFrame.h"
-#include "nsIDocument.h"
-#include "nsIFormControl.h"
-#include "nsIServiceManager.h"
-#include "nsFrameSelection.h"
 #include "nsIPlaintextEditor.h"
-#include "nsEditorCID.h"
-#include "nsLayoutCID.h"
-#include "nsIDocumentEncoder.h"
 #include "nsCaret.h"
-#include "nsISelectionListener.h"
-#include "nsIController.h"
-#include "nsIControllers.h"
-#include "nsIControllerContext.h"
 #include "nsGenericHTMLElement.h"
+#include "nsIEditor.h"
 #include "nsIEditorIMESupport.h"
 #include "nsIPhonetic.h"
 #include "nsTextFragment.h"
-#include "nsIEditorObserver.h"
-#include "nsEditProperty.h"
 #include "nsIDOMHTMLTextAreaElement.h"
 #include "nsINameSpaceManager.h"
 #include "nsINodeInfo.h"
 #include "nsFormControlFrame.h" //for registering accesskeys
 
 #include "nsIContent.h"
-#include "nsIAtom.h"
 #include "nsPresContext.h"
 #include "nsRenderingContext.h"
 #include "nsGkAtoms.h"
 #include "nsLayoutUtils.h"
-#include "nsIComponentManager.h"
-#include "nsView.h"
-#include "nsViewManager.h"
-#include "nsIDOMHTMLInputElement.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMHTMLElement.h"
 #include "nsIPresShell.h"
 
-#include "nsBoxLayoutState.h"
 #include <algorithm>
-//for keylistener for "return" check
-#include "nsIDocument.h" //observe documents to send onchangenotifications
-#include "nsIStyleSheet.h"//observe documents to send onchangenotifications
-#include "nsIStyleRule.h"//observe documents to send onchangenotifications
-#include "nsIDOMEventListener.h"//observe documents to send onchangenotifications
-#include "nsGUIEvent.h"
-
-#include "nsIDOMCharacterData.h" //for selection setting helper func
 #include "nsIDOMNodeList.h" //for selection setting helper func
 #include "nsIDOMRange.h" //for selection setting helper func
 #include "nsPIDOMWindow.h" //needed for notify selection changed to update the menus ect.
 #include "nsIDOMNode.h"
 
-#include "nsITransactionManager.h"
 #include "nsIDOMText.h" //for multiline getselection
-#include "nsNodeInfoManager.h"
-#include "nsContentCreatorFunctions.h"
-#include "nsINativeKeyBindings.h"
 #include "nsFocusManager.h"
 #include "nsTextEditRules.h"
 #include "nsPresState.h"
@@ -74,6 +44,7 @@
 #include "nsContentUtils.h"
 #include "nsCxPusher.h"
 #include "nsTextNode.h"
+#include "nsStyleSet.h"
 
 #define DEFAULT_COLUMN_WIDTH 20
 
@@ -129,7 +100,7 @@ private:
 
 nsTextControlFrame::nsTextControlFrame(nsIPresShell* aShell, nsStyleContext* aContext)
   : nsContainerFrame(aContext)
-  , mUseEditor(false)
+  , mEditorHasBeenInitialized(false)
   , mIsProcessing(false)
 #ifdef DEBUG
   , mInEditorInitialization(false)
@@ -282,9 +253,7 @@ nsTextControlFrame::EnsureEditorInitialized()
   // never get used.  So, now this method is being called lazily only
   // when we actually need an editor.
 
-  // Check if this method has been called already.
-  // If so, just return early.
-  if (mUseEditor)
+  if (mEditorHasBeenInitialized)
     return NS_OK;
 
   nsIDocument* doc = mContent->GetCurrentDoc();
@@ -337,9 +306,9 @@ nsTextControlFrame::EnsureEditorInitialized()
     NS_ENSURE_SUCCESS(rv, rv);
     NS_ENSURE_STATE(weakFrame.IsAlive());
 
-    // Turn on mUseEditor so that subsequent calls will use the
+    // Set mEditorHasBeenInitialized so that subsequent calls will use the
     // editor.
-    mUseEditor = true;
+    mEditorHasBeenInitialized = true;
 
     // Set the selection to the beginning of the text field.
     if (weakFrame.IsAlive()) {
@@ -388,7 +357,8 @@ nsTextControlFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
 
     nsRefPtr<nsStyleContext> placeholderStyleContext =
       PresContext()->StyleSet()->ResolvePseudoElementStyle(
-          mContent->AsElement(), pseudoType, StyleContext());
+          mContent->AsElement(), pseudoType, StyleContext(),
+          placeholderNode->AsElement());
 
     if (!aElements.AppendElement(ContentInfo(placeholderNode,
                                  placeholderStyleContext))) {
@@ -1108,80 +1078,73 @@ nsTextControlFrame::AttributeChanged(int32_t         aNameSpaceID,
   if (needEditor) {
     GetEditor(getter_AddRefs(editor));
   }
-  if ((needEditor && !editor) || !selCon)
+  if ((needEditor && !editor) || !selCon) {
     return nsContainerFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
+  }
 
-  nsresult rv = NS_OK;
-
-  if (nsGkAtoms::maxlength == aAttribute) 
-  {
+  if (nsGkAtoms::maxlength == aAttribute) {
     int32_t maxLength;
     bool maxDefined = GetMaxLength(&maxLength);
-    
     nsCOMPtr<nsIPlaintextEditor> textEditor = do_QueryInterface(editor);
-    if (textEditor)
-    {
-      if (maxDefined) 
-      {  // set the maxLength attribute
-          textEditor->SetMaxTextLength(maxLength);
+    if (textEditor) {
+      if (maxDefined) { // set the maxLength attribute
+        textEditor->SetMaxTextLength(maxLength);
         // if maxLength>docLength, we need to truncate the doc content
-      }
-      else { // unset the maxLength attribute
-          textEditor->SetMaxTextLength(-1);
-      }
-    }
-    rv = NS_OK; // don't propagate the error
-  } 
-  else if (nsGkAtoms::readonly == aAttribute) 
-  {
-    uint32_t flags;
-    editor->GetFlags(&flags);
-    if (AttributeExists(nsGkAtoms::readonly))
-    { // set readonly
-      flags |= nsIPlaintextEditor::eEditorReadonlyMask;
-      if (nsContentUtils::IsFocusedContent(mContent))
-        selCon->SetCaretEnabled(false);
-    }
-    else 
-    { // unset readonly
-      flags &= ~(nsIPlaintextEditor::eEditorReadonlyMask);
-      if (!(flags & nsIPlaintextEditor::eEditorDisabledMask) &&
-          nsContentUtils::IsFocusedContent(mContent))
-        selCon->SetCaretEnabled(true);
-    }
-    editor->SetFlags(flags);
-  }
-  else if (nsGkAtoms::disabled == aAttribute) 
-  {
-    uint32_t flags;
-    editor->GetFlags(&flags);
-    if (AttributeExists(nsGkAtoms::disabled))
-    { // set disabled
-      flags |= nsIPlaintextEditor::eEditorDisabledMask;
-      selCon->SetDisplaySelection(nsISelectionController::SELECTION_OFF);
-      if (nsContentUtils::IsFocusedContent(mContent))
-        selCon->SetCaretEnabled(false);
-    }
-    else 
-    { // unset disabled
-      flags &= ~(nsIPlaintextEditor::eEditorDisabledMask);
-      selCon->SetDisplaySelection(nsISelectionController::SELECTION_HIDDEN);
-      if (nsContentUtils::IsFocusedContent(mContent)) {
-        selCon->SetCaretEnabled(true);
+      } else { // unset the maxLength attribute
+        textEditor->SetMaxTextLength(-1);
       }
     }
-    editor->SetFlags(flags);
-  }
-  else if (!mUseEditor && nsGkAtoms::value == aAttribute) {
-    UpdateValueDisplay(true);
-  }
-  // Allow the base class to handle common attributes supported
-  // by all form elements... 
-  else {
-    rv = nsContainerFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
+    return NS_OK;
   }
 
-  return rv;
+  if (nsGkAtoms::readonly == aAttribute) {
+    uint32_t flags;
+    editor->GetFlags(&flags);
+    if (AttributeExists(nsGkAtoms::readonly)) { // set readonly
+      flags |= nsIPlaintextEditor::eEditorReadonlyMask;
+      if (nsContentUtils::IsFocusedContent(mContent)) {
+        selCon->SetCaretEnabled(false);
+      }
+    } else { // unset readonly
+      flags &= ~(nsIPlaintextEditor::eEditorReadonlyMask);
+      if (!(flags & nsIPlaintextEditor::eEditorDisabledMask) &&
+          nsContentUtils::IsFocusedContent(mContent)) {
+        selCon->SetCaretEnabled(true);
+      }
+    }
+    editor->SetFlags(flags);
+    return NS_OK;
+  }
+
+  if (nsGkAtoms::disabled == aAttribute) {
+    uint32_t flags;
+    editor->GetFlags(&flags);
+    int16_t displaySelection = nsISelectionController::SELECTION_OFF;
+    const bool focused = nsContentUtils::IsFocusedContent(mContent);
+    const bool hasAttr = AttributeExists(nsGkAtoms::disabled);
+    if (hasAttr) { // set disabled
+      flags |= nsIPlaintextEditor::eEditorDisabledMask;
+    } else { // unset disabled
+      flags &= ~(nsIPlaintextEditor::eEditorDisabledMask);
+      displaySelection = focused ? nsISelectionController::SELECTION_ON
+                                 : nsISelectionController::SELECTION_HIDDEN;
+    }
+    selCon->SetDisplaySelection(displaySelection);
+    if (focused) {
+      selCon->SetCaretEnabled(!hasAttr);
+    }
+    editor->SetFlags(flags);
+    return NS_OK;
+  }
+
+  if (!mEditorHasBeenInitialized && nsGkAtoms::value == aAttribute) {
+    UpdateValueDisplay(true);
+    return NS_OK;
+  }
+
+  // Allow the base class to handle common attributes supported by all form
+  // elements...
+  return nsContainerFrame::AttributeChanged(aNameSpaceID, aAttribute, aModType);
 }
 
 
@@ -1279,12 +1242,6 @@ nsTextControlFrame::SetInitialChildList(ChildListID     aListID,
   return rv;
 }
 
-bool
-nsTextControlFrame::IsScrollable() const
-{
-  return !IsSingleLineTextControl();
-}
-
 void
 nsTextControlFrame::SetValueChanged(bool aValueChanged)
 {
@@ -1316,7 +1273,7 @@ nsTextControlFrame::UpdateValueDisplay(bool aNotify,
   nsIContent* rootNode = txtCtrl->GetRootEditorNode();
 
   NS_PRECONDITION(rootNode, "Must have a div content\n");
-  NS_PRECONDITION(!mUseEditor,
+  NS_PRECONDITION(!mEditorHasBeenInitialized,
                   "Do not call this after editor has been initialized");
   NS_ASSERTION(!mUsePlaceholder || txtCtrl->GetPlaceholderNode(),
                "A placeholder div must exist");
@@ -1473,6 +1430,17 @@ nsTextControlFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
     }
     kid = kid->GetNextSibling();
   }
+}
+
+mozilla::dom::Element*
+nsTextControlFrame::GetPseudoElement(nsCSSPseudoElements::Type aType)
+{
+  if (aType == nsCSSPseudoElements::ePseudo_mozPlaceholder) {
+    nsCOMPtr<nsITextControlElement> txtCtrl = do_QueryInterface(GetContent());
+    return txtCtrl->GetPlaceholderNode();
+  }
+
+  return nsContainerFrame::GetPseudoElement(aType);
 }
 
 NS_IMETHODIMP

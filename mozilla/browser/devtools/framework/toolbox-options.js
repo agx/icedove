@@ -6,7 +6,7 @@
 
 const {Cu, Cc, Ci} = require("chrome");
 
-let Promise = require("sdk/core/promise");
+let promise = require("sdk/core/promise");
 let EventEmitter = require("devtools/shared/event-emitter");
 
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
@@ -40,9 +40,6 @@ function OptionsPanel(iframeWindow, toolbox) {
   this.toolbox = toolbox;
   this.isReady = false;
 
-  // Make restart method available from xul
-  this.panelWin.restart = this.restart;
-
   EventEmitter.decorate(this);
 };
 
@@ -53,11 +50,10 @@ OptionsPanel.prototype = {
   },
 
   open: function() {
-    let deferred = Promise.defer();
+    let deferred = promise.defer();
 
     this.setupToolsList();
     this.populatePreferences();
-    this.prepareRestartPreferences();
 
     this._disableJSClicked = this._disableJSClicked.bind(this);
 
@@ -111,6 +107,7 @@ OptionsPanel.prototype = {
         atleastOneToolNotSupported = true;
         checkbox.setAttribute("label",
                               l10n("options.toolNotSupportedMarker", tool.label));
+        checkbox.setAttribute("unsupported", "");
       }
       checkbox.setAttribute("checked", pref(tool.visibilityswitch));
       checkbox.addEventListener("command", onCheckboxClick.bind(checkbox, tool.id));
@@ -118,10 +115,10 @@ OptionsPanel.prototype = {
     };
 
     // Populating the default tools lists
-    for (let tool of gDevTools.getDefaultTools()) {
-      if (tool.id == "options") {
-        continue;
-      }
+    let toggleableTools = gDevTools.getDefaultTools().filter(tool => {
+      return tool.visibilityswitch
+    });
+    for (let tool of toggleableTools) {
       defaultToolsBox.appendChild(createToolCheckbox(tool));
     }
 
@@ -178,38 +175,27 @@ OptionsPanel.prototype = {
         gDevTools.emit("pref-changed", data);
       }.bind(radiogroup));
     }
-  },
-
-  /**
-   * Hides any label in a box with class "hidden-labels-box" at page load. The
-   * labels are shown again when the user click on the checkbox in the box.
-   */
-  prepareRestartPreferences: function() {
-    let labels = this.panelDoc.querySelectorAll(".hidden-labels-box > label");
-    for (let label of labels) {
-      label.style.display = "none";
+    let prefMenulists = this.panelDoc.querySelectorAll("menulist[data-pref]");
+    for (let menulist of prefMenulists) {
+      let pref = Services.prefs.getCharPref(menulist.getAttribute("data-pref"));
+      let menuitems = menulist.querySelectorAll("menuitem");
+      for (let menuitem of menuitems) {
+        let value = menuitem.getAttribute("value");
+        if (value === pref) {
+          menulist.selectedItem = menuitem;
+          break;
+        }
+      }
+      menulist.addEventListener("command", function() {
+        let data = {
+          pref: this.getAttribute("data-pref"),
+          newValue: this.value
+        };
+        data.oldValue = Services.prefs.getCharPref(data.pref);
+        Services.prefs.setCharPref(data.pref, data.newValue);
+        gDevTools.emit("pref-changed", data);
+      }.bind(menulist));
     }
-    let checkboxes = this.panelDoc.querySelectorAll(".hidden-labels-box > checkbox");
-    for (let checkbox of checkboxes) {
-      checkbox.addEventListener("command", function(target) {
-        target.nextSibling.style.display = "";
-        target.nextSibling.nextSibling.style.display = "";
-      }.bind(null, checkbox));
-    }
-  },
-
-  restart: function() {
-    let canceled = Cc["@mozilla.org/supports-PRBool;1"]
-                     .createInstance(Ci.nsISupportsPRBool);
-    Services.obs.notifyObservers(canceled, "quit-application-requested", "restart");
-    if (canceled.data) {
-      return;
-    }
-
-    // restart
-    Cc['@mozilla.org/toolkit/app-startup;1']
-      .getService(Ci.nsIAppStartup)
-      .quit(Ci.nsIAppStartup.eAttemptQuit | Ci.nsIAppStartup.eRestart);
   },
 
   /**

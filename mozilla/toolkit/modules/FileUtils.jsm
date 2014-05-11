@@ -23,8 +23,8 @@ this.FileUtils = {
   MODE_APPEND   : 0x10,
   MODE_TRUNCATE : 0x20,
 
-  PERMS_FILE      : 0644,
-  PERMS_DIRECTORY : 0755,
+  PERMS_FILE      : 0o644,
+  PERMS_DIRECTORY : 0o755,
 
   /**
    * Gets a file at the specified hierarchy under a nsIDirectoryService key.
@@ -60,12 +60,19 @@ this.FileUtils = {
    * @return  nsIFile object for the location specified.
    */
   getDir: function FileUtils_getDir(key, pathArray, shouldCreate, followLinks) {
-    var dir = gDirService.get(key, Ci.nsILocalFile);
+    var dir = gDirService.get(key, Ci.nsIFile);
     for (var i = 0; i < pathArray.length; ++i) {
       dir.append(pathArray[i]);
-      if (shouldCreate && !dir.exists())
-        dir.create(Ci.nsILocalFile.DIRECTORY_TYPE, this.PERMS_DIRECTORY);
     }
+
+    if (shouldCreate) {
+      try {
+        dir.create(Ci.nsIFile.DIRECTORY_TYPE, this.PERMS_DIRECTORY);
+      } catch (ex if ex.result == Cr.NS_ERROR_FILE_ALREADY_EXISTS) {
+        // Ignore the exception due to a directory that already exists.
+      }
+    }
+
     if (!followLinks)
       dir.followLinks = false;
     return dir;

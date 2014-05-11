@@ -64,6 +64,9 @@ interface WebGLTexture {
 interface WebGLUniformLocation {
 };
 
+interface WebGLVertexArray {
+};
+
 interface WebGLActiveInfo {
     readonly attribute GLint size;
     readonly attribute GLenum type;
@@ -586,9 +589,9 @@ interface WebGLRenderingContext {
 
     void generateMipmap(GLenum target);
 
-    [Creator]
+    [NewObject]
     WebGLActiveInfo? getActiveAttrib(WebGLProgram? program, GLuint index);
-    [Creator]
+    [NewObject]
     WebGLActiveInfo? getActiveUniform(WebGLProgram? program, GLuint index);
 
     sequence<WebGLShader>? getAttachedShaders(WebGLProgram? program);
@@ -609,7 +612,7 @@ interface WebGLRenderingContext {
     any getRenderbufferParameter(GLenum target, GLenum pname);
     any getShaderParameter(WebGLShader? shader, GLenum pname);
 
-    [Creator]
+    [NewObject]
     WebGLShaderPrecisionFormat? getShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype);
 
     DOMString? getShaderInfoLog(WebGLShader? shader);
@@ -618,10 +621,9 @@ interface WebGLRenderingContext {
 
     any getTexParameter(GLenum target, GLenum pname);
 
-    [Throws]
     any getUniform(WebGLProgram? program, WebGLUniformLocation? location);
 
-    [Creator]
+    [NewObject]
     WebGLUniformLocation? getUniformLocation(WebGLProgram? program, DOMString name);
 
     [Throws]
@@ -828,6 +830,15 @@ interface WebGLExtensionTextureFilterAnisotropic
 };
 
 [NoInterfaceObject]
+interface WebGLExtensionSRGB
+{
+    const GLenum SRGB_EXT                                  = 0x8C40;
+    const GLenum SRGB_ALPHA_EXT                            = 0x8C42;
+    const GLenum SRGB8_ALPHA8_EXT                          = 0x8C43;
+    const GLenum FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT = 0x8210;
+};
+
+[NoInterfaceObject]
 interface WebGLExtensionStandardDerivatives {
     const GLenum FRAGMENT_SHADER_DERIVATIVE_HINT_OES = 0x8B8B;
 };
@@ -882,4 +893,23 @@ interface WebGLExtensionDrawBuffers {
 [NoInterfaceObject]
 interface WebGLExtensionTextureFloatLinear
 {
+};
+
+[NoInterfaceObject]
+interface WebGLExtensionVertexArray {
+    const GLenum VERTEX_ARRAY_BINDING_OES = 0x85B5;
+
+    WebGLVertexArray? createVertexArrayOES();
+    void deleteVertexArrayOES(WebGLVertexArray? arrayObject);
+    [WebGLHandlesContextLoss] GLboolean isVertexArrayOES(WebGLVertexArray? arrayObject);
+    void bindVertexArrayOES(WebGLVertexArray? arrayObject);
+};
+
+[NoInterfaceObject]
+interface WebGLExtensionInstancedArrays {
+    const GLenum VERTEX_ATTRIB_ARRAY_DIVISOR_ANGLE = 0x88FE;
+
+    void drawArraysInstancedANGLE(GLenum mode, GLint first, GLsizei count, GLsizei primcount);
+    void drawElementsInstancedANGLE(GLenum mode, GLsizei count, GLenum type, GLintptr offset, GLsizei primcount);
+    void vertexAttribDivisorANGLE(GLuint index, GLuint divisor);
 };

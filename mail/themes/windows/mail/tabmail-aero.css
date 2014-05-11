@@ -61,15 +61,15 @@
 }
 
 .tabmail-tab:hover > .tab-stack > .tab-background:not([selected=true]) {
-  background-image: url(icons/tabBackgroundStart.png),
-                    url(icons/tabBackgroundMiddle.png),
-                    url(icons/tabBackgroundEnd.png);
+  background-image: url(tabs/backgroundStart.png),
+                    url(tabs/backgroundMiddle.png),
+                    url(tabs/backgroundEnd.png);
 }
 
 .tab-background[selected=true] {
-  background-image: url(icons/tabActiveStart.svg),
-                    url(icons/tabActiveMiddle.svg),
-                    url(icons/tabActiveEnd.svg);
+  background-image: url(tabs/activeStart.svg),
+                    url(tabs/activeMiddle.svg),
+                    url(tabs/activeEnd.svg);
 }
 
 .tab-background[selected=true]:-moz-lwtheme {
@@ -78,9 +78,9 @@
 
 @media (-moz-windows-default-theme) {
   .tab-background[selected=true] {
-    background-image: url(icons/tabActiveStart.png),
-                      url(icons/tabActiveMiddle.png),
-                      url(icons/tabActiveEnd.png);
+    background-image: url(tabs/activeStart.png),
+                      url(tabs/activeMiddle.png),
+                      url(tabs/activeEnd.png);
   }
   
   .tab-background[selected=true]:-moz-lwtheme {
@@ -88,12 +88,9 @@
   }
 }
 
-/* Apply only on Win8 */
 @media (-moz-windows-compositor) {
-  @media not all and (-moz-windows-glass) {
-    .tabmail-tab {
-      text-shadow: none;
-    }
+  .tabmail-tab:not(:-moz-lwtheme) {
+    text-shadow: none;
   }
 }
 
@@ -204,7 +201,7 @@ tabpanels {
 
 /* Tab DnD indicator */
 .tab-drop-indicator {
-  list-style-image: url(chrome://messenger/skin/icons/tabDragIndicator.png);
+  list-style-image: url(tabs/dragIndicator.png);
   margin-bottom: -11px;
 }
 
@@ -263,7 +260,7 @@ tabpanels {
 .tabmail-arrowscrollbox > stack > .scrollbutton-down {
   margin: 0;
   -moz-margin-end: 1px;
-  list-style-image: url("chrome://messenger/skin/icons/tab-arrow-left.png");
+  list-style-image: url(tabs/arrow-left.png);
   -moz-image-region: rect(0, 15px, 17px, 0);
   border-radius: 0;
 }
@@ -274,7 +271,7 @@ tabpanels {
   .scrollbutton-down:-moz-system-metric(windows-glass):not(:-moz-lwtheme),
 .tabmail-arrowscrollbox > .scrollbutton-up:-moz-lwtheme-brighttext,
 .tabmail-arrowscrollbox > stack > .scrollbutton-down:-moz-lwtheme-brighttext {
-  list-style-image: url(chrome://messenger/skin/icons/tab-arrow-left-inverted.png);
+  list-style-image: url(tabs/arrow-left-inverted.png);
 }
 
 .tabmail-arrowscrollbox > .scrollbutton-up:-moz-locale-dir(rtl),

@@ -6,6 +6,7 @@
 
 #include "OfflineAudioCompletionEvent.h"
 #include "mozilla/dom/OfflineAudioCompletionEventBinding.h"
+#include "AudioContext.h"
 
 namespace mozilla {
 namespace dom {
@@ -21,7 +22,7 @@ NS_IMPL_RELEASE_INHERITED(OfflineAudioCompletionEvent, nsDOMEvent)
 
 OfflineAudioCompletionEvent::OfflineAudioCompletionEvent(AudioContext* aOwner,
                                                          nsPresContext* aPresContext,
-                                                         nsEvent* aEvent)
+                                                         WidgetEvent* aEvent)
   : nsDOMEvent(aOwner, aPresContext, aEvent)
 {
   SetIsDOMBinding();

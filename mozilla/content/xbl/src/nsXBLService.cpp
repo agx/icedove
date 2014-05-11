@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsCOMPtr.h"
 #include "nsNetUtil.h"
@@ -46,6 +46,7 @@
 #include "nsIScriptError.h"
 #include "nsXBLSerialize.h"
 #include "nsDOMEvent.h"
+#include "nsEventListenerManager.h"
 
 #ifdef MOZ_XUL
 #include "nsXULPrototypeCache.h"
@@ -72,11 +73,10 @@ IsAncestorBinding(nsIDocument* aDocument,
   NS_ASSERTION(aChild, "expected a child content");
 
   uint32_t bindingRecursion = 0;
-  nsBindingManager* bindingManager = aDocument->BindingManager();
   for (nsIContent *bindingParent = aChild->GetBindingParent();
        bindingParent;
        bindingParent = bindingParent->GetBindingParent()) {
-    nsXBLBinding* binding = bindingManager->GetBinding(bindingParent);
+    nsXBLBinding* binding = bindingParent->GetXBLBinding();
     if (!binding) {
       continue;
     }
@@ -91,7 +91,7 @@ IsAncestorBinding(nsIDocument* aDocument,
       NS_ConvertUTF8toUTF16 bindingURI(spec);
       const PRUnichar* params[] = { bindingURI.get() };
       nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                      "XBL", aDocument,
+                                      NS_LITERAL_CSTRING("XBL"), aDocument,
                                       nsContentUtils::eXBL_PROPERTIES,
                                       "TooDeepBindingRecursion",
                                       params, ArrayLength(params));
@@ -332,7 +332,7 @@ nsXBLStreamListener::HandleEvent(nsIDOMEvent* aEvent)
         NS_WARNING("An XBL file is malformed. Did you forget the XBL namespace on the bindings tag?");
       }
       nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                      "XBL", nullptr,
+                                      NS_LITERAL_CSTRING("XBL"), nullptr,
                                       nsContentUtils::eXBL_PROPERTIES,
                                       "MalformedXBL",
                                       nullptr, 0, documentURI);
@@ -370,7 +370,7 @@ bool nsXBLService::gAllowDataURIs = false;
 
 nsHashtable* nsXBLService::gClassTable = nullptr;
 
-JSCList  nsXBLService::gClassLRUList = JS_INIT_STATIC_CLIST(&nsXBLService::gClassLRUList);
+LinkedList<nsXBLJSClass>* nsXBLService::gClassLRUList = nullptr;
 uint32_t nsXBLService::gClassLRUListLength = 0;
 uint32_t nsXBLService::gClassLRUListQuota = 64;
 
@@ -394,6 +394,7 @@ nsXBLService::Init()
 nsXBLService::nsXBLService(void)
 {
   gClassTable = new nsHashtable();
+  gClassLRUList = new LinkedList<nsXBLJSClass>();
 
   Preferences::AddBoolVarCache(&gAllowDataURIs, "layout.debug.enable_data_xbl");
 }
@@ -407,6 +408,8 @@ nsXBLService::~nsXBLService(void)
   // created for bindings will be deleted when those objects are finalized
   // (and not put on gClassLRUList, because length >= quota).
   gClassLRUListLength = gClassLRUListQuota = 0;
+  delete gClassLRUList;
+  gClassLRUList = nullptr;
 
   // At this point, the only hash table entries should be for referenced
   // XBL class structs held by unfinalized JS binding objects.
@@ -451,23 +454,18 @@ nsXBLService::LoadBindings(nsIContent* aContent, nsIURI* aURL,
     return NS_OK;
   }
 
-  nsBindingManager *bindingManager = document->BindingManager();
-  
-  nsXBLBinding *binding = bindingManager->GetBinding(aContent);
+  nsXBLBinding *binding = aContent->GetXBLBinding();
   if (binding) {
-    nsXBLBinding *styleBinding = binding->GetFirstStyleBinding();
-    if (styleBinding) {
-      if (binding->MarkedForDeath()) {
-        FlushStyleBindings(aContent);
-        binding = nullptr;
-      }
-      else {
-        // See if the URIs match.
-        if (styleBinding->PrototypeBinding()->CompareBindingURI(aURL))
-          return NS_OK;
-        FlushStyleBindings(aContent);
-        binding = nullptr;
-      }
+    if (binding->MarkedForDeath()) {
+      FlushStyleBindings(aContent);
+      binding = nullptr;
+    }
+    else {
+      // See if the URIs match.
+      if (binding->PrototypeBinding()->CompareBindingURI(aURL))
+        return NS_OK;
+      FlushStyleBindings(aContent);
+      binding = nullptr;
     }
   }
 
@@ -499,7 +497,7 @@ nsXBLService::LoadBindings(nsIContent* aContent, nsIURI* aURL,
   }
   else {
     // Install the binding on the content node.
-    bindingManager->SetBinding(aContent, newBinding);
+    aContent->SetXBLBinding(newBinding);
   }
 
   {
@@ -532,20 +530,12 @@ nsXBLService::FlushStyleBindings(nsIContent* aContent)
 {
   nsCOMPtr<nsIDocument> document = aContent->OwnerDoc();
 
-  nsBindingManager *bindingManager = document->BindingManager();
-  
-  nsXBLBinding *binding = bindingManager->GetBinding(aContent);
-  
+  nsXBLBinding *binding = aContent->GetXBLBinding();
   if (binding) {
-    nsXBLBinding *styleBinding = binding->GetFirstStyleBinding();
+    // Clear out the script references.
+    binding->ChangeDocument(document, nullptr);
 
-    if (styleBinding) {
-      // Clear out the script references.
-      styleBinding->ChangeDocument(document, nullptr);
-    }
-
-    if (styleBinding == binding) 
-      bindingManager->SetBinding(aContent, nullptr); // Flush old style bindings
+    aContent->SetXBLBinding(nullptr); // Flush old style bindings
   }
    
   return NS_OK;
@@ -572,7 +562,7 @@ nsXBLService::AttachGlobalKeyHandler(EventTarget* aTarget)
       piTarget = doc; // We're a XUL keyset. Attach to our document.
   }
 
-  nsEventListenerManager* manager = piTarget->GetListenerManager(true);
+  nsEventListenerManager* manager = piTarget->GetOrCreateListenerManager();
 
   if (!piTarget || !manager)
     return NS_ERROR_FAILURE;
@@ -622,7 +612,7 @@ nsXBLService::DetachGlobalKeyHandler(EventTarget* aTarget)
   if (doc)
     piTarget = do_QueryInterface(doc);
 
-  nsEventListenerManager* manager = piTarget->GetListenerManager(true);
+  nsEventListenerManager* manager = piTarget->GetOrCreateListenerManager();
 
   if (!piTarget || !manager)
     return NS_ERROR_FAILURE;
@@ -656,11 +646,8 @@ nsXBLService::Observe(nsISupports* aSubject, const char* aTopic, const PRUnichar
 nsresult
 nsXBLService::FlushMemory()
 {
-  while (!JS_CLIST_IS_EMPTY(&gClassLRUList)) {
-    JSCList* lru = gClassLRUList.next;
-    nsXBLJSClass* c = static_cast<nsXBLJSClass*>(lru);
-
-    JS_REMOVE_AND_INIT_LINK(lru);
+  while (!gClassLRUList->isEmpty()) {
+    nsXBLJSClass* c = gClassLRUList->popFirst();
     delete c;
     gClassLRUListLength--;
   }
@@ -777,7 +764,7 @@ nsXBLService::GetBinding(nsIContent* aBoundElement, nsIURI* aURI,
           NS_ConvertUTF8toUTF16 baseSpecUTF16(basespec);
           const PRUnichar* params[] = { protoSpec.get(), baseSpecUTF16.get() };
           nsContentUtils::ReportToConsole(nsIScriptError::warningFlag,
-                                          "XBL", nullptr,
+                                          NS_LITERAL_CSTRING("XBL"), nullptr,
                                           nsContentUtils::eXBL_PROPERTIES,
                                           "CircularExtendsBinding",
                                           params, ArrayLength(params),
@@ -790,7 +777,7 @@ nsXBLService::GetBinding(nsIContent* aBoundElement, nsIURI* aURI,
 
   nsRefPtr<nsXBLBinding> baseBinding;
   if (baseBindingURI) {
-    nsCOMPtr<nsIContent> child = protoBinding->GetBindingElement();
+    nsIContent* child = protoBinding->GetBindingElement();
     rv = GetBinding(aBoundElement, baseBindingURI, aPeekOnly,
                     child->NodePrincipal(), aIsReady,
                     getter_AddRefs(baseBinding), aDontExtendURIs);

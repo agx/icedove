@@ -14,6 +14,10 @@
 
 namespace mozilla {
 
+#ifdef LOG
+#undef LOG
+#endif
+
 #ifdef PR_LOGGING
 extern PRLogModuleInfo* GetMediaManagerLog();
 #define LOG(msg) PR_LOG(GetMediaManagerLog(), PR_LOG_DEBUG, msg)
@@ -24,7 +28,7 @@ extern PRLogModuleInfo* GetMediaManagerLog();
 /**
  * Webrtc audio source.
  */
-NS_IMPL_THREADSAFE_ISUPPORTS0(MediaEngineWebRTCAudioSource)
+NS_IMPL_ISUPPORTS0(MediaEngineWebRTCAudioSource)
 
 void
 MediaEngineWebRTCAudioSource::GetName(nsAString& aName)
@@ -103,15 +107,20 @@ MediaEngineWebRTCAudioSource::Config(bool aEchoOn, uint32_t aEcho,
 nsresult
 MediaEngineWebRTCAudioSource::Allocate(const MediaEnginePrefs &aPrefs)
 {
-  if (mState == kReleased && mInitDone) {
-    webrtc::VoEHardware* ptrVoEHw = webrtc::VoEHardware::GetInterface(mVoiceEngine);
-    int res = ptrVoEHw->SetRecordingDevice(mCapIndex);
-    ptrVoEHw->Release();
-    if (res) {
+  if (mState == kReleased) {
+    if (mInitDone) {
+      webrtc::VoEHardware* ptrVoEHw = webrtc::VoEHardware::GetInterface(mVoiceEngine);
+      int res = ptrVoEHw->SetRecordingDevice(mCapIndex);
+      ptrVoEHw->Release();
+      if (res) {
+        return NS_ERROR_FAILURE;
+      }
+      mState = kAllocated;
+      LOG(("Audio device %d allocated", mCapIndex));
+    } else {
+      LOG(("Audio device is not initalized"));
       return NS_ERROR_FAILURE;
     }
-    mState = kAllocated;
-    LOG(("Audio device %d allocated", mCapIndex));
   } else if (mSources.IsEmpty()) {
     LOG(("Audio device %d reallocated", mCapIndex));
   } else {
@@ -151,13 +160,17 @@ MediaEngineWebRTCAudioSource::Start(SourceMediaStream* aStream, TrackID aID)
   AudioSegment* segment = new AudioSegment();
   aStream->AddTrack(aID, SAMPLE_FREQUENCY, 0, segment);
   aStream->AdvanceKnownTracksTime(STREAM_TIME_MAX);
-  LOG(("Initial audio"));
-  mTrackID = aID;
+  LOG(("Start audio for stream %p", aStream));
 
   if (mState == kStarted) {
+    MOZ_ASSERT(aID == mTrackID);
     return NS_OK;
   }
   mState = kStarted;
+  mTrackID = aID;
+
+  // Make sure logger starts before capture
+  AsyncLatencyLogger::Get(true);
 
   // Configure audio processing in webrtc code
   Config(mEchoOn, webrtc::kEcUnchanged,
@@ -271,13 +284,16 @@ MediaEngineWebRTCAudioSource::Init()
     return;
   }
 
+#ifndef MOZ_B2G
+  // Because of the permission mechanism of B2G, we need to skip the status
+  // check here.
   bool avail = false;
   ptrVoEHw->GetRecordingDeviceStatus(avail);
   ptrVoEHw->Release();
   if (!avail) {
     return;
   }
-
+#endif // MOZ_B2G
   // Set "codec" to PCM, 32kHz on 1 channel
   webrtc::VoECodec* ptrVoECodec;
   webrtc::CodecInst codec;
@@ -343,12 +359,12 @@ MediaEngineWebRTCAudioSource::Shutdown()
   mInitDone = false;
 }
 
-typedef WebRtc_Word16 sample;
+typedef int16_t sample;
 
 void
-MediaEngineWebRTCAudioSource::Process(const int channel,
-  const webrtc::ProcessingTypes type, sample* audio10ms,
-  const int length, const int samplingFreq, const bool isStereo)
+MediaEngineWebRTCAudioSource::Process(int channel,
+  webrtc::ProcessingTypes type, sample* audio10ms,
+  int length, int samplingFreq, bool isStereo)
 {
   MonitorAutoLock lock(mMonitor);
   if (mState != kStarted)
@@ -365,11 +381,18 @@ MediaEngineWebRTCAudioSource::Process(const int channel,
     nsAutoTArray<const sample*,1> channels;
     channels.AppendElement(dest);
     segment.AppendFrames(buffer.forget(), channels, length);
+    TimeStamp insertTime;
+    segment.GetStartTime(insertTime);
 
     SourceMediaStream *source = mSources[i];
     if (source) {
       // This is safe from any thread, and is safe if the track is Finished
-      // or Destroyed
+      // or Destroyed.
+      // Make sure we include the stream and the track.
+      // The 0:1 is a flag to note when we've done the final insert for a given input block.
+      LogTime(AsyncLatencyLogger::AudioTrackInsertion, LATENCY_STREAM_ID(source, mTrackID),
+              (i+1 < len) ? 0 : 1, insertTime);
+
       source->AppendToTrack(mTrackID, &segment);
     }
   }

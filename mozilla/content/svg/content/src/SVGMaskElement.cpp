@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
+#include "mozilla/ArrayUtils.h"
 
 #include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
@@ -58,13 +58,13 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGMaskElement)
 
 //----------------------------------------------------------------------
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 SVGMaskElement::MaskUnits()
 {
   return mEnumAttributes[MASKUNITS].ToDOMAnimatedEnum(this);
 }
 
-already_AddRefed<nsIDOMSVGAnimatedEnumeration>
+already_AddRefed<SVGAnimatedEnumeration>
 SVGMaskElement::MaskContentUnits()
 {
   return mEnumAttributes[MASKCONTENTUNITS].ToDOMAnimatedEnum(this);

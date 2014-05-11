@@ -7,24 +7,22 @@
 #define nsINativeKeyBindings_h_
 
 #include "nsISupports.h"
-#include "nsEvent.h"
+#include "mozilla/EventForwards.h"
 
 #define NS_INATIVEKEYBINDINGS_IID \
-{0x606c54e7, 0x0593, 0x4750, {0x99, 0xd9, 0x4e, 0x1b, 0xcc, 0xec, 0x98, 0xd9}}
+{0xc2baecc3, 0x1758, 0x4211, {0x96, 0xbe, 0xee, 0x1b, 0x1b, 0x7c, 0xd7, 0x6d}}
 
 #define NS_NATIVEKEYBINDINGS_CONTRACTID_PREFIX \
   "@mozilla.org/widget/native-key-bindings;1?type="
 
-struct nsNativeKeyEvent
-{
-  nsEvent *nativeEvent; // see bug 406407 to see how this is used
-  uint32_t keyCode;
-  uint32_t charCode;
-  bool     altKey;
-  bool     ctrlKey;
-  bool     shiftKey;
-  bool     metaKey;
-};
+#define NS_NATIVEKEYBINDINGSINPUT_CONTRACTID \
+NS_NATIVEKEYBINDINGS_CONTRACTID_PREFIX "input"
+
+#define NS_NATIVEKEYBINDINGSTEXTAREA_CONTRACTID \
+NS_NATIVEKEYBINDINGS_CONTRACTID_PREFIX "textarea"
+
+#define NS_NATIVEKEYBINDINGSEDITOR_CONTRACTID \
+NS_NATIVEKEYBINDINGS_CONTRACTID_PREFIX "editor"
 
 class nsINativeKeyBindings : public nsISupports
 {
@@ -33,17 +31,17 @@ class nsINativeKeyBindings : public nsISupports
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_INATIVEKEYBINDINGS_IID)
 
-  virtual NS_HIDDEN_(bool) KeyDown(const nsNativeKeyEvent& aEvent,
-                                     DoCommandCallback aCallback,
-                                     void *aCallbackData) = 0;
-
-  virtual NS_HIDDEN_(bool) KeyPress(const nsNativeKeyEvent& aEvent,
-                                      DoCommandCallback aCallback,
-                                      void *aCallbackData) = 0;
-
-  virtual NS_HIDDEN_(bool) KeyUp(const nsNativeKeyEvent& aEvent,
+  virtual NS_HIDDEN_(bool) KeyDown(const mozilla::WidgetKeyboardEvent& aEvent,
                                    DoCommandCallback aCallback,
                                    void *aCallbackData) = 0;
+
+  virtual NS_HIDDEN_(bool) KeyPress(const mozilla::WidgetKeyboardEvent& aEvent,
+                                    DoCommandCallback aCallback,
+                                    void *aCallbackData) = 0;
+
+  virtual NS_HIDDEN_(bool) KeyUp(const mozilla::WidgetKeyboardEvent& aEvent,
+                                 DoCommandCallback aCallback,
+                                 void *aCallbackData) = 0;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(nsINativeKeyBindings, NS_INATIVEKEYBINDINGS_IID)

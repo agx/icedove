@@ -7,21 +7,28 @@
 #ifndef mozilla_layers_CompositorChild_h
 #define mozilla_layers_CompositorChild_h
 
+#include "base/basictypes.h"            // for DISALLOW_EVIL_CONSTRUCTORS
+#include "mozilla/Assertions.h"         // for MOZ_ASSERT_HELPER2
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/layers/PCompositorChild.h"
-#include "nsXULAppAPI.h"
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsCOMPtr.h"                   // for nsCOMPtr
+#include "nsISupportsImpl.h"            // for NS_INLINE_DECL_REFCOUNTING
+
+class nsIObserver;
 
 namespace mozilla {
 namespace layers {
 
-class LayerManager;
+class ClientLayerManager;
 class CompositorParent;
-struct TextureFactoryIdentifier;
 
 class CompositorChild : public PCompositorChild
 {
   NS_INLINE_DECL_REFCOUNTING(CompositorChild)
 public:
-  CompositorChild(LayerManager *aLayerManager);
+  CompositorChild(ClientLayerManager *aLayerManager);
   virtual ~CompositorChild();
 
   void Destroy();
@@ -37,18 +44,22 @@ public:
   static PCompositorChild* Get();
 
   static bool ChildProcessHasCompositor() { return sCompositor != nullptr; }
+
+  virtual bool RecvInvalidateAll() MOZ_OVERRIDE;
+
 protected:
   virtual PLayerTransactionChild*
-    AllocPLayerTransaction(const LayersBackend& aBackendHint,
-                           const uint64_t& aId,
-                           TextureFactoryIdentifier* aTextureFactoryIdentifier) MOZ_OVERRIDE;
+    AllocPLayerTransactionChild(const nsTArray<LayersBackend>& aBackendHints,
+                                const uint64_t& aId,
+                                TextureFactoryIdentifier* aTextureFactoryIdentifier,
+                                bool* aSuccess) MOZ_OVERRIDE;
 
-  virtual bool DeallocPLayerTransaction(PLayerTransactionChild *aChild) MOZ_OVERRIDE;
+  virtual bool DeallocPLayerTransactionChild(PLayerTransactionChild *aChild) MOZ_OVERRIDE;
 
   virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
 
 private:
-  nsRefPtr<LayerManager> mLayerManager;
+  nsRefPtr<ClientLayerManager> mLayerManager;
   nsCOMPtr<nsIObserver> mMemoryPressureObserver;
 
   // When we're in a child process, this is the process-global

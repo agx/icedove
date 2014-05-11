@@ -6,14 +6,35 @@
 #ifndef GFX_CLIENTLAYERMANAGER_H
 #define GFX_CLIENTLAYERMANAGER_H
 
+#include <stdint.h>                     // for int32_t
 #include "Layers.h"
-#include "mozilla/layers/ShadowLayers.h"
+#include "gfxContext.h"                 // for gfxContext
+#include "mozilla/Attributes.h"         // for MOZ_OVERRIDE
+#include "mozilla/WidgetUtils.h"        // for ScreenRotation
+#include "mozilla/gfx/Rect.h"           // for Rect
+#include "mozilla/layers/CompositorTypes.h"
+#include "mozilla/layers/LayersTypes.h"  // for BufferMode, LayersBackend, etc
+#include "mozilla/layers/ShadowLayers.h"  // for ShadowLayerForwarder, etc
+#include "nsAutoPtr.h"                  // for nsRefPtr
+#include "nsCOMPtr.h"                   // for already_AddRefed
+#include "nsDebug.h"                    // for NS_ABORT_IF_FALSE
+#include "nsISupportsImpl.h"            // for Layer::Release, etc
+#include "nsRect.h"                     // for nsIntRect
+#include "nsTArray.h"                   // for nsTArray
+#include "nsTraceRefcnt.h"              // for MOZ_COUNT_CTOR
+#include "nscore.h"                     // for nsAString
+
+class nsIWidget;
 
 namespace mozilla {
 namespace layers {
 
-class ClientLayerManager : public LayerManager,
-                           public ShadowLayerForwarder
+class ClientThebesLayer;
+class CompositorChild;
+class ImageLayer;
+class PLayerChild;
+
+class ClientLayerManager : public LayerManager
 {
   typedef nsTArray<nsRefPtr<Layer> > LayerRefArray;
 
@@ -23,7 +44,7 @@ public:
 
   virtual ShadowLayerForwarder* AsShadowForwarder()
   {
-    return this;
+    return mForwarder;
   }
 
   virtual int32_t GetMaxTextureSize() const;
@@ -38,28 +59,38 @@ public:
 
   virtual LayersBackend GetBackendType() { return LAYERS_CLIENT; }
   virtual void GetBackendName(nsAString& name);
-#ifdef MOZ_LAYERS_HAVE_LOG
   virtual const char* Name() const { return "Client"; }
-#endif // MOZ_LAYERS_HAVE_LOG
 
   virtual void SetRoot(Layer* aLayer);
 
   virtual void Mutated(Layer* aLayer);
 
   virtual already_AddRefed<ThebesLayer> CreateThebesLayer();
+  virtual already_AddRefed<ThebesLayer> CreateThebesLayerWithHint(ThebesLayerCreationHint aHint);
   virtual already_AddRefed<ContainerLayer> CreateContainerLayer();
   virtual already_AddRefed<ImageLayer> CreateImageLayer();
   virtual already_AddRefed<CanvasLayer> CreateCanvasLayer();
   virtual already_AddRefed<ColorLayer> CreateColorLayer();
   virtual already_AddRefed<RefLayer> CreateRefLayer();
 
-  virtual void FlushRendering() MOZ_OVERRIDE;
+  virtual TextureFactoryIdentifier GetTextureFactoryIdentifier() MOZ_OVERRIDE
+  {
+    return mForwarder->GetTextureFactoryIdentifier();
+  }
 
-  virtual bool NeedsWidgetInvalidation() MOZ_OVERRIDE { return Compositor::GetBackend() == LAYERS_BASIC; }
+  virtual void FlushRendering() MOZ_OVERRIDE;
+  void SendInvalidRegion(const nsIntRegion& aRegion);
+
+  virtual uint32_t StartFrameTimeRecording(int32_t aBufferSize) MOZ_OVERRIDE;
+
+  virtual void StopFrameTimeRecording(uint32_t         aStartIndex,
+                                      nsTArray<float>& aFrameIntervals) MOZ_OVERRIDE;
+
+  virtual bool NeedsWidgetInvalidation() MOZ_OVERRIDE { return false; }
 
   ShadowableLayer* Hold(Layer* aLayer);
 
-  bool HasShadowManager() const { return ShadowLayerForwarder::HasShadowManager(); }
+  bool HasShadowManager() const { return mForwarder->HasShadowManager(); }
 
   virtual bool IsCompositingCheap();
   virtual bool HasShadowManagerInternal() const { return HasShadowManager(); }
@@ -89,21 +120,23 @@ public:
   void* GetThebesLayerCallbackData() const
   { return mThebesLayerCallbackData; }
 
+  CompositorChild *GetRemoteRenderer();
+
   /**
    * Called for each iteration of a progressive tile update. Fills
-   * aViewport, aScaleX and aScaleY with the current scale and viewport
+   * aCompositionBounds and aZoom with the current scale and composition bounds
    * being used to composite the layers in this manager, to determine what area
-   * intersects with the target render rectangle. aDrawingCritical will be
-   * true if the current drawing operation is using the critical displayport.
+   * intersects with the target composition bounds.
+   * aDrawingCritical will be true if the current drawing operation is using
+   * the critical displayport.
    * Returns true if the update should continue, or false if it should be
    * cancelled.
    * This is only called if gfxPlatform::UseProgressiveTilePainting() returns
    * true.
    */
   bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent,
-                                 gfx::Rect& aViewport,
-                                 float& aScaleX,
-                                 float& aScaleY,
+                                 ScreenRect& aCompositionBounds,
+                                 CSSToScreenScale& aZoom,
                                  bool aDrawingCritical);
 
 #ifdef DEBUG
@@ -112,6 +145,12 @@ public:
   bool InForward() { return mPhase == PHASE_FORWARD; }
 #endif
   bool InTransaction() { return mPhase != PHASE_NONE; }
+
+  void SetNeedsComposite(bool aNeedsComposite)
+  {
+    mNeedsComposite = aNeedsComposite;
+  }
+  bool NeedsComposite() const { return mNeedsComposite; }
 
 protected:
   enum TransactionPhase {
@@ -171,9 +210,11 @@ private:
   bool mIsRepeatTransaction;
   bool mTransactionIncomplete;
   bool mCompositorMightResample;
+  bool mNeedsComposite;
+
+  RefPtr<ShadowLayerForwarder> mForwarder;
 };
 
-class ClientThebesLayer;
 class ClientLayer : public ShadowableLayer
 {
 public:
@@ -221,12 +262,12 @@ CreateShadowFor(ClientLayer* aLayer,
                 ClientLayerManager* aMgr,
                 CreatedMethod aMethod)
 {
-  PLayerChild* shadow = aMgr->ConstructShadowFor(aLayer);
+  PLayerChild* shadow = aMgr->AsShadowForwarder()->ConstructShadowFor(aLayer);
   // XXX error handling
   NS_ABORT_IF_FALSE(shadow, "failed to create shadow");
 
   aLayer->SetShadow(shadow);
-  (aMgr->*aMethod)(aLayer);
+  (aMgr->AsShadowForwarder()->*aMethod)(aLayer);
   aMgr->Hold(aLayer->AsLayer());
 }
 

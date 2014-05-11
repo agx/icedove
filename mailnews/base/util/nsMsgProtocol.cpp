@@ -32,6 +32,7 @@
 #include "nsDirectoryServiceDefs.h"
 #include "nsMsgUtils.h"
 #include "nsILineInputStream.h"
+#include "nsIAsyncInputStream.h"
 #include "nsIMsgIncomingServer.h"
 #include "nsMimeTypes.h"
 #include "nsAlgorithm.h"
@@ -42,17 +43,8 @@
 
 using namespace mozilla;
 
-NS_IMPL_THREADSAFE_ADDREF(nsMsgProtocol)
-NS_IMPL_THREADSAFE_RELEASE(nsMsgProtocol)
-
-NS_INTERFACE_MAP_BEGIN(nsMsgProtocol)
-   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIChannel)
-   NS_INTERFACE_MAP_ENTRY(nsIStreamListener)
-   NS_INTERFACE_MAP_ENTRY(nsIRequestObserver)
-   NS_INTERFACE_MAP_ENTRY(nsIChannel)
-   NS_INTERFACE_MAP_ENTRY(nsIRequest)
-   NS_INTERFACE_MAP_ENTRY(nsITransportEventSink)
-NS_INTERFACE_MAP_END_THREADSAFE
+NS_IMPL_ISUPPORTS5(nsMsgProtocol, nsIChannel, nsIStreamListener,
+  nsIRequestObserver, nsIRequest, nsITransportEventSink)
 
 static PRUnichar *FormatStringWithHostNameByID(int32_t stringID, nsIMsgMailNewsUrl *msgUri);
 
@@ -1037,7 +1029,8 @@ nsresult nsMsgProtocol::DoNtlmStep2(nsCString &commandResponse, nsCString &respo
 class nsMsgProtocolStreamProvider : public nsIOutputStreamCallback
 {
 public:
-    NS_DECL_ISUPPORTS
+    // XXX this probably doesn't need to be threadsafe
+    NS_DECL_THREADSAFE_ISUPPORTS
 
     nsMsgProtocolStreamProvider() { }
     virtual ~nsMsgProtocolStreamProvider() {}
@@ -1113,14 +1106,13 @@ protected:
   nsCOMPtr<nsIInputStream>  mInStream;
 };
 
-// XXX this probably doesn't need to be threadsafe
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsMsgProtocolStreamProvider,
+NS_IMPL_ISUPPORTS1(nsMsgProtocolStreamProvider,
                               nsIOutputStreamCallback)
 
 class nsMsgFilePostHelper : public nsIStreamListener
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIREQUESTOBSERVER
   NS_DECL_NSISTREAMLISTENER
 
@@ -1135,13 +1127,7 @@ protected:
   nsCOMPtr<nsIWeakReference> mProtInstance;
 };
 
-NS_IMPL_THREADSAFE_ADDREF(nsMsgFilePostHelper)
-NS_IMPL_THREADSAFE_RELEASE(nsMsgFilePostHelper)
-
-NS_INTERFACE_MAP_BEGIN(nsMsgFilePostHelper)
-  NS_INTERFACE_MAP_ENTRY(nsIStreamListener)
-  NS_INTERFACE_MAP_ENTRY(nsIRequestObserver)
-NS_INTERFACE_MAP_END_THREADSAFE
+NS_IMPL_ISUPPORTS2(nsMsgFilePostHelper, nsIStreamListener, nsIRequestObserver)
 
 nsresult nsMsgFilePostHelper::Init(nsIOutputStream * aOutStream, nsMsgAsyncWriteProtocol * aProtInstance, nsIFile *aFileToPost)
 {
@@ -1544,8 +1530,6 @@ nsresult nsMsgAsyncWriteProtocol::SendData(const char * dataBuffer, bool aSuppre
   this->mAsyncBuffer.Append(dataBuffer);
   return mAsyncOutStream->AsyncWait(mProvider, 0, 0, mProviderThread);
 }
-
-#define MSGS_URL    "chrome://messenger/locale/messenger.properties"
 
 PRUnichar *FormatStringWithHostNameByID(int32_t stringID, nsIMsgMailNewsUrl *msgUri)
 {

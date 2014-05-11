@@ -4,6 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsCOMArray.h"
+
+#include "mozilla/MemoryReporting.h"
+
 #include "nsCOMPtr.h"
 
 // This specialization is private to nsCOMArray.
@@ -54,7 +57,8 @@ int32_t
 nsCOMArray_base::IndexOfObject(nsISupports* aObject) const
 {
     nsCOMPtr<nsISupports> supports = do_QueryInterface(aObject);
-    NS_ENSURE_TRUE(supports, -1);
+    if (NS_WARN_IF(!supports))
+        return -1;
 
     uint32_t i, count;
     int32_t retval = -1;
@@ -264,7 +268,7 @@ nsCOMArray_base::SetCount(int32_t aNewCount)
 size_t
 nsCOMArray_base::SizeOfExcludingThis(
                    nsBaseArraySizeOfElementIncludingThisFunc aSizeOfElementIncludingThis,
-                   nsMallocSizeOfFun aMallocSizeOf, void* aData) const
+                   mozilla::MallocSizeOf aMallocSizeOf, void* aData) const
 {
     size_t n = mArray.SizeOfExcludingThis(aMallocSizeOf);
 

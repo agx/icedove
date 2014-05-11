@@ -41,6 +41,8 @@
 #include "nsCxPusher.h"
 #include "mozilla/Preferences.h"
 #include "nsTextNode.h"
+#include "nsIController.h"
+#include "mozilla/TextEvents.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -49,6 +51,33 @@ static NS_DEFINE_CID(kTextEditorCID, NS_TEXTEDITOR_CID);
 
 static nsINativeKeyBindings *sNativeInputBindings = nullptr;
 static nsINativeKeyBindings *sNativeTextAreaBindings = nullptr;
+
+class MOZ_STACK_CLASS ValueSetter
+{
+public:
+  ValueSetter(nsIEditor* aEditor)
+    : mEditor(aEditor)
+  {
+    MOZ_ASSERT(aEditor);
+  
+    // To protect against a reentrant call to SetValue, we check whether
+    // another SetValue is already happening for this editor.  If it is,
+    // we must wait until we unwind to re-enable oninput events.
+    mEditor->GetSuppressDispatchingInputEvent(&mOuterTransaction);
+  }
+  ~ValueSetter()
+  {
+    mEditor->SetSuppressDispatchingInputEvent(mOuterTransaction);
+  }
+  void Init()
+  {
+    mEditor->SetSuppressDispatchingInputEvent(true);
+  }
+
+private:
+  nsCOMPtr<nsIEditor> mEditor;
+  bool mOuterTransaction;
+};
 
 class RestoreSelectionState : public nsRunnable {
 public:
@@ -746,7 +775,7 @@ nsTextInputListener::NotifySelectionChanged(nsIDOMDocument* aDoc, nsISelection* 
         if (presShell) 
         {
           nsEventStatus status = nsEventStatus_eIgnore;
-          nsEvent event(true, NS_FORM_SELECTED);
+          WidgetEvent event(true, NS_FORM_SELECTED);
 
           presShell->HandleEventWithTarget(&event, mFrame, content, &status);
         }
@@ -794,7 +823,14 @@ DoCommandCallback(const char *aCommand, void *aData)
 
   nsCOMPtr<nsIController> controller;
   controllers->GetControllerForCommand(aCommand, getter_AddRefs(controller));
-  if (controller) {
+  if (!controller) {
+    return;
+  }
+
+  bool commandEnabled;
+  nsresult rv = controller->IsCommandEnabled(aCommand, &commandEnabled);
+  NS_ENSURE_SUCCESS_VOID(rv);
+  if (commandEnabled) {
     controller->DoCommand(aCommand);
   }
 }
@@ -802,29 +838,41 @@ DoCommandCallback(const char *aCommand, void *aData)
 NS_IMETHODIMP
 nsTextInputListener::HandleEvent(nsIDOMEvent* aEvent)
 {
-  nsCOMPtr<nsIDOMKeyEvent> keyEvent(do_QueryInterface(aEvent));
-  NS_ENSURE_TRUE(keyEvent, NS_ERROR_INVALID_ARG);
+  bool defaultPrevented = false;
+  nsresult rv = aEvent->GetDefaultPrevented(&defaultPrevented);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (defaultPrevented) {
+    return NS_OK;
+  }
 
-  nsAutoString eventType;
-  aEvent->GetType(eventType);
+  bool isTrusted = false;
+  rv = aEvent->GetIsTrusted(&isTrusted);
+  NS_ENSURE_SUCCESS(rv, rv);
+  if (!isTrusted) {
+    return NS_OK;
+  }
 
-  nsNativeKeyEvent nativeEvent;
+  WidgetKeyboardEvent* keyEvent =
+    aEvent->GetInternalNSEvent()->AsKeyboardEvent();
+  if (!keyEvent) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
   nsINativeKeyBindings *bindings = GetKeyBindings();
-  if (bindings &&
-      nsContentUtils::DOMEventToNativeKeyEvent(keyEvent, &nativeEvent, false)) {
-
+  if (bindings) {
     bool handled = false;
-    if (eventType.EqualsLiteral("keydown")) {
-      handled = bindings->KeyDown(nativeEvent, DoCommandCallback, mFrame);
-    }
-    else if (eventType.EqualsLiteral("keyup")) {
-      handled = bindings->KeyUp(nativeEvent, DoCommandCallback, mFrame);
-    }
-    else if (eventType.EqualsLiteral("keypress")) {
-      handled = bindings->KeyPress(nativeEvent, DoCommandCallback, mFrame);
-    }
-    else {
-      NS_ABORT();
+    switch (keyEvent->message) {
+      case NS_KEY_DOWN:
+        handled = bindings->KeyDown(*keyEvent, DoCommandCallback, mFrame);
+        break;
+      case NS_KEY_UP:
+        handled = bindings->KeyUp(*keyEvent, DoCommandCallback, mFrame);
+        break;
+      case NS_KEY_PRESS:
+        handled = bindings->KeyPress(*keyEvent, DoCommandCallback, mFrame);
+        break;
+      default:
+        MOZ_CRASH("Unknown key message");
     }
     if (handled) {
       aEvent->PreventDefault();
@@ -1084,9 +1132,7 @@ nsTextEditorState::BindToFrame(nsTextControlFrame* aFrame)
 
   // Create a SelectionController
   mSelCon = new nsTextInputSelectionImpl(frameSel, shell, rootNode);
-  NS_ENSURE_TRUE(mSelCon, NS_ERROR_OUT_OF_MEMORY);
   mTextListener = new nsTextInputListener(mTextCtrlElement);
-  NS_ENSURE_TRUE(mTextListener, NS_ERROR_OUT_OF_MEMORY);
   NS_ADDREF(mTextListener);
 
   mTextListener->SetFrame(mBoundFrame);
@@ -1516,8 +1562,7 @@ nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame)
     mTextListener->SetFrame(nullptr);
 
     nsCOMPtr<EventTarget> target = do_QueryInterface(mTextCtrlElement);
-    nsEventListenerManager* manager =
-      target->GetListenerManager(false);
+    nsEventListenerManager* manager = target->GetExistingListenerManager();
     if (manager) {
       manager->RemoveEventListenerByType(mTextListener,
         NS_LITERAL_STRING("keydown"),
@@ -1791,7 +1836,7 @@ nsTextEditorState::SetValue(const nsAString& aValue, bool aUserInput,
     // this is necessary to avoid infinite recursion
     if (!currentValue.Equals(aValue))
     {
-      nsTextControlFrame::ValueSetter valueSetter(mEditor);
+      ValueSetter valueSetter(mEditor);
 
       // \r is an illegal character in the dom, but people use them,
       // so convert windows and mac platform linebreaks to \n:
@@ -1885,7 +1930,6 @@ nsTextEditorState::SetValue(const nsAString& aValue, bool aUserInput,
           if (!mBoundFrame) {
             SetValue(newValue, false, aSetValueChanged);
           }
-          valueSetter.Cancel();
           return;
         }
 
@@ -1925,7 +1969,7 @@ nsTextEditorState::InitializeKeyboardEventListeners()
 {
   //register key listeners
   nsCOMPtr<EventTarget> target = do_QueryInterface(mTextCtrlElement);
-  nsEventListenerManager* manager = target->GetListenerManager(true);
+  nsEventListenerManager* manager = target->GetOrCreateListenerManager();
   if (manager) {
     manager->AddEventListenerByType(mTextListener,
                                     NS_LITERAL_STRING("keydown"),

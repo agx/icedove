@@ -10,13 +10,12 @@ XPIDL_SOURCES += [
     'nsILoginInfo.idl',
     'nsILoginManager.idl',
     'nsILoginManagerCrypto.idl',
-    'nsILoginManagerIEMigrationHelper.idl',
     'nsILoginManagerPrompter.idl',
     'nsILoginManagerStorage.idl',
     'nsILoginMetaInfo.idl',
 ]
 
-MODULE = 'loginmgr'
+XPIDL_MODULE = 'loginmgr'
 
 EXTRA_COMPONENTS += [
     'crypto-SDR.js',
@@ -24,9 +23,13 @@ EXTRA_COMPONENTS += [
     'nsLoginManager.js',
     'nsLoginManagerPrompter.js',
     'passwordmgr.manifest',
-    'storage-Legacy.js',
 ]
 
 EXTRA_PP_COMPONENTS += [
     'storage-mozStorage.js',
+]
+
+EXTRA_JS_MODULES += [
+    'InsecurePasswordUtils.jsm',
+    'LoginManagerContent.jsm',
 ]

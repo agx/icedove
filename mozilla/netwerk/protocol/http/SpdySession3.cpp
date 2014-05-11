@@ -8,16 +8,15 @@
 #include "HttpLog.h"
 
 #include "mozilla/Telemetry.h"
-#include "mozilla/Preferences.h"
 #include "nsHttp.h"
 #include "nsHttpHandler.h"
-#include "nsHttpConnection.h"
 #include "nsILoadGroup.h"
 #include "prprf.h"
 #include "prnetdb.h"
 #include "SpdyPush3.h"
 #include "SpdySession3.h"
 #include "SpdyStream3.h"
+#include "PSpdyPush.h"
 
 #include <algorithm>
 
@@ -32,8 +31,8 @@ namespace net {
 // SpdySession3 has multiple inheritance of things that implement
 // nsISupports, so this magic is taken from nsHttpPipeline that
 // implements some of the same abstract classes.
-NS_IMPL_THREADSAFE_ADDREF(SpdySession3)
-NS_IMPL_THREADSAFE_RELEASE(SpdySession3)
+NS_IMPL_ADDREF(SpdySession3)
+NS_IMPL_RELEASE(SpdySession3)
 NS_INTERFACE_MAP_BEGIN(SpdySession3)
     NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsAHttpConnection)
 NS_INTERFACE_MAP_END
@@ -76,8 +75,6 @@ SpdySession3::SpdySession3(nsAHttpTransaction *aHttpTransaction,
   LOG3(("SpdySession3::SpdySession3 %p transaction 1 = %p serial=0x%X\n",
         this, aHttpTransaction, mSerial));
 
-  mStreamIDHash.Init();
-  mStreamTransactionHash.Init();
   mConnection = aHttpTransaction->Connection();
   mInputFrameBuffer = new char[mInputFrameBufferSize];
   mOutputQueueBuffer = new char[mOutputQueueSize];
@@ -186,22 +183,6 @@ SpdySession3::LogIO(SpdySession3 *self, SpdyStream3 *stream, const char *label,
     LOG4(("%s", linebuf));
   }
 }
-
-typedef nsresult  (*Control_FX) (SpdySession3 *self);
-static Control_FX sControlFunctions[] =
-{
-  nullptr,
-  SpdySession3::HandleSynStream,
-  SpdySession3::HandleSynReply,
-  SpdySession3::HandleRstStream,
-  SpdySession3::HandleSettings,
-  SpdySession3::HandleNoop,
-  SpdySession3::HandlePing,
-  SpdySession3::HandleGoAway,
-  SpdySession3::HandleHeaders,
-  SpdySession3::HandleWindowUpdate,
-  SpdySession3::HandleCredential
-};
 
 bool
 SpdySession3::RoomForMoreConcurrent()
@@ -377,6 +358,11 @@ SpdySession3::AddStream(nsAHttpTransaction *aHttpTransaction,
     mQueuedStreams.Push(stream);
   }
 
+  if (!(aHttpTransaction->Caps() & NS_HTTP_ALLOW_KEEPALIVE)) {
+    LOG3(("SpdySession3::AddStream %p transaction %p forces keep-alive off.\n",
+          this, aHttpTransaction));
+    DontReuse();
+  }
   return true;
 }
 
@@ -553,7 +539,7 @@ SpdySession3::EnsureBuffer(nsAutoArrayPtr<T> &buf,
 
   objSize = (newSize + 2048 + 4095) & ~4095;
 
-  MOZ_STATIC_ASSERT(sizeof(T) == 1, "sizeof(T) must be 1");
+  static_assert(sizeof(T) == 1, "sizeof(T) must be 1");
   nsAutoArrayPtr<T> tmp(new T[objSize]);
   memcpy(tmp, buf, preserve);
   buf = tmp;
@@ -628,7 +614,7 @@ SpdySession3::UncompressAndDiscard(uint32_t offset,
     if (zlib_rv == Z_NEED_DICT) {
       if (triedDictionary) {
         LOG3(("SpdySession3::UncompressAndDiscard %p Dictionary Error\n", this));
-        return NS_ERROR_FAILURE;
+        return NS_ERROR_ILLEGAL_VALUE;
       }
 
       triedDictionary = true;
@@ -636,7 +622,10 @@ SpdySession3::UncompressAndDiscard(uint32_t offset,
                            sizeof(SpdyStream3::kDictionary));
     }
 
-    if (zlib_rv == Z_DATA_ERROR || zlib_rv == Z_MEM_ERROR)
+    if (zlib_rv == Z_DATA_ERROR)
+      return NS_ERROR_ILLEGAL_VALUE;
+
+    if (zlib_rv == Z_MEM_ERROR)
       return NS_ERROR_FAILURE;
   }
   while (mDownstreamZlib.avail_in);
@@ -854,7 +843,10 @@ SpdySession3::CleanupStream(SpdyStream3 *aStream, nsresult aResult,
 {
   MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
   LOG3(("SpdySession3::CleanupStream %p %p 0x%X %X\n",
-        this, aStream, aStream->StreamID(), aResult));
+        this, aStream, aStream ? aStream->StreamID() : 0, aResult));
+  if (!aStream) {
+    return;
+  }
 
   SpdyPushedStream3 *pushSource = nullptr;
 
@@ -983,7 +975,7 @@ SpdySession3::HandleSynStream(SpdySession3 *self)
     self->mShouldGoAway = true;
 
   bool resetStream = true;
-  SpdyPushCache3 *cache = nullptr;
+  SpdyPushCache *cache = nullptr;
 
   if (!(flags & kFlag_Data_UNI)) {
     // pushed streams require UNIDIRECTIONAL flag
@@ -1012,10 +1004,10 @@ SpdySession3::HandleSynStream(SpdySession3 *self)
   } else {
     nsILoadGroupConnectionInfo *loadGroupCI = associatedStream->LoadGroupConnectionInfo();
     if (loadGroupCI) {
-      loadGroupCI->GetSpdyPushCache3(&cache);
+      loadGroupCI->GetSpdyPushCache(&cache);
       if (!cache) {
-        cache = new SpdyPushCache3();
-        if (!cache || NS_FAILED(loadGroupCI->SetSpdyPushCache3(cache))) {
+        cache = new SpdyPushCache();
+        if (!cache || NS_FAILED(loadGroupCI->SetSpdyPushCache(cache))) {
           delete cache;
           cache = nullptr;
         }
@@ -1096,7 +1088,7 @@ SpdySession3::HandleSynStream(SpdySession3 *self)
     return NS_OK;
   }
 
-  if (!cache->RegisterPushedStream(key, pushedStream)) {
+  if (!cache->RegisterPushedStreamSpdy3(key, pushedStream)) {
     LOG(("SpdySession3::HandleSynStream registerPushedStream Failed\n"));
     self->CleanupStream(pushedStream, NS_ERROR_FAILURE, RST_INVALID_STREAM);
     self->ResetDownstreamState();
@@ -1151,11 +1143,11 @@ SpdySession3::HandleSynReply(SpdySession3 *self)
     if (streamID >= self->mNextStreamID)
       self->GenerateRstStream(RST_INVALID_STREAM, streamID);
 
-    if (NS_FAILED(self->UncompressAndDiscard(12,
-                                             self->mInputFrameDataSize - 4))) {
+    rv = self->UncompressAndDiscard(12, self->mInputFrameDataSize - 4);
+    if (NS_FAILED(rv)) {
       LOG(("SpdySession3::HandleSynReply uncompress failed\n"));
       // this is fatal to the session
-      return NS_ERROR_FAILURE;
+      return rv;
     }
 
     self->ResetDownstreamState();
@@ -1173,7 +1165,7 @@ SpdySession3::HandleSynReply(SpdySession3 *self)
 
   if (NS_FAILED(rv)) {
     LOG(("SpdySession3::HandleSynReply uncompress failed\n"));
-    return NS_ERROR_FAILURE;
+    return rv;
   }
 
   if (self->mInputFrameDataStream->GetFullyOpen()) {
@@ -1531,11 +1523,11 @@ SpdySession3::HandleHeaders(SpdySession3 *self)
     if (streamID >= self->mNextStreamID)
       self->GenerateRstStream(RST_INVALID_STREAM, streamID);
 
-    if (NS_FAILED(self->UncompressAndDiscard(12,
-                                             self->mInputFrameDataSize - 4))) {
+    rv = self->UncompressAndDiscard(12, self->mInputFrameDataSize - 4);
+    if (NS_FAILED(rv)) {
       LOG(("SpdySession3::HandleHeaders uncompress failed\n"));
       // this is fatal to the session
-      return NS_ERROR_FAILURE;
+      return rv;
     }
     self->ResetDownstreamState();
     return NS_OK;
@@ -1551,7 +1543,7 @@ SpdySession3::HandleHeaders(SpdySession3 *self)
                                                self->mInputFrameDataSize - 4);
   if (NS_FAILED(rv)) {
     LOG(("SpdySession3::HandleHeaders uncompress failed\n"));
-    return NS_ERROR_FAILURE;
+    return rv;
   }
 
   self->mInputFrameDataLast = self->mInputFrameBuffer[4] & kFlag_Data_FIN;
@@ -1617,20 +1609,7 @@ SpdySession3::HandleWindowUpdate(SpdySession3 *self)
     return NS_OK;
   }
 
-  int64_t oldRemoteWindow = self->mInputFrameDataStream->RemoteWindow();
   self->mInputFrameDataStream->UpdateRemoteWindow(delta);
-
-  LOG3(("SpdySession3::HandleWindowUpdate %p stream 0x%X window "
-        "%d increased by %d.\n", self, streamID, oldRemoteWindow, delta));
-
-  // If the stream had a <=0 window, that has now opened
-  // schedule it for writing again
-  if (oldRemoteWindow <= 0 &&
-      self->mInputFrameDataStream->RemoteWindow() > 0) {
-    self->mReadyForWrite.Push(self->mInputFrameDataStream);
-    self->SetWriteCallbacks();
-  }
-
   self->ResetDownstreamState();
   return NS_OK;
 }
@@ -1820,6 +1799,22 @@ SpdySession3::WriteSegments(nsAHttpSegmentWriter *writer,
                            uint32_t count,
                            uint32_t *countWritten)
 {
+  typedef nsresult  (*Control_FX) (SpdySession3 *self);
+  static const Control_FX sControlFunctions[] =
+  {
+    nullptr,
+    SpdySession3::HandleSynStream,
+    SpdySession3::HandleSynReply,
+    SpdySession3::HandleRstStream,
+    SpdySession3::HandleSettings,
+    SpdySession3::HandleNoop,
+    SpdySession3::HandlePing,
+    SpdySession3::HandleGoAway,
+    SpdySession3::HandleHeaders,
+    SpdySession3::HandleWindowUpdate,
+    SpdySession3::HandleCredential
+  };
+
   MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
 
   nsresult rv;
@@ -2031,9 +2026,10 @@ SpdySession3::WriteSegments(nsAHttpSegmentWriter *writer,
 
     mLastDataReadEpoch = mLastReadEpoch;
 
-    if (rv == NS_BASE_STREAM_CLOSED) {
+    if (SoftStreamError(rv)) {
       // This will happen when the transaction figures out it is EOF, generally
-      // due to a content-length match being made
+      // due to a content-length match being made. Return OK from this function
+      // otherwise the whole session would be torn down.
       SpdyStream3 *stream = mInputFrameDataStream;
 
       // if we were doing PROCESSING_COMPLETE_HEADERS need to pop the state
@@ -2044,9 +2040,9 @@ SpdySession3::WriteSegments(nsAHttpSegmentWriter *writer,
         ResetDownstreamState();
       LOG3(("SpdySession3::WriteSegments session=%p stream=%p 0x%X "
             "needscleanup=%p. cleanup stream based on "
-            "stream->writeSegments returning BASE_STREAM_CLOSED\n",
+            "stream->writeSegments returning code %X\n",
             this, stream, stream ? stream->StreamID() : 0,
-            mNeedsCleanup));
+            mNeedsCleanup, rv));
       CleanupStream(stream, NS_OK, RST_CANCEL);
       MOZ_ASSERT(!mNeedsCleanup, "double cleanup out of data frame");
       mNeedsCleanup = nullptr;                     /* just in case */
@@ -2226,8 +2222,15 @@ SpdySession3::Close(nsresult aReason)
   mStreamIDHash.Clear();
   mStreamTransactionHash.Clear();
 
-  if (NS_SUCCEEDED(aReason))
-    GenerateGoAway(OK);
+  uint32_t goAwayReason;
+  if (NS_SUCCEEDED(aReason)) {
+    goAwayReason = OK;
+  } else if (aReason == NS_ERROR_ILLEGAL_VALUE) {
+    goAwayReason = PROTOCOL_ERROR;
+  } else {
+    goAwayReason = INTERNAL_ERROR;
+  }
+  GenerateGoAway(goAwayReason);
   mConnection = nullptr;
   mSegmentReader = nullptr;
   mSegmentWriter = nullptr;
@@ -2579,6 +2582,11 @@ SpdySession3::Caps()
   return 0;
 }
 
+void
+SpdySession3::SetDNSWasRefreshed()
+{
+}
+
 uint64_t
 SpdySession3::Available()
 {
@@ -2593,7 +2601,7 @@ SpdySession3::RequestHead()
   MOZ_ASSERT(false,
              "SpdySession3::RequestHead() "
              "should not be called after SPDY is setup");
-  return NULL;
+  return nullptr;
 }
 
 uint32_t

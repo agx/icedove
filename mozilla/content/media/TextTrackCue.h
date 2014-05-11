@@ -7,15 +7,13 @@
 #ifndef mozilla_dom_TextTrackCue_h
 #define mozilla_dom_TextTrackCue_h
 
-#define WEBVTT_NO_CONFIG_H 1
-#define WEBVTT_STATIC 1
-
 #include "mozilla/dom/DocumentFragment.h"
-#include "mozilla/dom/TextTrack.h"
-#include "mozilla/dom/TextTrackCueBinding.h"
+#include "mozilla/dom/VTTCueBinding.h"
 #include "nsCycleCollectionParticipant.h"
 #include "nsDOMEventTargetHelper.h"
-#include "webvtt/node.h"
+#include "nsIWebVTTParserWrapper.h"
+#include "mozilla/StaticPtr.h"
+#include "nsIDocument.h"
 
 namespace mozilla {
 namespace dom {
@@ -27,8 +25,7 @@ class TextTrackCue MOZ_FINAL : public nsDOMEventTargetHelper
 {
 public:
   NS_DECL_ISUPPORTS_INHERITED
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(TextTrackCue,
-                                                         nsDOMEventTargetHelper)
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(TextTrackCue, nsDOMEventTargetHelper)
 
   // TextTrackCue WebIDL
   // See bug 868509 about splitting out the WebVTT-specific interfaces.
@@ -39,25 +36,23 @@ public:
               const nsAString& aText,
               ErrorResult& aRv)
   {
-    nsRefPtr<TextTrackCue> ttcue = new TextTrackCue(aGlobal.Get(), aStartTime,
-                                                    aEndTime, aText);
+    nsRefPtr<TextTrackCue> ttcue = new TextTrackCue(aGlobal.GetAsSupports(), aStartTime,
+                                                    aEndTime, aText, aRv);
     return ttcue.forget();
   }
   TextTrackCue(nsISupports* aGlobal, double aStartTime, double aEndTime,
-               const nsAString& aText);
+               const nsAString& aText, ErrorResult& aRv);
 
   TextTrackCue(nsISupports* aGlobal, double aStartTime, double aEndTime,
                const nsAString& aText, HTMLTrackElement* aTrackElement,
-               webvtt_node* head);
-
-  ~TextTrackCue();
+               ErrorResult& aRv);
 
   virtual JSObject* WrapObject(JSContext* aCx,
                                JS::Handle<JSObject*> aScope) MOZ_OVERRIDE;
 
-  nsISupports* GetParentObject()
+  nsINode* GetParentObject()
   {
-    return mGlobal;
+    return mDocument;
   }
 
   TextTrack* GetTrack() const
@@ -87,7 +82,6 @@ public:
 
   void SetStartTime(double aStartTime)
   {
-    //XXXhumph: validate? bug 868519.
     if (mStartTime == aStartTime)
       return;
 
@@ -102,7 +96,6 @@ public:
 
   void SetEndTime(double aEndTime)
   {
-    //XXXhumph: validate? bug 868519.
     if (mEndTime == aEndTime)
       return;
 
@@ -124,16 +117,32 @@ public:
     CueChanged();
   }
 
-  void GetVertical(nsAString& aVertical)
+  void GetRegionId(nsAString& aRegionId) const
   {
-    aVertical = mVertical;
+    aRegionId = mRegionId;
   }
 
-  void SetVertical(const nsAString& aVertical)
+  void SetRegionId(const nsAString& aRegionId)
+  {
+    if (mRegionId == aRegionId) {
+      return;
+    }
+
+    mRegionId = aRegionId;
+    CueChanged();
+  }
+
+  DirectionSetting Vertical() const
+  {
+    return mVertical;
+  }
+
+  void SetVertical(const DirectionSetting& aVertical)
   {
     if (mVertical == aVertical)
       return;
 
+    mReset = true;
     mVertical = aVertical;
     CueChanged();
   }
@@ -148,6 +157,7 @@ public:
     if (mSnapToLines == aSnapToLines)
       return;
 
+    mReset = true;
     mSnapToLines = aSnapToLines;
     CueChanged();
   }
@@ -159,7 +169,8 @@ public:
 
   void SetLine(double aLine)
   {
-    //XXX: validate? bug 868519.
+    //XXX: TODO Line position can be a keyword auto. bug882299
+    mReset = true;
     mLine = aLine;
   }
 
@@ -168,12 +179,18 @@ public:
     return mPosition;
   }
 
-  void SetPosition(int32_t aPosition)
+  void SetPosition(int32_t aPosition, ErrorResult& aRv)
   {
     // XXXhumph: validate? bug 868519.
     if (mPosition == aPosition)
       return;
 
+    if (aPosition > 100 || aPosition < 0){
+      aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+      return;
+    }
+
+    mReset = true;
     mPosition = aPosition;
     CueChanged();
   }
@@ -183,16 +200,18 @@ public:
     return mSize;
   }
 
-  void SetSize(int32_t aSize)
+  void SetSize(int32_t aSize, ErrorResult& aRv)
   {
     if (mSize == aSize) {
       return;
     }
 
     if (aSize < 0 || aSize > 100) {
-      //XXX:throw IndexSizeError; bug 868519.
+      aRv.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
+      return;
     }
 
+    mReset = true;
     mSize = aSize;
     CueChanged();
   }
@@ -207,6 +226,7 @@ public:
     if (mAlign == aAlign)
       return;
 
+    mReset = true;
     mAlign = aAlign;
     CueChanged();
   }
@@ -218,18 +238,12 @@ public:
 
   void SetText(const nsAString& aText)
   {
-    // XXXhumph: validate? bug 868519.
     if (mText == aText)
       return;
 
+    mReset = true;
     mText = aText;
     CueChanged();
-  }
-
-  already_AddRefed<DocumentFragment> GetCueAsHTML() const
-  {
-    // XXXhumph: todo. Bug 868509.
-    return nullptr;
   }
 
   IMPL_EVENT_HANDLER(enter)
@@ -248,17 +262,17 @@ public:
   }
 
   /**
-   * Overview of WEBVTT cuetext and anonymous content setup.
+   * Overview of WebVTT cuetext and anonymous content setup.
    *
-   * webvtt_nodes are the parsed version of WEBVTT cuetext. WEBVTT cuetext is
-   * the portion of a WEBVTT cue that specifies what the caption will actually
+   * WebVTT nodes are the parsed version of WebVTT cuetext. WebVTT cuetext is
+   * the portion of a WebVTT cue that specifies what the caption will actually
    * show up as on screen.
    *
-   * WEBVTT cuetext can contain markup that loosely relates to HTML markup. It
+   * WebVTT cuetext can contain markup that loosely relates to HTML markup. It
    * can contain tags like <b>, <u>, <i>, <c>, <v>, <ruby>, <rt>, <lang>,
    * including timestamp tags.
    *
-   * When the caption is ready to be displayed the webvtt_nodes are converted
+   * When the caption is ready to be displayed the WebVTT nodes are converted
    * over to anonymous DOM content. <i>, <u>, <b>, <ruby>, and <rt> all become
    * HTMLElements of their corresponding HTML markup tags. <c> and <v> are
    * converted to <span> tags. Timestamp tags are converted to XML processing
@@ -266,7 +280,7 @@ public:
    * This takes the form of <foo.class.subclass>. These classes are then parsed
    * and set as the anonymous content's class attribute.
    *
-   * Rules on constructing DOM objects from webvtt_nodes can be found here
+   * Rules on constructing DOM objects from WebVTT nodes can be found here
    * http://dev.w3.org/html5/webvtt/#webvtt-cue-text-dom-construction-rules.
    * Current rules are taken from revision on April 15, 2013.
    */
@@ -279,63 +293,47 @@ public:
 
   /**
    * Produces a tree of anonymous content based on the tree of the processed
-   * cue text. This lives in a tree of C nodes whose head is mHead.
+   * cue text.
    *
    * Returns a DocumentFragment that is the head of the tree of anonymous
    * content.
    */
   already_AddRefed<DocumentFragment> GetCueAsHTML();
 
-  /**
-   * Converts mHead to a list of DOM elements and attaches it to aParentContent.
-   *
-   * Processes the C node tree in a depth-first pre-order traversal and creates
-   * a mirrored DOM tree. The conversion rules come from the webvtt DOM
-   * construction rules:
-   * http://dev.w3.org/html5/webvtt/#webvtt-cue-text-dom-construction-rules
-   * Current rules taken from revision on May 13, 2013.
-   */
-  void
-  ConvertNodeTreeToDOMTree(nsIContent* aParentContent);
-
-  /**
-   * Converts an internal webvtt node, i.e. one that has children, to an
-   * anonymous HTMLElement.
-   */
-  already_AddRefed<nsIContent>
-  ConvertInternalNodeToContent(const webvtt_node* aWebVTTNode);
-
-  /**
-   * Converts a leaf webvtt node, i.e. one that does not have children, to
-   * either a text node or processing instruction.
-   */
-  already_AddRefed<nsIContent>
-  ConvertLeafNodeToContent(const webvtt_node* aWebVTTNode);
+  void SetTrackElement(HTMLTrackElement* aTrackElement);
 
 private:
   void CueChanged();
   void SetDefaultCueSettings();
   void CreateCueOverlay();
+  nsresult StashDocument(nsISupports* aGlobal);
 
-  nsCOMPtr<nsISupports> mGlobal;
+  nsRefPtr<nsIDocument> mDocument;
   nsString mText;
   double mStartTime;
   double mEndTime;
 
   nsRefPtr<TextTrack> mTrack;
   nsRefPtr<HTMLTrackElement> mTrackElement;
-  webvtt_node *mHead;
   nsString mId;
   int32_t mPosition;
   int32_t mSize;
   bool mPauseOnExit;
   bool mSnapToLines;
-  nsString mVertical;
+  nsString mRegionId;
+  DirectionSetting mVertical;
   int mLine;
   TextTrackCueAlign mAlign;
 
-  // Anonymous child which is appended to VideoFrame's caption display div.
-  nsCOMPtr<nsIContent> mCueDiv;
+  // Holds the computed DOM elements that represent the parsed cue text.
+  // http://www.whatwg.org/specs/web-apps/current-work/#text-track-cue-display-state
+  nsCOMPtr<nsIContent> mDisplayState;
+  // Tells whether or not we need to recompute mDisplayState. This is set
+  // anytime a property that relates to the display of the TextTrackCue is
+  // changed.
+  bool mReset;
+
+  static StaticRefPtr<nsIWebVTTParserWrapper> sParserWrapper;
 };
 
 } // namespace dom

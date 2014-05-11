@@ -8,12 +8,10 @@
 #include "mozilla/net/FTPChannelParent.h"
 #include "nsFTPChannel.h"
 #include "nsNetUtil.h"
-#include "nsISupportsPriority.h"
-#include "nsIRedirectChannelRegistrar.h"
 #include "nsFtpProtocolHandler.h"
-#include "mozilla/LoadContext.h"
 #include "mozilla/ipc/InputStreamUtils.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "SerializedLoadContext.h"
 
 using namespace mozilla::ipc;
 
@@ -190,21 +188,39 @@ FTPChannelParent::OnStartRequest(nsIRequest* aRequest, nsISupports* aContext)
 {
   LOG(("FTPChannelParent::OnStartRequest [this=%p]\n", this));
 
-  nsFtpChannel* chan = static_cast<nsFtpChannel*>(aRequest);
+  nsCOMPtr<nsIChannel> chan = do_QueryInterface(aRequest);
+  MOZ_ASSERT(chan);
+  NS_ENSURE_TRUE(chan, NS_ERROR_UNEXPECTED);
+
   int64_t contentLength;
   chan->GetContentLength(&contentLength);
   nsCString contentType;
   chan->GetContentType(contentType);
-  nsCString entityID;
-  chan->GetEntityID(entityID);
-  PRTime lastModified;
-  chan->GetLastModifiedTime(&lastModified);
 
-  URIParams uri;
-  SerializeURI(chan->URI(), uri);
+  nsCString entityID;
+  nsCOMPtr<nsIResumableChannel> resChan = do_QueryInterface(aRequest);
+  MOZ_ASSERT(resChan); // both FTP and HTTP should implement nsIResumableChannel
+  if (resChan) {
+    resChan->GetEntityID(entityID);
+  }
+
+  nsCOMPtr<nsIFTPChannel> ftpChan = do_QueryInterface(aRequest);
+  PRTime lastModified = 0;
+  if (ftpChan) {
+    ftpChan->GetLastModifiedTime(&lastModified);
+  } else {
+    // Temporary hack: if we were redirected to use an HTTP channel (ie FTP is
+    // using an HTTP proxy), cancel, as we don't support those redirects yet.
+    aRequest->Cancel(NS_ERROR_NOT_IMPLEMENTED);
+  }
+
+  URIParams uriparam;
+  nsCOMPtr<nsIURI> uri;
+  chan->GetURI(getter_AddRefs(uri));
+  SerializeURI(uri, uriparam);
 
   if (mIPCClosed || !SendOnStartRequest(contentLength, contentType,
-                                       lastModified, entityID, uri)) {
+                                       lastModified, entityID, uriparam)) {
     return NS_ERROR_UNEXPECTED;
   }
 

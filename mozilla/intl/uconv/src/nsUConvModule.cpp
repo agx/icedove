@@ -2,17 +2,11 @@
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#include "nsCOMPtr.h"
-#include "nsCRT.h"
 #include "mozilla/ModuleUtils.h"
-#include "nsIComponentManager.h"
-#include "nsICategoryManager.h"
 #include "nsICharsetConverterManager.h"
 #include "nsEncoderDecoderUtils.h"
 #include "nsIUnicodeDecoder.h"
 #include "nsIUnicodeEncoder.h"
-#include "nsIServiceManager.h"
-
 
 #include "nsUConvCID.h"
 #include "nsCharsetConverterManager.h"
@@ -21,17 +15,13 @@
 #include "nsConverterInputStream.h"
 #include "nsConverterOutputStream.h"
 #include "nsScriptableUConv.h"
-
+#include "nsIOutputStream.h"
 #include "nsITextToSubURI.h"
 
-#include "nsIFile.h"
-
-#include "nsCRT.h"
-
-#include "nsUCSupport.h"
 #include "nsISO88591ToUnicode.h"
 #include "nsCP1252ToUnicode.h"
 #include "nsMacRomanToUnicode.h"
+#include "nsReplacementToUnicode.h"
 #include "nsUTF8ToUnicode.h"
 #include "nsUnicodeToISO88591.h"
 #include "nsUnicodeToCP1252.h"
@@ -223,7 +213,6 @@
 #include "nsGB2312ToUnicodeV2.h"
 #include "nsUnicodeToGB2312V2.h"
 #include "nsISO2022CNToUnicode.h"
-#include "nsUnicodeToISO2022CN.h"
 #include "gbku.h"
 
 NS_CONVERTER_REGISTRY_START
@@ -231,6 +220,7 @@ NS_UCONV_REG_UNREG("ISO-8859-1", NS_ISO88591TOUNICODE_CID, NS_UNICODETOISO88591_
 NS_UCONV_REG_UNREG("windows-1252", NS_CP1252TOUNICODE_CID, NS_UNICODETOCP1252_CID)
 NS_UCONV_REG_UNREG("macintosh", NS_MACROMANTOUNICODE_CID, NS_UNICODETOMACROMAN_CID)
 NS_UCONV_REG_UNREG("UTF-8", NS_UTF8TOUNICODE_CID, NS_UNICODETOUTF8_CID)
+NS_UCONV_REG_UNREG("replacement", NS_REPLACEMENTTOUNICODE_CID, NS_UNICODETOUTF8_CID)
 
   // ucvlatin
 NS_UCONV_REG_UNREG("us-ascii", NS_ASCIITOUNICODE_CID, NS_UNICODETOASCII_CID)
@@ -344,6 +334,7 @@ NS_CONVERTER_REGISTRY_END
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsUnicodeToUTF8)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsUTF8ToUnicode)
+NS_GENERIC_FACTORY_CONSTRUCTOR(nsReplacementToUnicode)
 
 // ucvlatin
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsUTF7ToUnicode)
@@ -518,6 +509,7 @@ NS_DEFINE_NAMED_CID(NS_ISO88591TOUNICODE_CID);
 NS_DEFINE_NAMED_CID(NS_CP1252TOUNICODE_CID);
 NS_DEFINE_NAMED_CID(NS_MACROMANTOUNICODE_CID);
 NS_DEFINE_NAMED_CID(NS_UTF8TOUNICODE_CID);
+NS_DEFINE_NAMED_CID(NS_REPLACEMENTTOUNICODE_CID);
 NS_DEFINE_NAMED_CID(NS_UNICODETOISO88591_CID);
 NS_DEFINE_NAMED_CID(NS_UNICODETOCP1252_CID);
 NS_DEFINE_NAMED_CID(NS_UNICODETOMACROMAN_CID);
@@ -702,6 +694,7 @@ static const mozilla::Module::CIDEntry kUConvCIDs[] = {
   { &kNS_ISO88591TOUNICODE_CID, false, nullptr, nsISO88591ToUnicodeConstructor },
   { &kNS_CP1252TOUNICODE_CID, false, nullptr, nsCP1252ToUnicodeConstructor },
   { &kNS_MACROMANTOUNICODE_CID, false, nullptr, nsMacRomanToUnicodeConstructor },
+  { &kNS_REPLACEMENTTOUNICODE_CID, false, nullptr, nsReplacementToUnicodeConstructor },
   { &kNS_UTF8TOUNICODE_CID, false, nullptr, nsUTF8ToUnicodeConstructor },
   { &kNS_UNICODETOISO88591_CID, false, nullptr, nsUnicodeToISO88591Constructor },
   { &kNS_UNICODETOCP1252_CID, false, nullptr, nsUnicodeToCP1252Constructor },
@@ -889,6 +882,7 @@ static const mozilla::Module::ContractIDEntry kUConvContracts[] = {
   { NS_ISO88591TOUNICODE_CONTRACTID, &kNS_ISO88591TOUNICODE_CID },
   { NS_CP1252TOUNICODE_CONTRACTID, &kNS_CP1252TOUNICODE_CID },
   { NS_MACROMANTOUNICODE_CONTRACTID, &kNS_MACROMANTOUNICODE_CID },
+  { NS_REPLACEMENTTOUNICODE_CONTRACTID, &kNS_REPLACEMENTTOUNICODE_CID },
   { NS_UTF8TOUNICODE_CONTRACTID, &kNS_UTF8TOUNICODE_CID },
   { NS_UNICODETOISO88591_CONTRACTID, &kNS_UNICODETOISO88591_CID },
   { NS_UNICODETOCP1252_CONTRACTID, &kNS_UNICODETOCP1252_CID },

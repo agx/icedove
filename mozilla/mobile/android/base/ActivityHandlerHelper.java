@@ -4,6 +4,8 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.prompts.Prompt;
+import org.mozilla.gecko.prompts.PromptService;
 import org.mozilla.gecko.util.ActivityResultHandler;
 import org.mozilla.gecko.util.ActivityResultHandlerMap;
 import org.mozilla.gecko.util.ThreadUtils;
@@ -36,7 +38,6 @@ public class ActivityHandlerHelper implements GeckoEventListener {
 
     private final ActivityResultHandlerMap mActivityResultHandlerMap;
     private final FilePickerResultHandlerSync mFilePickerResultHandlerSync;
-    private final AwesomebarResultHandler mAwesomebarResultHandler;
     private final CameraImageResultHandler mCameraImageResultHandler;
     private final CameraVideoResultHandler mCameraVideoResultHandler;
 
@@ -58,7 +59,6 @@ public class ActivityHandlerHelper implements GeckoEventListener {
         };
         mActivityResultHandlerMap = new ActivityResultHandlerMap();
         mFilePickerResultHandlerSync = new FilePickerResultHandlerSync(mFilePickerResult);
-        mAwesomebarResultHandler = new AwesomebarResultHandler();
         mCameraImageResultHandler = new CameraImageResultHandler(mFilePickerResult);
         mCameraVideoResultHandler = new CameraVideoResultHandler(mFilePickerResult);
         GeckoAppShell.getEventDispatcher().registerEventListener("FilePicker:Show", this);
@@ -91,12 +91,12 @@ public class ActivityHandlerHelper implements GeckoEventListener {
         }
     }
 
-    public int makeRequestCodeForAwesomebar() {
-        return mActivityResultHandlerMap.put(mAwesomebarResultHandler);
-    }
-
     public int makeRequestCode(ActivityResultHandler aHandler) {
         return mActivityResultHandlerMap.put(aHandler);
+    }
+
+    public void startIntentForActivity (Activity activity, Intent intent, ActivityResultHandler activityResultHandler) {
+        activity.startActivityForResult(intent, mActivityResultHandlerMap.put(activityResultHandler));
     }
 
     private int addIntentActivitiesToList(Context context, Intent intent, ArrayList<Prompt.PromptListItem> items, ArrayList<Intent> aIntents) {

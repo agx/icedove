@@ -11,20 +11,17 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/HashFunctions.h"
 #include "mozilla/MathAlgorithms.h"
-#include "mozilla/Types.h"
 
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
 #include "nsIFrame.h"
 #include "nsPoint.h"
 #include "nsRect.h"
-#include "nsViewManager.h"
 #include "nsIPresShell.h"
 #include "nsFrameManager.h"
 #include "nsStyleContext.h"
 #include "nsGkAtoms.h"
 #include "nsCSSAnonBoxes.h"
-#include "nsTransform2D.h"
 #include "nsIContent.h"
 #include "nsIDocumentInlines.h"
 #include "nsIScrollableFrame.h"
@@ -34,16 +31,10 @@
 #include "nsCSSRendering.h"
 #include "nsCSSColorUtils.h"
 #include "nsITheme.h"
-#include "nsThemeConstants.h"
-#include "nsIServiceManager.h"
 #include "nsLayoutUtils.h"
-#include "nsINameSpaceManager.h"
 #include "nsBlockFrame.h"
 #include "gfxContext.h"
 #include "nsRenderingContext.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "gfxPlatform.h"
-#include "gfxImageSurface.h"
 #include "nsStyleStructInlines.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsCSSProps.h"
@@ -57,11 +48,15 @@
 #include "ImageContainer.h"
 #include "mozilla/Telemetry.h"
 #include "gfxUtils.h"
+#include "gfxColor.h"
+#include "gfxGradientCache.h"
 #include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::css;
+using namespace mozilla::gfx;
 using mozilla::image::ImageOps;
+using mozilla::CSSSizeOrRatio;
 
 static int gFrameTreeLockCount = 0;
 
@@ -224,7 +219,7 @@ protected:
     nsIFrame* nextCont = aFrame->GetNextContinuation();
     if (!nextCont && (aFrame->GetStateBits() & NS_FRAME_IS_SPECIAL)) {
       // The {ib} properties are only stored on first continuations
-      aFrame = aFrame->GetFirstContinuation();
+      aFrame = aFrame->FirstContinuation();
       nsIFrame* block = static_cast<nsIFrame*>
         (aFrame->Properties().Get(nsIFrame::IBSplitSpecialSibling()));
       if (block) {
@@ -301,165 +296,6 @@ struct ColorStop {
   gfxRGBA mColor;
 };
 
-struct GradientCacheKey : public PLDHashEntryHdr {
-  typedef const GradientCacheKey& KeyType;
-  typedef const GradientCacheKey* KeyTypePointer;
-  enum { ALLOW_MEMMOVE = true };
-  const nsTArray<gfx::GradientStop> mStops;
-  const bool mRepeating;
-  const gfx::BackendType mBackendType;
-
-  GradientCacheKey(const nsTArray<gfx::GradientStop>& aStops, const bool aRepeating, const gfx::BackendType aBackendType)
-    : mStops(aStops), mRepeating(aRepeating), mBackendType(aBackendType)
-  { }
-
-  GradientCacheKey(const GradientCacheKey* aOther)
-    : mStops(aOther->mStops), mRepeating(aOther->mRepeating), mBackendType(aOther->mBackendType)
-  { }
-
-  union FloatUint32
-  {
-    float    f;
-    uint32_t u;
-  };
-
-  static PLDHashNumber
-  HashKey(const KeyTypePointer aKey)
-  {
-    PLDHashNumber hash = 0;
-    FloatUint32 convert;
-    hash = AddToHash(hash, aKey->mBackendType);
-    hash = AddToHash(hash, aKey->mRepeating);
-    for (uint32_t i = 0; i < aKey->mStops.Length(); i++) {
-      hash = AddToHash(hash, aKey->mStops[i].color.ToABGR());
-      // Use the float bits as hash, except for the cases of 0.0 and -0.0 which both map to 0
-      convert.f = aKey->mStops[i].offset;
-      hash = AddToHash(hash, convert.f ? convert.u : 0);
-    }
-    return hash;
-  }
-
-  bool KeyEquals(KeyTypePointer aKey) const
-  {
-    bool sameStops = true;
-    if (aKey->mStops.Length() != mStops.Length()) {
-      sameStops = false;
-    } else {
-      for (uint32_t i = 0; i < mStops.Length(); i++) {
-        if (mStops[i].color.ToABGR() != aKey->mStops[i].color.ToABGR() ||
-            mStops[i].offset != aKey->mStops[i].offset) {
-          sameStops = false;
-          break;
-        }
-      }
-    }
-
-    return sameStops &&
-           (aKey->mBackendType == mBackendType) &&
-           (aKey->mRepeating == mRepeating);
-  }
-  static KeyTypePointer KeyToPointer(KeyType aKey)
-  {
-    return &aKey;
-  }
-};
-
-/**
- * This class is what is cached. It need to be allocated in an object separated
- * to the cache entry to be able to be tracked by the nsExpirationTracker.
- * */
-struct GradientCacheData {
-  GradientCacheData(mozilla::gfx::GradientStops* aStops, const GradientCacheKey& aKey)
-    : mStops(aStops),
-      mKey(aKey)
-  {}
-
-  GradientCacheData(const GradientCacheData& aOther)
-    : mStops(aOther.mStops),
-      mKey(aOther.mKey)
-  { }
-
-  nsExpirationState *GetExpirationState() {
-    return &mExpirationState;
-  }
-
-  nsExpirationState mExpirationState;
-  const mozilla::RefPtr<mozilla::gfx::GradientStops> mStops;
-  GradientCacheKey mKey;
-};
-
-/**
- * This class implements a cache with no maximum size, that retains the
- * gfxPatterns used to draw the gradients.
- *
- * The key is the nsStyleGradient that defines the gradient, and the size of the
- * gradient.
- *
- * The value is the gfxPattern, and whether or not we perform an optimization
- * based on the actual gradient property.
- *
- * An entry stays in the cache as long as it is used often. As long as a cache
- * entry is in the cache, all the references it has are guaranteed to be valid:
- * the nsStyleRect for the key, the gfxPattern for the value.
- */
-class GradientCache MOZ_FINAL : public nsExpirationTracker<GradientCacheData,4>
-{
-  public:
-    GradientCache()
-      : nsExpirationTracker<GradientCacheData, 4>(MAX_GENERATION_MS)
-    {
-      mHashEntries.Init();
-      srand(time(nullptr));
-      mTimerPeriod = rand() % MAX_GENERATION_MS + 1;
-      Telemetry::Accumulate(Telemetry::GRADIENT_RETENTION_TIME, mTimerPeriod);
-    }
-
-    virtual void NotifyExpired(GradientCacheData* aObject)
-    {
-      // This will free the gfxPattern.
-      RemoveObject(aObject);
-      mHashEntries.Remove(aObject->mKey);
-    }
-
-    GradientCacheData* Lookup(const nsTArray<gfx::GradientStop>& aStops, bool aRepeating, gfx::BackendType aBackendType)
-    {
-      GradientCacheData* gradient =
-        mHashEntries.Get(GradientCacheKey(aStops, aRepeating, aBackendType));
-
-      if (gradient) {
-        MarkUsed(gradient);
-      }
-
-      return gradient;
-    }
-
-    // Returns true if we successfully register the gradient in the cache, false
-    // otherwise.
-    bool RegisterEntry(GradientCacheData* aValue)
-    {
-      nsresult rv = AddObject(aValue);
-      if (NS_FAILED(rv)) {
-        // We are OOM, and we cannot track this object. We don't want stall
-        // entries in the hash table (since the expiration tracker is responsible
-        // for removing the cache entries), so we avoid putting that entry in the
-        // table, which is a good things considering we are short on memory
-        // anyway, we probably don't want to retain things.
-        return false;
-      }
-      mHashEntries.Put(aValue->mKey, aValue);
-      return true;
-    }
-
-  protected:
-    uint32_t mTimerPeriod;
-    static const uint32_t MAX_GENERATION_MS = 10000;
-    /**
-     * FIXME use nsTHashtable to avoid duplicating the GradientCacheKey.
-     * https://bugzilla.mozilla.org/show_bug.cgi?id=761393#c47
-     */
-    nsClassHashtable<GradientCacheKey, GradientCacheData> mHashEntries;
-};
-
 /* Local functions */
 static void DrawBorderImage(nsPresContext* aPresContext,
                             nsRenderingContext& aRenderingContext,
@@ -485,15 +321,12 @@ static nscolor MakeBevelColor(mozilla::css::Side whichSide, uint8_t style,
                               nscolor aBorderColor);
 
 static InlineBackgroundData* gInlineBGData = nullptr;
-static GradientCache* gGradientCache = nullptr;
 
 // Initialize any static variables used by nsCSSRendering.
 void nsCSSRendering::Init()
 {
   NS_ASSERTION(!gInlineBGData, "Init called twice");
   gInlineBGData = new InlineBackgroundData();
-  gGradientCache = new GradientCache();
-  nsCSSBorderRenderer::Init();
 }
 
 // Clean up any global variables used by nsCSSRendering.
@@ -501,9 +334,6 @@ void nsCSSRendering::Shutdown()
 {
   delete gInlineBGData;
   gInlineBGData = nullptr;
-  delete gGradientCache;
-  gGradientCache = nullptr;
-  nsCSSBorderRenderer::Shutdown();
 }
 
 /**
@@ -1190,7 +1020,8 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
                                     nsRenderingContext& aRenderingContext,
                                     nsIFrame* aForFrame,
                                     const nsRect& aFrameArea,
-                                    const nsRect& aDirtyRect)
+                                    const nsRect& aDirtyRect,
+                                    float aOpacity)
 {
   const nsStyleBorder* styleBorder = aForFrame->StyleBorder();
   nsCSSShadowArray* shadows = styleBorder->mBoxShadow;
@@ -1254,12 +1085,8 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
 
     nsRect shadowRect = frameRect;
     shadowRect.MoveBy(shadowItem->mXOffset, shadowItem->mYOffset);
-    nscoord pixelSpreadRadius;
-    if (nativeTheme) {
-      pixelSpreadRadius = shadowItem->mSpread;
-    } else {
+    if (!nativeTheme) {
       shadowRect.Inflate(shadowItem->mSpread, shadowItem->mSpread);
-      pixelSpreadRadius = 0;
     }
 
     // shadowRect won't include the blur, so make an extra rect here that includes the blur
@@ -1269,31 +1096,9 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
     shadowRectPlusBlur.Inflate(
       nsContextBoxBlur::GetBlurRadiusMargin(blurRadius, twipsPerPixel));
 
-    gfxRect shadowGfxRect =
-      nsLayoutUtils::RectToGfxRect(shadowRect, twipsPerPixel);
     gfxRect shadowGfxRectPlusBlur =
       nsLayoutUtils::RectToGfxRect(shadowRectPlusBlur, twipsPerPixel);
-    shadowGfxRect.Round();
     shadowGfxRectPlusBlur.RoundOut();
-
-    gfxContext* renderContext = aRenderingContext.ThebesContext();
-    nsContextBoxBlur blurringArea;
-
-    // When getting the widget shape from the native theme, we're going
-    // to draw the widget into the shadow surface to create a mask.
-    // We need to ensure that there actually *is* a shadow surface
-    // and that we're not going to draw directly into renderContext.
-    gfxContext* shadowContext =
-      blurringArea.Init(shadowRect, pixelSpreadRadius,
-                        blurRadius, twipsPerPixel, renderContext, aDirtyRect,
-                        useSkipGfxRect ? &skipGfxRect : nullptr,
-                        nativeTheme ? nsContextBoxBlur::FORCE_MASK : 0);
-    if (!shadowContext)
-      continue;
-
-    // shadowContext is owned by either blurringArea or aRenderingContext.
-    MOZ_ASSERT(shadowContext == renderContext ||
-               shadowContext == blurringArea.GetContext());
 
     // Set the shadow color; if not specified, use the foreground color
     nscolor shadowColor;
@@ -1302,15 +1107,37 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
     else
       shadowColor = aForFrame->StyleColor()->mColor;
 
-    renderContext->Save();
-    renderContext->SetColor(gfxRGBA(shadowColor));
+    gfxRGBA gfxShadowColor(shadowColor);
+    gfxShadowColor.a *= aOpacity;
 
-    // Draw the shape of the frame so it can be blurred. Recall how nsContextBoxBlur
-    // doesn't make any temporary surfaces if blur is 0 and it just returns the original
-    // surface? If we have no blur, we're painting this fill on the actual content surface
-    // (renderContext == shadowContext) which is why we set up the color and clip
-    // before doing this.
+    gfxContext* renderContext = aRenderingContext.ThebesContext();
     if (nativeTheme) {
+      nsContextBoxBlur blurringArea;
+
+      // When getting the widget shape from the native theme, we're going
+      // to draw the widget into the shadow surface to create a mask.
+      // We need to ensure that there actually *is* a shadow surface
+      // and that we're not going to draw directly into renderContext.
+      gfxContext* shadowContext =
+        blurringArea.Init(shadowRect, shadowItem->mSpread,
+                          blurRadius, twipsPerPixel, renderContext, aDirtyRect,
+                          useSkipGfxRect ? &skipGfxRect : nullptr,
+                          nsContextBoxBlur::FORCE_MASK);
+      if (!shadowContext)
+        continue;
+
+      // shadowContext is owned by either blurringArea or aRenderingContext.
+      MOZ_ASSERT(shadowContext == blurringArea.GetContext());
+
+      renderContext->Save();
+      renderContext->SetColor(gfxShadowColor);
+
+      // Draw the shape of the frame so it can be blurred. Recall how nsContextBoxBlur
+      // doesn't make any temporary surfaces if blur is 0 and it just returns the original
+      // surface? If we have no blur, we're painting this fill on the actual content surface
+      // (renderContext == shadowContext) which is why we set up the color and clip
+      // before doing this.
+
       // We don't clip the border-box from the shadow, nor any other box.
       // We assume that the native theme is going to paint over the shadow.
 
@@ -1325,7 +1152,11 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
       nativeRect.IntersectRect(frameRect, aDirtyRect);
       aPresContext->GetTheme()->DrawWidgetBackground(wrapperCtx, aForFrame,
           styleDisplay->mAppearance, aFrameArea, nativeRect);
+
+      blurringArea.DoPaint();
+      renderContext->Restore();
     } else {
+      renderContext->Save();
       // Clip out the area of the actual frame so the shadow is not shown within
       // the frame
       renderContext->NewPath();
@@ -1339,9 +1170,8 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
       renderContext->SetFillRule(gfxContext::FILL_RULE_EVEN_ODD);
       renderContext->Clip();
 
-      shadowContext->NewPath();
+      gfxCornerSizes clipRectRadii;
       if (hasBorderRadius) {
-        gfxCornerSizes clipRectRadii;
         gfxFloat spreadDistance = shadowItem->mSpread / twipsPerPixel;
 
         gfxFloat borderSizes[4];
@@ -1353,15 +1183,19 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
 
         nsCSSBorderRenderer::ComputeOuterRadii(borderRadii, borderSizes,
             &clipRectRadii);
-        shadowContext->RoundedRectangle(shadowGfxRect, clipRectRadii);
-      } else {
-        shadowContext->Rectangle(shadowGfxRect);
+
       }
-      shadowContext->Fill();
+      nsContextBoxBlur::BlurRectangle(renderContext,
+                                      shadowRect,
+                                      twipsPerPixel,
+                                      hasBorderRadius ? &clipRectRadii : nullptr,
+                                      blurRadius,
+                                      gfxShadowColor,
+                                      aDirtyRect,
+                                      skipGfxRect);
+      renderContext->Restore();
     }
 
-    blurringArea.DoPaint();
-    renderContext->Restore();
   }
 }
 
@@ -1676,12 +1510,14 @@ SetupDirtyRects(const nsRect& aBGClipArea, const nsRect& aCallerDirtyRect,
 }
 
 struct BackgroundClipState {
-  nsRect mBGClipArea;
+  nsRect mBGClipArea;  // Affected by mClippedRadii
+  nsRect mAdditionalBGClipArea;  // Not affected by mClippedRadii
   nsRect mDirtyRect;
   gfxRect mDirtyRectGfx;
 
   gfxCornerSizes mClippedRadii;
   bool mRadiiAreOuter;
+  bool mHasAdditionalBGClipArea;
 
   // Whether we are being asked to draw with a caller provided background
   // clipping area. If this is true we also disable rounded corners.
@@ -1690,15 +1526,49 @@ struct BackgroundClipState {
 
 static void
 GetBackgroundClip(gfxContext *aCtx, uint8_t aBackgroundClip,
+                  uint8_t aBackgroundAttachment,
                   nsIFrame* aForFrame, const nsRect& aBorderArea,
                   const nsRect& aCallerDirtyRect, bool aHaveRoundedCorners,
                   const gfxCornerSizes& aBGRadii, nscoord aAppUnitsPerPixel,
                   /* out */ BackgroundClipState* aClipState)
 {
   aClipState->mBGClipArea = aBorderArea;
+  aClipState->mHasAdditionalBGClipArea = false;
   aClipState->mCustomClip = false;
   aClipState->mRadiiAreOuter = true;
   aClipState->mClippedRadii = aBGRadii;
+  if (aForFrame->GetType() == nsGkAtoms::scrollFrame &&
+        NS_STYLE_BG_ATTACHMENT_LOCAL == aBackgroundAttachment) {
+    // As of this writing, this is still in discussion in the CSS Working Group
+    // http://lists.w3.org/Archives/Public/www-style/2013Jul/0250.html
+
+    // The rectangle for 'background-clip' scrolls with the content,
+    // but the background is also clipped at a non-scrolling 'padding-box'
+    // like the content. (See below.)
+    // Therefore, only 'content-box' makes a difference here.
+    if (aBackgroundClip == NS_STYLE_BG_CLIP_CONTENT) {
+      nsIScrollableFrame* scrollableFrame = do_QueryFrame(aForFrame);
+      // Clip at a rectangle attached to the scrolled content.
+      aClipState->mHasAdditionalBGClipArea = true;
+      aClipState->mAdditionalBGClipArea = nsRect(
+        aClipState->mBGClipArea.TopLeft()
+          + scrollableFrame->GetScrolledFrame()->GetPosition()
+          // For the dir=rtl case:
+          + scrollableFrame->GetScrollRange().TopLeft(),
+        scrollableFrame->GetScrolledRect().Size());
+      nsMargin padding = aForFrame->GetUsedPadding();
+      // padding-bottom is ignored on scrollable frames:
+      // https://bugzilla.mozilla.org/show_bug.cgi?id=748518
+      padding.bottom = 0;
+      aForFrame->ApplySkipSides(padding);
+      aClipState->mAdditionalBGClipArea.Deflate(padding);
+    }
+
+    // Also clip at a non-scrolling, rounded-corner 'padding-box',
+    // same as the scrolled content because of the 'overflow' property.
+    aBackgroundClip = NS_STYLE_BG_CLIP_PADDING;
+  }
+
   if (aBackgroundClip != NS_STYLE_BG_CLIP_BORDER) {
     nsMargin border = aForFrame->GetUsedBorder();
     if (aBackgroundClip == NS_STYLE_BG_CLIP_MOZ_ALMOST_PADDING) {
@@ -1730,6 +1600,13 @@ GetBackgroundClip(gfxContext *aCtx, uint8_t aBackgroundClip,
     }
   }
 
+  if (!aHaveRoundedCorners && aClipState->mHasAdditionalBGClipArea) {
+    // Do the intersection here to account for the fast path(?) below.
+    aClipState->mBGClipArea =
+      aClipState->mBGClipArea.Intersect(aClipState->mAdditionalBGClipArea);
+    aClipState->mHasAdditionalBGClipArea = false;
+  }
+
   SetupDirtyRects(aClipState->mBGClipArea, aCallerDirtyRect, aAppUnitsPerPixel,
                   &aClipState->mDirtyRect, &aClipState->mDirtyRectGfx);
 }
@@ -1758,6 +1635,20 @@ SetupBackgroundClip(BackgroundClipState& aClipState, gfxContext *aCtx,
   // as above with bgArea, arguably a bug, but table painting seems
   // to depend on it.
 
+  if (aHaveRoundedCorners || aClipState.mHasAdditionalBGClipArea) {
+    aAutoSR->Reset(aCtx);
+  }
+
+  if (aClipState.mHasAdditionalBGClipArea) {
+    gfxRect bgAreaGfx = nsLayoutUtils::RectToGfxRect(
+      aClipState.mAdditionalBGClipArea, aAppUnitsPerPixel);
+    bgAreaGfx.Round();
+    bgAreaGfx.Condition();
+    aCtx->NewPath();
+    aCtx->Rectangle(bgAreaGfx, true);
+    aCtx->Clip();
+  }
+
   if (aHaveRoundedCorners) {
     gfxRect bgAreaGfx =
       nsLayoutUtils::RectToGfxRect(aClipState.mBGClipArea, aAppUnitsPerPixel);
@@ -1773,7 +1664,6 @@ SetupBackgroundClip(BackgroundClipState& aClipState, gfxContext *aCtx,
       return;
     }
 
-    aAutoSR->Reset(aCtx);
     aCtx->NewPath();
     aCtx->RoundedRectangle(bgAreaGfx, aClipState.mClippedRadii, aClipState.mRadiiAreOuter);
     aCtx->Clip();
@@ -1820,9 +1710,20 @@ DrawBackgroundColor(BackgroundClipState& aClipState, gfxContext *aCtx,
   aCtx->Rectangle(dirty, true);
   aCtx->Clip();
 
+  if (aClipState.mHasAdditionalBGClipArea) {
+    gfxRect bgAdditionalAreaGfx = nsLayoutUtils::RectToGfxRect(
+      aClipState.mAdditionalBGClipArea, aAppUnitsPerPixel);
+    bgAdditionalAreaGfx.Round();
+    bgAdditionalAreaGfx.Condition();
+    aCtx->NewPath();
+    aCtx->Rectangle(bgAdditionalAreaGfx, true);
+    aCtx->Clip();
+  }
+
   aCtx->NewPath();
   aCtx->RoundedRectangle(bgAreaGfx, aClipState.mClippedRadii,
                          aClipState.mRadiiAreOuter);
+
   aCtx->Fill();
   aCtx->Restore();
 }
@@ -2101,15 +2002,6 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
 
   bool cellContainsFill = aOneCellArea.Contains(aFillArea);
 
-  gfx::BackendType backendType = gfx::BACKEND_NONE;
-  if (ctx->IsCairo()) {
-    backendType = gfx::BACKEND_CAIRO;
-  } else {
-    gfx::DrawTarget* dt = ctx->GetDrawTarget();
-    NS_ASSERTION(dt, "If we are not using Cairo, we should have a draw target.");
-    backendType = dt->GetType();
-  }
-
   // Compute "gradient line" start and end relative to oneCellArea
   gfxPoint lineStart, lineEnd;
   double radiusX = 0, radiusY = 0; // for radial gradients only
@@ -2261,6 +2153,8 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
   // stop positions will be normalized below by subtracting firstStop and then
   // multiplying by stopScale.
   double stopScale;
+  double stopOrigin = firstStop;
+  double stopEnd = lastStop;
   double stopDelta = lastStop - firstStop;
   bool zeroRadius = aGradient->mShape != NS_STYLE_GRADIENT_SHAPE_LINEAR &&
                       (radiusX < 1e-6 || radiusY < 1e-6);
@@ -2269,14 +2163,22 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
     // For repeating radial gradients, or for any radial gradients with
     // a zero radius, we need to fill with the last stop color, so just set
     // both radii to 0.
-    stopScale = 0.0;
     if (aGradient->mRepeating || zeroRadius) {
       radiusX = radiusY = 0.0;
     }
+    stopDelta = 0.0;
     lastStop = firstStop;
-  } else {
-    stopScale = 1.0/stopDelta;
   }
+
+  // Don't normalize non-repeating or degenerate gradients below 0..1
+  // This keeps the gradient line as large as the box and doesn't
+  // lets us avoiding having to get padding correct for stops
+  // at 0 and 1
+  if (!aGradient->mRepeating || stopDelta == 0.0) {
+    stopOrigin = std::min(stopOrigin, 0.0);
+    stopEnd = std::max(stopEnd, 1.0);
+  }
+  stopScale = 1.0/(stopEnd - stopOrigin);
 
   // Create the gradient pattern.
   nsRefPtr<gfxPattern> gradientPattern;
@@ -2284,10 +2186,12 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
   if (aGradient->mShape == NS_STYLE_GRADIENT_SHAPE_LINEAR) {
     // Compute the actual gradient line ends we need to pass to cairo after
     // stops have been normalized.
-    gfxPoint gradientStart = lineStart + (lineEnd - lineStart)*firstStop;
-    gfxPoint gradientEnd = lineStart + (lineEnd - lineStart)*lastStop;
+    gfxPoint gradientStart = lineStart + (lineEnd - lineStart)*stopOrigin;
+    gfxPoint gradientEnd = lineStart + (lineEnd - lineStart)*stopEnd;
+    gfxPoint gradientStopStart = lineStart + (lineEnd - lineStart)*firstStop;
+    gfxPoint gradientStopEnd = lineStart + (lineEnd - lineStart)*lastStop;
 
-    if (stopScale == 0.0) {
+    if (stopDelta == 0.0) {
       // Stops are all at the same place. For repeating gradients, this will
       // just paint the last stop color. We don't need to do anything.
       // For non-repeating gradients, this should render as two colors, one
@@ -2295,6 +2199,7 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
       // our stops will be at 0.0; we just need to set the direction vector
       // correctly.
       gradientEnd = gradientStart + (lineEnd - lineStart);
+      gradientStopEnd = gradientStopStart + (lineEnd - lineStart);
     }
 
     gradientPattern = new gfxPattern(gradientStart.x, gradientStart.y,
@@ -2304,10 +2209,10 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
     // to the right edge of a tile, then we can repeat by just repeating the
     // gradient.
     if (!cellContainsFill &&
-        ((gradientStart.y == gradientEnd.y && gradientStart.x == 0 &&
-          gradientEnd.x == oneCellArea.width) ||
-          (gradientStart.x == gradientEnd.x && gradientStart.y == 0 &&
-          gradientEnd.y == oneCellArea.height))) {
+        ((gradientStopStart.y == gradientStopEnd.y && gradientStopStart.x == 0 &&
+          gradientStopEnd.x == oneCellArea.width) ||
+          (gradientStopStart.x == gradientStopEnd.x && gradientStopStart.y == 0 &&
+          gradientStopEnd.y == oneCellArea.height))) {
       forceRepeatToCoverTiles = true;
     }
   } else {
@@ -2316,9 +2221,9 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
 
     // To form an ellipse, we'll stretch a circle vertically, if necessary.
     // So our radii are based on radiusX.
-    double innerRadius = radiusX*firstStop;
-    double outerRadius = radiusX*lastStop;
-    if (stopScale == 0.0) {
+    double innerRadius = radiusX*stopOrigin;
+    double outerRadius = radiusX*stopEnd;
+    if (stopDelta == 0.0) {
       // Stops are all at the same place.  See above (except we now have
       // the inside vs. outside of an ellipse).
       outerRadius = innerRadius + 1;
@@ -2341,7 +2246,7 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
   if (gradientPattern->CairoStatus())
     return;
 
-  if (stopScale == 0.0) {
+  if (stopDelta == 0.0) {
     // Non-repeating gradient with all stops in same place -> just add
     // first stop and last stop, both at position 0.
     // Repeating gradient with all stops in the same place, or radial
@@ -2371,22 +2276,16 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
     rawStops.SetLength(stops.Length());
     for(uint32_t i = 0; i < stops.Length(); i++) {
       rawStops[i].color = gfx::Color(stops[i].mColor.r, stops[i].mColor.g, stops[i].mColor.b, stops[i].mColor.a);
-      rawStops[i].offset =  stopScale * (stops[i].mPosition - firstStop);
+      rawStops[i].offset = stopScale * (stops[i].mPosition - stopOrigin);
     }
-    GradientCacheData* cached = gGradientCache->Lookup(rawStops, isRepeat, backendType);
-    mozilla::RefPtr<mozilla::gfx::GradientStops> gs = cached ? cached->mStops : nullptr;
-    if (!gs) {
-      // CreateGradientStops is expensive (possibly lazily)
-      gs = ctx->GetDrawTarget()->CreateGradientStops(rawStops.Elements(), stops.Length(), isRepeat ? gfx::EXTEND_REPEAT : gfx::EXTEND_CLAMP);
-      cached = new GradientCacheData(gs, GradientCacheKey(rawStops, isRepeat, backendType));
-      if (!gGradientCache->RegisterEntry(cached)) {
-        delete cached;
-      }
-    }
+    mozilla::RefPtr<mozilla::gfx::GradientStops> gs =
+      gfxGradientCache::GetOrCreateGradientStops(ctx->GetDrawTarget(),
+                                                 rawStops,
+                                                 isRepeat ? gfx::EXTEND_REPEAT : gfx::EXTEND_CLAMP);
     gradientPattern->SetColorStops(gs);
   } else {
     for (uint32_t i = 0; i < stops.Length(); i++) {
-      double pos = stopScale*(stops[i].mPosition - firstStop);
+      double pos = stopScale*(stops[i].mPosition - stopOrigin);
       gradientPattern->AddColorStop(pos, stops[i].mColor);
     }
     // Set repeat mode. Default cairo extend mode is PAD.
@@ -2425,7 +2324,6 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
       // tile with the overall area we're supposed to be filling
       gfxRect fillRect =
         forceRepeatToCoverTiles ? areaToFill : tileRect.Intersect(areaToFill);
-      ctx->NewPath();
       // Try snapping the fill rect. Snap its top-left and bottom-right
       // independently to preserve the orientation.
       gfxPoint snappedFillRectTopLeft = fillRect.TopLeft();
@@ -2451,6 +2349,7 @@ nsCSSRendering::PaintGradient(nsPresContext* aPresContext,
             snappedFillRectBottomRight);
         ctx->SetMatrix(transform);
       }
+      ctx->NewPath();
       ctx->Rectangle(fillRect);
       ctx->Translate(tileRect.TopLeft());
       ctx->SetPattern(gradientPattern);
@@ -2583,7 +2482,8 @@ nsCSSRendering::PaintBackgroundWithSC(nsPresContext* aPresContext,
         NS_STYLE_BG_CLIP_MOZ_ALMOST_PADDING : NS_STYLE_BG_CLIP_PADDING;
     }
 
-    GetBackgroundClip(ctx, currentBackgroundClip, aForFrame, aBorderArea,
+    GetBackgroundClip(ctx, currentBackgroundClip, bg->BottomLayer().mAttachment,
+                      aForFrame, aBorderArea,
                       aDirtyRect, haveRoundedCorners, bgRadii, appUnitsPerPixel,
                       &clipState);
   }
@@ -2622,14 +2522,8 @@ nsCSSRendering::PaintBackgroundWithSC(nsPresContext* aPresContext,
   // this here because this might be the only code that knows about the
   // association of the style data with the frame.
   if (aBackgroundSC != aForFrame->StyleContext()) {
-    ImageLoader* loader = aPresContext->Document()->StyleImageLoader();
-
     NS_FOR_VISIBLE_BACKGROUND_LAYERS_BACK_TO_FRONT_WITH_RANGE(i, bg, startLayer, nLayers) {
-      if (bg->mLayers[i].mImage.GetType() == eStyleImageType_Image) {
-        imgIRequest *image = bg->mLayers[i].mImage.GetImageData();
-
-        loader->AssociateRequestToFrame(image, aForFrame);
-      }
+      aForFrame->AssociateImage(bg->mLayers[i].mImage, aPresContext);
     }
   }
 
@@ -2657,7 +2551,7 @@ nsCSSRendering::PaintBackgroundWithSC(nsPresContext* aPresContext,
           // already called GetBackgroundClip above and it stored its results
           // in clipState.
           if (clipSet) {
-            GetBackgroundClip(ctx, currentBackgroundClip, aForFrame,
+            GetBackgroundClip(ctx, currentBackgroundClip, layer.mAttachment, aForFrame,
                               aBorderArea, aDirtyRect, haveRoundedCorners,
                               bgRadii, appUnitsPerPixel, &clipState);
           }
@@ -2671,10 +2565,18 @@ nsCSSRendering::PaintBackgroundWithSC(nsPresContext* aPresContext,
         nsBackgroundLayerState state = PrepareBackgroundLayer(aPresContext, aForFrame,
             aFlags, aBorderArea, clipState.mBGClipArea, *bg, layer);
         if (!state.mFillArea.IsEmpty()) {
-          state.mImageRenderer.Draw(aPresContext, aRenderingContext,
-                                    state.mDestArea, state.mFillArea,
-                                    state.mAnchor + aBorderArea.TopLeft(),
-                                    clipState.mDirtyRect);
+          if (state.mCompositingOp != gfxContext::OPERATOR_OVER) {
+            NS_ASSERTION(ctx->CurrentOperator() == gfxContext::OPERATOR_OVER,
+                         "It is assumed the initial operator is OPERATOR_OVER, when it is restored later");
+            ctx->SetOperator(state.mCompositingOp);
+          }
+          state.mImageRenderer.DrawBackground(aPresContext, aRenderingContext,
+                                              state.mDestArea, state.mFillArea,
+                                              state.mAnchor + aBorderArea.TopLeft(),
+                                              clipState.mDirtyRect);
+          if (state.mCompositingOp != gfxContext::OPERATOR_OVER) {
+            ctx->SetOperator(gfxContext::OPERATOR_OVER);
+          }
         }
       }
     }
@@ -2764,7 +2666,8 @@ nsCSSRendering::PaintBackgroundColorWithSC(nsPresContext* aPresContext,
   }
 
   BackgroundClipState clipState;
-  GetBackgroundClip(ctx, currentBackgroundClip, aForFrame, aBorderArea,
+  GetBackgroundClip(ctx, currentBackgroundClip, bg->BottomLayer().mAttachment,
+                    aForFrame, aBorderArea,
                     aDirtyRect, haveRoundedCorners, bgRadii, appUnitsPerPixel,
                     &clipState);
 
@@ -2828,6 +2731,31 @@ nsCSSRendering::ComputeBackgroundPositioningArea(nsPresContext* aPresContext,
     if (geometryFrame) {
       bgPositioningArea = geometryFrame->GetRect();
     }
+  } else if (frameType == nsGkAtoms::scrollFrame &&
+             NS_STYLE_BG_ATTACHMENT_LOCAL == aLayer.mAttachment) {
+    nsIScrollableFrame* scrollableFrame = do_QueryFrame(aForFrame);
+    bgPositioningArea = nsRect(
+      scrollableFrame->GetScrolledFrame()->GetPosition()
+        // For the dir=rtl case:
+        + scrollableFrame->GetScrollRange().TopLeft(),
+      scrollableFrame->GetScrolledRect().Size());
+    // The ScrolledRect’s size does not include the borders or scrollbars,
+    // reverse the handling of background-origin
+    // compared to the common case below.
+    if (aLayer.mOrigin == NS_STYLE_BG_ORIGIN_BORDER) {
+      nsMargin border = geometryFrame->GetUsedBorder();
+      geometryFrame->ApplySkipSides(border);
+      bgPositioningArea.Inflate(border);
+      bgPositioningArea.Inflate(scrollableFrame->GetActualScrollbarSizes());
+    } else if (aLayer.mOrigin != NS_STYLE_BG_ORIGIN_PADDING) {
+      nsMargin padding = geometryFrame->GetUsedPadding();
+      geometryFrame->ApplySkipSides(padding);
+      bgPositioningArea.Deflate(padding);
+      NS_ASSERTION(aLayer.mOrigin == NS_STYLE_BG_ORIGIN_CONTENT,
+                   "unknown background-origin value");
+    }
+    *aAttachedToFrame = aForFrame;
+    return bgPositioningArea;
   } else {
     bgPositioningArea = nsRect(nsPoint(0,0), aBorderArea.Size());
   }
@@ -2882,6 +2810,43 @@ nsCSSRendering::ComputeBackgroundPositioningArea(nsPresContext* aPresContext,
   return bgPositioningArea;
 }
 
+// Apply the CSS image sizing algorithm as it applies to background images.
+// See http://www.w3.org/TR/css3-background/#the-background-size .
+// aIntrinsicSize is the size that the background image 'would like to be'.
+// It can be found by calling nsImageRenderer::ComputeIntrinsicSize.
+static nsSize
+ComputeDrawnSizeForBackground(const CSSSizeOrRatio& aIntrinsicSize,
+                              const nsSize& aBgPositioningArea,
+                              const nsStyleBackground::Size& aLayerSize)
+{
+  // Size is dictated by cover or contain rules.
+  if (aLayerSize.mWidthType == nsStyleBackground::Size::eContain ||
+      aLayerSize.mWidthType == nsStyleBackground::Size::eCover) {
+    nsImageRenderer::FitType fitType =
+      aLayerSize.mWidthType == nsStyleBackground::Size::eCover
+        ? nsImageRenderer::COVER
+        : nsImageRenderer::CONTAIN;
+    return nsImageRenderer::ComputeConstrainedSize(aBgPositioningArea,
+                                                   aIntrinsicSize.mRatio,
+                                                   fitType);
+  }
+
+  // No cover/contain constraint, use default algorithm.
+  CSSSizeOrRatio specifiedSize;
+  if (aLayerSize.mWidthType == nsStyleBackground::Size::eLengthPercentage) {
+    specifiedSize.SetWidth(
+      aLayerSize.ResolveWidthLengthPercentage(aBgPositioningArea));
+  }
+  if (aLayerSize.mHeightType == nsStyleBackground::Size::eLengthPercentage) {
+    specifiedSize.SetHeight(
+      aLayerSize.ResolveHeightLengthPercentage(aBgPositioningArea));
+  }
+
+  return nsImageRenderer::ComputeConcreteSize(specifiedSize,
+                                              aIntrinsicSize,
+                                              aBgPositioningArea);
+}
+
 nsBackgroundLayerState
 nsCSSRendering::PrepareBackgroundLayer(nsPresContext* aPresContext,
                                        nsIFrame* aForFrame,
@@ -2903,6 +2868,7 @@ nsCSSRendering::PrepareBackgroundLayer(nsPresContext* aPresContext,
    *   background-origin
    *   background-size
    *   background-break (-moz-background-inline-policy)
+   *   background-blend-mode
    *
    * (background-color applies to the entire element and not to individual
    * layers, so it is irrelevant to this method.)
@@ -2994,13 +2960,20 @@ nsCSSRendering::PrepareBackgroundLayer(nsPresContext* aPresContext,
   // Scale the image as specified for background-size and as required for
   // proper background positioning when background-position is defined with
   // percentages.
-  nsSize imageSize = state.mImageRenderer.ComputeSize(aLayer.mSize, bgPositioningArea.Size());
+  CSSSizeOrRatio intrinsicSize = state.mImageRenderer.ComputeIntrinsicSize();
+  nsSize bgPositionSize = bgPositioningArea.Size();
+  nsSize imageSize = ComputeDrawnSizeForBackground(intrinsicSize,
+                                                   bgPositionSize,
+                                                   aLayer.mSize);
   if (imageSize.width <= 0 || imageSize.height <= 0)
     return state;
 
+  state.mImageRenderer.SetPreferredSize(intrinsicSize,
+                                        imageSize);
+
   // Compute the position of the background now that the background's size is
   // determined.
-  ComputeBackgroundAnchorPoint(aLayer, bgPositioningArea.Size(), imageSize,
+  ComputeBackgroundAnchorPoint(aLayer, bgPositionSize, imageSize,
                                &imageTopLeft, &state.mAnchor);
   imageTopLeft += bgPositioningArea.TopLeft();
   state.mAnchor += bgPositioningArea.TopLeft();
@@ -3018,6 +2991,9 @@ nsCSSRendering::PrepareBackgroundLayer(nsPresContext* aPresContext,
     state.mFillArea.height = bgClipRect.height;
   }
   state.mFillArea.IntersectRect(state.mFillArea, bgClipRect);
+
+  state.mCompositingOp = GetGFXBlendMode(aLayer.mBlendMode);
+
   return state;
 }
 
@@ -3034,6 +3010,34 @@ nsCSSRendering::GetBackgroundLayerRect(nsPresContext* aPresContext,
       PrepareBackgroundLayer(aPresContext, aForFrame, aFlags, aBorderArea,
                              aClipRect, aBackground, aLayer);
   return state.mFillArea;
+}
+
+/* static */ bool
+nsCSSRendering::IsBackgroundImageDecodedForStyleContextAndLayer(
+  const nsStyleBackground *aBackground, uint32_t aLayer)
+{
+  const nsStyleImage* image = &aBackground->mLayers[aLayer].mImage;
+  if (image->GetType() == eStyleImageType_Image) {
+    nsCOMPtr<imgIContainer> img;
+    if (NS_SUCCEEDED(image->GetImageData()->GetImage(getter_AddRefs(img)))) {
+      if (!img->IsDecoded()) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/* static */ bool
+nsCSSRendering::AreAllBackgroundImagesDecodedForFrame(nsIFrame* aFrame)
+{
+  const nsStyleBackground *bg = aFrame->StyleContext()->StyleBackground();
+  NS_FOR_VISIBLE_BACKGROUND_LAYERS_BACK_TO_FRONT(i, bg) {
+    if (!IsBackgroundImageDecodedForStyleContextAndLayer(bg, i)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 static void
@@ -3327,7 +3331,7 @@ DrawBorderImageComponent(nsRenderingContext&  aRenderingContext,
     aStyleBorder.SetSubImage(aIndex, subImage);
   }
 
-  gfxPattern::GraphicsFilter graphicsFilter =
+  GraphicsFilter graphicsFilter =
     nsLayoutUtils::GetGraphicsFilterForFrame(aForFrame);
 
   // If we have no tiling in either direction, we can skip the intermediate
@@ -3773,18 +3777,17 @@ nsCSSRendering::ExpandPaintingRectForDecorationLine(nsIFrame* aFrame,
   nsBlockFrame* block = nullptr;
   // Note that when we paint the decoration lines in relative positioned
   // box, we should paint them like all of the boxes are positioned as static.
-  nscoord relativeX = 0;
+  nscoord frameXInBlockAppUnits = 0;
   for (nsIFrame* f = aFrame; f; f = f->GetParent()) {
     block = do_QueryFrame(f);
     if (block) {
       break;
     }
-    relativeX += f->GetRelativeOffset(f->StyleDisplay()).x;
+    frameXInBlockAppUnits += f->GetNormalPosition().x;
   }
 
   NS_ENSURE_TRUE(block, aClippedRect);
 
-  nscoord frameXInBlockAppUnits = aFrame->GetOffsetTo(block).x - relativeX;
   nsPresContext *pc = aFrame->PresContext();
   gfxFloat frameXInBlock = pc->AppUnitsToGfxUnits(frameXInBlockAppUnits);
   int32_t rectXInBlock = int32_t(NS_round(frameXInBlock + aXInFrame));
@@ -4310,7 +4313,7 @@ nsImageRenderer::PrepareImage()
       nsContentUtils::NewURIWithDocumentCharset(getter_AddRefs(targetURI), elementId,
                                                 mForFrame->GetContent()->GetCurrentDoc(), base);
       nsSVGPaintingProperty* property = nsSVGEffects::GetPaintingPropertyForURI(
-          targetURI, mForFrame->GetFirstContinuation(),
+          targetURI, mForFrame->FirstContinuation(),
           nsSVGEffects::BackgroundImageProperty());
       if (!property)
         return false;
@@ -4335,57 +4338,49 @@ nsImageRenderer::PrepareImage()
   return mIsReady;
 }
 
-enum FitType { CONTAIN, COVER };
-
-static nsSize
-ComputeContainCoverSizeFromRatio(const nsSize& aBgPositioningArea,
-                                 const nsSize& aRatio, FitType fitType)
+nsSize
+CSSSizeOrRatio::ComputeConcreteSize() const
 {
-  NS_ABORT_IF_FALSE(aRatio.width > 0, "width division by zero");
-  NS_ABORT_IF_FALSE(aRatio.height > 0, "height division by zero");
-
-  float scaleX = double(aBgPositioningArea.width) / aRatio.width;
-  float scaleY = double(aBgPositioningArea.height) / aRatio.height;
-  nsSize size;
-  if ((fitType == CONTAIN) == (scaleX < scaleY)) {
-    size.width = aBgPositioningArea.width;
-    size.height = NSCoordSaturatingNonnegativeMultiply(aRatio.height, scaleX);
-  } else {
-    size.width = NSCoordSaturatingNonnegativeMultiply(aRatio.width, scaleY);
-    size.height = aBgPositioningArea.height;
+  NS_ASSERTION(CanComputeConcreteSize(), "Cannot compute");
+  if (mHasWidth && mHasHeight) {
+    return nsSize(mWidth, mHeight);
   }
-  return size;
+  if (mHasWidth) {
+    nscoord height = NSCoordSaturatingNonnegativeMultiply(
+      mWidth,
+      double(mRatio.height) / mRatio.width);
+    return nsSize(mWidth, height);
+  } 
+
+  MOZ_ASSERT(mHasHeight);
+  nscoord width = NSCoordSaturatingNonnegativeMultiply(
+    mHeight,
+    double(mRatio.width) / mRatio.height);      
+  return nsSize(width, mHeight);
 }
 
-void
-nsImageRenderer::ComputeUnscaledDimensions(const nsSize& aBgPositioningArea,
-                                           nscoord& aUnscaledWidth, bool& aHaveWidth,
-                                           nscoord& aUnscaledHeight, bool& aHaveHeight,
-                                           nsSize& aRatio)
+CSSSizeOrRatio
+nsImageRenderer::ComputeIntrinsicSize()
 {
   NS_ASSERTION(mIsReady, "Ensure PrepareImage() has returned true "
                          "before calling me");
 
+  CSSSizeOrRatio result;
   switch (mType) {
     case eStyleImageType_Image:
     {
+      bool haveWidth, haveHeight;
       nsIntSize imageIntSize;
       nsLayoutUtils::ComputeSizeForDrawing(mImageContainer, imageIntSize,
-                                           aRatio, aHaveWidth, aHaveHeight);
-      if (aHaveWidth) {
-        aUnscaledWidth = nsPresContext::CSSPixelsToAppUnits(imageIntSize.width);
+                                           result.mRatio, haveWidth, haveHeight);
+      if (haveWidth) {
+        result.SetWidth(nsPresContext::CSSPixelsToAppUnits(imageIntSize.width));
       }
-      if (aHaveHeight) {
-        aUnscaledHeight = nsPresContext::CSSPixelsToAppUnits(imageIntSize.height);
+      if (haveHeight) {
+        result.SetHeight(nsPresContext::CSSPixelsToAppUnits(imageIntSize.height));
       }
-      return;
+      break;
     }
-    case eStyleImageType_Gradient:
-      // Per <http://dev.w3.org/csswg/css3-images/#gradients>, gradients have no
-      // intrinsic dimensions.
-      aHaveWidth = aHaveHeight = false;
-      aRatio = nsSize(0, 0);
-      return;
     case eStyleImageType_Element:
     {
       // XXX element() should have the width/height of the referenced element,
@@ -4394,203 +4389,137 @@ nsImageRenderer::ComputeUnscaledDimensions(const nsSize& aBgPositioningArea,
       //     <http://dev.w3.org/csswg/css3-images/#element-reference>.
       //     Make sure to change nsStyleBackground::Size::DependsOnFrameSize
       //     when fixing this!
-      aHaveWidth = aHaveHeight = true;
-      nsSize size;
       if (mPaintServerFrame) {
-        if (mPaintServerFrame->IsFrameOfType(nsIFrame::eSVG)) {
-          size = aBgPositioningArea;
-        } else {
+        // SVG images have no intrinsic size
+        if (!mPaintServerFrame->IsFrameOfType(nsIFrame::eSVG)) {
           // The intrinsic image size for a generic nsIFrame paint server is
           // the union of the border-box rects of all of its continuations,
           // rounded to device pixels.
           int32_t appUnitsPerDevPixel =
             mForFrame->PresContext()->AppUnitsPerDevPixel();
-          size =
+          result.SetSize(
             nsSVGIntegrationUtils::GetContinuationUnionSize(mPaintServerFrame).
               ToNearestPixels(appUnitsPerDevPixel).
-              ToAppUnits(appUnitsPerDevPixel);
+              ToAppUnits(appUnitsPerDevPixel));
         }
       } else {
         NS_ASSERTION(mImageElementSurface.mSurface, "Surface should be ready.");
         gfxIntSize surfaceSize = mImageElementSurface.mSize;
-        size.width = nsPresContext::CSSPixelsToAppUnits(surfaceSize.width);
-        size.height = nsPresContext::CSSPixelsToAppUnits(surfaceSize.height);
+        result.SetSize(
+          nsSize(nsPresContext::CSSPixelsToAppUnits(surfaceSize.width),
+                 nsPresContext::CSSPixelsToAppUnits(surfaceSize.height)));
       }
-      aRatio = size;
-      aUnscaledWidth = size.width;
-      aUnscaledHeight = size.height;
-      return;
+      break;
     }
+    case eStyleImageType_Gradient:
+      // Per <http://dev.w3.org/csswg/css3-images/#gradients>, gradients have no
+      // intrinsic dimensions.
     case eStyleImageType_Null:
     default:
-      aHaveWidth = aHaveHeight = true;
-      aUnscaledWidth = aUnscaledHeight = 0;
-      aRatio = nsSize(0, 0);
-      return;
+      break;
   }
+
+  return result;
 }
 
-nsSize
-nsImageRenderer::ComputeDrawnSize(const nsStyleBackground::Size& aLayerSize,
-                                  const nsSize& aBgPositioningArea,
-                                  nscoord aUnscaledWidth, bool aHaveWidth,
-                                  nscoord aUnscaledHeight, bool aHaveHeight,
-                                  const nsSize& aIntrinsicRatio)
+/* static */ nsSize
+nsImageRenderer::ComputeConcreteSize(const CSSSizeOrRatio& aSpecifiedSize,
+                                     const CSSSizeOrRatio& aIntrinsicSize,
+                                     const nsSize& aDefaultSize)
 {
-  NS_ABORT_IF_FALSE(aIntrinsicRatio.width >= 0,
-                    "image ratio with nonsense width");
-  NS_ABORT_IF_FALSE(aIntrinsicRatio.height >= 0,
-                    "image ratio with nonsense height");
-
-  // Bail early if the image is empty.
-  if ((aHaveWidth && aUnscaledWidth <= 0) ||
-      (aHaveHeight && aUnscaledHeight <= 0)) {
-    return nsSize(0, 0);
+  // The specified size is fully specified, just use that
+  if (aSpecifiedSize.IsConcrete()) {
+    return aSpecifiedSize.ComputeConcreteSize();
   }
 
-  // If the image has an intrinsic ratio but either component of it is zero,
-  // then the image would eventually scale to nothingness, so again we can bail.
-  bool haveRatio = aIntrinsicRatio != nsSize(0, 0);
-  if (haveRatio &&
-      (aIntrinsicRatio.width == 0 || aIntrinsicRatio.height == 0)) {
-    return nsSize(0, 0);
-  }
+  MOZ_ASSERT(!aSpecifiedSize.mHasWidth || !aSpecifiedSize.mHasHeight);
 
-  // Easiest case: background-size completely specifies the size.
-  if (aLayerSize.mWidthType == nsStyleBackground::Size::eLengthPercentage &&
-      aLayerSize.mHeightType == nsStyleBackground::Size::eLengthPercentage) {
-    return nsSize(aLayerSize.ResolveWidthLengthPercentage(aBgPositioningArea),
-                  aLayerSize.ResolveHeightLengthPercentage(aBgPositioningArea));
-  }
-
-  // The harder cases: contain/cover.
-  if (aLayerSize.mWidthType == nsStyleBackground::Size::eContain ||
-      aLayerSize.mWidthType == nsStyleBackground::Size::eCover) {
-    FitType fitType = aLayerSize.mWidthType == nsStyleBackground::Size::eCover
-                    ? COVER
-                    : CONTAIN;
-    if (!haveRatio) {
-      // If we don't have an intrinsic ratio, then proportionally scaling to
-      // either largest-fitting or smallest-covering size means scaling to the
-      // background positioning area's size.
-      return aBgPositioningArea;
+  if (!aSpecifiedSize.mHasWidth && !aSpecifiedSize.mHasHeight) {
+    // no specified size, try using the intrinsic size
+    if (aIntrinsicSize.CanComputeConcreteSize()) {
+      return aIntrinsicSize.ComputeConcreteSize();
     }
 
-    return ComputeContainCoverSizeFromRatio(aBgPositioningArea, aIntrinsicRatio,
-                                            fitType);
-  }
-
-  // Harder case: all-auto.
-  if (aLayerSize.mWidthType == nsStyleBackground::Size::eAuto &&
-      aLayerSize.mHeightType == nsStyleBackground::Size::eAuto) {
-    // If the image has all its dimensions, we're done.
-    if (aHaveWidth && aHaveHeight)
-      return nsSize(aUnscaledWidth, aUnscaledHeight);
-
-    // If the image has no dimensions, treat it as if for contain.
-    if (!aHaveWidth && !aHaveHeight) {
-      if (!haveRatio) {
-        // As above, max-contain without a ratio means the whole area.
-        return aBgPositioningArea;
-      }
-
-      // Otherwise determine size using the intrinsic ratio.
-      return ComputeContainCoverSizeFromRatio(aBgPositioningArea,
-                                              aIntrinsicRatio, CONTAIN);
+    if (aIntrinsicSize.mHasWidth) {
+      return nsSize(aIntrinsicSize.mWidth, aDefaultSize.height);
+    }
+    if (aIntrinsicSize.mHasHeight) {
+      return nsSize(aDefaultSize.width, aIntrinsicSize.mHeight);
     }
 
-    NS_ABORT_IF_FALSE(aHaveWidth != aHaveHeight, "logic error");
-
-    if (haveRatio) {
-      // Resolve missing dimensions using the intrinsic ratio.
-      nsSize size;
-      if (aHaveWidth) {
-        size.width = aUnscaledWidth;
-        size.height =
-          NSCoordSaturatingNonnegativeMultiply(size.width,
-                                               double(aIntrinsicRatio.height) /
-                                               aIntrinsicRatio.width);
-      } else {
-        size.height = aUnscaledHeight;
-        size.width =
-          NSCoordSaturatingNonnegativeMultiply(size.height,
-                                               double(aIntrinsicRatio.width) /
-                                               aIntrinsicRatio.height);
-      }
-
-      return size;
-    }
-
-    // Without a ratio we must fall back to the relevant dimension of the
-    // area to determine the missing dimension.
-    return aHaveWidth ? nsSize(aUnscaledWidth, aBgPositioningArea.height)
-                      : nsSize(aBgPositioningArea.width, aUnscaledHeight);
+    // couldn't use the intrinsic size either, revert to using the default size
+    return ComputeConstrainedSize(aDefaultSize,
+                                  aIntrinsicSize.mRatio,
+                                  CONTAIN);
   }
 
-  // Hardest case: only one auto.  Prepare to negotiate amongst intrinsic
-  // dimensions, intrinsic ratio, *and* a specific background-size!
-  NS_ABORT_IF_FALSE((aLayerSize.mWidthType == nsStyleBackground::Size::eAuto) !=
-                    (aLayerSize.mHeightType == nsStyleBackground::Size::eAuto),
-                    "logic error");
+  MOZ_ASSERT(aSpecifiedSize.mHasWidth || aSpecifiedSize.mHasHeight);
 
-  bool isAutoWidth = aLayerSize.mWidthType == nsStyleBackground::Size::eAuto;
-
-  if (haveRatio) {
-    // Use the specified dimension, and compute the other from the ratio.
-    NS_ABORT_IF_FALSE(aIntrinsicRatio.width > 0,
-                      "ratio width out of sync with width?");
-    NS_ABORT_IF_FALSE(aIntrinsicRatio.height > 0,
-                      "ratio height out of sync with width?");
-    nsSize size;
-    if (isAutoWidth) {
-      size.height = aLayerSize.ResolveHeightLengthPercentage(aBgPositioningArea);
-      size.width =
-        NSCoordSaturatingNonnegativeMultiply(size.height,
-                                             double(aIntrinsicRatio.width) /
-                                             aIntrinsicRatio.height);
+  // The specified height is partial, try to compute the missing part.
+  if (aSpecifiedSize.mHasWidth) {
+    nscoord height;
+    if (aIntrinsicSize.HasRatio()) {
+      height = NSCoordSaturatingNonnegativeMultiply(
+        aSpecifiedSize.mWidth,
+        double(aIntrinsicSize.mRatio.height) / aIntrinsicSize.mRatio.width);
+    } else if (aIntrinsicSize.mHasHeight) {
+      height = aIntrinsicSize.mHeight;
     } else {
-      size.width = aLayerSize.ResolveWidthLengthPercentage(aBgPositioningArea);
-      size.height =
-        NSCoordSaturatingNonnegativeMultiply(size.width,
-                                             double(aIntrinsicRatio.height) /
-                                             aIntrinsicRatio.width);
+      height = aDefaultSize.height;
     }
-
-    return size;
+    return nsSize(aSpecifiedSize.mWidth, height);
   }
 
-  NS_ABORT_IF_FALSE(!(aHaveWidth && aHaveHeight),
-                    "if we have width and height, we must have had a ratio");
-
-  // We have a specified dimension and an auto dimension, with no ratio to
-  // preserve.  A specified dimension trumps all, so use that.  For the other
-  // dimension, resolve auto to the intrinsic dimension (if present) or to 100%.
-  nsSize size;
-  if (isAutoWidth) {
-    size.width = aHaveWidth ? aUnscaledWidth : aBgPositioningArea.width;
-    size.height = aLayerSize.ResolveHeightLengthPercentage(aBgPositioningArea);
+  MOZ_ASSERT(aSpecifiedSize.mHasHeight);
+  nscoord width;
+  if (aIntrinsicSize.HasRatio()) {
+    width = NSCoordSaturatingNonnegativeMultiply(
+      aSpecifiedSize.mHeight,
+      double(aIntrinsicSize.mRatio.width) / aIntrinsicSize.mRatio.height);
+  } else if (aIntrinsicSize.mHasWidth) {
+    width = aIntrinsicSize.mWidth;
   } else {
-    size.width = aLayerSize.ResolveWidthLengthPercentage(aBgPositioningArea);
-    size.height = aHaveHeight ? aUnscaledHeight : aBgPositioningArea.height;
+    width = aDefaultSize.width;
+  }
+  return nsSize(width, aSpecifiedSize.mHeight);
+}
+
+/* static */ nsSize
+nsImageRenderer::ComputeConstrainedSize(const nsSize& aConstrainingSize,
+                                        const nsSize& aIntrinsicRatio,
+                                        FitType aFitType)
+{
+  if (aIntrinsicRatio.width <= 0 && aIntrinsicRatio.height <= 0) {
+    return aConstrainingSize;
   }
 
+  float scaleX = double(aConstrainingSize.width) / aIntrinsicRatio.width;
+  float scaleY = double(aConstrainingSize.height) / aIntrinsicRatio.height;
+  nsSize size;
+  if ((aFitType == CONTAIN) == (scaleX < scaleY)) {
+    size.width = aConstrainingSize.width;
+    size.height = NSCoordSaturatingNonnegativeMultiply(
+                    aIntrinsicRatio.height, scaleX);
+  } else {
+    size.width = NSCoordSaturatingNonnegativeMultiply(
+                   aIntrinsicRatio.width, scaleY);
+    size.height = aConstrainingSize.height;
+  }
   return size;
 }
 
-/*
- * The size returned by this method differs from the value of mSize, which this
- * method also computes, in that mSize is the image's "preferred" size for this
- * particular rendering, while the size returned here is the actual rendered
- * size after accounting for background-size.  The preferred size is most often
- * the image's intrinsic dimensions.  But for images with incomplete intrinsic
- * dimensions, the preferred size varies, depending on the background
- * positioning area, the specified background-size, and the intrinsic ratio and
- * dimensions of the image (if it has them).
+/**
+ * mSize is the image's "preferred" size for this particular rendering, while
+ * the drawn (aka concrete) size is the actual rendered size after accounting
+ * for background-size etc..  The preferred size is most often the image's
+ * intrinsic dimensions.  But for images with incomplete intrinsic dimensions,
+ * the preferred size varies, depending on the specified and default sizes, see
+ * nsImageRenderer::Compute*Size.
  *
  * This distinction is necessary because the components of a vector image are
  * specified with respect to its preferred size for a rendering situation, not
- * to its actual rendered size after background-size is applied.  For example,
- * consider a 4px wide vector image with no height which contains a left-aligned
+ * to its actual rendered size.  For example, consider a 4px wide background
+ * vector image with no height which contains a left-aligned
  * 2px wide black rectangle with height 100%.  If the background-size width is
  * auto (or 4px), the vector image will render 4px wide, and the black rectangle
  * will be 2px wide.  If the background-size width is 8px, the vector image will
@@ -4598,73 +4527,75 @@ nsImageRenderer::ComputeDrawnSize(const nsStyleBackground::Size& aLayerSize,
  * In both cases mSize.width will be 4px; but in the first case the returned
  * width will be 4px, while in the second case the returned width will be 8px.
  */
-nsSize
-nsImageRenderer::ComputeSize(const nsStyleBackground::Size& aLayerSize,
-                             const nsSize& aBgPositioningArea)
+void
+nsImageRenderer::SetPreferredSize(const CSSSizeOrRatio& aIntrinsicSize,
+                                  const nsSize& aDefaultSize)
 {
-  bool haveWidth, haveHeight;
-  nsSize ratio;
-  nscoord unscaledWidth, unscaledHeight;
-  ComputeUnscaledDimensions(aBgPositioningArea,
-                            unscaledWidth, haveWidth,
-                            unscaledHeight, haveHeight,
-                            ratio);
-  nsSize drawnSize = ComputeDrawnSize(aLayerSize, aBgPositioningArea,
-                                      unscaledWidth, haveWidth,
-                                      unscaledHeight, haveHeight,
-                                      ratio);
-  mSize.width = haveWidth ? unscaledWidth : drawnSize.width;
-  mSize.height = haveHeight ? unscaledHeight : drawnSize.height;
-  return drawnSize;
+  mSize.width = aIntrinsicSize.mHasWidth
+                  ? aIntrinsicSize.mWidth
+                  : aDefaultSize.width;
+  mSize.height = aIntrinsicSize.mHasHeight
+                  ? aIntrinsicSize.mHeight
+                  : aDefaultSize.height;
+}
+
+// Convert from nsImageRenderer flags to the flags we want to use for drawing in
+// the imgIContainer namespace.
+static uint32_t
+ConvertImageRendererToDrawFlags(uint32_t aImageRendererFlags)
+{
+  uint32_t drawFlags = imgIContainer::FLAG_NONE;
+  if (aImageRendererFlags & nsImageRenderer::FLAG_SYNC_DECODE_IMAGES) {
+    drawFlags |= imgIContainer::FLAG_SYNC_DECODE;
+  }
+  if (aImageRendererFlags & nsImageRenderer::FLAG_PAINTING_TO_WINDOW) {
+    drawFlags |= imgIContainer::FLAG_HIGH_QUALITY_SCALING;
+  }
+  return drawFlags;
 }
 
 void
 nsImageRenderer::Draw(nsPresContext*       aPresContext,
-                      nsRenderingContext& aRenderingContext,
-                      const nsRect&        aDest,
+                      nsRenderingContext&  aRenderingContext,
+                      const nsRect&        aDirtyRect,
                       const nsRect&        aFill,
-                      const nsPoint&       aAnchor,
-                      const nsRect&        aDirty)
+                      const nsRect&        aDest)
 {
   if (!mIsReady) {
     NS_NOTREACHED("Ensure PrepareImage() has returned true before calling me");
     return;
   }
-
   if (aDest.IsEmpty() || aFill.IsEmpty() ||
-      mSize.width <= 0 || mSize.height <= 0)
+      mSize.width <= 0 || mSize.height <= 0) {
     return;
+  }
 
-  gfxPattern::GraphicsFilter graphicsFilter =
+  GraphicsFilter graphicsFilter =
     nsLayoutUtils::GetGraphicsFilterForFrame(mForFrame);
 
   switch (mType) {
     case eStyleImageType_Image:
     {
-      uint32_t drawFlags = imgIContainer::FLAG_NONE;
-      if (mFlags & FLAG_SYNC_DECODE_IMAGES) {
-        drawFlags |= imgIContainer::FLAG_SYNC_DECODE;
-      }
-      if (mFlags & FLAG_PAINTING_TO_WINDOW) {
-        drawFlags |= imgIContainer::FLAG_HIGH_QUALITY_SCALING;
-      }
-
-      nsLayoutUtils::DrawBackgroundImage(&aRenderingContext, mImageContainer,
-          nsIntSize(nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
-                    nsPresContext::AppUnitsToIntCSSPixels(mSize.height)),
-          graphicsFilter,
-          aDest, aFill, aAnchor, aDirty, drawFlags);
-      break;
+      nsLayoutUtils::DrawSingleImage(&aRenderingContext, mImageContainer,
+                                     graphicsFilter, aFill, aDirtyRect,
+                                     nullptr,
+                                     ConvertImageRendererToDrawFlags(mFlags));
+      return;
     }
     case eStyleImageType_Gradient:
+    {
       nsCSSRendering::PaintGradient(aPresContext, aRenderingContext,
-          mGradientData, aDirty, aDest, aFill);
-      break;
+                                    mGradientData, aDirtyRect, aDest, aFill);
+      return;
+    }
     case eStyleImageType_Element:
+    {
       if (mPaintServerFrame) {
         nsSVGIntegrationUtils::DrawPaintServer(
             &aRenderingContext, mForFrame, mPaintServerFrame, graphicsFilter,
-            aDest, aFill, aAnchor, aDirty, mSize);
+            aDest, aFill, aDest.TopLeft(), aDirtyRect, mSize,
+            mFlags & FLAG_SYNC_DECODE_IMAGES ?
+              nsSVGIntegrationUtils::FLAG_SYNC_DECODE_IMAGES : 0);
       } else {
         NS_ASSERTION(mImageElementSurface.mSurface, "Surface should be ready.");
         nsRefPtr<gfxDrawable> surfaceDrawable =
@@ -4672,13 +4603,46 @@ nsImageRenderer::Draw(nsPresContext*       aPresContext,
                                  mImageElementSurface.mSize);
         nsLayoutUtils::DrawPixelSnapped(
             &aRenderingContext, surfaceDrawable, graphicsFilter,
-            aDest, aFill, aAnchor, aDirty);
+            aDest, aFill, aDest.TopLeft(), aDirtyRect);
       }
-      break;
+      return;
+    }
     case eStyleImageType_Null:
     default:
-      break;
+      return;
   }
+}
+
+void
+nsImageRenderer::DrawBackground(nsPresContext*       aPresContext,
+                                nsRenderingContext&  aRenderingContext,
+                                const nsRect&        aDest,
+                                const nsRect&        aFill,
+                                const nsPoint&       aAnchor,
+                                const nsRect&        aDirty)
+{
+  if (!mIsReady) {
+    NS_NOTREACHED("Ensure PrepareImage() has returned true before calling me");
+    return;
+  }
+  if (aDest.IsEmpty() || aFill.IsEmpty() ||
+      mSize.width <= 0 || mSize.height <= 0) {
+    return;
+  }
+
+  if (mType == eStyleImageType_Image) {
+    GraphicsFilter graphicsFilter =
+      nsLayoutUtils::GetGraphicsFilterForFrame(mForFrame);
+
+    nsLayoutUtils::DrawBackgroundImage(&aRenderingContext, mImageContainer,
+        nsIntSize(nsPresContext::AppUnitsToIntCSSPixels(mSize.width),
+                  nsPresContext::AppUnitsToIntCSSPixels(mSize.height)),
+        graphicsFilter,
+        aDest, aFill, aAnchor, aDirty, ConvertImageRendererToDrawFlags(mFlags));
+    return;
+  }
+
+  Draw(aPresContext, aRenderingContext, aDirty, aFill, aDest);
 }
 
 bool
@@ -4716,17 +4680,29 @@ nsImageRenderer::GetContainer(LayerManager* aManager)
 #define MAX_BLUR_RADIUS 300
 #define MAX_SPREAD_RADIUS 50
 
-static inline gfxIntSize
-ComputeBlurRadius(nscoord aBlurRadius, int32_t aAppUnitsPerDevPixel, gfxFloat aScaleX = 1.0, gfxFloat aScaleY = 1.0)
+static inline gfxPoint ComputeBlurStdDev(nscoord aBlurRadius,
+                                         int32_t aAppUnitsPerDevPixel,
+                                         gfxFloat aScaleX,
+                                         gfxFloat aScaleY)
 {
   // http://dev.w3.org/csswg/css3-background/#box-shadow says that the
   // standard deviation of the blur should be half the given blur value.
   gfxFloat blurStdDev = gfxFloat(aBlurRadius) / gfxFloat(aAppUnitsPerDevPixel);
 
-  gfxPoint scaledBlurStdDev = gfxPoint(std::min((blurStdDev * aScaleX),
-                                              gfxFloat(MAX_BLUR_RADIUS)) / 2.0,
-                                       std::min((blurStdDev * aScaleY),
-                                              gfxFloat(MAX_BLUR_RADIUS)) / 2.0);
+  return gfxPoint(std::min((blurStdDev * aScaleX),
+                           gfxFloat(MAX_BLUR_RADIUS)) / 2.0,
+                  std::min((blurStdDev * aScaleY),
+                           gfxFloat(MAX_BLUR_RADIUS)) / 2.0);
+}
+
+static inline gfxIntSize
+ComputeBlurRadius(nscoord aBlurRadius,
+                  int32_t aAppUnitsPerDevPixel,
+                  gfxFloat aScaleX = 1.0,
+                  gfxFloat aScaleY = 1.0)
+{
+  gfxPoint scaledBlurStdDev = ComputeBlurStdDev(aBlurRadius, aAppUnitsPerDevPixel,
+                                                aScaleX, aScaleY);
   return
     gfxAlphaBoxBlur::CalculateBlurRadius(scaledBlurStdDev);
 }
@@ -4798,13 +4774,13 @@ nsContextBoxBlur::Init(const nsRect& aRect, nscoord aSpreadRadius,
                          blurRadius, &dirtyRect, &skipRect);
   } else {
     mContext = blur.Init(rect, spreadRadius,
-                         blurRadius, &dirtyRect, NULL);
+                         blurRadius, &dirtyRect, nullptr);
   }
 
   if (mContext) {
     // we don't need to blur if skipRect is equal to rect
-    // and mContext will be NULL
-    mContext->SetMatrix(transform);
+    // and mContext will be nullptr
+    mContext->Multiply(transform);
   }
   return mContext;
 }
@@ -4842,4 +4818,73 @@ nsContextBoxBlur::GetBlurRadiusMargin(nscoord aBlurRadius,
   result.bottom = blurRadius.height * aAppUnitsPerDevPixel;
   result.left   = blurRadius.width  * aAppUnitsPerDevPixel;
   return result;
+}
+
+/* static */ void
+nsContextBoxBlur::BlurRectangle(gfxContext* aDestinationCtx,
+                                const nsRect& aRect,
+                                int32_t aAppUnitsPerDevPixel,
+                                gfxCornerSizes* aCornerRadii,
+                                nscoord aBlurRadius,
+                                const gfxRGBA& aShadowColor,
+                                const nsRect& aDirtyRect,
+                                const gfxRect& aSkipRect)
+{
+  if (aRect.IsEmpty()) {
+    return;
+  }
+
+  gfxRect shadowGfxRect =
+    nsLayoutUtils::RectToGfxRect(aRect, aAppUnitsPerDevPixel);
+
+  if (aBlurRadius <= 0) {
+    aDestinationCtx->SetColor(aShadowColor);
+    aDestinationCtx->NewPath();
+    if (aCornerRadii) {
+      aDestinationCtx->RoundedRectangle(shadowGfxRect, *aCornerRadii);
+    } else {
+      aDestinationCtx->Rectangle(shadowGfxRect);
+    }
+
+    aDestinationCtx->Fill();
+    return;
+  }
+
+  gfxFloat scaleX = 1;
+  gfxFloat scaleY = 1;
+
+  // Do blurs in device space when possible.
+  // Chrome/Skia always does the blurs in device space
+  // and will sometimes get incorrect results (e.g. rotated blurs)
+  gfxMatrix transform = aDestinationCtx->CurrentMatrix();
+  // XXX: we could probably handle negative scales but for now it's easier just to fallback
+  if (!transform.HasNonAxisAlignedTransform() && transform.xx > 0.0 && transform.yy > 0.0) {
+    scaleX = transform.xx;
+    scaleY = transform.yy;
+    aDestinationCtx->IdentityMatrix();
+  } else {
+    transform = gfxMatrix();
+  }
+
+  gfxPoint blurStdDev = ComputeBlurStdDev(aBlurRadius, aAppUnitsPerDevPixel, scaleX, scaleY);
+
+  gfxRect dirtyRect =
+    nsLayoutUtils::RectToGfxRect(aDirtyRect, aAppUnitsPerDevPixel);
+  dirtyRect.RoundOut();
+
+  shadowGfxRect = transform.TransformBounds(shadowGfxRect);
+  dirtyRect = transform.TransformBounds(dirtyRect);
+  gfxRect skipRect = transform.TransformBounds(aSkipRect);
+
+  if (aCornerRadii) {
+    aCornerRadii->Scale(scaleX, scaleY);
+  }
+
+  gfxAlphaBoxBlur::BlurRectangle(aDestinationCtx,
+                                 shadowGfxRect,
+                                 aCornerRadii,
+                                 blurStdDev,
+                                 aShadowColor,
+                                 dirtyRect,
+                                 skipRect);
 }

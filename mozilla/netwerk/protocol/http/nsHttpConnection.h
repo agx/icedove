@@ -6,25 +6,27 @@
 #ifndef nsHttpConnection_h__
 #define nsHttpConnection_h__
 
-#include "nsHttp.h"
 #include "nsHttpConnectionInfo.h"
 #include "nsAHttpTransaction.h"
-#include "nsXPIDLString.h"
 #include "nsCOMPtr.h"
 #include "nsAutoPtr.h"
 #include "nsProxyRelease.h"
 #include "prinrval.h"
-#include "ASpdySession.h"
-#include "mozilla/TimeStamp.h"
 
-#include "nsIStreamListener.h"
-#include "nsISocketTransport.h"
 #include "nsIAsyncInputStream.h"
 #include "nsIAsyncOutputStream.h"
 #include "nsIInterfaceRequestor.h"
 
 class nsHttpRequestHead;
 class nsHttpResponseHead;
+class nsHttpHandler;
+class nsISocketTransport;
+
+namespace mozilla {
+namespace net {
+class ASpdySession;
+}
+}
 
 //-----------------------------------------------------------------------------
 // nsHttpConnection - represents a connection to a HTTP server (or proxy)
@@ -41,7 +43,7 @@ class nsHttpConnection : public nsAHttpSegmentReader
                        , public nsIInterfaceRequestor
 {
 public:
-    NS_DECL_ISUPPORTS
+    NS_DECL_THREADSAFE_ISUPPORTS
     NS_DECL_NSAHTTPSEGMENTREADER
     NS_DECL_NSAHTTPSEGMENTWRITER
     NS_DECL_NSIINPUTSTREAMCALLBACK
@@ -119,6 +121,7 @@ public:
     nsresult ResumeSend();
     nsresult ResumeRecv();
     int64_t  MaxBytesRead() {return mMaxBytesRead;}
+    uint8_t GetLastHttpResponseVersion() { return mLastHttpResponseVersion; }
 
     friend class nsHttpConnectionForceRecv;
     nsresult ForceRecv();
@@ -134,6 +137,7 @@ public:
     void EndIdleMonitoring();
 
     bool UsingSpdy() { return !!mUsingSpdyVersion; }
+    uint8_t GetSpdyVersion() { return mUsingSpdyVersion; }
     bool EverUsedSpdy() { return mEverUsedSpdy; }
     PRIntervalTime Rtt() { return mRtt; }
 
@@ -158,6 +162,12 @@ public:
     void    SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks);
     void    PrintDiagnostics(nsCString &log);
 
+    void    SetTransactionCaps(uint32_t aCaps) { mTransactionCaps = aCaps; }
+
+    // IsExperienced() returns true when the connection has started at least one
+    // non null HTTP transaction of any version.
+    bool    IsExperienced() { return mExperienced; }
+
 private:
     // called to cause the underlying socket to start speaking SSL
     nsresult ProxyStartSSL();
@@ -175,13 +185,16 @@ private:
     // Makes certain the SSL handshake is complete and NPN negotiation
     // has had a chance to happen
     bool     EnsureNPNComplete();
-    void     SetupNPN(uint32_t caps);
+    void     SetupSSL(uint32_t caps);
 
     // Start the Spdy transaction handler when NPN indicates spdy/*
     void     StartSpdy(uint8_t versionLevel);
 
     // Directly Add a transaction to an active connection for SPDY
     nsresult AddTransaction(nsAHttpTransaction *, int32_t);
+
+    // used to inform nsIHttpDataUsage of transfer
+    void ReportDataUsage(bool);
 
 private:
     nsCOMPtr<nsISocketTransport>    mSocketTransport;
@@ -198,12 +211,15 @@ private:
     // transaction is open, otherwise it is null.
     nsRefPtr<nsAHttpTransaction>    mTransaction;
 
+    nsRefPtr<nsHttpHandler>         mHttpHandler; // keep gHttpHandler alive
+
     mozilla::Mutex                  mCallbacksLock;
     nsMainThreadPtrHandle<nsIInterfaceRequestor> mCallbacks;
 
     nsRefPtr<nsHttpConnectionInfo> mConnInfo;
 
     PRIntervalTime                  mLastReadTime;
+    PRIntervalTime                  mLastWriteTime;
     PRIntervalTime                  mMaxHangTime;    // max download time before dropping keep-alive status
     PRIntervalTime                  mIdleTimeout;    // value of keep-alive: timeout=
     PRIntervalTime                  mConsiderReusedAfterInterval;
@@ -212,6 +228,10 @@ private:
     int64_t                         mMaxBytesRead;       // max read in 1 activation
     int64_t                         mTotalBytesRead;     // total data read
     int64_t                         mTotalBytesWritten;  // does not include CONNECT tunnel
+
+    // for nsIHttpDataUsage
+    uint64_t                        mUnreportedBytesRead;     // subset of totalBytesRead
+    uint64_t                        mUnreportedBytesWritten;  // subset of totalBytesWritten
 
     nsRefPtr<nsIAsyncInputStream>   mInputOverflow;
 
@@ -226,6 +246,7 @@ private:
     bool                            mLastTransactionExpectedNoContent;
     bool                            mIdleMonitoring;
     bool                            mProxyConnectInProgress;
+    bool                            mExperienced;
 
     // The number of <= HTTP/1.1 transactions performed on this connection. This
     // excludes spdy transactions.
@@ -240,7 +261,7 @@ private:
 
     // SPDY related
     bool                            mNPNComplete;
-    bool                            mSetupNPNCalled;
+    bool                            mSetupSSLCalled;
 
     // version level in use, 0 if unused
     uint8_t                         mUsingSpdyVersion;
@@ -251,6 +272,12 @@ private:
 
     // mUsingSpdyVersion is cleared when mSpdySession is freed, this is permanent
     bool                            mEverUsedSpdy;
+
+    // mLastHttpResponseVersion stores the last response's http version seen.
+    uint8_t                         mLastHttpResponseVersion;
+
+    // The capabailities associated with the most recent transaction
+    uint32_t                        mTransactionCaps;
 };
 
 #endif // nsHttpConnection_h__

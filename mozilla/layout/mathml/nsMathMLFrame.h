@@ -7,19 +7,16 @@
 #define nsMathMLFrame_h___
 
 #include "mozilla/Attributes.h"
-#include "nsCOMPtr.h"
-#include "nsPresContext.h"
 #include "nsFontMetrics.h"
-#include "nsStyleContext.h"
-#include "nsMathMLAtoms.h"
 #include "nsMathMLOperators.h"
 #include "nsIMathMLFrame.h"
-#include "nsFrame.h"
-#include "nsCSSValue.h"
-#include "nsMathMLElement.h"
 #include "nsLayoutUtils.h"
+#include "nsBoundingMetrics.h"
+#include "nsIFrame.h"
 
 class nsMathMLChar;
+class nsCSSValue;
+class nsDisplayListSet;
 
 // Concrete base class with default methods that derived MathML frames can override
 class nsMathMLFrame : public nsIMathMLFrame {

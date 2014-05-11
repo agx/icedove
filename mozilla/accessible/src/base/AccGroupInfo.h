@@ -6,7 +6,6 @@
 #define AccGroupInfo_h_
 
 #include "Accessible-inl.h"
-#include "nsAccUtils.h"
 
 namespace mozilla {
 namespace a11y {
@@ -42,7 +41,6 @@ public:
   {
     mozilla::a11y::role role = aAccessible->Role();
     if (role != mozilla::a11y::roles::ROW &&
-        role != mozilla::a11y::roles::GRID_CELL &&
         role != mozilla::a11y::roles::OUTLINEITEM &&
         role != mozilla::a11y::roles::OPTION &&
         role != mozilla::a11y::roles::LISTITEM &&

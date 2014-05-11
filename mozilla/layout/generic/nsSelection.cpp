@@ -13,23 +13,16 @@
 #include "mozilla/Attributes.h"
 
 #include "nsCOMPtr.h"
-#include "nsWeakReference.h"
-#include "nsIFactory.h"
 #include "nsString.h"
-#include "nsReadableUtils.h"
 #include "nsFrameSelection.h"
 #include "nsISelectionListener.h"
-#include "nsIComponentManager.h"
 #include "nsContentCID.h"
 #include "nsIContent.h"
-#include "nsIDOMElement.h"
 #include "nsIDOMNode.h"
 #include "nsRange.h"
 #include "nsCOMArray.h"
-#include "nsGUIEvent.h"
 #include "nsIDOMKeyEvent.h"
 #include "nsITableCellLayout.h"
-#include "nsIDOMNodeList.h"
 #include "nsTArray.h"
 #include "nsTableOuterFrame.h"
 #include "nsTableCellFrame.h"
@@ -41,8 +34,6 @@
 #include <algorithm>
 
 // for IBMBIDI
-#include "nsFrameTraversal.h"
-#include "nsILineIterator.h"
 #include "nsGkAtoms.h"
 #include "nsIFrameTraversal.h"
 #include "nsLayoutUtils.h"
@@ -63,9 +54,10 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "nsIPresShell.h"
 #include "nsCaret.h"
 
+#include "mozilla/MouseEvents.h"
+#include "mozilla/TextEvents.h"
 
 #include "nsITimer.h"
-#include "nsIServiceManager.h"
 #include "nsFrameManager.h"
 // notifications
 #include "nsIDOMDocument.h"
@@ -75,6 +67,7 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 #include "nsAutoCopyListener.h"
 #include "nsCopySupport.h"
 #include "nsIClipboard.h"
+#include "nsIFrameInlines.h"
 
 #ifdef IBMBIDI
 #include "nsIBidiKeyboard.h"
@@ -82,16 +75,11 @@ static NS_DEFINE_CID(kFrameTraversalCID, NS_FRAMETRAVERSAL_CID);
 
 #include "nsError.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/ShadowRoot.h"
 
 using namespace mozilla;
 
 //#define DEBUG_TABLE 1
-
-static NS_DEFINE_IID(kCContentIteratorCID, NS_CONTENTITERATOR_CID);
-
-//PROTOTYPES
-class nsFrameSelection;
-class nsAutoScrollTimer;
 
 static bool IsValidSelectionPoint(nsFrameSelection *aFrameSel, nsINode *aNode);
 
@@ -105,7 +93,7 @@ static void printRange(nsRange *aDomRange);
 #define DEBUG_OUT_RANGE(x)  printRange(x)
 #else
 #define DEBUG_OUT_RANGE(x)  
-#endif //MOZ_DEBUG
+#endif // PRINT_RANGE
 
 
 
@@ -128,8 +116,6 @@ struct CachedOffsetForFrame {
   int32_t      mLastContentOffset;      // store last content offset
   bool mCanCacheFrameOffset;    // cached frame offset is valid?
 };
-
-static RangeData sEmptyData(nullptr);
 
 // Stack-class to turn on/off selection batching for table selection
 class MOZ_STACK_CLASS nsSelectionBatcher MOZ_FINAL
@@ -374,6 +360,8 @@ nsFrameSelection::nsFrameSelection()
   mDelayedMouseEventClickCount = 0;
 }
 
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(nsFrameSelection)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsFrameSelection)
   int32_t i;
@@ -1516,7 +1504,7 @@ nsFrameSelection::TakeFocus(nsIContent *aNewFocus,
 #ifdef DEBUG_TABLE_SELECTION
 printf(" * TakeFocus - moving into new cell\n");
 #endif
-        nsMouseEvent event(false, 0, nullptr, nsMouseEvent::eReal);
+        WidgetMouseEvent event(false, 0, nullptr, WidgetMouseEvent::eReal);
 
         // Start selecting in the cell we were in before
         nsINode* parent = ParentOffset(mCellParent, &offset);
@@ -1529,7 +1517,7 @@ printf(" * TakeFocus - moving into new cell\n");
 
         // XXXX We need to REALLY get the current key shift state
         //  (we'd need to add event listener -- let's not bother for now)
-        event.modifiers &= ~widget::MODIFIER_SHIFT; //aContinueSelection;
+        event.modifiers &= ~MODIFIER_SHIFT; //aContinueSelection;
         if (parent)
         {
           mCellParent = cellparent;
@@ -1758,7 +1746,16 @@ nsFrameSelection::GetFrameForNodeOffset(nsIContent *aNode,
       }
     }
   }
-  
+
+  // If the node is a ShadowRoot, the frame needs to be adjusted,
+  // because a ShadowRoot does not get a frame. Its children are rendered
+  // as children of the host.
+  mozilla::dom::ShadowRoot* shadowRoot =
+    mozilla::dom::ShadowRoot::FromNode(theNode);
+  if (shadowRoot) {
+    theNode = shadowRoot->GetHost();
+  }
+
   nsIFrame* returnFrame = theNode->GetPrimaryFrame();
   if (!returnFrame)
     return nullptr;
@@ -1985,10 +1982,10 @@ GetFirstSelectedContent(nsRange* aRange)
 // Table selection support.
 // TODO: Separate table methods into a separate nsITableSelection interface
 nsresult
-nsFrameSelection::HandleTableSelection(nsINode *aParentContent,
+nsFrameSelection::HandleTableSelection(nsINode* aParentContent,
                                        int32_t aContentOffset,
                                        int32_t aTarget,
-                                       nsMouseEvent *aMouseEvent)
+                                       WidgetMouseEvent* aMouseEvent)
 {
   NS_ENSURE_TRUE(aParentContent, NS_ERROR_NULL_POINTER);
   NS_ENSURE_TRUE(aMouseEvent, NS_ERROR_NULL_POINTER);
@@ -2953,7 +2950,7 @@ nsFrameSelection::DeleteFromDocument()
 }
 
 void
-nsFrameSelection::SetDelayedCaretData(nsMouseEvent *aMouseEvent)
+nsFrameSelection::SetDelayedCaretData(WidgetMouseEvent* aMouseEvent)
 {
   if (aMouseEvent) {
     mDelayedMouseEventValid = true;
@@ -3021,6 +3018,8 @@ Selection::~Selection()
   }
 }
 
+
+NS_IMPL_CYCLE_COLLECTION_CLASS(Selection)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Selection)
   // Unlink the selection listeners *before* we do RemoveAllRanges since
@@ -4137,7 +4136,7 @@ Selection::FindRangeData(nsIDOMRange* aRange)
 
 NS_IMETHODIMP
 Selection::SetTextRangeStyle(nsIDOMRange* aRange,
-                             const nsTextRangeStyle& aTextRangeStyle)
+                             const TextRangeStyle& aTextRangeStyle)
 {
   NS_ENSURE_ARG_POINTER(aRange);
   RangeData *rd = FindRangeData(aRange);
@@ -4395,7 +4394,7 @@ Selection::Collapse(nsINode* aParentNode, int32_t aOffset)
   nsresult result;
 
   nsRefPtr<nsPresContext> presContext = GetPresContext();
-  if (presContext->Document() != aParentNode->OwnerDoc())
+  if (!presContext || presContext->Document() != aParentNode->OwnerDoc())
     return NS_ERROR_FAILURE;
 
   // Delete all of the current ranges
@@ -4449,6 +4448,10 @@ Selection::CollapseToStart()
   if (!firstRange)
     return NS_ERROR_FAILURE;
 
+  if (mFrameSelection) {
+    int16_t reason = mFrameSelection->PopReason() | nsISelectionListener::COLLAPSETOSTART_REASON;
+    mFrameSelection->PostReason(reason);
+  }
   return Collapse(firstRange->GetStartParent(), firstRange->StartOffset());
 }
 
@@ -4469,6 +4472,10 @@ Selection::CollapseToEnd()
   if (!lastRange)
     return NS_ERROR_FAILURE;
 
+  if (mFrameSelection) {
+    int16_t reason = mFrameSelection->PopReason() | nsISelectionListener::COLLAPSETOEND_REASON;
+    mFrameSelection->PostReason(reason);
+  }
   return Collapse(lastRange->GetEndParent(), lastRange->EndOffset());
 }
 
@@ -4517,7 +4524,8 @@ Selection::GetRangeCount(int32_t* aRangeCount)
 NS_IMETHODIMP
 Selection::GetRangeAt(int32_t aIndex, nsIDOMRange** aReturn)
 {
-  *aReturn = mRanges.SafeElementAt(aIndex, sEmptyData).mRange;
+  RangeData empty(nullptr);
+  *aReturn = mRanges.SafeElementAt(aIndex, empty).mRange;
   if (!*aReturn) {
     return NS_ERROR_DOM_INDEX_SIZE_ERR;
   }
@@ -4530,7 +4538,8 @@ Selection::GetRangeAt(int32_t aIndex, nsIDOMRange** aReturn)
 nsRange*
 Selection::GetRangeAt(int32_t aIndex)
 {
-  return mRanges.SafeElementAt(aIndex, sEmptyData).mRange;
+  RangeData empty(nullptr);
+  return mRanges.SafeElementAt(aIndex, empty).mRange;
 }
 
 /*
@@ -4626,7 +4635,7 @@ Selection::Extend(nsINode* aParentNode, int32_t aOffset)
     return NS_ERROR_FAILURE;
 
   nsRefPtr<nsPresContext> presContext = GetPresContext();
-  if (presContext->Document() != aParentNode->OwnerDoc())
+  if (!presContext || presContext->Document() != aParentNode->OwnerDoc())
     return NS_ERROR_FAILURE;
 
   //mFrameSelection->InvalidateDesiredX();
@@ -4648,20 +4657,34 @@ Selection::Extend(nsINode* aParentNode, int32_t aOffset)
   //compare anchor to old cursor.
 
   // We pass |disconnected| to the following ComparePoints calls in order
-  // to avoid assertions, and there is no special handling required, since
-  // ComparePoints returns 1 in the disconnected case.
+  // to avoid assertions. ComparePoints returns 1 in the disconnected case
+  // and we can end up in various cases below, but it is assumed that in
+  // any of the cases we end up, the nsRange implementation will collapse
+  // the range to the new point because we can not make a valid range with
+  // a disconnected point. This means that whatever range is currently
+  // selected will be cleared.
   bool disconnected = false;
+  bool shouldClearRange = false;
   int32_t result1 = nsContentUtils::ComparePoints(anchorNode, anchorOffset,
                                                   focusNode, focusOffset,
                                                   &disconnected);
   //compare old cursor to new cursor
+  shouldClearRange |= disconnected;
   int32_t result2 = nsContentUtils::ComparePoints(focusNode, focusOffset,
                                                   aParentNode, aOffset,
                                                   &disconnected);
   //compare anchor to new cursor
+  shouldClearRange |= disconnected;
   int32_t result3 = nsContentUtils::ComparePoints(anchorNode, anchorOffset,
                                                   aParentNode, aOffset,
                                                   &disconnected);
+
+  // If the points are disconnected, the range will be collapsed below,
+  // resulting in a range that selects nothing.
+  if (shouldClearRange) {
+    // Repaint the current range with the selection removed.
+    selectFrames(presContext, range, false);
+  }
 
   nsRefPtr<nsRange> difRange = new nsRange(aParentNode);
   if ((result1 == 0 && result3 < 0) || (result1 <= 0 && result2 < 0)){//a1,2  a,1,2

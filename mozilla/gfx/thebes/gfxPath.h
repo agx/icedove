@@ -8,10 +8,16 @@
 
 #include "gfxTypes.h"
 #include "nsISupportsImpl.h"
+#include "mozilla/RefPtr.h"
 
 class gfxContext;
-struct gfxPoint;
 typedef struct cairo_path cairo_path_t;
+
+namespace mozilla {
+namespace gfx {
+class Path;
+}
+}
 
 /**
  * Class representing a path. Can be created by copying the current path
@@ -22,43 +28,15 @@ class gfxPath {
 
     friend class gfxContext;
 
-protected:
     gfxPath(cairo_path_t* aPath);
 
 public:
+    gfxPath(mozilla::gfx::Path* aPath);
     virtual ~gfxPath();
 
-protected:
+private:
     cairo_path_t* mPath;
-};
-
-/**
- * Specialization of a path that only contains linear pieces. Can be created
- * from the existing path of a gfxContext.
- */
-class gfxFlattenedPath : public gfxPath {
-    friend class gfxContext;
-
-protected:
-    gfxFlattenedPath(cairo_path_t* aPath);
-
-public:
-    virtual ~gfxFlattenedPath();
-
-    /**
-     * Returns calculated total length of path
-     */
-    gfxFloat GetLength();
-
-    /**
-     * Returns a point a certain distance along the path.  Return is
-     * first or last point of the path if the requested length offset
-     * is outside the range for the path.
-     * @param aOffset offset inpath parameter space (x=length, y=normal offset)
-     * @param aAngle optional - output tangent
-     */
-    gfxPoint FindPoint(gfxPoint aOffset,
-                       gfxFloat* aAngle = nullptr);
+    mozilla::RefPtr<mozilla::gfx::Path> mMoz2DPath;
 };
 
 #endif

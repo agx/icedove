@@ -14,6 +14,7 @@
 
 #ifdef XP_WIN
 #include <io.h>
+#include <windows.h>
 #endif
 
 #ifdef ANDROID
@@ -40,13 +41,13 @@ char*
 NS_strtok(const char *delims, char **str)
 {
   if (!*str)
-    return NULL;
+    return nullptr;
 
   char *ret = (char*) NS_strspnp(delims, *str);
 
   if (!*ret) {
     *str = ret;
-    return NULL;
+    return nullptr;
   }
 
   char *i = ret;
@@ -61,7 +62,7 @@ NS_strtok(const char *delims, char **str)
     ++i;
   } while (*i);
 
-  *str = NULL;
+  *str = nullptr;
   return ret;
 }
 
@@ -267,36 +268,67 @@ void NS_MakeRandomString(char *aBuf, int32_t aBufLen)
 
 #endif
 #if defined(XP_WIN)
+
+#define va_copy(dest, src) (dest = src)
+
 void
-printf_stderr(const char *fmt, ...)
+vprintf_stderr(const char *fmt, va_list args)
 {
+  if (IsDebuggerPresent()) {
+    char buf[2048];
+    va_list argsCpy;
+    va_copy(argsCpy, args);
+    vsnprintf(buf, sizeof(buf), fmt, argsCpy);
+    buf[sizeof(buf) - 1] = '\0';
+    va_end(argsCpy);
+    OutputDebugStringA(buf);
+  }
+
   FILE *fp = _fdopen(_dup(2), "a");
   if (!fp)
       return;
 
-  va_list args;
-  va_start(args, fmt);
   vfprintf(fp, fmt, args);
-  va_end(args);
 
   fclose(fp);
 }
+
+#undef va_copy
+
 #elif defined(ANDROID)
 void
-printf_stderr(const char *fmt, ...)
+vprintf_stderr(const char *fmt, va_list args)
 {
-  va_list args;
-  va_start(args, fmt);
   __android_log_vprint(ANDROID_LOG_INFO, "Gecko", fmt, args);
-  va_end(args);
 }
 #else
 void
+vprintf_stderr(const char *fmt, va_list args)
+{
+  vfprintf(stderr, fmt, args);
+}
+#endif
+
+void
 printf_stderr(const char *fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
-  vfprintf(stderr, fmt, args);
+  vprintf_stderr(fmt, args);
   va_end(args);
 }
-#endif
+
+void
+fprintf_stderr(FILE* aFile, const char *fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  if (aFile == stderr) {
+    vprintf_stderr(fmt, args);
+  } else {
+    vfprintf(aFile, fmt, args);
+  }
+  va_end(args);
+}
+
+

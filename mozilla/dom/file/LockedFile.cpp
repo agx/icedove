@@ -213,12 +213,12 @@ CreateGenericEvent(mozilla::dom::EventTarget* aEventOwner,
 }
 
 inline nsresult
-GetInputStreamForJSVal(const JS::Value& aValue, JSContext* aCx,
+GetInputStreamForJSVal(JS::Handle<JS::Value> aValue, JSContext* aCx,
                        nsIInputStream** aInputStream, uint64_t* aInputLength)
 {
   nsresult rv;
 
-  if (!JSVAL_IS_PRIMITIVE(aValue)) {
+  if (aValue.isObject()) {
     JS::Rooted<JSObject*> obj(aCx, &aValue.toObject());
     if (JS_IsArrayBufferObject(obj)) {
       char* data = reinterpret_cast<char*>(JS_GetArrayBufferData(obj));
@@ -246,14 +246,8 @@ GetInputStreamForJSVal(const JS::Value& aValue, JSContext* aCx,
     }
   }
 
-  JSString* jsstr;
-  if (JSVAL_IS_STRING(aValue)) {
-    jsstr = JSVAL_TO_STRING(aValue);
-  }
-  else {
-    jsstr = JS_ValueToString(aCx, aValue);
-    NS_ENSURE_TRUE(jsstr, NS_ERROR_XPC_BAD_CONVERT_JS);
-  }
+  JSString* jsstr = JS::ToString(aCx, aValue);
+  NS_ENSURE_TRUE(jsstr, NS_ERROR_XPC_BAD_CONVERT_JS);
 
   nsDependentJSString str;
   if (!str.init(aCx, jsstr)) {
@@ -523,7 +517,8 @@ LockedFile::SetLocation(JSContext* aCx,
   }
 
   uint64_t location;
-  if (!JS::ToUint64(aCx, aLocation, &location)) {
+  JS::Rooted<JS::Value> value(aCx, aLocation);
+  if (!JS::ToUint64(aCx, value, &location)) {
     return NS_ERROR_TYPE_ERR;
   }
 
@@ -863,10 +858,11 @@ LockedFile::WriteOrAppend(const JS::Value& aValue,
     return NS_OK;
   }
 
+  JS::Rooted<JS::Value> val(aCx, aValue);
   nsCOMPtr<nsIInputStream> inputStream;
   uint64_t inputLength;
   nsresult rv =
-    GetInputStreamForJSVal(aValue, aCx, getter_AddRefs(inputStream),
+    GetInputStreamForJSVal(val, aCx, getter_AddRefs(inputStream),
                            &inputLength);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -923,7 +919,7 @@ FinishHelper::FinishHelper(LockedFile* aLockedFile)
   mStream.swap(aLockedFile->mStream);
 }
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(FinishHelper, nsIRunnable)
+NS_IMPL_ISUPPORTS1(FinishHelper, nsIRunnable)
 
 NS_IMETHODIMP
 FinishHelper::Run()
@@ -1065,11 +1061,13 @@ ReadTextHelper::GetSuccessResult(JSContext* aCx,
                                                 tmpString);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  if (!xpc::StringToJsval(aCx, tmpString, aVal)) {
+  JS::Rooted<JS::Value> rval(aCx);
+  if (!xpc::StringToJsval(aCx, tmpString, &rval)) {
     NS_WARNING("Failed to convert string!");
     return NS_ERROR_FAILURE;
   }
 
+  *aVal = rval;
   return NS_OK;
 }
 

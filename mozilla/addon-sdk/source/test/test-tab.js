@@ -6,6 +6,9 @@
 const tabs = require("sdk/tabs"); // From addon-kit
 const windowUtils = require("sdk/deprecated/window-utils");
 const { getTabForWindow } = require('sdk/tabs/helpers');
+const app = require("sdk/system/xul-app");
+const { viewFor } = require("sdk/view/core");
+const { getTabId } = require("sdk/tabs/utils");
 
 // The primary test tab
 var primaryTab;
@@ -122,9 +125,12 @@ exports["test behavior on close"] = function(assert, done) {
                      "After being closed, tab attributes are undefined (url)");
         assert.equal(tab.index, undefined,
                      "After being closed, tab attributes are undefined (index)");
-        // Ensure that we can call destroy multiple times without throwing
-        tab.destroy();
-        tab.destroy();
+        if (app.is("Firefox")) {
+          // Ensure that we can call destroy multiple times without throwing;
+          // Fennec doesn't use this internal utility
+          tab.destroy();
+          tab.destroy();
+        }
 
         done();
       });
@@ -132,14 +138,17 @@ exports["test behavior on close"] = function(assert, done) {
   });
 };
 
-if (require("sdk/system/xul-app").is("Fennec")) {
-  module.exports = {
-    "test Unsupported Test": function UnsupportedTest (assert) {
-        assert.pass(
-          "Skipping this test until Fennec support is implemented." +
-          "See Bug 809362");
-    }
-  }
+exports["test viewFor(tab)"] = (assert, done) => {
+  tabs.once("open", tab => {
+    const view = viewFor(tab);
+    assert.ok(view, "view is returned");
+    assert.equal(getTabId(view), tab.id, "tab has a same id");
+
+    tab.close();
+    done();
+  });
+
+  tabs.open({ url: "about:mozilla" });
 }
 
 require("test").run(exports);

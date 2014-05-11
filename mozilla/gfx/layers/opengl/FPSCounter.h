@@ -3,14 +3,23 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/TimeStamp.h"
-#include "LayerManagerOGLProgram.h"
+#ifndef mozilla_layers_opengl_FPSCounter_h_
+#define mozilla_layers_opengl_FPSCounter_h_
+
+#include <stddef.h>                     // for size_t
+#include <algorithm>                    // for min
+#include "GLDefs.h"                     // for GLuint
+#include "mozilla/TimeStamp.h"          // for TimeStamp, TimeDuration
+#include "nsTArray.h"                   // for nsAutoTArray, nsTArray_Impl, etc
+#include "VBOArena.h"                   // for gl::VBOArena
 
 namespace mozilla {
 namespace gl {
 class GLContext;
 }
 namespace layers {
+
+class ShaderProgramOGL;
 
 const double kFpsWindowMs = 250.0;
 const size_t kNumFrameTimeStamps = 16;
@@ -65,12 +74,11 @@ struct FPSState {
   GLuint mTexture;
   FPSCounter mCompositionFps;
   FPSCounter mTransactionFps;
+  gl::VBOArena mVBOs;
 
   FPSState() : mTexture(0) { }
 
-  void DrawFPS(TimeStamp, gl::GLContext*, ShaderProgramOGL*);
-
-  static void DrawFrameCounter(gl::GLContext* context);
+  void DrawFPS(TimeStamp, unsigned, gl::GLContext*, ShaderProgramOGL*);
 
   void NotifyShadowTreeTransaction() {
     mTransactionFps.AddFrame(TimeStamp::Now());
@@ -79,3 +87,5 @@ struct FPSState {
 
 }
 }
+
+#endif // mozilla_layers_opengl_FPSCounter_h_

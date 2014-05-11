@@ -471,6 +471,38 @@ nsClipboard::PasteboardDictFromTransferable(nsITransferable* aTransferable)
       if (tiffData)
         CFRelease(tiffData);
     }
+    else if (flavorStr.EqualsLiteral(kFileMime)) {
+      uint32_t len = 0;
+      nsCOMPtr<nsISupports> genericFile;
+      rv = aTransferable->GetTransferData(flavorStr, getter_AddRefs(genericFile), &len);
+      if (NS_FAILED(rv)) {
+        continue;
+      }
+
+      nsCOMPtr<nsIFile> file(do_QueryInterface(genericFile));
+      if (!file) {
+        nsCOMPtr<nsISupportsInterfacePointer> ptr(do_QueryInterface(genericFile));
+
+        if (ptr) {
+          ptr->GetData(getter_AddRefs(genericFile));
+          file = do_QueryInterface(genericFile);
+        }
+      }
+
+      if (!file) {
+        continue;
+      }
+
+      nsAutoString fileURI;
+      rv = file->GetPath(fileURI);
+      if (NS_FAILED(rv)) {
+        continue;
+      }
+
+      NSString* str = nsCocoaUtils::ToNSString(fileURI);
+      NSArray* fileList = [NSArray arrayWithObjects:str, nil];
+      [pasteboardOutputDict setObject:fileList forKey:NSFilenamesPboardType];
+    }
     else if (flavorStr.EqualsLiteral(kFilePromiseMime)) {
       [pasteboardOutputDict setObject:[NSArray arrayWithObject:@""] forKey:NSFilesPromisePboardType];      
     }
@@ -492,7 +524,8 @@ nsClipboard::PasteboardDictFromTransferable(nsITransferable* aTransferable)
         urlObject->GetData(urlTitle);
         urlTitle.Mid(urlTitle, newlinePos + 1, len - (newlinePos + 1));
 
-        NSString *nativeTitle = [[NSString alloc] initWithCharacters:urlTitle.get() length:urlTitle.Length()];
+        NSString *nativeTitle = [[NSString alloc] initWithCharacters:reinterpret_cast<const unichar*>(urlTitle.get())
+                                                              length:urlTitle.Length()];
         // be nice to Carbon apps, normalize the receiver's contents using Form C.
         [pasteboardOutputDict setObject:[nativeTitle precomposedStringWithCanonicalMapping] forKey:kCorePboardType_urln];
         // Also put the title out as 'urld', since some recipients will look for that.

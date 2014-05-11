@@ -56,6 +56,10 @@ public:
                            const Rect &aSource,
                            const DrawSurfaceOptions &aSurfOptions = DrawSurfaceOptions(),
                            const DrawOptions &aOptions = DrawOptions());
+  virtual void DrawFilter(FilterNode *aNode,
+                          const Rect &aSourceRect,
+                          const Point &aDestPoint,
+                          const DrawOptions &aOptions = DrawOptions());
   virtual void DrawSurfaceWithShadow(SourceSurface *aSurface,
                                      const Point &aDest,
                                      const Color &aColor,
@@ -123,6 +127,8 @@ public:
                         uint32_t aNumStops,
                         ExtendMode aExtendMode = EXTEND_CLAMP) const;
 
+  virtual TemporaryRef<FilterNode> CreateFilter(FilterType aType);
+
   virtual void *GetNativeSurface(NativeSurfaceType aType);
 
   bool Init(const IntSize &aSize, SurfaceFormat aFormat);
@@ -135,6 +141,7 @@ public:
   static ID2D1Factory *factory();
   static void CleanupD2D();
   static IDWriteFactory *GetDWriteFactory();
+  ID2D1RenderTarget *GetRT() { return mRT; }
 
   operator std::string() const {
     std::stringstream stream;
@@ -147,8 +154,8 @@ public:
 
 private:
   TemporaryRef<ID2D1Bitmap>
-  DrawTargetD2D::GetBitmapForSurface(SourceSurface *aSurface,
-                                     Rect &aSource);
+  GetBitmapForSurface(SourceSurface *aSurface,
+                      Rect &aSource);
   friend class AutoSaveRestoreClippedOut;
   friend class SourceSurfaceD2DTarget;
 
@@ -198,6 +205,8 @@ private:
   // bounds to correctly reflect the total clip. This is in device space.
   TemporaryRef<ID2D1Geometry> GetClippedGeometry(IntRect *aClipBounds);
 
+  bool GetDeviceSpaceClipRect(D2D1_RECT_F& aClipRect, bool& aIsPixelAligned);
+
   TemporaryRef<ID2D1Brush> CreateBrushForPattern(const Pattern &aPattern, Float aAlpha = 1.0f);
 
   TemporaryRef<ID3D10Texture2D> CreateGradientTexture(const GradientStopsD2D *aStops);
@@ -207,7 +216,7 @@ private:
   void SetupStateForRendering();
 
   // Set the scissor rect to a certain IntRects, resets the scissor rect to
-  // surface bounds when NULL is specified.
+  // surface bounds when nullptr is specified.
   void SetScissorToRect(IntRect *aRect);
 
   void PushD2DLayer(ID2D1RenderTarget *aRT, ID2D1Geometry *aGeometry, ID2D1Layer *aLayer, const D2D1_MATRIX_3X2_F &aTransform);
@@ -242,7 +251,7 @@ private:
     RefPtr<ID2D1Layer> mLayer;
     D2D1_RECT_F mBounds;
     union {
-      // If mPath is non-NULL, the mTransform member will be used, otherwise
+      // If mPath is non-nullptr, the mTransform member will be used, otherwise
       // the mIsPixelAligned member is valid.
       D2D1_MATRIX_3X2_F mTransform;
       bool mIsPixelAligned;

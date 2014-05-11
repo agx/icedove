@@ -9,9 +9,11 @@
 #include "jsutil.h"
 
 #include "mozilla/Assertions.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/PodOperations.h"
 
 #include <stdio.h>
+
 #include "jstypes.h"
 
 #ifdef WIN32
@@ -22,6 +24,7 @@
 
 using namespace js;
 
+using mozilla::CeilingLog2Size;
 using mozilla::PodArrayZero;
 
 #if USE_ZLIB
@@ -43,10 +46,10 @@ Compressor::Compressor(const unsigned char *inp, size_t inplen)
       outbytes(0)
 {
     JS_ASSERT(inplen > 0);
-    zs.opaque = NULL;
+    zs.opaque = nullptr;
     zs.next_in = (Bytef *)inp;
     zs.avail_in = 0;
-    zs.next_out = NULL;
+    zs.next_out = nullptr;
     zs.avail_out = 0;
     zs.zalloc = zlib_alloc;
     zs.zfree = zlib_free;
@@ -120,7 +123,7 @@ js::DecompressString(const unsigned char *inp, size_t inplen, unsigned char *out
     z_stream zs;
     zs.zalloc = zlib_alloc;
     zs.zfree = zlib_free;
-    zs.opaque = NULL;
+    zs.opaque = nullptr;
     zs.next_in = (Bytef *)inp;
     zs.avail_in = inplen;
     zs.next_out = out;
@@ -158,6 +161,49 @@ JS_Assert(const char *s, const char *file, int ln)
     MOZ_CRASH();
 }
 
+#ifdef __linux__
+
+#include <malloc.h>
+#include <stdlib.h>
+
+namespace js {
+
+// This function calls all the vanilla heap allocation functions.  It is never
+// called, and exists purely to help config/check_vanilla_allocations.py.  See
+// that script for more details.
+extern void
+AllTheNonBasicVanillaNewAllocations()
+{
+    // posix_memalign and aligned_alloc aren't available on all Linux
+    // configurations.
+    //char *q;
+    //posix_memalign((void**)&q, 16, 16);
+
+    intptr_t p =
+        intptr_t(malloc(16)) +
+        intptr_t(calloc(1, 16)) +
+        intptr_t(realloc(nullptr, 16)) +
+        intptr_t(new char) +
+        intptr_t(new char) +
+        intptr_t(new char) +
+        intptr_t(new char[16]) +
+        intptr_t(memalign(16, 16)) +
+        //intptr_t(q) +
+        //intptr_t(aligned_alloc(16, 16)) +
+        intptr_t(valloc(4096)) +
+        intptr_t(strdup("dummy"));
+
+    printf("%u\n", uint32_t(p));  // make sure |p| is not optimized away
+
+    free((int*)p);      // this would crash if ever actually called
+
+    MOZ_CRASH();
+}
+
+} // namespace js
+
+#endif // __linux__
+
 #ifdef JS_BASIC_STATS
 
 #include <math.h>
@@ -194,7 +240,7 @@ ValToBin(unsigned logscale, uint32_t val)
     bin = (logscale == 10)
         ? (unsigned) ceil(log10((double) val))
         : (logscale == 2)
-        ? (unsigned) JS_CEILING_LOG2W(val)
+        ? (unsigned) CeilingLog2Size(val)
         : val;
     return Min(bin, 10U);
 }
@@ -295,7 +341,7 @@ JS_DumpHistogram(JSBasicStats *bs, FILE *fp)
             if (max > 1e6 && mean > 1e3)
                 cnt = uint32_t(ceil(log10((double) cnt)));
             else if (max > 16 && mean > 8)
-                cnt = JS_CEILING_LOG2W(cnt);
+                cnt = CeilingLog2Size(cnt);
             for (unsigned i = 0; i < cnt; i++)
                 putc('*', fp);
         }

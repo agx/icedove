@@ -10,7 +10,10 @@ EXPORTS.mozilla.dom += [
     'CellBroadcast.h',
 ]
 
-CPP_SOURCES += [
+SOURCES += [
     'CellBroadcast.cpp',
 ]
 
+FAIL_ON_WARNINGS = True
+
+FINAL_LIBRARY = 'gklayout'

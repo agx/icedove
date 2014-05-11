@@ -26,16 +26,22 @@ interface TextTrack : EventTarget {
   readonly attribute TextTrackKind kind;
   readonly attribute DOMString label;
   readonly attribute DOMString language;
+
+  readonly attribute DOMString id;
   readonly attribute DOMString inBandMetadataTrackDispatchType;
 
            attribute TextTrackMode mode;
 
   readonly attribute TextTrackCueList? cues;
   readonly attribute TextTrackCueList? activeCues;
+  readonly attribute VTTRegionList? regions;
 
-  void addCue(TextTrackCue cue);
-  void removeCue(TextTrackCue cue);
+  void addCue(VTTCue cue);
+  [Throws]
+  void removeCue(VTTCue cue);
 
-  [SetterThrows]
            attribute EventHandler oncuechange;
+  [Throws]
+  void removeRegion(VTTRegion region);
+  void addRegion(VTTRegion region);
 };

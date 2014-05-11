@@ -7,8 +7,6 @@ function test() {
   const TEST_URI = "http://example.com/browser/browser/devtools/shared/test/" +
                    "browser_toolbar_webconsole_errors_count.html";
 
-  let HUDService = Cu.import("resource:///modules/HUDService.jsm",
-                             {}).HUDService;
   let gDevTools = Cu.import("resource:///modules/devtools/gDevTools.jsm",
                              {}).gDevTools;
 
@@ -95,14 +93,17 @@ function test() {
   }
 
   function onWebConsoleOpen(hud) {
+    dump("lolz!!\n");
     waitForValue({
       name: "web console shows the page errors",
       validator: function() {
-        return hud.outputNode.querySelectorAll(".hud-exception").length;
+        return hud.outputNode.querySelectorAll(".message[category=exception][severity=error]").length;
       },
       value: 4,
       success: checkConsoleOutput.bind(null, hud),
-      failure: finish,
+      failure: () => {
+        finish();
+      },
     });
   }
 
@@ -177,7 +178,7 @@ function test() {
     let waitForConsoleOutputAfterReload = {
       name: "the Web Console displays the correct number of errors after reload",
       validator: function() {
-        return hud.outputNode.querySelectorAll(".hud-exception").length;
+        return hud.outputNode.querySelectorAll(".message[category=exception][severity=error]").length;
       },
       value: 3,
       success: function() {

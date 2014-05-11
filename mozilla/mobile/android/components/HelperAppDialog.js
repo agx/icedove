@@ -1,17 +1,17 @@
+// -*- Mode: js2; tab-width: 2; indent-tabs-mode: nil; js2-basic-offset: 2; js2-skip-preprocessor-directives: t; -*-
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
-const Cr = Components.results;
+const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 const PREF_BD_USEDOWNLOADDIR = "browser.download.useDownloadDir";
 const URI_GENERIC_ICON_DOWNLOAD = "drawable://alert_download";
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/Prompt.jsm");
+Cu.import("resource://gre/modules/HelperApps.jsm");
 
 // -----------------------------------------------------------------------
 // HelperApp Launcher Dialog
@@ -24,123 +24,112 @@ HelperAppLauncherDialog.prototype = {
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIHelperAppLauncherDialog]),
 
   show: function hald_show(aLauncher, aContext, aReason) {
-    // Check to see if we can open this file or not
-    if (aLauncher.MIMEInfo.hasDefaultHandler) {
-      aLauncher.MIMEInfo.preferredAction = Ci.nsIMIMEInfo.useSystemDefault;
-      aLauncher.launchWithApplication(null, false);
+    let bundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
+
+    let defaultHandler = new Object();
+    let apps = HelperApps.getAppsForUri(aLauncher.source, {
+      mimeType: aLauncher.MIMEInfo.MIMEType,
+    });
+
+    // Add a fake intent for save to disk at the top of the list
+    apps.unshift({
+      name: bundle.GetStringFromName("helperapps.saveToDisk"),
+      packageName: "org.mozilla.gecko.Download",
+      iconUri: "drawable://icon",
+      launch: function() {
+        // Reset the preferredAction here
+        aLauncher.MIMEInfo.preferredAction = Ci.nsIMIMEInfo.saveToDisk;
+        aLauncher.saveToDisk(null, false);
+        return true;
+      }
+    });
+
+    // See if the user already marked something as the default for this mimetype,
+    // and if that app is still installed.
+    let preferredApp = this._getPreferredApp(aLauncher);
+    if (preferredApp) {
+      let pref = apps.filter(function(app) {
+        return app.packageName === preferredApp;
+      });
+
+      if (pref.length > 0) {
+        pref[0].launch(aLauncher.source);
+        return;
+      }
+    }
+
+    let callback = function(app) {
+      aLauncher.MIMEInfo.preferredAction = Ci.nsIMIMEInfo.useHelperApp;
+      if (!app.launch(aLauncher.source)) {
+        aLauncher.cancel(Cr.NS_BINDING_ABORTED);
+      }
+    }
+
+    if (apps.length > 1) {
+      HelperApps.prompt(apps, {
+        title: bundle.GetStringFromName("helperapps.pick"),
+        buttons: [
+          bundle.GetStringFromName("helperapps.alwaysUse"),
+          bundle.GetStringFromName("helperapps.useJustOnce")
+        ]
+      }, (data) => {
+        if (data.button < 0)
+          return;
+
+        callback(apps[data.icongrid0]);
+
+        if (data.button == 0)
+          this._setPreferredApp(aLauncher, apps[data.icongrid0]);
+      });
     } else {
-      let wasClicked = false;
-      let listener = {
-        observe: function(aSubject, aTopic, aData) {
-          if (aTopic == "alertclickcallback") {
-            wasClicked = true;
-            let win = Cc["@mozilla.org/appshell/window-mediator;1"].getService(Ci.nsIWindowMediator).getMostRecentWindow("navigator:browser");
-            if (win)
-              win.BrowserUI.showPanel("downloads-container");
-  
-            aLauncher.saveToDisk(null, false);
-          } else {
-            if (!wasClicked)
-              aLauncher.cancel(Cr.NS_BINDING_ABORTED);
-          }
-        }
-      };
-      this._notify(aLauncher, listener);
+      callback(apps[0]);
     }
   },
 
-  promptForSaveToFile: function hald_promptForSaveToFile(aLauncher, aContext, aDefaultFile, aSuggestedFileExt, aForcePrompt) {
-    let file = null;
-    let prefs = Services.prefs;
+  _getPrefName: function getPrefName(mimetype) {
+    return "browser.download.preferred." + mimetype.replace("\\", ".");
+  },
 
-    if (!aForcePrompt) {
-      // Check to see if the user wishes to auto save to the default download
-      // folder without prompting. Note that preference might not be set.
-      let autodownload = true;
-      try {
-        autodownload = prefs.getBoolPref(PREF_BD_USEDOWNLOADDIR);
-      } catch (e) { }
+  _getMimeTypeFromLauncher: function getMimeTypeFromLauncher(launcher) {
+    let mime = launcher.MIMEInfo.MIMEType;
+    if (!mime)
+      mime = ContentAreaUtils.getMIMETypeForURI(launcher.source) || "";
+    return mime;
+  },
 
-      if (autodownload) {
-        // Retrieve the user's default download directory
-        let dnldMgr = Cc["@mozilla.org/download-manager;1"].getService(Ci.nsIDownloadManager);
-        let defaultFolder = dnldMgr.userDownloadsDirectory;
+  _getPreferredApp: function getPreferredApp(launcher) {
+    let mime = this._getMimeTypeFromLauncher(launcher);
+    if (!mime)
+      return;
 
-        try {
-          file = this.validateLeafName(defaultFolder, aDefaultFile, aSuggestedFileExt);
-        }
-        catch (e) {
-        }
-
-        // Check to make sure we have a valid directory, otherwise, prompt
-        if (file)
-          return file;
-      }
-    }
-
-    // Use file picker to show dialog.
-    let picker = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
-    let windowTitle = "";
-    let parent = aContext.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindow);
-    picker.init(parent, windowTitle, Ci.nsIFilePicker.modeSave);
-    picker.defaultString = aDefaultFile;
-
-    if (aSuggestedFileExt) {
-      // aSuggestedFileExtension includes the period, so strip it
-      picker.defaultExtension = aSuggestedFileExt.substring(1);
-    }
-    else {
-      try {
-        picker.defaultExtension = aLauncher.MIMEInfo.primaryExtension;
-      }
-      catch (e) { }
-    }
-
-    var wildCardExtension = "*";
-    if (aSuggestedFileExt) {
-      wildCardExtension += aSuggestedFileExt;
-      picker.appendFilter(aLauncher.MIMEInfo.description, wildCardExtension);
-    }
-
-    picker.appendFilters(Ci.nsIFilePicker.filterAll);
-
-    // Default to lastDir if it is valid, otherwise use the user's default
-    // downloads directory.  userDownloadsDirectory should always return a
-    // valid directory, so we can safely default to it.
-    var dnldMgr = Cc["@mozilla.org/download-manager;1"].getService(Ci.nsIDownloadManager);
-    picker.displayDirectory = dnldMgr.userDownloadsDirectory;
-
-    // The last directory preference may not exist, which will throw.
     try {
-      let lastDir = prefs.getComplexValue("browser.download.lastDir", Ci.nsILocalFile);
-      if (isUsableDirectory(lastDir))
-        picker.displayDirectory = lastDir;
+      return Services.prefs.getCharPref(this._getPrefName(mime));
+    } catch(ex) {
+      Services.console.logStringMessage("Error getting pref for " + mime + " " + ex);
     }
-    catch (e) { }
+    return null;
+  },
 
-    if (picker.show() == Ci.nsIFilePicker.returnCancel) {
-      // null result means user cancelled.
-      return null;
-    }
+  _setPreferredApp: function setPreferredApp(launcher, app) {
+    let mime = this._getMimeTypeFromLauncher(launcher);
+    if (!mime)
+      return;
 
-    // Be sure to save the directory the user chose through the Save As...
-    // dialog  as the new browser.download.dir since the old one
-    // didn't exist.
-    file = picker.file;
+    if (app)
+      Services.prefs.setCharPref(this._getPrefName(mime), app.packageName);
+    else
+      Services.prefs.clearUserPref(this._getPrefName(mime));
+  },
 
-    if (file) {
-      try {
-        // Remove the file so that it's not there when we ensure non-existence later;
-        // this is safe because for the file to exist, the user would have had to
-        // confirm that he wanted the file overwritten.
-        if (file.exists())
-          file.remove(false);
-      }
-      catch (e) { }
-      var newDir = file.parent.QueryInterface(Ci.nsILocalFile);
-      prefs.setComplexValue("browser.download.lastDir", Ci.nsILocalFile, newDir);
-      file = this.validateLeafName(newDir, file.leafName, null);
-    }
+  promptForSaveToFile: function hald_promptForSaveToFile(aLauncher, aContext, aDefaultFile, aSuggestedFileExt, aForcePrompt) {
+    // Retrieve the user's default download directory
+    let dnldMgr = Cc["@mozilla.org/download-manager;1"].getService(Ci.nsIDownloadManager);
+    let defaultFolder = dnldMgr.userDownloadsDirectory;
+
+    try {
+      file = this.validateLeafName(defaultFolder, aDefaultFile, aSuggestedFileExt);
+    } catch (e) { }
+
     return file;
   },
 
@@ -166,7 +155,7 @@ HelperAppLauncherDialog.prototype = {
       //   toolkit/content/contentAreaUtils.js.
       // If you are updating this code, update that code too! We can't share code
       // here since this is called in a js component.
-      var collisionCount = 0;
+      let collisionCount = 0;
       while (aLocalFile.exists()) {
         collisionCount++;
         if (collisionCount == 1) {
@@ -201,16 +190,6 @@ HelperAppLauncherDialog.prototype = {
   isUsableDirectory: function hald_isUsableDirectory(aDirectory) {
     return aDirectory.exists() && aDirectory.isDirectory() && aDirectory.isWritable();
   },
-
-  _notify: function hald_notify(aLauncher, aCallback) {
-    let bundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
-
-    let notifier = Cc[aCallback ? "@mozilla.org/alerts-service;1" : "@mozilla.org/toaster-alerts-service;1"].getService(Ci.nsIAlertsService);
-    notifier.showAlertNotification(URI_GENERIC_ICON_DOWNLOAD,
-                                   bundle.GetStringFromName("alertDownloads"),
-                                   bundle.GetStringFromName("alertCantOpenDownload"),
-                                   true, "", aCallback, "downloadopen-fail");
-  }
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([HelperAppLauncherDialog]);

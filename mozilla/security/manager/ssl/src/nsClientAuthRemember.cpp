@@ -27,9 +27,9 @@
 using namespace mozilla;
 using namespace mozilla::psm;
 
-NS_IMPL_THREADSAFE_ISUPPORTS2(nsClientAuthRememberService, 
-                              nsIObserver,
-                              nsISupportsWeakReference)
+NS_IMPL_ISUPPORTS2(nsClientAuthRememberService,
+                   nsIObserver,
+                   nsISupportsWeakReference)
 
 nsClientAuthRememberService::nsClientAuthRememberService()
   : monitor("nsClientAuthRememberService.monitor")
@@ -48,8 +48,6 @@ nsClientAuthRememberService::Init()
     NS_ERROR("nsClientAuthRememberService::Init called off the main thread");
     return NS_ERROR_NOT_SAME_THREAD;
   }
-
-  mSettingsTable.Init();
 
   nsCOMPtr<nsIObserverService> observerService =
       mozilla::services::GetObserverService();

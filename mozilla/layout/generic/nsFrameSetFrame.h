@@ -9,22 +9,16 @@
 #define nsHTMLFrameset_h___
 
 #include "mozilla/Attributes.h"
-#include "nsGkAtoms.h"
 #include "nsContainerFrame.h"
 #include "nsColor.h"
-#include "nsIObserver.h"
-#include "nsWeakPtr.h"
 
 class  nsIContent;
-class  nsIFrame;
 class  nsPresContext;
-class  nsRenderingContext;
 struct nsRect;
 struct nsHTMLReflowState;
 struct nsSize;
 class  nsIAtom;
 class  nsHTMLFramesetBorderFrame;
-class  nsGUIEvent;
 class  nsHTMLFramesetFrame;
 
 #define NO_COLOR 0xFFFFFFFA
@@ -94,8 +88,8 @@ public:
                         nsIntPoint& aCellIndex);
 
   NS_IMETHOD HandleEvent(nsPresContext* aPresContext, 
-                         nsGUIEvent*     aEvent,
-                         nsEventStatus*  aEventStatus) MOZ_OVERRIDE;
+                         mozilla::WidgetGUIEvent* aEvent,
+                         nsEventStatus* aEventStatus) MOZ_OVERRIDE;
 
   NS_IMETHOD GetCursor(const nsPoint&    aPoint,
                        nsIFrame::Cursor& aCursor) MOZ_OVERRIDE;
@@ -116,12 +110,12 @@ public:
 
   virtual bool IsLeaf() const MOZ_OVERRIDE;
   
-  void StartMouseDrag(nsPresContext*            aPresContext, 
-                      nsHTMLFramesetBorderFrame* aBorder, 
-                      nsGUIEvent*                aEvent);
+  void StartMouseDrag(nsPresContext* aPresContext,
+                      nsHTMLFramesetBorderFrame* aBorder,
+                      mozilla::WidgetGUIEvent* aEvent);
 
   void MouseDrag(nsPresContext* aPresContext, 
-                 nsGUIEvent*     aEvent);
+                 mozilla::WidgetGUIEvent* aEvent);
 
   void EndMouseDrag(nsPresContext* aPresContext);
 

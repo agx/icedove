@@ -7,11 +7,11 @@
 #ifndef jit_SnapshotWriter_h
 #define jit_SnapshotWriter_h
 
-#include "Ion.h"
-#include "IonCode.h"
-#include "Registers.h"
-#include "CompactBuffer.h"
-#include "Bailouts.h"
+#include "jit/Bailouts.h"
+#include "jit/CompactBuffer.h"
+#include "jit/Ion.h"
+#include "jit/IonCode.h"
+#include "jit/Registers.h"
 
 namespace js {
 namespace jit {
@@ -46,6 +46,8 @@ class SnapshotWriter
     void addUndefinedSlot();
     void addNullSlot();
     void addInt32Slot(int32_t value);
+    void addFloat32Slot(const FloatRegister &reg);
+    void addFloat32Slot(int32_t stackIndex);
     void addConstantPoolSlot(uint32_t index);
 #if defined(JS_NUNBOX32)
     void addSlot(const Register &type, const Register &payload);

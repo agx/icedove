@@ -6,11 +6,6 @@
 
 #include "nsViewSourceChannel.h"
 #include "nsIIOService.h"
-#include "nsIServiceManager.h"
-#include "nsIInterfaceRequestor.h"
-#include "nsIInterfaceRequestorUtils.h"
-#include "nsXPIDLString.h"
-#include "nsReadableUtils.h"
 #include "nsMimeTypes.h"
 #include "nsNetUtil.h"
 #include "nsIHttpHeaderVisitor.h"
@@ -62,7 +57,9 @@ nsViewSourceChannel::Init(nsIURI* uri)
     rv = pService->NewChannel(path, nullptr, nullptr, getter_AddRefs(mChannel));
     if (NS_FAILED(rv))
       return rv;
- 
+
+    mIsSrcdocChannel = false;
+
     mChannel->SetOriginalURI(mOriginalURI);
     mHttpChannel = do_QueryInterface(mChannel);
     mHttpChannelInternal = do_QueryInterface(mChannel);
@@ -70,6 +67,37 @@ nsViewSourceChannel::Init(nsIURI* uri)
     mApplicationCacheChannel = do_QueryInterface(mChannel);
     mUploadChannel = do_QueryInterface(mChannel);
     
+    return NS_OK;
+}
+
+nsresult
+nsViewSourceChannel::InitSrcdoc(nsIURI* aURI, const nsAString &aSrcdoc)
+{
+
+    nsresult rv;
+
+    nsCOMPtr<nsIURI> inStreamURI;
+    // Need to strip view-source: from the URI.  Hardcoded to
+    // about:srcdoc as this is the only permissible URI for srcdoc 
+    // loads
+    rv = NS_NewURI(getter_AddRefs(inStreamURI),
+                   NS_LITERAL_STRING("about:srcdoc"));
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    rv = NS_NewInputStreamChannel(getter_AddRefs(mChannel), inStreamURI,
+                                  aSrcdoc, NS_LITERAL_CSTRING("text/html"),
+                                  true);
+
+    NS_ENSURE_SUCCESS(rv, rv);
+    mOriginalURI = aURI;
+    mIsSrcdocChannel = true;
+    
+    mChannel->SetOriginalURI(mOriginalURI);
+    mHttpChannel = do_QueryInterface(mChannel);
+    mHttpChannelInternal = do_QueryInterface(mChannel);
+    mCachingChannel = do_QueryInterface(mChannel);
+    mApplicationCacheChannel = do_QueryInterface(mChannel);
+    mUploadChannel = do_QueryInterface(mChannel);
     return NS_OK;
 }
 
@@ -461,6 +489,13 @@ nsViewSourceChannel::SetOriginalContentType(const nsACString &aContentType)
     mContentType.Truncate();
 
     return mChannel->SetContentType(aContentType);
+}
+
+NS_IMETHODIMP
+nsViewSourceChannel::GetIsSrcdocChannel(bool* aIsSrcdocChannel)
+{
+    *aIsSrcdocChannel = mIsSrcdocChannel;
+    return NS_OK;
 }
 
 // nsIRequestObserver methods
