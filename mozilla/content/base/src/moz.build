@@ -16,7 +16,6 @@ EXPORTS += [
     'nsContentSink.h',
     'nsCrossSiteListenerProxy.h',
     'nsDOMAttributeMap.h',
-    'nsElementFrameLoaderOwner.h',
     'nsFrameMessageManager.h',
     'nsGenericDOMDataNode.h',
     'nsGkAtomList.h',
@@ -70,10 +69,8 @@ EXPORTS.mozilla.dom += [
     'DOMRect.h',
     'DOMStringList.h',
     'EventSource.h',
-    'ImportManager.h',
     'Link.h',
     'NodeIterator.h',
-    'ResponsiveImageSelector.h',
     'ShadowRoot.h',
     'StyleSheetList.h',
     'Text.h',
@@ -97,7 +94,6 @@ UNIFIED_SOURCES += [
     'EventSource.cpp',
     'FileIOObject.cpp',
     'FragmentOrElement.cpp',
-    'ImportManager.cpp',
     'Link.cpp',
     'NodeIterator.cpp',
     'nsAtomListUtils.cpp',
@@ -113,10 +109,7 @@ UNIFIED_SOURCES += [
     'nsContentSink.cpp',
     'nsCopySupport.cpp',
     'nsCrossSiteListenerProxy.cpp',
-    'nsCSPContext.cpp',
-    'nsCSPParser.cpp',
     'nsCSPService.cpp',
-    'nsCSPUtils.cpp',
     'nsDataDocumentContentPolicy.cpp',
     'nsDocumentEncoder.cpp',
     'nsDOMAttributeMap.cpp',
@@ -128,7 +121,6 @@ UNIFIED_SOURCES += [
     'nsDOMSerializer.cpp',
     'nsDOMSettableTokenList.cpp',
     'nsDOMTokenList.cpp',
-    'nsElementFrameLoaderOwner.cpp',
     'nsFormData.cpp',
     'nsFrameLoader.cpp',
     'nsFrameMessageManager.cpp',
@@ -138,6 +130,7 @@ UNIFIED_SOURCES += [
     'nsHostObjectProtocolHandler.cpp',
     'nsHostObjectURI.cpp',
     'nsHTMLContentSerializer.cpp',
+    'nsImageLoadingContent.cpp',
     'nsINode.cpp',
     'nsInProcessTabChildGlobal.cpp',
     'nsLineBreaker.cpp',
@@ -168,17 +161,12 @@ UNIFIED_SOURCES += [
     'nsXMLContentSerializer.cpp',
     'nsXMLHttpRequest.cpp',
     'nsXMLNameSpaceMap.cpp',
-    'ResponsiveImageSelector.cpp',
     'ShadowRoot.cpp',
     'StyleSheetList.cpp',
     'Text.cpp',
     'ThirdPartyUtil.cpp',
     'TreeWalker.cpp',
     'WebSocket.cpp',
-]
-
-SOURCES += [
-    'nsImageLoadingContent.cpp',
 ]
 
 # These files cannot be built in unified mode because they use FORCE_PR_LOG
@@ -243,3 +231,7 @@ LOCAL_INCLUDES += [
     '/netwerk/base/src',
     '/xpcom/ds',
 ]
+
+if CONFIG['GNU_CC'] and CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
+    # Work around bug 986928
+    CXXFLAGS += ['-Wno-error=format']

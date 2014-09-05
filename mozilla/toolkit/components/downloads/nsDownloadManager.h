@@ -434,12 +434,6 @@ private:
    */
   nsCOMPtr<nsIArray> mSignatureInfo;
 
-  /**
-   * Stores the redirects that led to this download in an nsIArray of
-   * nsIPrincipal.
-   */
-  nsCOMPtr<nsIArray> mRedirects;
-
   friend class nsDownloadManager;
 };
 

@@ -47,7 +47,7 @@ private:
     bool        UsingSSL() const  { return mUsingSSL; }
 
     bool        UsingHttpProxy() const
-    { return mProxyInfo && (mProxyInfo->IsHTTP() || mProxyInfo->IsHTTPS()); }
+    { return !!(mProxyInfo && !nsCRT::strcmp(mProxyInfo->Type(), "http")); }
 
     nsresult PrepareForAuthentication(bool proxyAuth);
     nsresult GenCredsAndSetEntry(nsIHttpAuthenticator *, bool proxyAuth,

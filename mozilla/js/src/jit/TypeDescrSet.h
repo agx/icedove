@@ -86,7 +86,7 @@ class TypeDescrSet {
     // Query the set
 
     bool empty() const;
-    bool allOfKind(type::Kind kind);
+    bool allOfKind(TypeDescr::Kind kind);
 
     // Returns true only when non-empty and `kind()` is
     // `TypeDescr::Array`
@@ -108,7 +108,7 @@ class TypeDescrSet {
     //////////////////////////////////////////////////////////////////////
     // The following operations are only valid on a non-empty set:
 
-    type::Kind kind();
+    TypeDescr::Kind kind();
 
     // Returns the prototype that a typed object whose type is within
     // this TypeDescrSet would have. Returns `null` if this cannot be
@@ -118,7 +118,7 @@ class TypeDescrSet {
     //////////////////////////////////////////////////////////////////////
     // Scalar operations
     //
-    // Only valid when `kind() == type::Scalar`
+    // Only valid when `kind() == TypeDescr::Scalar`
 
     // If all type descrs in this set have a single type, returns true
     // and sets *out. Else returns false.
@@ -127,7 +127,7 @@ class TypeDescrSet {
     //////////////////////////////////////////////////////////////////////
     // Reference operations
     //
-    // Only valid when `kind() == type::Reference`
+    // Only valid when `kind() == TypeDescr::Reference`
 
     // If all type descrs in this set have a single type, returns true
     // and sets *out. Else returns false.
@@ -136,7 +136,7 @@ class TypeDescrSet {
     //////////////////////////////////////////////////////////////////////
     // Reference operations
     //
-    // Only valid when `kind() == type::X4`
+    // Only valid when `kind() == TypeDescr::X4`
 
     // If all type descrs in this set have a single type, returns true
     // and sets *out. Else returns false.
@@ -145,7 +145,7 @@ class TypeDescrSet {
     //////////////////////////////////////////////////////////////////////
     // SizedArray operations
     //
-    // Only valid when `kind() == type::SizedArray`
+    // Only valid when `kind() == TypeDescr::SizedArray`
 
     // Determines whether all arrays in this set have the same,
     // statically known, array length and return that length
@@ -160,7 +160,7 @@ class TypeDescrSet {
     //////////////////////////////////////////////////////////////////////
     // Struct operations
     //
-    // Only valid when `kind() == type::Struct`
+    // Only valid when `kind() == TypeDescr::Struct`
 
     // Searches the type in the set for a field named `id`. All
     // possible types must agree on the offset of the field within the

@@ -1,2 +1,2 @@
-enableSPSProfiling();
+enableSPSProfilingAssertions(false);
 Object.getOwnPropertyNames(this);

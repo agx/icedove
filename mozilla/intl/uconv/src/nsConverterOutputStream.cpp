@@ -6,13 +6,10 @@
 #include "nsCOMPtr.h"
 
 #include "nsIOutputStream.h"
-#include "nsString.h"
+#include "nsICharsetConverterManager.h"
 
 #include "nsConverterOutputStream.h"
-#include "nsIUnicodeEncoder.h"
-#include "mozilla/dom/EncodingUtils.h"
-
-using mozilla::dom::EncodingUtils;
+#include "nsServiceManagerUtils.h"
 
 NS_IMPL_ISUPPORTS(nsConverterOutputStream,
                   nsIUnicharOutputStream,
@@ -31,22 +28,17 @@ nsConverterOutputStream::Init(nsIOutputStream* aOutStream,
 {
     NS_PRECONDITION(aOutStream, "Null output stream!");
 
-    nsAutoCString label;
-    if (!aCharset) {
-        label.AssignLiteral("UTF-8");
-    } else {
-        label = aCharset;
-    }
+    if (!aCharset)
+        aCharset = "UTF-8";
 
-    nsAutoCString encoding;
-    if (label.EqualsLiteral("UTF-16")) {
-        // Make sure to output a BOM when UTF-16 requested
-        encoding.Assign(label);
-    } else if (!EncodingUtils::FindEncodingForLabelNoReplacement(label,
-                                                                 encoding)) {
-      return NS_ERROR_UCONV_NOCONV;
-    }
-    mConverter = EncodingUtils::EncoderForEncoding(encoding);
+    nsresult rv;
+    nsCOMPtr<nsICharsetConverterManager> ccm =
+        do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
+    if (NS_FAILED(rv)) return rv;
+
+    rv = ccm->GetUnicodeEncoder(aCharset, getter_AddRefs(mConverter));
+    if (NS_FAILED(rv))
+        return rv;
 
     mOutStream = aOutStream;
 

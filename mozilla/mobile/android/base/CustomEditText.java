@@ -16,11 +16,10 @@ public class CustomEditText extends ThemedEditText {
     private OnKeyPreImeListener mOnKeyPreImeListener;
     private OnSelectionChangedListener mOnSelectionChangedListener;
     private OnWindowFocusChangeListener mOnWindowFocusChangeListener;
-    private int mHighlightColor;
 
     public CustomEditText(Context context, AttributeSet attrs) {
         super(context, attrs);
-        setPrivateMode(false); // Initialize mHighlightColor.
+        mOnKeyPreImeListener = null;
     }
 
     public interface OnKeyPreImeListener {
@@ -70,19 +69,12 @@ public class CustomEditText extends ThemedEditText {
             mOnWindowFocusChangeListener.onWindowFocusChanged(hasFocus);
     }
 
-    // Provide a getHighlightColor implementation for API level < 16.
-    @Override
-    public int getHighlightColor() {
-        return mHighlightColor;
-    }
-
     @Override
     public void setPrivateMode(boolean isPrivate) {
         super.setPrivateMode(isPrivate);
 
-        mHighlightColor = getContext().getResources().getColor(isPrivate
-                ? R.color.url_bar_text_highlight_pb : R.color.url_bar_text_highlight);
         // android:textColorHighlight cannot support a ColorStateList.
-        setHighlightColor(mHighlightColor);
+        int colorId = isPrivate ? R.color.url_bar_text_highlight_pb : R.color.url_bar_text_highlight;
+        setHighlightColor(getContext().getResources().getColor(colorId));
     }
 }

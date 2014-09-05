@@ -11,9 +11,8 @@
 #ifndef WEBRTC_MODULES_VIDEO_RENDER_MAIN_SOURCE_VIDEO_RENDER_FRAMES_H_  // NOLINT
 #define WEBRTC_MODULES_VIDEO_RENDER_MAIN_SOURCE_VIDEO_RENDER_FRAMES_H_  // NOLINT
 
-#include <list>
-
 #include "webrtc/modules/video_render/include/video_render.h"
+#include "webrtc/system_wrappers/interface/list_wrapper.h"
 
 namespace webrtc {
 
@@ -42,8 +41,6 @@ class VideoRenderFrames {
   int32_t SetRenderDelay(const uint32_t render_delay);
 
  private:
-  typedef std::list<I420VideoFrame*> FrameList;
-
   // 10 seconds for 30 fps.
   enum { KMaxNumberOfFrames = 300 };
   // Don't render frames with timestamp older than 500ms from now.
@@ -52,9 +49,9 @@ class VideoRenderFrames {
   enum { KFutureRenderTimestampMS = 10000 };
 
   // Sorted list with framed to be rendered, oldest first.
-  FrameList incoming_frames_;
+  ListWrapper incoming_frames_;
   // Empty frames.
-  FrameList empty_frames_;
+  ListWrapper empty_frames_;
 
   // Estimated delay from a frame is released until it's rendered.
   uint32_t render_delay_ms_;

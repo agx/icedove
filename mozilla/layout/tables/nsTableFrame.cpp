@@ -138,13 +138,13 @@ nsTableFrame::GetParentStyleContextFrame() const
   // Since our parent, the table outer frame, returned this frame, we
   // must return whatever our parent would normally have returned.
 
-  NS_PRECONDITION(GetParent(), "table constructed without outer table");
+  NS_PRECONDITION(mParent, "table constructed without outer table");
   if (!mContent->GetParent() && !StyleContext()->GetPseudo()) {
     // We're the root.  We have no style context parent.
     return nullptr;
   }
 
-  return GetParent()->DoGetParentStyleContextFrame();
+  return static_cast<nsFrame*>(GetParent())->DoGetParentStyleContextFrame();
 }
 
 
@@ -164,9 +164,9 @@ nsTableFrame::nsTableFrame(nsStyleContext* aContext)
 }
 
 void
-nsTableFrame::Init(nsIContent*       aContent,
-                   nsContainerFrame* aParent,
-                   nsIFrame*         aPrevInFlow)
+nsTableFrame::Init(nsIContent*      aContent,
+                   nsIFrame*        aParent,
+                   nsIFrame*        aPrevInFlow)
 {
   NS_PRECONDITION(!mCellMap, "Init called twice");
   NS_PRECONDITION(!aPrevInFlow ||
@@ -332,13 +332,22 @@ nsTableFrame::UnregisterPositionedTablePart(nsIFrame* aFrame,
 
 // XXX this needs to be cleaned up so that the frame constructor breaks out col group
 // frames into a separate child list, bug 343048.
-void
+nsresult
 nsTableFrame::SetInitialChildList(ChildListID     aListID,
                                   nsFrameList&    aChildList)
 {
-  MOZ_ASSERT(mFrames.IsEmpty() && mColGroups.IsEmpty(),
-             "unexpected second call to SetInitialChildList");
-  MOZ_ASSERT(aListID == kPrincipalList, "unexpected child list");
+
+  if (!mFrames.IsEmpty() || !mColGroups.IsEmpty()) {
+    // We already have child frames which means we've already been
+    // initialized
+    NS_NOTREACHED("unexpected second call to SetInitialChildList");
+    return NS_ERROR_UNEXPECTED;
+  }
+  if (aListID != kPrincipalList) {
+    // All we know about is the principal child list.
+    NS_NOTREACHED("unknown frame list");
+    return NS_ERROR_INVALID_ARG;
+  }
 
   // XXXbz the below code is an icky cesspit that's only needed in its current
   // form for two reasons:
@@ -370,6 +379,8 @@ nsTableFrame::SetInitialChildList(ChildListID     aListID,
       SetFullBCDamageArea();
     }
   }
+
+  return NS_OK;
 }
 
 void nsTableFrame::AttributeChangedFor(nsIFrame*       aFrame,
@@ -1398,11 +1409,6 @@ nsTableFrame::PaintTableBorderBackground(nsRenderingContext& aRenderingContext,
 int
 nsTableFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
 {
-  if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
-                     NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
-    return 0;
-  }
-
   int skip = 0;
   // frame attribute was accounted for in nsHTMLTableElement::MapTableBorderInto
   // account for pagination
@@ -1753,8 +1759,7 @@ nsTableFrame::RequestSpecialHeightReflow(const nsHTMLReflowState& aReflowState)
  ******************************************************************************************/
 
 /* Layout the entire inner table. */
-void
-nsTableFrame::Reflow(nsPresContext*           aPresContext,
+nsresult nsTableFrame::Reflow(nsPresContext*           aPresContext,
                                nsHTMLReflowMetrics&     aDesiredSize,
                                const nsHTMLReflowState& aReflowState,
                                nsReflowStatus&          aStatus)
@@ -1766,8 +1771,9 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
   aStatus = NS_FRAME_COMPLETE;
   if (!GetPrevInFlow() && !mTableLayoutStrategy) {
     NS_ASSERTION(false, "strategy should have been created in Init");
-    return;
+    return NS_ERROR_NULL_POINTER;
   }
+  nsresult rv = NS_OK;
 
   // see if collapsing borders need to be calculated
   if (!GetPrevInFlow() && IsBorderCollapse() && NeedToCalcBCBorders()) {
@@ -1907,6 +1913,7 @@ nsTableFrame::Reflow(nsPresContext*           aPresContext,
 
   FinishAndStoreOverflow(&aDesiredSize);
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  return rv;
 }
 
 void
@@ -1985,13 +1992,14 @@ nsTableFrame::UpdateOverflow()
   return FinishAndStoreOverflow(overflowAreas, GetSize());
 }
 
-void
+nsresult
 nsTableFrame::ReflowTable(nsHTMLReflowMetrics&     aDesiredSize,
                           const nsHTMLReflowState& aReflowState,
                           nscoord                  aAvailHeight,
                           nsIFrame*&               aLastChildReflowed,
                           nsReflowStatus&          aStatus)
 {
+  nsresult rv = NS_OK;
   aLastChildReflowed = nullptr;
 
   if (!GetPrevInFlow()) {
@@ -2007,6 +2015,7 @@ nsTableFrame::ReflowTable(nsHTMLReflowMetrics&     aDesiredSize,
                  aDesiredSize.mOverflowAreas);
 
   ReflowColGroups(aReflowState.rendContext);
+  return rv;
 }
 
 nsIFrame*
@@ -2195,7 +2204,7 @@ nsTableFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 
 
 
-void
+nsresult
 nsTableFrame::AppendFrames(ChildListID     aListID,
                            nsFrameList&    aFrameList)
 {
@@ -2242,6 +2251,8 @@ nsTableFrame::AppendFrames(ChildListID     aListID,
   PresContext()->PresShell()->FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                                                NS_FRAME_HAS_DIRTY_CHILDREN);
   SetGeometryDirty();
+
+  return NS_OK;
 }
 
 // Needs to be at file scope or ArrayLength fails to compile.
@@ -2250,7 +2261,7 @@ struct ChildListInsertions {
   nsFrameList mList;
 };
 
-void
+nsresult
 nsTableFrame::InsertFrames(ChildListID     aListID,
                            nsIFrame*       aPrevFrame,
                            nsFrameList&    aFrameList)
@@ -2267,8 +2278,7 @@ nsTableFrame::InsertFrames(ChildListID     aListID,
   if ((aPrevFrame && !aPrevFrame->GetNextSibling()) ||
       (!aPrevFrame && GetChildList(aListID).IsEmpty())) {
     // Treat this like an append; still a workaround for bug 343048.
-    AppendFrames(aListID, aFrameList);
-    return;
+    return AppendFrames(aListID, aFrameList);
   }
 
   // Collect ColGroupFrames into a separate list and insert those separately
@@ -2302,6 +2312,7 @@ nsTableFrame::InsertFrames(ChildListID     aListID,
                              insertions[i].mList);
     }
   }
+  return NS_OK;
 }
 
 void
@@ -2468,7 +2479,7 @@ nsTableFrame::DoRemoveFrame(ChildListID     aListID,
   }
 }
 
-void
+nsresult
 nsTableFrame::RemoveFrame(ChildListID     aListID,
                           nsIFrame*       aOldFrame)
 {
@@ -2502,6 +2513,7 @@ nsTableFrame::RemoveFrame(ChildListID     aListID,
   printf("=== TableFrame::RemoveFrame\n");
   Dump(true, true, true);
 #endif
+  return NS_OK;
 }
 
 /* virtual */ nsMargin
@@ -2815,8 +2827,9 @@ nsTableFrame::SetupHeaderFooterChild(const nsTableReflowState& aReflowState,
   nsHTMLReflowMetrics desiredSize(aReflowState.reflowState);
   desiredSize.Width() = desiredSize.Height() = 0;
   nsReflowStatus status;
-  ReflowChild(aFrame, presContext, desiredSize, kidReflowState,
-              aReflowState.x, aReflowState.y, 0, status);
+  nsresult rv = ReflowChild(aFrame, presContext, desiredSize, kidReflowState,
+                            aReflowState.x, aReflowState.y, 0, status);
+  NS_ENSURE_SUCCESS(rv, rv);
   // The child will be reflowed again "for real" so no need to place it now
 
   aFrame->SetRepeatable(IsRepeatable(desiredSize.Height(), pageHeight));
@@ -2854,7 +2867,7 @@ nsTableFrame::PlaceRepeatedFooter(nsTableReflowState& aReflowState,
                     
 // Reflow the children based on the avail size and reason in aReflowState
 // update aReflowMetrics a aStatus
-void
+nsresult
 nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
                              nsReflowStatus&     aStatus,
                              nsIFrame*&          aLastChildReflowed,
@@ -2864,6 +2877,7 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
   aLastChildReflowed = nullptr;
 
   nsIFrame* prevKidFrame = nullptr;
+  nsresult  rv = NS_OK;
   nscoord   cellSpacingY = GetCellSpacingY();
 
   nsPresContext* presContext = PresContext();
@@ -2898,19 +2912,19 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
   if (isPaginated) {
     if (thead && !GetPrevInFlow()) {
       nscoord desiredHeight;
-      nsresult rv = SetupHeaderFooterChild(aReflowState, thead, &desiredHeight);
+      rv = SetupHeaderFooterChild(aReflowState, thead, &desiredHeight);
       if (NS_FAILED(rv))
-        return;
+        return rv;
     }
     if (tfoot) {
-      nsresult rv = SetupHeaderFooterChild(aReflowState, tfoot, &footerHeight);
+      rv = SetupHeaderFooterChild(aReflowState, tfoot, &footerHeight);
       if (NS_FAILED(rv))
-        return;
+        return rv;
     }
   }
    // if the child is a tbody in paginated mode reduce the height by a repeated footer
   bool allowRepeatedFooter = false;
-  for (size_t childX = 0; childX < rowGroups.Length(); childX++) {
+  for (uint32_t childX = 0; childX < rowGroups.Length(); childX++) {
     nsIFrame* kidFrame = rowGroups[childX];
     // Get the frame state bits
     // See if we should only reflow the dirty child frames
@@ -2977,8 +2991,8 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
       if (kidFrame->GetNextInFlow())
         reorder = true;
 
-      ReflowChild(kidFrame, presContext, desiredSize, kidReflowState,
-                  aReflowState.x, aReflowState.y, 0, aStatus);
+      rv = ReflowChild(kidFrame, presContext, desiredSize, kidReflowState,
+                       aReflowState.x, aReflowState.y, 0, aStatus);
 
       if (reorder) {
         // reorder row groups the reflow may have changed the nextinflows
@@ -3134,6 +3148,8 @@ nsTableFrame::ReflowChildren(nsTableReflowState& aReflowState,
   // the children.
   mBits.mResizedColumns = false;
   ClearGeometryDirty();
+
+  return rv;
 }
 
 void
@@ -3547,7 +3563,7 @@ nsTableFrame::GetBaseline() const
 }
 /* ----- global methods ----- */
 
-nsTableFrame*
+nsIFrame*
 NS_NewTableFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsTableFrame(aContext);

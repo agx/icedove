@@ -70,7 +70,6 @@ gujar.sources += [
     'util/StringUtils.java',
     'util/ThreadUtils.java',
     'util/UiAsyncTask.java',
-    'util/WebActivityMapper.java',
 ]
 gujar.extra_jars = [
     'gecko-mozglue.jar'
@@ -83,20 +82,16 @@ stjar.javac_flags = ['-Xlint:none']
 
 if CONFIG['MOZ_WEBRTC']:
     video_root = TOPSRCDIR + '/media/webrtc/trunk/webrtc/modules/video_capture/android/java/src/org/webrtc/videoengine/'
-    video_render_root = TOPSRCDIR + '/media/webrtc/trunk/webrtc/modules/video_render/android/java/src/org/webrtc/videoengine/'
     audio_root = TOPSRCDIR + '/media/webrtc/trunk/webrtc/modules/audio_device/android/java/src/org/webrtc/voiceengine/'
     wrjar = add_java_jar('webrtc')
     wrjar.sources += [
         video_root + 'CaptureCapabilityAndroid.java',
         video_root + 'VideoCaptureAndroid.java',
         video_root + 'VideoCaptureDeviceInfoAndroid.java',
-        video_render_root + 'ViEAndroidGLES20.java',
-        video_render_root + 'ViERenderer.java',
     ]
     wrjar.sources += [
         audio_root + 'AudioManagerAndroid.java',
-        audio_root + 'WebRtcAudioRecord.java',
-        audio_root + 'WebRtcAudioTrack.java',
+        audio_root + 'WebRTCAudioDevice.java',
     ]
     wrjar.extra_jars = [
         'gecko-R.jar',
@@ -113,7 +108,6 @@ gbjar.sources += [
     'ActionModeCompatView.java',
     'ActivityHandlerHelper.java',
     'AlertNotification.java',
-    'AndroidGamepadManager.java',
     'animation/AnimationUtils.java',
     'animation/AnimatorProxy.java',
     'animation/HeightChangeAnimation.java',
@@ -146,10 +140,9 @@ gbjar.sources += [
     'db/ReadingListProvider.java',
     'db/SharedBrowserDatabaseProvider.java',
     'db/SQLiteBridgeContentProvider.java',
-    'db/SuggestedSites.java',
     'db/TabsProvider.java',
     'db/TopSitesCursorWrapper.java',
-    'distribution/Distribution.java',
+    'Distribution.java',
     'DoorHangerPopup.java',
     'DynamicToolbar.java',
     'EditBookmarkDialog.java',
@@ -204,7 +197,6 @@ gbjar.sources += [
     'gfx/DisplayPortMetrics.java',
     'gfx/DrawTimingQueue.java',
     'gfx/FloatSize.java',
-    'gfx/FullScreenState.java',
     'gfx/GeckoLayerClient.java',
     'gfx/GLController.java',
     'gfx/ImmutableViewportMetrics.java',
@@ -295,7 +287,6 @@ gbjar.sources += [
     'home/TopSitesThumbnailView.java',
     'home/TwoLinePageRow.java',
     'InputMethods.java',
-    'IntentHelper.java',
     'JavaAddonManager.java',
     'LightweightTheme.java',
     'LightweightThemeDrawable.java',
@@ -327,7 +318,6 @@ gbjar.sources += [
     'preferences/GeckoPreferenceFragment.java',
     'preferences/GeckoPreferences.java',
     'preferences/LinkPreference.java',
-    'preferences/LocaleListPreference.java',
     'preferences/ModifiableHintPreference.java',
     'preferences/MultiChoicePreference.java',
     'preferences/PanelsPreference.java',
@@ -350,6 +340,8 @@ gbjar.sources += [
     'prompts/TabInput.java',
     'ReaderModeUtils.java',
     'ReferrerReceiver.java',
+    'RemoteTabsContainer.java',
+    'RemoteTabsList.java',
     'Restarter.java',
     'ScrollAnimator.java',
     'ServiceNotificationClient.java',
@@ -365,13 +357,8 @@ gbjar.sources += [
     'Tab.java',
     'Tabs.java',
     'TabsAccessor.java',
-    'tabspanel/RemoteTabsContainerPanel.java',
-    'tabspanel/RemoteTabsList.java',
-    'tabspanel/RemoteTabsPanel.java',
-    'tabspanel/RemoteTabsSetupPanel.java',
-    'tabspanel/RemoteTabsVerificationPanel.java',
-    'tabspanel/TabsPanel.java',
-    'tabspanel/TabsTray.java',
+    'TabsPanel.java',
+    'TabsTray.java',
     'Telemetry.java',
     'TelemetryContract.java',
     'TextSelection.java',
@@ -394,6 +381,7 @@ gbjar.sources += [
     'TouchEventInterceptor.java',
     'updater/UpdateService.java',
     'updater/UpdateServiceHelper.java',
+    'VideoPlayer.java',
     'webapp/Allocator.java',
     'webapp/ApkResources.java',
     'webapp/Dispatcher.java',
@@ -418,7 +406,6 @@ gbjar.sources += [
     'widget/DoorHanger.java',
     'widget/EllipsisTextView.java',
     'widget/FaviconView.java',
-    'widget/FloatingHintEditText.java',
     'widget/FlowLayout.java',
     'widget/GeckoActionProvider.java',
     'widget/GeckoPopupMenu.java',
@@ -516,11 +503,10 @@ ANDROID_RES_DIRS += [
 ]
 
 ANDROID_GENERATED_RESFILES += [
-    'res/raw/suggestedsites.json',
     'res/values/strings.xml',
 ]
 
-for var in ('MOZ_ANDROID_ANR_REPORTER', 'MOZ_LINKER_EXTRACT', 'MOZILLA_OFFICIAL', 'MOZ_DEBUG'):
+for var in ('MOZ_ANDROID_ANR_REPORTER', 'MOZ_LINKER_EXTRACT'):
     if CONFIG[var]:
         DEFINES[var] = 1
 
@@ -529,7 +515,7 @@ for var in ('MOZ_UPDATER', 'MOZ_PKG_SPECIAL'):
         DEFINES[var] = CONFIG[var]
 
 for var in ('ANDROID_PACKAGE_NAME', 'ANDROID_CPU_ARCH', 'CPU_ARCH',
-            'GRE_MILESTONE', 'MOZ_APP_BASENAME',
+            'GRE_MILESTONE', 'MOZILLA_OFFICIAL', 'MOZ_APP_BASENAME',
             'MOZ_APP_DISPLAYNAME', 'MOZ_APP_ID', 'MOZ_APP_NAME',
             'MOZ_APP_VENDOR', 'MOZ_APP_VERSION', 'MOZ_CHILD_PROCESS_NAME',
             'MOZ_CRASHREPORTER', 'MOZ_UPDATE_CHANNEL', 'OMNIJAR_NAME',
@@ -545,17 +531,13 @@ if '-march=armv7' in CONFIG['OS_CFLAGS']:
 else:
     DEFINES['MOZ_MIN_CPU_VERSION'] = 5
 
-generated_recursive_make_targets = ['.aapt.deps', '.locales.deps'] # Captures dependencies on Android manifest and all resources.
-
 generated = add_android_eclipse_library_project('FennecResourcesGenerated')
 generated.package_name = 'org.mozilla.fennec.resources.generated'
 generated.res = OBJDIR + '/res'
-generated.recursive_make_targets += generated_recursive_make_targets
 
 branding = add_android_eclipse_library_project('FennecResourcesBranding')
 branding.package_name = 'org.mozilla.fennec.resources.branding'
 branding.res = TOPSRCDIR + '/' + CONFIG['MOZ_BRANDING_DIRECTORY'] + '/res'
-branding.recursive_make_targets += generated_recursive_make_targets
 
 main = add_android_eclipse_project('Fennec', OBJDIR + '/AndroidManifest.xml')
 main.package_name = 'org.mozilla.gecko'
@@ -568,11 +550,12 @@ main.filtered_resources += [
     '1.0-projectRelativePath-matches-false-false-*org/mozilla/gecko/tests/**',
 ]
 
-main.recursive_make_targets += generated_recursive_make_targets
+main.recursive_make_targets += ['.aapt.deps'] # Captures dependencies on Android manifest and all resources.
 main.recursive_make_targets += [OBJDIR + '/generated/' + f for f in mgjar.generated_sources]
 main.recursive_make_targets += [OBJDIR + '/generated/' + f for f in gbjar.generated_sources]
 
 main.included_projects += ['../' + generated.name, '../' + branding.name]
+main.referenced_projects += [generated.name, branding.name]
 main.extra_jars += [CONFIG['ANDROID_COMPAT_LIB']]
 main.assets = TOPOBJDIR + '/dist/' + CONFIG['MOZ_APP_NAME'] + '/assets'
 main.libs = TOPOBJDIR + '/dist/' + CONFIG['MOZ_APP_NAME'] + '/lib'
@@ -594,7 +577,7 @@ resources = add_android_eclipse_library_project('FennecResources')
 resources.package_name = 'org.mozilla.fennec.resources'
 resources.res = SRCDIR + '/resources'
 resources.included_projects += ['../' + generated.name, '../' + branding.name]
-resources.recursive_make_targets += generated_recursive_make_targets
+resources.referenced_projects += [generated.name, branding.name]
 
 main.included_projects += ['../' + resources.name]
 main.referenced_projects += [resources.name]
@@ -604,5 +587,7 @@ if CONFIG['MOZ_CRASHREPORTER']:
     crashreporter.package_name = 'org.mozilla.fennec.resources.crashreporter'
     crashreporter.res = SRCDIR + '/crashreporter/res'
     crashreporter.included_projects += ['../' + resources.name]
+    crashreporter.referenced_projects += [resources.name]
 
     main.included_projects += ['../' + crashreporter.name]
+    main.referenced_projects += [crashreporter.name]

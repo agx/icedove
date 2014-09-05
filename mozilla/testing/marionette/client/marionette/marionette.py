@@ -9,20 +9,12 @@ import socket
 import sys
 import time
 import traceback
-import base64
 
 from application_cache import ApplicationCache
 from decorators import do_crash_check
 from emulator import Emulator
 from emulator_screen import EmulatorScreen
-from errors import (
-        ErrorCodes, MarionetteException, InstallGeckoError, TimeoutException, InvalidResponseException,
-        JavascriptException, NoSuchElementException, XPathLookupException, NoSuchWindowException,
-        StaleElementException, ScriptTimeoutException, ElementNotVisibleException,
-        NoSuchFrameException, InvalidElementStateException, NoAlertPresentException,
-        InvalidCookieDomainException, UnableToSetCookieException, InvalidSelectorException,
-        MoveTargetOutOfBoundsException, FrameSendNotInitializedError, FrameSendFailureError
-        )
+from errors import *
 from keys import Keys
 from marionette_transport import MarionetteTransport
 
@@ -452,7 +444,7 @@ class Marionette(object):
                  emulatorImg=None, emulator_res=None, gecko_path=None,
                  connectToRunningEmulator=False, homedir=None, baseurl=None,
                  noWindow=False, logcat_dir=None, busybox=None, symbols_path=None,
-                 timeout=None, device_serial=None, gecko_log=None):
+                 timeout=None, device_serial=None):
         self.host = host
         self.port = self.local_port = port
         self.bin = bin
@@ -494,8 +486,7 @@ class Marionette(object):
                     instance_class = geckoinstance.GeckoInstance
             self.instance = instance_class(host=self.host, port=self.port,
                                            bin=self.bin, profile=self.profile,
-                                           app_args=app_args, symbols_path=symbols_path,
-                                           gecko_log=gecko_log)
+                                           app_args=app_args, symbols_path=symbols_path)
             self.instance.start()
             assert(self.wait_for_port()), "Timed out waiting for port!"
 
@@ -587,7 +578,7 @@ class Marionette(object):
                 sock.connect((self.host, self.port))
                 data = sock.recv(16)
                 sock.close()
-                if ':' in data:
+                if '"from"' in data:
                     time.sleep(5)
                     return True
             except socket.error:
@@ -1384,11 +1375,11 @@ class Marionette(object):
     def application_cache(self):
         return ApplicationCache(self)
 
-    def screenshot(self, element=None, highlights=None, format="base64"):
+    def screenshot(self, element=None, highlights=None):
         """Takes a screenshot of a web element or the current frame.
 
         The screen capture is returned as a lossless PNG image encoded
-        as a base 64 string by default. If the `element` argument is defined the
+        as a base 64 string.  If the `element` argument is defined the
         capture area will be limited to the bounding box of that
         element.  Otherwise, the capture area will be the bounding box
         of the current frame.
@@ -1398,10 +1389,6 @@ class Marionette(object):
 
         :param highlights: A list of HTMLElement objects to draw a red
             box around in the returned screenshot.
-        
-        :param format: if "base64" (the default), returns the screenshot
-            as a base64-string. If "binary", the data is decoded and
-            returned as raw binary.
 
         """
 
@@ -1410,15 +1397,8 @@ class Marionette(object):
         lights = None
         if highlights:
             lights = [highlight.id for highlight in highlights]
-        screenshot_data = self._send_message("takeScreenshot", "value",
+        return self._send_message("takeScreenshot", "value",
                                   id=element, highlights=lights)
-        if format == 'base64':
-            return screenshot_data
-        elif format == 'binary':
-            return base64.b64decode(screenshot_data.encode('ascii'))
-        else:
-            raise ValueError("format parameter must be either 'base64'"
-                             " or 'binary', not {0}".format(repr(format)))
 
     @property
     def orientation(self):

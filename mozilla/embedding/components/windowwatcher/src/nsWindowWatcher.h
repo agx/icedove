@@ -15,7 +15,6 @@
 #include "nsIWindowCreator.h" // for stupid compilers
 #include "nsIWindowWatcher.h"
 #include "nsIPromptFactory.h"
-#include "nsITabParent.h"
 #include "nsPIWindowWatcher.h"
 #include "nsTArray.h"
 #include "js/TypeDecls.h"
@@ -23,7 +22,6 @@
 class  nsIURI;
 class  nsIDocShellTreeItem;
 class  nsIDocShellTreeOwner;
-class nsPIDOMWindow;
 class  nsIWebBrowserChrome;
 class  nsString;
 class  nsWatcherWindowEnumerator;
@@ -66,7 +64,7 @@ protected:
   
   // Unlike GetWindowByName this will look for a caller on the JS
   // stack, and then fall back on aCurrentWindow if it can't find one.
-  nsPIDOMWindow*
+  already_AddRefed<nsIDOMWindow>
     SafeGetWindowByName(const nsAString& aName, nsIDOMWindow* aCurrentWindow);
 
   // Just like OpenWindowJS, but knows whether it got called via OpenWindowJS
@@ -78,7 +76,6 @@ protected:
                               bool aCalledFromJS,
                               bool aDialog,
                               bool aNavigate,
-                              nsITabParent *aOpeningTab,
                               nsIArray *argv,
                               nsIDOMWindow **_retval);
 

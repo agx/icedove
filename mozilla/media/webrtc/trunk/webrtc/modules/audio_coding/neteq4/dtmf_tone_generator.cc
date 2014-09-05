@@ -150,7 +150,7 @@ void DtmfToneGenerator::Reset() {
 
 // Generate num_samples of DTMF signal and write to |output|.
 int DtmfToneGenerator::Generate(int num_samples,
-                                AudioMultiVector* output) {
+                                AudioMultiVector<int16_t>* output) {
   if (!initialized_) {
     return kNotInitialized;
   }

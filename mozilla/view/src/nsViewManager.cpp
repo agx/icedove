@@ -52,8 +52,10 @@ using namespace mozilla::layers;
 
 #undef DEBUG_MOUSE_LOCATION
 
+int32_t nsViewManager::mVMCount = 0;
+
 // Weakly held references to all of the view managers
-nsTArray<nsViewManager*>* nsViewManager::gViewManagers = nullptr;
+nsVoidArray* nsViewManager::gViewManagers = nullptr;
 uint32_t nsViewManager::gLastUserEventTime = 0;
 
 nsViewManager::nsViewManager()
@@ -61,11 +63,14 @@ nsViewManager::nsViewManager()
 {
   mRootViewManager = this;
   if (gViewManagers == nullptr) {
+    NS_ASSERTION(mVMCount == 0, "View Manager count is incorrect");
     // Create an array to hold a list of view managers
-    gViewManagers = new nsTArray<nsViewManager*>;
+    gViewManagers = new nsVoidArray;
   }
  
   gViewManagers->AppendElement(this);
+
+  ++mVMCount;
 
   // NOTE:  we use a zeroing operator new, so all data members are
   // assumed to be cleared here.
@@ -86,17 +91,20 @@ nsViewManager::~nsViewManager()
     NS_RELEASE(mRootViewManager);
   }
 
-  NS_ASSERTION(gViewManagers != nullptr, "About to use null gViewManagers");
+  NS_ASSERTION((mVMCount > 0), "underflow of viewmanagers");
+  --mVMCount;
 
 #ifdef DEBUG
   bool removed =
 #endif
     gViewManagers->RemoveElement(this);
-  NS_ASSERTION(removed, "Viewmanager instance was not in the global list of viewmanagers");
+  NS_ASSERTION(removed, "Viewmanager instance not was not in the global list of viewmanagers");
 
-  if (gViewManagers->IsEmpty()) {
+  if (0 == mVMCount) {
     // There aren't any more view managers so
     // release the global array of view managers
+   
+    NS_ASSERTION(gViewManagers != nullptr, "About to delete null gViewManagers");
     delete gViewManagers;
     gViewManagers = nullptr;
   }
@@ -722,8 +730,7 @@ nsViewManager::DispatchEvent(WidgetGUIEvent *aEvent,
                              nsView* aView,
                              nsEventStatus* aStatus)
 {
-  PROFILER_LABEL("nsViewManager", "DispatchEvent",
-    js::ProfileEntry::Category::EVENTS);
+  PROFILER_LABEL("event", "nsViewManager::DispatchEvent");
 
   WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent();
   if ((mouseEvent &&
@@ -1094,13 +1101,9 @@ nsViewManager::CallWillPaintOnObservers()
 {
   NS_PRECONDITION(IsRootVM(), "Must be root VM for this to be called!");
 
-  if (NS_WARN_IF(!gViewManagers)) {
-    return;
-  }
-
-  uint32_t index;
-  for (index = 0; index < gViewManagers->Length(); index++) {
-    nsViewManager* vm = gViewManagers->ElementAt(index);
+  int32_t index;
+  for (index = 0; index < mVMCount; index++) {
+    nsViewManager* vm = (nsViewManager*)gViewManagers->ElementAt(index);
     if (vm->RootViewManager() == this) {
       // One of our kids.
       if (vm->mRootView && vm->mRootView->IsEffectivelyVisible()) {

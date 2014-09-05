@@ -571,7 +571,7 @@ gfxGDIFont::AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
     aSizes->mFontInstances += aMallocSizeOf(mMetrics);
     if (mGlyphWidths) {
         aSizes->mFontInstances +=
-            mGlyphWidths->SizeOfIncludingThis(nullptr, aMallocSizeOf);
+            mGlyphWidths->SizeOfExcludingThis(nullptr, aMallocSizeOf);
     }
 }
 

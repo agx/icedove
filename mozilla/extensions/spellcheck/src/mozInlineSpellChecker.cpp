@@ -1251,7 +1251,7 @@ mozInlineSpellChecker::SkipSpellCheckForNode(nsIEditor* aEditor,
       {
         nsAutoString classname;
         parentElement->GetAttribute(NS_LITERAL_STRING("class"),classname);
-        if (classname.EqualsLiteral("moz-signature"))
+        if (classname.Equals(NS_LITERAL_STRING("moz-signature")))
           *checkSpelling = false;
       }
 

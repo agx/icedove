@@ -91,7 +91,6 @@
 #include "nsUnicharUtils.h"
 #include "nsXBLBinding.h"
 #include "nsXBLPrototypeBinding.h"
-#include "mozilla/Preferences.h"
 #include "prprf.h"
 #include "xpcpublic.h"
 #include "nsCSSRuleProcessor.h"
@@ -236,41 +235,6 @@ nsINode::GetTextEditorRootContent(nsIEditor** aEditor)
   return nullptr;
 }
 
-nsINode*
-nsINode::SubtreeRoot() const
-{
-  // There are four cases of interest here.  nsINodes that are really:
-  // 1. nsIDocument nodes - Are always in the document.
-  // 2.a nsIContent nodes not in a shadow tree - Are either in the document,
-  //     or mSubtreeRoot is updated in BindToTree/UnbindFromTree.
-  // 2.b nsIContent nodes in a shadow tree - Are never in the document,
-  //     ignore mSubtreeRoot and return the containing shadow root.
-  // 4. nsIAttribute nodes - Are never in the document, and mSubtreeRoot
-  //    is always 'this' (as set in nsINode's ctor).
-  nsINode* node;
-  if (IsInDoc()) {
-    node = OwnerDocAsNode();
-  } else if (IsContent()) {
-    ShadowRoot* containingShadow = AsContent()->GetContainingShadow();
-    node = containingShadow ? containingShadow : mSubtreeRoot;
-  } else {
-    node = mSubtreeRoot;
-  }
-  NS_ASSERTION(node, "Should always have a node here!");
-#ifdef DEBUG
-  {
-    const nsINode* slowNode = this;
-    const nsINode* iter = slowNode;
-    while ((iter = iter->GetParentNode())) {
-      slowNode = iter;
-    }
-
-    NS_ASSERTION(slowNode == node, "These should always be in sync!");
-  }
-#endif
-  return node;
-}
-
 static nsIContent* GetRootForContentSubtree(nsIContent* aContent)
 {
   NS_ENSURE_TRUE(aContent, nullptr);
@@ -304,7 +268,7 @@ nsINode::GetSelectionRootContent(nsIPresShell* aPresShell)
   if (!IsNodeOfType(eCONTENT))
     return nullptr;
 
-  if (GetCrossShadowCurrentDoc() != aPresShell->GetDocument()) {
+  if (GetCurrentDoc() != aPresShell->GetDocument()) {
     return nullptr;
   }
 
@@ -320,7 +284,7 @@ nsINode::GetSelectionRootContent(nsIPresShell* aPresShell)
     nsIEditor* editor = nsContentUtils::GetHTMLEditor(presContext);
     if (editor) {
       // This node is in HTML editor.
-      nsIDocument* doc = GetCrossShadowCurrentDoc();
+      nsIDocument* doc = GetCurrentDoc();
       if (!doc || doc->HasFlag(NODE_IS_EDITABLE) ||
           !HasFlag(NODE_IS_EDITABLE)) {
         nsIContent* editorRoot = GetEditorRootContent(editor);
@@ -382,17 +346,6 @@ void
 nsINode::GetTextContentInternal(nsAString& aTextContent)
 {
   SetDOMStringToNull(aTextContent);
-}
-
-nsIDocument*
-nsINode::GetCrossShadowCurrentDocInternal() const
-{
-  MOZ_ASSERT(HasFlag(NODE_IS_IN_SHADOW_TREE) && IsContent(),
-             "Should only be caled on nodes in the shadow tree.");
-
-  // Cross ShadowRoot boundary.
-  ShadowRoot* containingShadow = AsContent()->GetContainingShadow();
-  return containingShadow->GetHost()->GetCrossShadowCurrentDoc();
 }
 
 #ifdef DEBUG
@@ -1478,10 +1431,8 @@ static nsresult
 CheckForOutdatedParent(nsINode* aParent, nsINode* aNode)
 {
   if (JSObject* existingObjUnrooted = aNode->GetWrapper()) {
-    JSRuntime* runtime = JS_GetObjectRuntime(existingObjUnrooted);
-    JS::Rooted<JSObject*> existingObj(runtime, existingObjUnrooted);
-
     AutoJSContext cx;
+    JS::Rooted<JSObject*> existingObj(cx, existingObjUnrooted);
     nsIGlobalObject* global = aParent->OwnerDoc()->GetScopeObject();
     MOZ_ASSERT(global);
 
@@ -1510,7 +1461,7 @@ nsINode::doInsertChildAt(nsIContent* aKid, uint32_t aIndex,
 
   // Do this before checking the child-count since this could cause mutations
   nsIDocument* doc = GetCurrentDoc();
-  mozAutoDocUpdate updateBatch(GetCrossShadowCurrentDoc(), UPDATE_CONTENT_MODEL, aNotify);
+  mozAutoDocUpdate updateBatch(doc, UPDATE_CONTENT_MODEL, aNotify);
 
   if (OwnerDoc() != aKid->OwnerDoc()) {
     rv = AdoptNodeIntoOwnerDoc(this, aKid);
@@ -1650,7 +1601,10 @@ nsINode::doRemoveChildAt(uint32_t aIndex, bool aNotify,
                   IndexOf(aKid) == (int32_t)aIndex, "Bogus aKid");
 
   nsMutationGuard::DidMutate();
-  mozAutoDocUpdate updateBatch(GetCrossShadowCurrentDoc(), UPDATE_CONTENT_MODEL, aNotify);
+
+  nsIDocument* doc = GetCurrentDoc();
+
+  mozAutoDocUpdate updateBatch(doc, UPDATE_CONTENT_MODEL, aNotify);
 
   nsIContent* previousSibling = aKid->GetPreviousSibling();
 
@@ -2088,7 +2042,7 @@ nsINode::ReplaceOrInsertBefore(bool aReplace, nsINode* aNewChild,
     }
   }
 
-  mozAutoDocUpdate batch(GetCrossShadowCurrentDoc(), UPDATE_CONTENT_MODEL, true);
+  mozAutoDocUpdate batch(GetCurrentDoc(), UPDATE_CONTENT_MODEL, true);
   nsAutoMutationBatch mb;
 
   // Figure out which index we want to insert at.  Note that we use
@@ -2706,7 +2660,7 @@ nsINode::WrapObject(JSContext *aCx)
 
   JS::Rooted<JSObject*> obj(aCx, WrapNode(aCx));
   MOZ_ASSERT_IF(ChromeOnlyAccess(),
-                xpc::IsInContentXBLScope(obj) || !xpc::UseContentXBLScope(js::GetObjectCompartment(obj)));
+                xpc::IsInXBLScope(obj) || !xpc::UseXBLScope(js::GetObjectCompartment(obj)));
   return obj;
 }
 
@@ -2738,11 +2692,4 @@ EventTarget::DispatchEvent(Event& aEvent,
   bool result = false;
   aRv = DispatchEvent(&aEvent, &result);
   return result;
-}
-
-bool
-nsINode::HasBoxQuadsSupport(JSContext* aCx, JSObject* /* unused */)
-{
-  return xpc::AccessCheck::isChrome(js::GetContextCompartment(aCx)) ||
-         Preferences::GetBool("layout.css.getBoxQuads.enabled");
 }

@@ -76,8 +76,7 @@ add_task(function () {
 
   // Create a new window to attach our frame script to.
   let win = yield promiseNewWindowLoaded();
-  let mm = win.getGroupMessageManager("browsers");
-  mm.loadFrameScript(FRAME_SCRIPT, true);
+  win.messageManager.loadFrameScript(FRAME_SCRIPT, true);
 
   // Create a new tab in the new window that will load the frame script.
   let tab = win.gBrowser.addTab("about:mozilla");

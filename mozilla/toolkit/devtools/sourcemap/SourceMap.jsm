@@ -1406,8 +1406,7 @@ define('source-map/source-map-generator', ['require', 'exports', 'module' ,  'so
         map.sourceRoot = this._sourceRoot;
       }
       if (this._sourcesContents) {
-        map.sourcesContent = this._generateSourcesContent(map.sources,
-                                                          map.sourceRoot || undefined);
+        map.sourcesContent = this._generateSourcesContent(map.sources, map.sourceRoot);
       }
 
       return map;

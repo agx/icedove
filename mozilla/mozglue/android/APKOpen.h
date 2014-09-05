@@ -18,7 +18,7 @@ struct mapping_info {
   size_t offset;
 };
 
-NS_EXPORT const struct mapping_info * getLibraryMapping();
+const struct mapping_info * getLibraryMapping();
 
 static const int SUCCESS = 0;
 static const int FAILURE = 1;

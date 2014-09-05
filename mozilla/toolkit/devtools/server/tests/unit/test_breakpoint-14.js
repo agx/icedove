@@ -9,28 +9,19 @@
 var gDebuggee;
 var gClient;
 var gThreadClient;
-var gCallback;
 
 function run_test()
 {
-  run_test_with_server(DebuggerServer, function () {
-    run_test_with_server(WorkerDebuggerServer, do_test_finished);
-  });
-  do_test_pending();
-};
-
-function run_test_with_server(aServer, aCallback)
-{
-  gCallback = aCallback;
-  initTestDebuggerServer(aServer);
-  gDebuggee = addTestGlobal("test-stack", aServer);
-  gClient = new DebuggerClient(aServer.connectPipe());
+  initTestDebuggerServer();
+  gDebuggee = addTestGlobal("test-stack");
+  gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect(function () {
     attachTestTabAndResume(gClient, "test-stack", function (aResponse, aTabClient, aThreadClient) {
       gThreadClient = aThreadClient;
       test_simple_breakpoint();
     });
   });
+  do_test_pending();
 }
 
 function test_simple_breakpoint()
@@ -78,7 +69,7 @@ function test_simple_breakpoint()
                   do_check_eq(aPacket.why.type, "resumeLimit");
 
                   // Remove the breakpoint and finish.
-                  bpClient.remove(() => gThreadClient.resume(() => gClient.close(gCallback)));
+                  bpClient.remove(() => gThreadClient.resume(() => finishClient(gClient)));
 
                 });
                 // Step past the debugger statement.

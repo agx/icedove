@@ -289,7 +289,7 @@ nsComputedDOMStyle::Shutdown()
 }
 
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsComputedDOMStyle, mContent)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsComputedDOMStyle, mContent)
 
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsComputedDOMStyle)
   return tmp->IsBlack();
@@ -670,7 +670,7 @@ nsComputedDOMStyle::UpdateCurrentStyleSources(bool aNeedsLayoutFlush)
       nsAutoString assertMsg(
         NS_LITERAL_STRING("we should be in a pseudo-element that is expected to contain elements ("));
       assertMsg.Append(nsDependentString(pseudoAtom->GetUTF16String()));
-      assertMsg.Append(')');
+      assertMsg.Append(NS_LITERAL_STRING(")"));
       NS_ASSERTION(nsCSSPseudoElements::PseudoElementContainsElements(pseudo),
                    NS_LossyConvertUTF16toASCII(assertMsg).get());
     }
@@ -1314,48 +1314,48 @@ nsComputedDOMStyle::MatrixToCSSValue(gfx3DMatrix& matrix)
 
   nsAutoString resultString(NS_LITERAL_STRING("matrix"));
   if (is3D) {
-    resultString.AppendLiteral("3d");
+    resultString.Append(NS_LITERAL_STRING("3d"));
   }
 
-  resultString.Append('(');
+  resultString.Append(NS_LITERAL_STRING("("));
   resultString.AppendFloat(matrix._11);
-  resultString.AppendLiteral(", ");
+  resultString.Append(NS_LITERAL_STRING(", "));
   resultString.AppendFloat(matrix._12);
-  resultString.AppendLiteral(", ");
+  resultString.Append(NS_LITERAL_STRING(", "));
   if (is3D) {
     resultString.AppendFloat(matrix._13);
-    resultString.AppendLiteral(", ");
+    resultString.Append(NS_LITERAL_STRING(", "));
     resultString.AppendFloat(matrix._14);
-    resultString.AppendLiteral(", ");
+    resultString.Append(NS_LITERAL_STRING(", "));
   }
   resultString.AppendFloat(matrix._21);
-  resultString.AppendLiteral(", ");
+  resultString.Append(NS_LITERAL_STRING(", "));
   resultString.AppendFloat(matrix._22);
-  resultString.AppendLiteral(", ");
+  resultString.Append(NS_LITERAL_STRING(", "));
   if (is3D) {
     resultString.AppendFloat(matrix._23);
-    resultString.AppendLiteral(", ");
+    resultString.Append(NS_LITERAL_STRING(", "));
     resultString.AppendFloat(matrix._24);
-    resultString.AppendLiteral(", ");
+    resultString.Append(NS_LITERAL_STRING(", "));
     resultString.AppendFloat(matrix._31);
-    resultString.AppendLiteral(", ");
+    resultString.Append(NS_LITERAL_STRING(", "));
     resultString.AppendFloat(matrix._32);
-    resultString.AppendLiteral(", ");
+    resultString.Append(NS_LITERAL_STRING(", "));
     resultString.AppendFloat(matrix._33);
-    resultString.AppendLiteral(", ");
+    resultString.Append(NS_LITERAL_STRING(", "));
     resultString.AppendFloat(matrix._34);
-    resultString.AppendLiteral(", ");
+    resultString.Append(NS_LITERAL_STRING(", "));
   }
   resultString.AppendFloat(matrix._41);
-  resultString.AppendLiteral(", ");
+  resultString.Append(NS_LITERAL_STRING(", "));
   resultString.AppendFloat(matrix._42);
   if (is3D) {
-    resultString.AppendLiteral(", ");
+    resultString.Append(NS_LITERAL_STRING(", "));
     resultString.AppendFloat(matrix._43);
-    resultString.AppendLiteral(", ");
+    resultString.Append(NS_LITERAL_STRING(", "));
     resultString.AppendFloat(matrix._44);
   }
-  resultString.Append(')');
+  resultString.Append(NS_LITERAL_STRING(")"));
 
   /* Create a value to hold our result. */
   nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
@@ -1431,10 +1431,30 @@ nsComputedDOMStyle::DoGetFontFamily()
   nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
 
   const nsStyleFont* font = StyleFont();
-  nsAutoString fontlistStr;
-  nsStyleUtil::AppendEscapedCSSFontFamilyList(font->mFont.fontlist,
-                                              fontlistStr);
-  val->SetString(fontlistStr);
+
+  nsCOMPtr<nsIDocument> doc = do_QueryReferent(mDocumentWeak);
+  NS_ASSERTION(doc, "document is required");
+  nsIPresShell* presShell = doc->GetShell();
+  NS_ASSERTION(presShell, "pres shell is required");
+  nsPresContext *presContext = presShell->GetPresContext();
+  NS_ASSERTION(presContext, "pres context is required");
+
+  const nsString& fontName = font->mFont.name;
+  if (font->mGenericID == kGenericFont_NONE && !font->mFont.systemFont) {
+    const nsFont* defaultFont =
+      presContext->GetDefaultFont(kPresContext_DefaultVariableFont_ID,
+                                  font->mLanguage);
+
+    int32_t lendiff = fontName.Length() - defaultFont->name.Length();
+    if (lendiff > 0) {
+      val->SetString(Substring(fontName, 0, lendiff-1)); // -1 removes comma
+    } else {
+      val->SetString(fontName);
+    }
+  } else {
+    val->SetString(fontName);
+  }
+
   return val;
 }
 
@@ -1776,7 +1796,7 @@ SetValueToCalc(const nsStyleCoord::Calc *aCalc, nsROCSSPrimitiveValue *aValue)
     result.Append(tmp);
   }
 
-  result.Append(')');
+  result.AppendLiteral(")");
 
   aValue->SetString(result); // not really SetString
 }
@@ -1863,7 +1883,7 @@ nsComputedDOMStyle::GetCSSGradientString(const nsStyleGradient* aGradient,
       }
       if (aGradient->mSize != NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER) {
         if (needSep) {
-          aString.Append(' ');
+          aString.AppendLiteral(" ");
         }
         AppendASCIItoUTF16(nsCSSProps::
                            ValueToKeyword(aGradient->mSize,
@@ -1874,7 +1894,7 @@ nsComputedDOMStyle::GetCSSGradientString(const nsStyleGradient* aGradient,
     } else {
       AppendCSSGradientLength(aGradient->mRadiusX, tmpVal, aString);
       if (aGradient->mShape != NS_STYLE_GRADIENT_SHAPE_CIRCULAR) {
-        aString.Append(' ');
+        aString.AppendLiteral(" ");
         AppendCSSGradientLength(aGradient->mRadiusY, tmpVal, aString);
       }
       needSep = true;
@@ -1890,14 +1910,14 @@ nsComputedDOMStyle::GetCSSGradientString(const nsStyleGradient* aGradient,
                aGradient->mBgPosY.GetPercentValue() != (isRadial ? 0.5f : 1.0f)) {
       if (isRadial && !aGradient->mLegacySyntax) {
         if (needSep) {
-          aString.Append(' ');
+          aString.AppendLiteral(" ");
         }
         aString.AppendLiteral("at ");
         needSep = false;
       }
       AppendCSSGradientLength(aGradient->mBgPosX, tmpVal, aString);
       if (aGradient->mBgPosY.GetUnit() != eStyleUnit_None) {
-        aString.Append(' ');
+        aString.AppendLiteral(" ");
         AppendCSSGradientLength(aGradient->mBgPosY, tmpVal, aString);
       }
       needSep = true;
@@ -1906,7 +1926,7 @@ nsComputedDOMStyle::GetCSSGradientString(const nsStyleGradient* aGradient,
   if (aGradient->mAngle.GetUnit() != eStyleUnit_None) {
     MOZ_ASSERT(!isRadial || aGradient->mLegacySyntax);
     if (needSep) {
-      aString.Append(' ');
+      aString.AppendLiteral(" ");
     }
     nsStyleUtil::AppendAngleValue(aGradient->mAngle, aString);
     needSep = true;
@@ -1926,7 +1946,7 @@ nsComputedDOMStyle::GetCSSGradientString(const nsStyleGradient* aGradient,
     }
     if (aGradient->mSize != NS_STYLE_GRADIENT_SIZE_FARTHEST_CORNER) {
       if (needSep) {
-        aString.Append(' ');
+        aString.AppendLiteral(" ");
       }
       AppendASCIItoUTF16(nsCSSProps::
                          ValueToKeyword(aGradient->mSize,
@@ -1947,14 +1967,14 @@ nsComputedDOMStyle::GetCSSGradientString(const nsStyleGradient* aGradient,
     aString.Append(tokenString);
 
     if (aGradient->mStops[i].mLocation.GetUnit() != eStyleUnit_None) {
-      aString.Append(' ');
+      aString.AppendLiteral(" ");
       AppendCSSGradientLength(aGradient->mStops[i].mLocation, tmpVal, aString);
     }
     needSep = true;
   }
 
   delete tmpVal;
-  aString.Append(')');
+  aString.AppendLiteral(")");
 }
 
 // -moz-image-rect(<uri>, <top>, <right>, <bottom>, <left>)
@@ -2051,6 +2071,16 @@ nsComputedDOMStyle::DoGetBackgroundImage()
   }
 
   return valueList;
+}
+
+CSSValue*
+nsComputedDOMStyle::DoGetBackgroundInlinePolicy()
+{
+  nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
+  val->SetIdent(nsCSSProps::ValueToKeywordEnum(
+                  StyleBackground()->mBackgroundInlinePolicy,
+                  nsCSSProps::kBackgroundInlinePolicyKTable));
+  return val;
 }
 
 CSSValue*
@@ -2272,17 +2302,17 @@ nsComputedDOMStyle::GetGridLineNames(const nsTArray<nsString>& aLineNames)
   nsROCSSPrimitiveValue *val = new nsROCSSPrimitiveValue;
   nsAutoString lineNamesString;
   uint32_t i_end = aLineNames.Length();
-  lineNamesString.Assign('(');
+  lineNamesString.AssignLiteral("(");
   if (i_end > 0) {
     for (uint32_t i = 0;;) {
       nsStyleUtil::AppendEscapedCSSIdent(aLineNames[i], lineNamesString);
       if (++i == i_end) {
         break;
       }
-      lineNamesString.Append(' ');
+      lineNamesString.AppendLiteral(" ");
     }
   }
-  lineNamesString.Append(')');
+  lineNamesString.AppendLiteral(")");
   val->SetString(lineNamesString);
   return val;
 }
@@ -2378,7 +2408,7 @@ nsComputedDOMStyle::DoGetGridAutoFlow()
   nsAutoString str;
   nsStyleUtil::AppendBitmaskCSSValue(eCSSProperty_grid_auto_flow,
                                      StylePosition()->mGridAutoFlow,
-                                     NS_STYLE_GRID_AUTO_FLOW_STACK,
+                                     NS_STYLE_GRID_AUTO_FLOW_NONE,
                                      NS_STYLE_GRID_AUTO_FLOW_DENSE,
                                      str);
   nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
@@ -2445,6 +2475,24 @@ nsComputedDOMStyle::GetGridLine(const nsStyleGridLine& aGridLine)
 
   NS_ASSERTION(valueList->Length() > 0,
                "Should have appended at least one value");
+  return valueList;
+}
+
+CSSValue*
+nsComputedDOMStyle::DoGetGridAutoPosition()
+{
+  nsDOMCSSValueList* valueList = GetROCSSValueList(false);
+
+  valueList->AppendCSSValue(
+    GetGridLine(StylePosition()->mGridAutoPositionColumn));
+
+  nsROCSSPrimitiveValue* slash = new nsROCSSPrimitiveValue;
+  slash->SetString(NS_LITERAL_STRING("/"));
+  valueList->AppendCSSValue(slash);
+
+  valueList->AppendCSSValue(
+    GetGridLine(StylePosition()->mGridAutoPositionRow));
+
   return valueList;
 }
 
@@ -2930,16 +2978,6 @@ nsComputedDOMStyle::GetCSSShadowArray(nsCSSShadowArray* aArray,
   }
 
   return valueList;
-}
-
-CSSValue*
-nsComputedDOMStyle::DoGetBoxDecorationBreak()
-{
-  nsROCSSPrimitiveValue* val = new nsROCSSPrimitiveValue;
-  val->SetIdent(
-    nsCSSProps::ValueToKeywordEnum(StyleBorder()->mBoxDecorationBreak,
-                                   nsCSSProps::kBoxDecorationBreakKTable));
-  return val;
 }
 
 CSSValue*
@@ -5147,7 +5185,7 @@ nsComputedDOMStyle::CreatePrimitiveValueForStyleFilter(
     nsCSSProps::ValueToKeyword(aStyleFilter.GetType(),
                                nsCSSProps::kFilterFunctionKTable),
                                filterFunctionString);
-  filterFunctionString.Append('(');
+  filterFunctionString.AppendLiteral("(");
 
   nsAutoString argumentString;
   if (aStyleFilter.GetType() == NS_STYLE_FILTER_DROP_SHADOW) {
@@ -5165,7 +5203,7 @@ nsComputedDOMStyle::CreatePrimitiveValueForStyleFilter(
   filterFunctionString.Append(argumentString);
 
   // Filter function closing parenthesis.
-  filterFunctionString.Append(')');
+  filterFunctionString.AppendLiteral(")");
 
   value->SetString(filterFunctionString);
   return value;
@@ -5320,7 +5358,7 @@ nsComputedDOMStyle::AppendTimingFunction(nsDOMCSSValueList *aValueList,
     tmp.AppendFloat(aTimingFunction.mFunc.mX2);
     tmp.AppendLiteral(", ");
     tmp.AppendFloat(aTimingFunction.mFunc.mY2);
-    tmp.Append(')');
+    tmp.AppendLiteral(")");
   } else {
     tmp.AppendLiteral("steps(");
     tmp.AppendInt(aTimingFunction.mSteps);

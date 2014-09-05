@@ -16,7 +16,7 @@ EmptyTrapHandler(JSContext *cx, JSScript *script, jsbytecode *pc, jsval *rval,
 {
     JS::RootedValue closure(cx, closureArg);
     JS_GC(JS_GetRuntime(cx));
-    if (closure.isString())
+    if (JSVAL_IS_STRING(closure))
         ++emptyTrapCallCount;
     return JSTRAP_CONTINUE;
 }

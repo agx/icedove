@@ -93,10 +93,6 @@ public:
     return mRealTime;
   }
 
-  // Called by RtspOmxReader, dispatch a runnable to notify mDecoder.
-  // Other thread only.
-  void SetSuspend(bool aIsSuspend);
-
   // The following methods can be called on any thread except main thread.
 
   // Read data from track.
@@ -141,7 +137,8 @@ public:
   virtual void    Pin() MOZ_OVERRIDE {}
   virtual void    Unpin() MOZ_OVERRIDE {}
 
-  virtual bool    IsSuspendedByCache() MOZ_OVERRIDE { return mIsSuspend; }
+  // dummy
+  virtual bool    IsSuspendedByCache() MOZ_OVERRIDE { return false; }
 
   virtual bool    IsSuspended() MOZ_OVERRIDE { return false; }
   virtual bool    IsTransportSeekable() MOZ_OVERRIDE { return true; }
@@ -227,8 +224,6 @@ protected:
   nsRefPtr<Listener> mListener;
 
 private:
-  // Notify mDecoder the rtsp stream is suspend. Main thread only.
-  void NotifySuspend(bool aIsSuspend);
   bool IsVideoEnabled();
   bool IsVideo(uint8_t tracks, nsIStreamingProtocolMetaData *meta);
   // These two members are created at |RtspMediaResource::OnConnected|.
@@ -240,8 +235,6 @@ private:
   bool mIsConnected;
   // live stream
   bool mRealTime;
-  // Indicate the rtsp controller is suspended or not. Main thread only.
-  bool mIsSuspend;
 };
 
 } // namespace mozilla

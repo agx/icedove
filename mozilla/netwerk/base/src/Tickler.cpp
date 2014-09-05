@@ -145,7 +145,8 @@ void Tickler::MaybeStartTickler()
   mLock.AssertCurrentThreadOwns();
   if (!NS_IsMainThread()) {
     NS_DispatchToMainThread(
-      NS_NewRunnableMethod(this, &Tickler::MaybeStartTicklerUnlocked));
+      NS_NewRunnableMethod(this, &Tickler::MaybeStartTicklerUnlocked),
+      NS_DISPATCH_NORMAL);
     return;
   }
 

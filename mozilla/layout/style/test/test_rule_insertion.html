@@ -207,7 +207,8 @@ function runTest()
 }
 
 SimpleTest.waitForExplicitFinish();
-runTest();
+SpecialPowers.pushPrefEnv({ "set": [["layout.css.supports-rule.enabled", true]] }, runTest);
+
 </script>
 </body>
 </html>

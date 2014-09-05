@@ -14,18 +14,17 @@ typedef struct rtree_s rtree_t;
  * Size of each radix tree node (must be a power of 2).  This impacts tree
  * depth.
  */
-#define	RTREE_NODESIZE (1U << 16)
-
-typedef void *(rtree_alloc_t)(size_t);
-typedef void (rtree_dalloc_t)(void *);
+#if (LG_SIZEOF_PTR == 2)
+#  define RTREE_NODESIZE (1U << 14)
+#else
+#  define RTREE_NODESIZE CACHELINE
+#endif
 
 #endif /* JEMALLOC_H_TYPES */
 /******************************************************************************/
 #ifdef JEMALLOC_H_STRUCTS
 
 struct rtree_s {
-	rtree_alloc_t	*alloc;
-	rtree_dalloc_t	*dalloc;
 	malloc_mutex_t	mutex;
 	void		**root;
 	unsigned	height;
@@ -36,8 +35,7 @@ struct rtree_s {
 /******************************************************************************/
 #ifdef JEMALLOC_H_EXTERNS
 
-rtree_t	*rtree_new(unsigned bits, rtree_alloc_t *alloc, rtree_dalloc_t *dalloc);
-void	rtree_delete(rtree_t *rtree);
+rtree_t	*rtree_new(unsigned bits);
 void	rtree_prefork(rtree_t *rtree);
 void	rtree_postfork_parent(rtree_t *rtree);
 void	rtree_postfork_child(rtree_t *rtree);
@@ -47,20 +45,20 @@ void	rtree_postfork_child(rtree_t *rtree);
 #ifdef JEMALLOC_H_INLINES
 
 #ifndef JEMALLOC_ENABLE_INLINE
-#ifdef JEMALLOC_DEBUG
-uint8_t rtree_get_locked(rtree_t *rtree, uintptr_t key);
+#ifndef JEMALLOC_DEBUG
+void	*rtree_get_locked(rtree_t *rtree, uintptr_t key);
 #endif
-uint8_t	rtree_get(rtree_t *rtree, uintptr_t key);
-bool	rtree_set(rtree_t *rtree, uintptr_t key, uint8_t val);
+void	*rtree_get(rtree_t *rtree, uintptr_t key);
+bool	rtree_set(rtree_t *rtree, uintptr_t key, void *val);
 #endif
 
 #if (defined(JEMALLOC_ENABLE_INLINE) || defined(JEMALLOC_RTREE_C_))
 #define	RTREE_GET_GENERATE(f)						\
 /* The least significant bits of the key are ignored. */		\
-JEMALLOC_INLINE uint8_t							\
+JEMALLOC_INLINE void *							\
 f(rtree_t *rtree, uintptr_t key)					\
 {									\
-	uint8_t ret;							\
+	void *ret;							\
 	uintptr_t subkey;						\
 	unsigned i, lshift, height, bits;				\
 	void **node, **child;						\
@@ -70,12 +68,12 @@ f(rtree_t *rtree, uintptr_t key)					\
 	    i < height - 1;						\
 	    i++, lshift += bits, node = child) {			\
 		bits = rtree->level2bits[i];				\
-		subkey = (key << lshift) >> ((ZU(1) << (LG_SIZEOF_PTR +	\
+		subkey = (key << lshift) >> ((ZU(1) << (LG_SIZEOF_PTR + \
 		    3)) - bits);					\
 		child = (void**)node[subkey];				\
 		if (child == NULL) {					\
 			RTREE_UNLOCK(&rtree->mutex);			\
-			return (0);					\
+			return (NULL);					\
 		}							\
 	}								\
 									\
@@ -86,10 +84,7 @@ f(rtree_t *rtree, uintptr_t key)					\
 	bits = rtree->level2bits[i];					\
 	subkey = (key << lshift) >> ((ZU(1) << (LG_SIZEOF_PTR+3)) -	\
 	    bits);							\
-	{								\
-		uint8_t *leaf = (uint8_t *)node;			\
-		ret = leaf[subkey];					\
-	}								\
+	ret = node[subkey];						\
 	RTREE_UNLOCK(&rtree->mutex);					\
 									\
 	RTREE_GET_VALIDATE						\
@@ -128,7 +123,7 @@ RTREE_GET_GENERATE(rtree_get)
 #undef RTREE_GET_VALIDATE
 
 JEMALLOC_INLINE bool
-rtree_set(rtree_t *rtree, uintptr_t key, uint8_t val)
+rtree_set(rtree_t *rtree, uintptr_t key, void *val)
 {
 	uintptr_t subkey;
 	unsigned i, lshift, height, bits;
@@ -143,14 +138,14 @@ rtree_set(rtree_t *rtree, uintptr_t key, uint8_t val)
 		    bits);
 		child = (void**)node[subkey];
 		if (child == NULL) {
-			size_t size = ((i + 1 < height - 1) ? sizeof(void *)
-			    : (sizeof(uint8_t))) << rtree->level2bits[i+1];
-			child = (void**)rtree->alloc(size);
+			child = (void**)base_alloc(sizeof(void *) <<
+			    rtree->level2bits[i+1]);
 			if (child == NULL) {
 				malloc_mutex_unlock(&rtree->mutex);
 				return (true);
 			}
-			memset(child, 0, size);
+			memset(child, 0, sizeof(void *) <<
+			    rtree->level2bits[i+1]);
 			node[subkey] = child;
 		}
 	}
@@ -158,10 +153,7 @@ rtree_set(rtree_t *rtree, uintptr_t key, uint8_t val)
 	/* node is a leaf, so it contains values rather than node pointers. */
 	bits = rtree->level2bits[i];
 	subkey = (key << lshift) >> ((ZU(1) << (LG_SIZEOF_PTR+3)) - bits);
-	{
-		uint8_t *leaf = (uint8_t *)node;
-		leaf[subkey] = val;
-	}
+	node[subkey] = val;
 	malloc_mutex_unlock(&rtree->mutex);
 
 	return (false);

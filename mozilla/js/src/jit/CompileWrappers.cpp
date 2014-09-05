@@ -35,9 +35,9 @@ CompileRuntime::mainThread()
 }
 
 const void *
-CompileRuntime::addressOfJitTop()
+CompileRuntime::addressOfIonTop()
 {
-    return &runtime()->mainThread.jitTop;
+    return &runtime()->mainThread.ionTop;
 }
 
 const void *
@@ -68,7 +68,7 @@ CompileRuntime::addressOfLastCachedNativeIterator()
 const void *
 CompileRuntime::addressOfGCZeal()
 {
-    return runtime()->gc.addressOfZealMode();
+    return &runtime()->gcZeal_;
 }
 #endif
 
@@ -122,12 +122,6 @@ CompileRuntime::hadOutOfMemory()
     return runtime()->hadOutOfMemory;
 }
 
-bool
-CompileRuntime::profilingScripts()
-{
-    return runtime()->profilingScripts;
-}
-
 const JSAtomState &
 CompileRuntime::names()
 {
@@ -156,7 +150,7 @@ CompileRuntime::positiveInfinityValue()
 bool
 CompileRuntime::isInsideNursery(gc::Cell *cell)
 {
-    return UninlinedIsInsideNursery(cell);
+    return UninlinedIsInsideNursery(runtime(), cell);
 }
 #endif
 
@@ -176,7 +170,7 @@ CompileRuntime::maybeGetMathCache()
 const Nursery &
 CompileRuntime::gcNursery()
 {
-    return runtime()->gc.nursery;
+    return runtime()->gcNursery;
 }
 #endif
 
@@ -201,13 +195,13 @@ CompileZone::addressOfNeedsBarrier()
 const void *
 CompileZone::addressOfFreeListFirst(gc::AllocKind allocKind)
 {
-    return zone()->allocator.arenas.getFreeList(allocKind)->addressOfFirst();
+    return &zone()->allocator.arenas.getFreeList(allocKind)->first;
 }
 
 const void *
 CompileZone::addressOfFreeListLast(gc::AllocKind allocKind)
 {
-    return zone()->allocator.arenas.getFreeList(allocKind)->addressOfLast();
+    return &zone()->allocator.arenas.getFreeList(allocKind)->last;
 }
 
 JSCompartment *

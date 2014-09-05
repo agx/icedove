@@ -30,7 +30,7 @@
 #include "nsIDocShell.h"
 #include "nsIWebNavigation.h"
 #include "nsISupportsPriority.h"
-#include "nsINetworkPredictor.h"
+#include "nsINetworkSeer.h"
 
 #include "nsIConsoleService.h"
 
@@ -383,9 +383,8 @@ nsUserFontSet::StartLoad(gfxMixedFontFamily* aFamily,
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsIDocument *document = ps->GetDocument();
-  mozilla::net::PredictorLearn(aFontFaceSrc->mURI, document->GetDocumentURI(),
-                               nsINetworkPredictor::LEARN_LOAD_SUBRESOURCE,
-                               loadGroup);
+  mozilla::net::SeerLearn(aFontFaceSrc->mURI, document->GetDocumentURI(),
+                          nsINetworkSeer::LEARN_LOAD_SUBRESOURCE, loadGroup);
 
   bool inherits = false;
   rv = NS_URIChainHasFlags(aFontFaceSrc->mURI,
@@ -805,21 +804,21 @@ nsUserFontSet::LogMessage(gfxMixedFontFamily* aFamily,
         aProxy->mSrcIndex);
 
   if (NS_FAILED(aStatus)) {
-    message.AppendLiteral(": ");
+    message.Append(": ");
     switch (aStatus) {
     case NS_ERROR_DOM_BAD_URI:
-      message.AppendLiteral("bad URI or cross-site access not allowed");
+      message.Append("bad URI or cross-site access not allowed");
       break;
     case NS_ERROR_CONTENT_BLOCKED:
-      message.AppendLiteral("content blocked");
+      message.Append("content blocked");
       break;
     default:
-      message.AppendLiteral("status=");
+      message.Append("status=");
       message.AppendInt(static_cast<uint32_t>(aStatus));
       break;
     }
   }
-  message.AppendLiteral("\nsource: ");
+  message.Append("\nsource: ");
   message.Append(fontURI);
 
 #ifdef PR_LOGGING

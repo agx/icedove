@@ -190,7 +190,7 @@ nsHTMLDocument::nsHTMLDocument()
   // NOTE! nsDocument::operator new() zeroes out all members, so don't
   // bother initializing members to 0.
 
-  mType = eHTML;
+  mIsRegularHTML = true;
   mDefaultElementType = kNameSpaceID_XHTML;
   mCompatMode = eCompatibility_NavQuirks;
 }
@@ -535,8 +535,7 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     MOZ_ASSERT(false, "Got a sink override. Should not happen for HTML doc.");
     return NS_ERROR_INVALID_ARG;
   }
-  if (mType != eHTML) {
-    MOZ_ASSERT(mType == eXHTML);
+  if (!mIsRegularHTML) {
     MOZ_ASSERT(false, "Must not set HTML doc to XHTML mode before load start.");
     return NS_ERROR_DOM_INVALID_STATE_ERR;
   }
@@ -548,8 +547,7 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
               !strcmp(aCommand, "external-resource");
   bool viewSource = !strcmp(aCommand, "view-source");
   bool asData = !strcmp(aCommand, kLoadAsData);
-  bool import = !strcmp(aCommand, "import");
-  if (!(view || viewSource || asData || import)) {
+  if(!(view || viewSource || asData)) {
     MOZ_ASSERT(false, "Bad parser command");
     return NS_ERROR_INVALID_ARG;
   }
@@ -566,7 +564,7 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
 
   if (!viewSource && xhtml) {
       // We're parsing XHTML as XML, remember that.
-      mType = eXHTML;
+      mIsRegularHTML = false;
       mCompatMode = eCompatibility_FullStandards;
       loadAsHtml5 = false;
   }
@@ -1372,7 +1370,7 @@ nsHTMLDocument::Open(JSContext* cx,
 {
   NS_ASSERTION(nsContentUtils::CanCallerAccess(static_cast<nsIDOMHTMLDocument*>(this)),
                "XOW should have caught this!");
-  if (!IsHTML() || mDisableDocWrite || !IsMasterDocument()) {
+  if (!IsHTML() || mDisableDocWrite) {
     // No calling document.open() on XHTML
     rv.Throw(NS_ERROR_DOM_INVALID_STATE_ERR);
     return nullptr;
@@ -1576,13 +1574,6 @@ nsHTMLDocument::Open(JSContext* cx,
 #ifdef DEBUG
     bool willReparent = mWillReparent;
     mWillReparent = true;
-
-    nsDocument* templateContentsOwner =
-      static_cast<nsDocument*>(mTemplateContentsOwner.get());
-
-    if (templateContentsOwner) {
-      templateContentsOwner->mWillReparent = true;
-    }
 #endif
 
     // Should this pass true for aForceReuseInnerWindow?
@@ -1592,10 +1583,6 @@ nsHTMLDocument::Open(JSContext* cx,
     }
 
 #ifdef DEBUG
-    if (templateContentsOwner) {
-      templateContentsOwner->mWillReparent = willReparent;
-    }
-
     mWillReparent = willReparent;
 #endif
 
@@ -1612,20 +1599,6 @@ nsHTMLDocument::Open(JSContext* cx,
       if (rv.Failed()) {
         return nullptr;
       }
-
-      // Also reparent the template contents owner document
-      // because its global is set to the same as this document.
-      if (mTemplateContentsOwner) {
-        JS::Rooted<JSObject*> contentsOwnerWrapper(cx,
-          mTemplateContentsOwner->GetWrapper());
-        if (contentsOwnerWrapper) {
-          rv = mozilla::dom::ReparentWrapper(cx, contentsOwnerWrapper);
-          if (rv.Failed()) {
-            return nullptr;
-          }
-        }
-      }
-
       nsIXPConnect *xpc = nsContentUtils::XPConnect();
       rv = xpc->RescueOrphansInScope(cx, oldScope->GetGlobalJSObject());
       if (rv.Failed()) {
@@ -1799,7 +1772,7 @@ nsHTMLDocument::WriteCommon(JSContext *cx,
     (mWriteLevel > NS_MAX_DOCUMENT_WRITE_DEPTH || mTooDeepWriteRecursion);
   NS_ENSURE_STATE(!mTooDeepWriteRecursion);
 
-  if (!IsHTML() || mDisableDocWrite || !IsMasterDocument()) {
+  if (!IsHTML() || mDisableDocWrite) {
     // No calling document.write*() on XHTML!
 
     return NS_ERROR_DOM_INVALID_STATE_ERR;
@@ -2593,6 +2566,13 @@ nsHTMLDocument::All()
   return mAll;
 }
 
+void
+nsHTMLDocument::GetAll(JSContext* aCx, JS::MutableHandle<JSObject*> aRetval,
+                       ErrorResult& aRv)
+{
+  aRetval.set(All()->GetObject(aCx, aRv));
+}
+
 static void
 NotifyEditableStateChange(nsINode *aNode, nsIDocument *aDocument)
 {
@@ -2872,10 +2852,27 @@ nsHTMLDocument::SetDesignMode(const nsAString & aDesignMode)
 void
 nsHTMLDocument::SetDesignMode(const nsAString& aDesignMode, ErrorResult& rv)
 {
-  if (!nsContentUtils::SubjectPrincipal()->Subsumes(NodePrincipal())) {
-    rv.Throw(NS_ERROR_DOM_PROP_ACCESS_DENIED);
-    return;
+  if (!nsContentUtils::IsCallerChrome()) {
+    nsCOMPtr<nsIPrincipal> subject;
+    nsIScriptSecurityManager *secMan = nsContentUtils::GetSecurityManager();
+    rv = secMan->GetSubjectPrincipal(getter_AddRefs(subject));
+    if (rv.Failed()) {
+      return;
+    }
+    if (subject) {
+      bool subsumes;
+      rv = subject->Subsumes(NodePrincipal(), &subsumes);
+      if (rv.Failed()) {
+        return;
+      }
+
+      if (!subsumes) {
+        rv.Throw(NS_ERROR_DOM_PROP_ACCESS_DENIED);
+        return;
+      }
+    }
   }
+
   bool editableMode = HasFlag(NODE_IS_EDITABLE);
   if (aDesignMode.LowerCaseEqualsASCII(editableMode ? "off" : "on")) {
     SetEditableFlag(!editableMode);
@@ -3014,10 +3011,10 @@ ConvertToMidasInternalCommandInner(const nsAString& inCommandID,
   // Hack to support old boolean commands that were backwards (see bug 301490).
   bool invertBool = false;
   if (convertedCommandID.LowerCaseEqualsLiteral("usecss")) {
-    convertedCommandID.AssignLiteral("styleWithCSS");
+    convertedCommandID.Assign("styleWithCSS");
     invertBool = true;
   } else if (convertedCommandID.LowerCaseEqualsLiteral("readonly")) {
-    convertedCommandID.AssignLiteral("contentReadOnly");
+    convertedCommandID.Assign("contentReadOnly");
     invertBool = true;
   }
 
@@ -3603,8 +3600,7 @@ nsHTMLDocument::DocAddSizeOfExcludingThis(nsWindowSizes* aWindowSizes) const
 bool
 nsHTMLDocument::WillIgnoreCharsetOverride()
 {
-  if (mType != eHTML) {
-    MOZ_ASSERT(mType == eXHTML);
+  if (!mIsRegularHTML) {
     return true;
   }
   if (mCharacterSetSource == kCharsetFromByteOrderMark) {

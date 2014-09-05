@@ -11,6 +11,7 @@ UNIFIED_SOURCES += [
     'nsNullPrincipalURI.cpp',
     'nsPrincipal.cpp',
     'nsScriptSecurityManager.cpp',
+    'nsSecurityManagerFactory.cpp',
     'nsSystemPrincipal.cpp',
 ]
 

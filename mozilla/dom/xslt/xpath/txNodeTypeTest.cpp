@@ -62,10 +62,10 @@ txNodeTypeTest::toString(nsAString& aDest)
 {
     switch (mNodeType) {
         case COMMENT_TYPE:
-            aDest.AppendLiteral("comment()");
+            aDest.Append(NS_LITERAL_STRING("comment()"));
             break;
         case TEXT_TYPE:
-            aDest.AppendLiteral("text()");
+            aDest.Append(NS_LITERAL_STRING("text()"));
             break;
         case PI_TYPE:
             aDest.AppendLiteral("processing-instruction(");
@@ -79,7 +79,7 @@ txNodeTypeTest::toString(nsAString& aDest)
             aDest.Append(char16_t(')'));
             break;
         case NODE_TYPE:
-            aDest.AppendLiteral("node()");
+            aDest.Append(NS_LITERAL_STRING("node()"));
             break;
     }
 }

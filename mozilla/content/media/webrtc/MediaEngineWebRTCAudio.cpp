@@ -7,7 +7,6 @@
 #include <algorithm>
 #include "mozilla/Assertions.h"
 #include "MediaTrackConstraints.h"
-#include "mtransport/runnable_utils.h"
 
 // scoped_ptr.h uses FF
 #ifdef FF
@@ -55,7 +54,6 @@ AudioOutputObserver::AudioOutputObserver()
   : mPlayoutFreq(0)
   , mPlayoutChannels(0)
   , mChunkSize(0)
-  , mSaved(nullptr)
   , mSamplesSaved(0)
 {
   // Buffers of 10ms chunks
@@ -64,18 +62,14 @@ AudioOutputObserver::AudioOutputObserver()
 
 AudioOutputObserver::~AudioOutputObserver()
 {
-  Clear();
-  moz_free(mSaved);
-  mSaved = nullptr;
 }
 
 void
 AudioOutputObserver::Clear()
 {
   while (mPlayoutFifo->size() > 0) {
-    moz_free(mPlayoutFifo->Pop());
+    (void) mPlayoutFifo->Pop();
   }
-  // we'd like to touch mSaved here, but we can't if we might still be getting callbacks
 }
 
 FarEndAudioChunk *
@@ -158,8 +152,7 @@ AudioOutputObserver::InsertFarEnd(const AudioDataValue *aBuffer, uint32_t aSampl
         // thread safety issues.
         break;
       } else {
-        mPlayoutFifo->Push((int8_t *) mSaved); // takes ownership
-        mSaved = nullptr;
+        mPlayoutFifo->Push((int8_t *) mSaved.forget()); // takes ownership
         mSamplesSaved = 0;
       }
     }
@@ -522,7 +515,8 @@ MediaEngineWebRTCAudioSource::Process(int channel,
   if (!mStarted) {
     mStarted  = true;
     while (gFarendObserver->Size() > 1) {
-      moz_free(gFarendObserver->Pop()); // only call if size() > 0
+      FarEndAudioChunk *buffer = gFarendObserver->Pop(); // only call if size() > 0
+      free(buffer);
     }
   }
 
@@ -530,16 +524,15 @@ MediaEngineWebRTCAudioSource::Process(int channel,
     FarEndAudioChunk *buffer = gFarendObserver->Pop(); // only call if size() > 0
     if (buffer) {
       int length = buffer->mSamples;
-      int res = mVoERender->ExternalPlayoutData(buffer->mData,
-                                                gFarendObserver->PlayoutFrequency(),
-                                                gFarendObserver->PlayoutChannels(),
-                                                mPlayoutDelay,
-                                                length);
-      moz_free(buffer);
-      if (res == -1) {
+      if (mVoERender->ExternalPlayoutData(buffer->mData,
+                                          gFarendObserver->PlayoutFrequency(),
+                                          gFarendObserver->PlayoutChannels(),
+                                          mPlayoutDelay,
+                                          length) == -1) {
         return;
       }
     }
+    free(buffer);
   }
 
 #ifdef PR_LOGGING
@@ -571,26 +564,23 @@ MediaEngineWebRTCAudioSource::Process(int channel,
     sample* dest = static_cast<sample*>(buffer->Data());
     memcpy(dest, audio10ms, length * sizeof(sample));
 
-    nsAutoPtr<AudioSegment> segment(new AudioSegment());
+    AudioSegment segment;
     nsAutoTArray<const sample*,1> channels;
     channels.AppendElement(dest);
-    segment->AppendFrames(buffer.forget(), channels, length);
+    segment.AppendFrames(buffer.forget(), channels, length);
     TimeStamp insertTime;
-    segment->GetStartTime(insertTime);
+    segment.GetStartTime(insertTime);
 
-    if (mSources[i]) {
-      // Make sure we include the stream and the track.
-      // The 0:1 is a flag to note when we've done the final insert for a given input block.
-      LogTime(AsyncLatencyLogger::AudioTrackInsertion, LATENCY_STREAM_ID(mSources[i], mTrackID),
-              (i+1 < len) ? 0 : 1, insertTime);
-
+    SourceMediaStream *source = mSources[i];
+    if (source) {
       // This is safe from any thread, and is safe if the track is Finished
       // or Destroyed.
-      // Note: due to evil magic, the nsAutoPtr<AudioSegment>'s ownership transfers to
-      // the Runnable (AutoPtr<> = AutoPtr<>)
-      RUN_ON_THREAD(mThread, WrapRunnable(mSources[i], &SourceMediaStream::AppendToTrack,
-                                          mTrackID, segment, (AudioSegment *) nullptr),
-                    NS_DISPATCH_NORMAL);
+      // Make sure we include the stream and the track.
+      // The 0:1 is a flag to note when we've done the final insert for a given input block.
+      LogTime(AsyncLatencyLogger::AudioTrackInsertion, LATENCY_STREAM_ID(source, mTrackID),
+              (i+1 < len) ? 0 : 1, insertTime);
+
+      source->AppendToTrack(mTrackID, &segment);
     }
   }
 

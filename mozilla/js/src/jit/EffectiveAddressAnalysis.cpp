@@ -45,7 +45,7 @@ AnalyzeLsh(TempAllocator &alloc, MLsh *lsh)
         if (add->specialization() != MIRType_Int32 || !add->isTruncated())
             break;
 
-        MDefinition *other = add->getOperand(1 - add->indexOf(*use));
+        MDefinition *other = add->getOperand(1 - use->index());
 
         if (other->isConstant()) {
             displacement += other->toConstant()->value().toInt32();
@@ -71,7 +71,7 @@ AnalyzeLsh(TempAllocator &alloc, MLsh *lsh)
             return;
 
         MBitAnd *bitAnd = use->consumer()->toDefinition()->toBitAnd();
-        MDefinition *other = bitAnd->getOperand(1 - bitAnd->indexOf(*use));
+        MDefinition *other = bitAnd->getOperand(1 - use->index());
         if (!other->isConstant() || !other->toConstant()->value().isInt32())
             return;
 

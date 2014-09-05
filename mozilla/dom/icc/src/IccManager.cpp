@@ -102,21 +102,21 @@ IccManager::GetIccIds(nsTArray<nsString>& aIccIds)
 {
   nsTArray<nsRefPtr<IccListener>>::size_type i;
   for (i = 0; i < mIccListeners.Length(); ++i) {
-    Icc* icc = mIccListeners[i]->GetIcc();
+    nsRefPtr<Icc> icc = mIccListeners[i]->GetIcc();
     if (icc) {
       aIccIds.AppendElement(icc->GetIccId());
     }
   }
 }
 
-Icc*
+already_AddRefed<nsISupports>
 IccManager::GetIccById(const nsAString& aIccId) const
 {
   nsTArray<nsRefPtr<IccListener>>::size_type i;
   for (i = 0; i < mIccListeners.Length(); ++i) {
-    Icc* icc = mIccListeners[i]->GetIcc();
+    nsRefPtr<Icc> icc = mIccListeners[i]->GetIcc();
     if (icc && aIccId == icc->GetIccId()) {
-      return icc;
+      return icc.forget();
     }
   }
   return nullptr;

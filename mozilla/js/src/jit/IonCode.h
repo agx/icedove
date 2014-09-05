@@ -169,10 +169,10 @@ struct IonScript
 {
   private:
     // Code pointer containing the actual method.
-    PreBarrieredJitCode method_;
+    EncapsulatedPtr<JitCode> method_;
 
     // Deoptimization table used by this method.
-    PreBarrieredJitCode deoptTable_;
+    EncapsulatedPtr<JitCode> deoptTable_;
 
     // Entrypoint for OSR, or nullptr.
     jsbytecode *osrPc_;
@@ -305,8 +305,8 @@ struct IonScript
     SnapshotOffset *bailoutTable() {
         return (SnapshotOffset *) &bottomBuffer()[bailoutTable_];
     }
-    PreBarrieredValue *constants() {
-        return (PreBarrieredValue *) &bottomBuffer()[constantTable_];
+    EncapsulatedValue *constants() {
+        return (EncapsulatedValue *) &bottomBuffer()[constantTable_];
     }
     const SafepointIndex *safepointIndices() const {
         return const_cast<IonScript *>(this)->safepointIndices();
@@ -496,7 +496,7 @@ struct IonScript
     size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {
         return mallocSizeOf(this);
     }
-    PreBarrieredValue &getConstant(size_t index) {
+    EncapsulatedValue &getConstant(size_t index) {
         JS_ASSERT(index < numConstants());
         return constants()[index];
     }
@@ -756,20 +756,18 @@ class JitRuntime;
 struct AutoFlushICache
 {
   private:
-#if defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS)
     uintptr_t start_;
     uintptr_t stop_;
     const char *name_;
     bool inhibit_;
     AutoFlushICache *prev_;
-#endif
 
   public:
     static void setRange(uintptr_t p, size_t len);
     static void flush(uintptr_t p, size_t len);
     static void setInhibit();
     ~AutoFlushICache();
-    explicit AutoFlushICache(const char *nonce, bool inhibit=false);
+    AutoFlushICache(const char *nonce, bool inhibit=false);
 };
 
 } // namespace jit

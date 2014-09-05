@@ -19,7 +19,7 @@ struct IdValuePair
     Value value;
 
     IdValuePair() {}
-    explicit IdValuePair(jsid idArg)
+    IdValuePair(jsid idArg)
       : id(idArg), value(UndefinedValue())
     {}
 };

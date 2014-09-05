@@ -29,6 +29,8 @@ Cu.import("resource://gre/modules/osfile/osfile_shared_allthreads.jsm", SharedAl
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 Cu.import("resource://gre/modules/Timer.jsm", this);
 
+XPCOMUtils.defineLazyModuleGetter(this, 'Deprecated',
+  'resource://gre/modules/Deprecated.jsm');
 
 // Boilerplate, to simplify the transition to require()
 let LOG = SharedAll.LOG.bind(SharedAll, "Controller");
@@ -192,19 +194,11 @@ let Scheduler = {
   shutdown: false,
 
   /**
-   * A promise resolved once all currently pending operations are complete.
+   * A promise resolved once all operations are complete.
    *
    * This promise is never rejected and the result is always undefined.
    */
   queue: Promise.resolve(),
-
-  /**
-   * A promise resolved once all currently pending `kill` operations
-   * are complete.
-   *
-   * This promise is never rejected and the result is always undefined.
-   */
-  _killQueue: Promise.resolve(),
 
   /**
    * Miscellaneous debugging information
@@ -294,14 +288,7 @@ let Scheduler = {
    *   through some other mean.
    */
   kill: function({shutdown, reset}) {
-    // Grab the kill queue to make sure that we
-    // cannot be interrupted by another call to `kill`.
-    let killQueue = this._killQueue;
-    return this._killQueue = Task.spawn(function*() {
-
-      yield killQueue;
-      // From this point, and until the end of the Task, we are the
-      // only call to `kill`, regardless of any `yield`.
+    return Task.spawn(function*() {
 
       yield this.queue;
 
@@ -454,7 +441,6 @@ let Scheduler = {
       let isError = false;
       try {
         try {
-          Scheduler.Debugging.messagesSent++;
           data = yield this.worker.post(method, ...args);
         } finally {
           Scheduler.Debugging.messagesReceived++;
@@ -609,18 +595,7 @@ const PREF_OSFILE_TEST_SHUTDOWN_OBSERVER =
 
 AsyncShutdown.webWorkersShutdown.addBlocker(
   "OS.File: flush pending requests, warn about unclosed files, shut down service.",
-  Task.async(function*() {
-    // Give clients a last chance to enqueue requests.
-    yield Barriers.shutdown.wait({crashAfterMS: null});
-
-    // Wait until all requests are complete and kill the worker.
-    yield Scheduler.kill({reset: false, shutdown: true});
-  }),
-  () => {
-    let details = Barriers.getDetails();
-    details.clients = Barriers.shutdown.state;
-    return details;
-  }
+  () => Scheduler.kill({reset: false, shutdown: true})
 );
 
 
@@ -698,6 +673,20 @@ File.prototype = {
     return Scheduler.post("File_prototype_stat", [this._fdmsg], this).then(
       File.Info.fromMsg
     );
+  },
+
+  /**
+   * Set the last access and modification date of the file.
+   * The time stamp resolution is 1 second at best, but might be worse
+   * depending on the platform.
+   *
+   * @return {promise}
+   * @rejects {TypeError}
+   * @rejects {OS.File.Error}
+   */
+  setDates: function setDates(accessDate, modificationDate) {
+    return Scheduler.post("File_prototype_setDates",
+                          [this._fdmsg, accessDate, modificationDate], this);
   },
 
   /**
@@ -864,27 +853,6 @@ File.prototype = {
                           [this._fdmsg, options]);
   }
 };
-
-
-if (SharedAll.Constants.Sys.Name != "Android") {
-  /**
-   * Set the last access and modification date of the file.
-   * The time stamp resolution is 1 second at best, but might be worse
-   * depending on the platform.
-   *
-   * WARNING: This method is not implemented on Android/B2G. On Android/B2G,
-   * you should use File.setDates instead.
-   *
-   * @return {promise}
-   * @rejects {TypeError}
-   * @rejects {OS.File.Error}
-   */
-  File.prototype.setDates = function(accessDate, modificationDate) {
-    return Scheduler.post("File_prototype_setDates",
-      [this._fdmsg, accessDate, modificationDate], this);
-  };
-}
-
 
 /**
  * Open a file asynchronously.
@@ -1322,7 +1290,6 @@ File.Info.prototype = SysAll.AbstractInfo.prototype;
 // Deprecated
 Object.defineProperty(File.Info.prototype, "creationDate", {
   get: function creationDate() {
-    let {Deprecated} = Cu.import("resource://gre/modules/Deprecated.jsm", {});
     Deprecated.warning("Field 'creationDate' is deprecated.", "https://developer.mozilla.org/en-US/docs/JavaScript_OS.File/OS.File.Info#Cross-platform_Attributes");
     return this._deprecatedCreationDate;
   }
@@ -1574,16 +1541,28 @@ Object.defineProperty(OS.File, "queue", {
   }
 });
 
-/**
- * Shutdown barriers, to let clients register to be informed during shutdown.
- */
-let Barriers = {
-  profileBeforeChange: new AsyncShutdown.Barrier("OS.File: Waiting for clients before profile-before-shutdown"),
-  shutdown: new AsyncShutdown.Barrier("OS.File: Waiting for clients before full shutdown"),
-  /**
-   * Return the shutdown state of OS.File
-   */
-  getDetails: function() {
+// Auto-flush OS.File during profile-before-change. This ensures that any I/O
+// that has been queued *before* profile-before-change is properly completed.
+// To ensure that I/O queued *during* profile-before-change is completed,
+// clients should register using AsyncShutdown.addBlocker.
+AsyncShutdown.profileBeforeChange.addBlocker(
+  "OS.File: flush I/O queued before profile-before-change",
+  // Wait until the latest currently enqueued promise is satisfied/rejected
+  function() {
+    let DEBUG = false;
+    try {
+      DEBUG = Services.prefs.getBoolPref("toolkit.osfile.debug.failshutdown");
+    } catch (ex) {
+      // Ignore
+    }
+    if (DEBUG) {
+      // Return a promise that will never be satisfied
+      return Promise.defer().promise;
+    } else {
+      return Scheduler.queue;
+    }
+  },
+  function getDetails() {
     let result = {
       launched: Scheduler.launched,
       shutdown: Scheduler.shutdown,
@@ -1594,7 +1573,7 @@ let Barriers = {
       messagesSent: Scheduler.Debugging.messagesSent,
       messagesReceived: Scheduler.Debugging.messagesReceived,
       messagesQueued: Scheduler.Debugging.messagesQueued,
-      DEBUG: SharedAll.Config.DEBUG,
+      DEBUG: SharedAll.Config.DEBUG
     };
     // Convert dates to strings for better readability
     for (let key of ["latestSent", "latestReceived"]) {
@@ -1603,28 +1582,5 @@ let Barriers = {
       }
     }
     return result;
-  }
-};
-
-File.profileBeforeChange = Barriers.profileBeforeChange.client;
-File.shutdown = Barriers.shutdown.client;
-
-// Auto-flush OS.File during profile-before-change. This ensures that any I/O
-// that has been queued *before* profile-before-change is properly completed.
-// To ensure that I/O queued *during* profile-before-change is completed,
-// clients should register using AsyncShutdown.addBlocker.
-AsyncShutdown.profileBeforeChange.addBlocker(
-  "OS.File: flush I/O queued before profile-before-change",
-  Task.async(function*() {
-    // Give clients a last chance to enqueue requests.
-    yield Barriers.profileBeforeChange.wait({crashAfterMS: null});
-
-    // Wait until all currently enqueued requests are completed.
-    yield Scheduler.queue;
-  }),
-  () => {
-    let details = Barriers.getDetails();
-    details.clients = Barriers.profileBeforeChange.state;
-    return details;
   }
 );

@@ -33,14 +33,17 @@ function init_all() {
   let categories = document.getElementById("categories");
   categories.addEventListener("select", event => gotoPref(event.target.value));
 
-  gotoPref("paneGeneral");
+  if (history.length > 1 && history.state) {
+    selectCategory(history.state);
+  } else {
+    history.replaceState("paneGeneral", document.title);
+  }
 }
 
 function selectCategory(name) {
   let categories = document.getElementById("categories");
   let item = categories.querySelector(".category[value=" + name + "]");
   categories.selectedItem = item;
-  gotoPref(name);
 }
 
 function gotoPref(page) {
@@ -54,12 +57,4 @@ function search(aQuery, aAttribute) {
     let attributeValue = element.getAttribute(aAttribute);
     element.hidden = (attributeValue != aQuery);
   }
-}
-
-function helpButtonCommand() {
-  let pane = history.state;
-  let categories = document.getElementById("categories");
-  let helpTopic = categories.querySelector(".category[value=" + pane + "]")
-                            .getAttribute("helpTopic");
-  openHelpLink(helpTopic);
 }

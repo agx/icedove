@@ -216,7 +216,7 @@ namespace js {
 
 class ForkJoinActivation : public Activation
 {
-    uint8_t *prevJitTop_;
+    uint8_t *prevIonTop_;
 
     // We ensure that incremental GC be finished before we enter into a fork
     // join section, but the runtime/zone might still be marked as needing
@@ -225,7 +225,7 @@ class ForkJoinActivation : public Activation
     gc::AutoStopVerifyingBarriers av_;
 
   public:
-    explicit ForkJoinActivation(JSContext *cx);
+    ForkJoinActivation(JSContext *cx);
     ~ForkJoinActivation();
 };
 
@@ -426,7 +426,7 @@ class ForkJoinContext : public ThreadSafeContext
 
     // ForkJoinContext is allocated on the stack. It would be dangerous to GC
     // with it live because of the GC pointer fields stored in the context.
-    JS::AutoSuppressGCAnalysis nogc_;
+    JS::AutoAssertNoGC nogc_;
 };
 
 // Locks a JSContext for its scope. Be very careful, because locking a
@@ -446,7 +446,7 @@ class LockedJSContext
     JSContext *jscx_;
 
   public:
-    explicit LockedJSContext(ForkJoinContext *cx)
+    LockedJSContext(ForkJoinContext *cx)
 #if defined(JS_THREADSAFE) && defined(JS_ION)
       : cx_(cx),
         jscx_(cx->acquireJSContext())

@@ -114,7 +114,7 @@ nsGridRowLeafLayout::PopulateBoxSizes(nsIFrame* aBox, nsBoxLayoutState& aState, 
     nsBoxSize* start = nullptr;
     nsBoxSize* last = nullptr;
     nsBoxSize* current = nullptr;
-    nsIFrame* child = nsBox::GetChildBox(aBox);
+    nsIFrame* child = aBox->GetChildBox();
     for (int i=0; i < count; i++)
     {
       column = grid->GetColumnAt(i,isHorizontal); 
@@ -206,7 +206,7 @@ nsGridRowLeafLayout::PopulateBoxSizes(nsIFrame* aBox, nsBoxLayoutState& aState, 
       }
 
       if (child && !column->mIsBogus)
-        child = nsBox::GetNextBox(child);
+        child = child->GetNextBox();
 
     }
     aBoxSizes = start;
@@ -299,12 +299,12 @@ void
 nsGridRowLeafLayout::CountRowsColumns(nsIFrame* aBox, int32_t& aRowCount, int32_t& aComputedColumnCount)
 {
   if (aBox) {
-    nsIFrame* child = nsBox::GetChildBox(aBox);
+    nsIFrame* child = aBox->GetChildBox();
 
     // count the children
     int32_t columnCount = 0;
     while(child) {
-      child = nsBox::GetNextBox(child);
+      child = child->GetNextBox();
       columnCount++;
     }
 

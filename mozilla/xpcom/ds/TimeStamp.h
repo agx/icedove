@@ -11,7 +11,6 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 #include "nscore.h"
-#include "nsDebug.h"
 
 namespace IPC {
 template <typename T> struct ParamTraits;
@@ -114,13 +113,6 @@ public:
     return TimeDuration::FromTicks(mValue * int64_t(aMultiplier));
   }
   TimeDuration operator*(const int64_t aMultiplier) const {
-    return TimeDuration::FromTicks(mValue * aMultiplier);
-  }
-  TimeDuration operator*(const uint64_t aMultiplier) const {
-    if (aMultiplier > INT64_MAX) {
-      NS_WARNING("Out-of-range multiplier when multiplying TimeDuration");
-      return TimeDuration::Forever();
-    }
     return TimeDuration::FromTicks(mValue * int64_t(aMultiplier));
   }
   TimeDuration operator/(const int64_t aDivisor) const {
@@ -343,8 +335,8 @@ public:
   // two TimeStamps, or scaling TimeStamps, is nonsense and must never
   // be allowed.
 
-  static nsresult Startup();
-  static void Shutdown();
+  static NS_HIDDEN_(nsresult) Startup();
+  static NS_HIDDEN_(void) Shutdown();
 
 private:
   friend struct IPC::ParamTraits<mozilla::TimeStamp>;

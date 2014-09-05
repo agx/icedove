@@ -17,10 +17,11 @@ function test() {
   browserWindowsCount(1);
 
   var win = openDialog(location, "", "chrome,all,dialog=no");
-  promiseWindowLoaded(win).then(() => {
+  win.addEventListener("load", function () {
+    win.removeEventListener("load", arguments.callee, false);
     browserWindowsCount(2);
     win.close();
     browserWindowsCount(1);
     finish();
-  });
+  }, false);
 }

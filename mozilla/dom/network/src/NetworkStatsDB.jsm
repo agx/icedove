@@ -382,11 +382,7 @@ NetworkStatsDB.prototype = {
         debug("New stats: " + JSON.stringify(stats));
       }
 
-      let lowerFilter = [stats.appId, stats.serviceType, stats.network, 0];
-      let upperFilter = [stats.appId, stats.serviceType, stats.network, ""];
-      let range = IDBKeyRange.bound(lowerFilter, upperFilter, false, false);
-
-      let request = aStore.openCursor(range, 'prev');
+      let request = aStore.index("network").openCursor(stats.network, "prev");
       request.onsuccess = function onsuccess(event) {
         let cursor = event.target.result;
         if (!cursor) {
@@ -405,9 +401,16 @@ NetworkStatsDB.prototype = {
           return;
         }
 
+        let value = cursor.value;
+        if (stats.appId != value.appId ||
+            (stats.appId == 0 && stats.serviceType != value.serviceType)) {
+          cursor.continue();
+          return;
+        }
+
         // There are old samples
         if (DEBUG) {
-          debug("Last value " + JSON.stringify(cursor.value));
+          debug("Last value " + JSON.stringify(value));
         }
 
         // Remove stats previous to now - VALUE_MAX_LENGTH

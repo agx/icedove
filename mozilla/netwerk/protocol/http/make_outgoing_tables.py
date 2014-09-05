@@ -29,11 +29,12 @@ for line in sys.stdin:
     obracket = line.rfind('[')
     nbits = int(line[obracket + 1:-1])
 
-    lastbar = line.rfind('|')
-    space = line.find(' ', lastbar)
-    encend = line.rfind(' ', 0, obracket)
+    encend = obracket - 1
+    hexits = nbits / 4
+    if hexits * 4 != nbits:
+        hexits += 1
 
-    enc = line[space:encend].strip()
+    enc = line[encend - hexits:encend]
     val = int(enc, 16)
 
     entries.append({'length': nbits, 'value': val})

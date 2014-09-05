@@ -15,7 +15,6 @@
 #include "webrtc/modules/desktop_capture/win/scoped_gdi_object.h"
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/desktop_geometry.h"
-#include "webrtc/modules/desktop_capture/mouse_cursor.h"
 #include "webrtc/system_wrappers/interface/compile_assert.h"
 #include "webrtc/system_wrappers/interface/logging.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
@@ -78,8 +77,7 @@ void AddCursorOutline(int width, int height, uint32_t* data) {
 // Premultiplies RGB components of the pixel data in the given image by
 // the corresponding alpha components.
 void AlphaMul(uint32_t* data, int width, int height) {
-  COMPILE_ASSERT(sizeof(uint32_t) == kBytesPerPixel,
-                 size_of_uint32_should_be_the_bytes_per_pixel);
+  COMPILE_ASSERT(sizeof(uint32_t) == kBytesPerPixel);
 
   for (uint32_t* data_end = data + width * height; data != data_end; ++data) {
     RGBQUAD* from = reinterpret_cast<RGBQUAD*>(data);
@@ -94,24 +92,29 @@ void AlphaMul(uint32_t* data, int width, int height) {
 }
 
 // Scans a 32bpp bitmap looking for any pixels with non-zero alpha component.
-// Returns true if non-zero alpha is found. |stride| is expressed in pixels.
-bool HasAlphaChannel(const uint32_t* data, int stride, int width, int height) {
+// |*has_alpha| is set to true if non-zero alpha is found. |stride| is expressed
+// in pixels.
+bool HasAlphaChannel(const uint32_t* data, int stride, int width, int height,
+                     bool* has_alpha) {
   const RGBQUAD* plane = reinterpret_cast<const RGBQUAD*>(data);
   for (int y = 0; y < height; ++y) {
     for (int x = 0; x < width; ++x) {
-      if (plane->rgbReserved != 0)
+      if (plane->rgbReserved != 0) {
+        *has_alpha = true;
         return true;
+      }
       plane += 1;
     }
     plane += stride - width;
   }
 
-  return false;
+  *has_alpha = false;
+  return true;
 }
 
 }  // namespace
 
-MouseCursor* CreateMouseCursorFromHCursor(HDC dc, HCURSOR cursor) {
+MouseCursorShape* CreateMouseCursorShapeFromCursor(HDC dc, HCURSOR cursor) {
   ICONINFO iinfo;
   if (!GetIconInfo(cursor, &iinfo)) {
     LOG_F(LS_ERROR) << "Unable to get cursor icon info. Error = "
@@ -164,18 +167,20 @@ MouseCursor* CreateMouseCursorFromHCursor(HDC dc, HCURSOR cursor) {
   }
 
   uint32_t* mask_plane = mask_data.get();
-  scoped_ptr<DesktopFrame> image(
-      new BasicDesktopFrame(DesktopSize(width, height)));
+
+  scoped_array<uint32_t> color_data;
+  uint32_t* color_plane = NULL;
+  int color_stride = 0;
   bool has_alpha = false;
 
   if (is_color) {
-    image.reset(new BasicDesktopFrame(DesktopSize(width, height)));
     // Get the pixels from the color bitmap.
+    color_data.reset(new uint32_t[width * height]);
     if (!GetDIBits(dc,
                    scoped_color,
                    0,
                    height,
-                   image->data(),
+                   color_data.get(),
                    reinterpret_cast<BITMAPINFO*>(&bmi),
                    DIB_RGB_COLORS)) {
       LOG_F(LS_ERROR) << "Unable to get bitmap bits. Error = "
@@ -183,28 +188,30 @@ MouseCursor* CreateMouseCursorFromHCursor(HDC dc, HCURSOR cursor) {
       return NULL;
     }
 
+    color_plane = color_data.get();
+    color_stride = width;
+
     // GetDIBits() does not provide any indication whether the bitmap has alpha
     // channel, so we use HasAlphaChannel() below to find it out.
-    has_alpha = HasAlphaChannel(reinterpret_cast<uint32_t*>(image->data()),
-                                width, width, height);
+    if (!HasAlphaChannel(color_plane, color_stride, width, height, &has_alpha))
+      return NULL;
   } else {
     // For non-color cursors, the mask contains both an AND and an XOR mask and
     // the height includes both. Thus, the width is correct, but we need to
     // divide by 2 to get the correct mask height.
     height /= 2;
 
-    image.reset(new BasicDesktopFrame(DesktopSize(width, height)));
-
     // The XOR mask becomes the color bitmap.
-    memcpy(
-        image->data(), mask_plane + (width * height), image->stride() * width);
+    color_plane = mask_plane + (width * height);
+    color_stride = width;
   }
 
   // Reconstruct transparency from the mask if the color image does not has
   // alpha channel.
   if (!has_alpha) {
     bool add_outline = false;
-    uint32_t* dst = reinterpret_cast<uint32_t*>(image->data());
+    uint32_t* color = color_plane;
+    uint32_t* dst = color_plane;
     uint32_t* mask = mask_plane;
     for (int y = 0; y < height; y++) {
       for (int x = 0; x < width; x++) {
@@ -219,32 +226,36 @@ MouseCursor* CreateMouseCursorFromHCursor(HDC dc, HCURSOR cursor) {
         // with black. In this case, we also add an outline around the cursor
         // so that it is visible against a dark background.
         if (*mask == kPixelRgbWhite) {
-          if (*dst != 0) {
+          if (*color != 0) {
             add_outline = true;
             *dst = kPixelRgbaBlack;
           } else {
             *dst = kPixelRgbaTransparent;
           }
         } else {
-          *dst = kPixelRgbaBlack ^ *dst;
+          *dst = kPixelRgbaBlack ^ *color;
         }
 
+        ++color;
         ++dst;
         ++mask;
       }
     }
     if (add_outline) {
-      AddCursorOutline(
-          width, height, reinterpret_cast<uint32_t*>(image->data()));
+      AddCursorOutline(width, height, color_plane);
     }
   }
 
-  // Pre-multiply the resulting pixels since MouseCursor uses premultiplied
+  // Pre-multiply the resulting pixels since MouseCursorShape uses premultiplied
   // images.
-  AlphaMul(reinterpret_cast<uint32_t*>(image->data()), width, height);
+  AlphaMul(color_plane, width, height);
 
-  return new MouseCursor(
-      image.release(), DesktopVector(hotspot_x, hotspot_y));
+  scoped_ptr<MouseCursorShape> result(new MouseCursorShape());
+  result->data.assign(reinterpret_cast<char*>(color_plane),
+                      height * width * kBytesPerPixel);
+  result->size.set(width, height);
+  result->hotspot.set(hotspot_x, hotspot_y);
+  return result.release();
 }
 
 }  // namespace webrtc

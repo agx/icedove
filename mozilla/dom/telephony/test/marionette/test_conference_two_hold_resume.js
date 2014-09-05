@@ -15,7 +15,7 @@ function testConferenceHoldAndResume() {
   let inInfo = gInCallStrPool(inNumber);
 
   return Promise.resolve()
-    .then(() => gSetupConference([outNumber, inNumber]))
+    .then(() => gSetupConferenceTwoCalls(outNumber, inNumber))
     .then(calls => {
       [outCall, inCall] = calls;
     })

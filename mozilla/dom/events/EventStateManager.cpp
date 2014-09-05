@@ -557,18 +557,12 @@ EventStateManager::PreHandleEvent(nsPresContext* aPresContext,
     }
     break;
   }
+  case NS_POINTER_CANCEL:
+  {
+    GenerateMouseEnterExit(mouseEvent);
+    break;
+  }
   case NS_MOUSE_EXIT:
-    // If this is a remote frame, we receive NS_MOUSE_EXIT from the parent
-    // the mouse exits our content. Since the parent may update the cursor
-    // while the mouse is outside our frame, and since PuppetWidget caches the
-    // current cursor internally, re-entering our content (say from over a
-    // window edge) wont update the cursor if the cached value and the current
-    // cursor match. So when the mouse exits a remote frame, clear the cached
-    // widget cursor so a proper update will occur when the mouse re-enters.
-    if (XRE_GetProcessType() == GeckoProcessType_Content) {
-      ClearCachedWidgetCursor(mCurrentTarget);
-    }
-
     // If the event is not a top-level window exit, then it's not
     // really an exit --- we may have traversed widget boundaries but
     // we're still in our toplevel window.
@@ -1155,7 +1149,6 @@ CrossProcessSafeEvent(const WidgetEvent& aEvent)
     case NS_MOUSE_BUTTON_UP:
     case NS_MOUSE_MOVE:
     case NS_CONTEXTMENU:
-    case NS_MOUSE_EXIT:
       return true;
     default:
       return false;
@@ -1177,6 +1170,7 @@ CrossProcessSafeEvent(const WidgetEvent& aEvent)
 
 bool
 EventStateManager::HandleCrossProcessEvent(WidgetEvent* aEvent,
+                                           nsIFrame* aTargetFrame,
                                            nsEventStatus *aStatus) {
   if (*aStatus == nsEventStatus_eConsumeNoDefault ||
       aEvent->mFlags.mNoCrossProcessBoundaryForwarding ||
@@ -1440,7 +1434,7 @@ EventStateManager::FireContextClick()
         }
       }
 
-      nsIDocument* doc = mGestureDownContent->GetCrossShadowCurrentDoc();
+      nsIDocument* doc = mGestureDownContent->GetCurrentDoc();
       AutoHandlingUserInputStatePusher userInpStatePusher(true, &event, doc);
 
       // dispatch to DOM
@@ -2011,7 +2005,7 @@ EventStateManager::DoScrollZoom(nsIFrame* aTargetFrame,
       // positive adjustment to decrease zoom, negative to increase
       int32_t change = (adjustment > 0) ? -1 : 1;
 
-      if (Preferences::GetBool("browser.zoom.full") || content->OwnerDoc()->IsSyntheticDocument()) {
+      if (Preferences::GetBool("browser.zoom.full") || content->GetCurrentDoc()->IsSyntheticDocument()) {
         ChangeFullZoom(change);
       } else {
         ChangeTextSize(change);
@@ -2181,7 +2175,6 @@ EventStateManager::SendLineScrollEvent(nsIFrame* aTargetFrame,
   event.refPoint = aEvent->refPoint;
   event.widget = aEvent->widget;
   event.time = aEvent->time;
-  event.timeStamp = aEvent->timeStamp;
   event.modifiers = aEvent->modifiers;
   event.buttons = aEvent->buttons;
   event.isHorizontal = (aDeltaDirection == DELTA_DIRECTION_X);
@@ -2221,7 +2214,6 @@ EventStateManager::SendPixelScrollEvent(nsIFrame* aTargetFrame,
   event.refPoint = aEvent->refPoint;
   event.widget = aEvent->widget;
   event.time = aEvent->time;
-  event.timeStamp = aEvent->timeStamp;
   event.modifiers = aEvent->modifiers;
   event.buttons = aEvent->buttons;
   event.isHorizontal = (aDeltaDirection == DELTA_DIRECTION_X);
@@ -2668,6 +2660,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
   NS_ENSURE_ARG_POINTER(aStatus);
 
   bool dispatchedToContentProcess = HandleCrossProcessEvent(aEvent,
+                                                            aTargetFrame,
                                                             aStatus);
 
   mCurrentTarget = aTargetFrame;
@@ -2752,7 +2745,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
         // NOTE: The newFocus isn't editable that also means it's not in
         // designMode.  In designMode, all contents are not focusable.
         if (newFocus && !newFocus->IsEditable()) {
-          nsIDocument *doc = newFocus->GetCrossShadowCurrentDoc();
+          nsIDocument *doc = newFocus->GetCurrentDoc();
           if (doc && newFocus == doc->GetRootElement()) {
             nsIContent *bodyContent =
               nsLayoutUtils::GetEditableRootContentByContentEditable(doc);
@@ -2871,13 +2864,7 @@ EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       SetActiveManager(this, activeContent);
     }
     break;
-  case NS_POINTER_CANCEL: {
-    if(WidgetMouseEvent* mouseEvent = aEvent->AsMouseEvent()) {
-      GenerateMouseEnterExit(mouseEvent);
-    }
-    // This break was commented specially
-    // break;
-  }
+  case NS_POINTER_CANCEL:
   case NS_POINTER_UP: {
     WidgetPointerEvent* pointerEvent = aEvent->AsPointerEvent();
     // After UP/Cancel Touch pointers become invalid so we can remove relevant helper from Table
@@ -3342,19 +3329,6 @@ EventStateManager::UpdateCursor(nsPresContext* aPresContext,
   }
 }
 
-void
-EventStateManager::ClearCachedWidgetCursor(nsIFrame* aTargetFrame)
-{
-  if (!aTargetFrame) {
-    return;
-  }
-  nsIWidget* aWidget = aTargetFrame->GetNearestWidget();
-  if (!aWidget) {
-    return;
-  }
-  aWidget->ClearCachedCursor();
-}
-
 nsresult
 EventStateManager::SetCursor(int32_t aCursor, imgIContainer* aContainer,
                              bool aHaveHotspot,
@@ -3567,46 +3541,6 @@ EventStateManager::IsHandlingUserInput()
          (TimeStamp::Now() - sHandlingInputStart) <= timeout;
 }
 
-static void
-CreateMouseOrPointerWidgetEvent(WidgetMouseEvent* aMouseEvent,
-                                uint32_t aMessage,
-                                nsIContent* aRelatedContent,
-                                nsAutoPtr<WidgetMouseEvent>& aNewEvent)
-{
-  WidgetPointerEvent* sourcePointer = aMouseEvent->AsPointerEvent();
-  if (sourcePointer) {
-    PROFILER_LABEL("Input", "DispatchPointerEvent",
-      js::ProfileEntry::Category::EVENTS);
-
-    nsAutoPtr<WidgetPointerEvent> newPointerEvent;
-    newPointerEvent =
-      new WidgetPointerEvent(aMouseEvent->mFlags.mIsTrusted, aMessage,
-                             aMouseEvent->widget);
-    newPointerEvent->isPrimary = sourcePointer->isPrimary;
-    newPointerEvent->pointerId = sourcePointer->pointerId;
-    newPointerEvent->width = sourcePointer->width;
-    newPointerEvent->height = sourcePointer->height;
-    newPointerEvent->inputSource = sourcePointer->inputSource;
-    newPointerEvent->relatedTarget =
-      nsIPresShell::GetPointerCapturingContent(sourcePointer->pointerId)
-        ? nullptr
-        : aRelatedContent;
-    aNewEvent = newPointerEvent.forget();
-  } else {
-    aNewEvent =
-      new WidgetMouseEvent(aMouseEvent->mFlags.mIsTrusted, aMessage,
-                           aMouseEvent->widget, WidgetMouseEvent::eReal);
-    aNewEvent->relatedTarget = aRelatedContent;
-  }
-  aNewEvent->refPoint = aMouseEvent->refPoint;
-  aNewEvent->modifiers = aMouseEvent->modifiers;
-  aNewEvent->button = aMouseEvent->button;
-  aNewEvent->buttons = aMouseEvent->buttons;
-  aNewEvent->pressure = aMouseEvent->pressure;
-  aNewEvent->pluginEvent = aMouseEvent->pluginEvent;
-  aNewEvent->inputSource = aMouseEvent->inputSource;
-}
-
 nsIFrame*
 EventStateManager::DispatchMouseOrPointerEvent(WidgetMouseEvent* aMouseEvent,
                                                uint32_t aMessage,
@@ -3632,50 +3566,54 @@ EventStateManager::DispatchMouseOrPointerEvent(WidgetMouseEvent* aMouseEvent,
     return mPresContext->GetPrimaryFrameFor(content);
   }
 
-  mCurrentTargetContent = nullptr;
-
-  if (!aTargetContent) {
-    return nullptr;
+  nsEventStatus status = nsEventStatus_eIgnore;
+  nsAutoPtr<WidgetMouseEvent> event;
+  WidgetPointerEvent* sourcePointer = aMouseEvent->AsPointerEvent();
+  if (sourcePointer) {
+    PROFILER_LABEL("Input", "DispatchPointerEvent");
+    nsAutoPtr<WidgetPointerEvent> newPointerEvent;
+    newPointerEvent =
+      new WidgetPointerEvent(aMouseEvent->mFlags.mIsTrusted, aMessage,
+                             aMouseEvent->widget);
+    newPointerEvent->isPrimary = sourcePointer->isPrimary;
+    newPointerEvent->pointerId = sourcePointer->pointerId;
+    newPointerEvent->width = sourcePointer->width;
+    newPointerEvent->height = sourcePointer->height;
+    newPointerEvent->inputSource = sourcePointer->inputSource;
+    newPointerEvent->relatedTarget = nsIPresShell::GetPointerCapturingContent(sourcePointer->pointerId)
+                                       ? nullptr
+                                       : aRelatedContent;
+    event = newPointerEvent.forget();
+  } else {
+    PROFILER_LABEL("Input", "DispatchMouseEvent");
+    event =
+      new WidgetMouseEvent(aMouseEvent->mFlags.mIsTrusted, aMessage,
+                           aMouseEvent->widget, WidgetMouseEvent::eReal);
+    event->relatedTarget = aRelatedContent;
   }
-
-  nsAutoPtr<WidgetMouseEvent> dispatchEvent;
-  CreateMouseOrPointerWidgetEvent(aMouseEvent, aMessage,
-                                  aRelatedContent, dispatchEvent);
+  event->refPoint = aMouseEvent->refPoint;
+  event->modifiers = aMouseEvent->modifiers;
+  event->button = aMouseEvent->button;
+  event->buttons = aMouseEvent->buttons;
+  event->pressure = aMouseEvent->pressure;
+  event->pluginEvent = aMouseEvent->pluginEvent;
+  event->inputSource = aMouseEvent->inputSource;
 
   nsWeakFrame previousTarget = mCurrentTarget;
+
   mCurrentTargetContent = aTargetContent;
 
   nsIFrame* targetFrame = nullptr;
+  if (aTargetContent) {
+    ESMEventCB callback(aTargetContent);
+    EventDispatcher::Dispatch(aTargetContent, mPresContext, event, nullptr,
+                              &status, &callback);
 
-  if (aMouseEvent->AsMouseEvent()) {
-    PROFILER_LABEL("Input", "DispatchMouseEvent",
-      js::ProfileEntry::Category::EVENTS);
-  }
-
-  nsEventStatus status = nsEventStatus_eIgnore;
-  ESMEventCB callback(aTargetContent);
-  EventDispatcher::Dispatch(aTargetContent, mPresContext, dispatchEvent, nullptr,
-                            &status, &callback);
-
-  if (mPresContext) {
-    // Although the primary frame was checked in event callback, it may not be
-    // the same object after event dispatch and handling, so refetch it.
-    targetFrame = mPresContext->GetPrimaryFrameFor(aTargetContent);
-
-    // If we are leaving remote content, dispatch a mouse exit event to the
-    // remote frame.
-    if (aMessage == NS_MOUSE_EXIT_SYNTH && IsRemoteTarget(aTargetContent)) {
-      // For remote content, send a normal widget mouse exit event.
-      nsAutoPtr<WidgetMouseEvent> remoteEvent;
-      CreateMouseOrPointerWidgetEvent(aMouseEvent, NS_MOUSE_EXIT,
-                                      aRelatedContent, remoteEvent);
-
-      // mCurrentTarget is set to the new target, so we must reset it to the
-      // old target and then dispatch a cross-process event. (mCurrentTarget
-      // will be set back below.) HandleCrossProcessEvent will query for the
-      // proper target via GetEventTarget which will return mCurrentTarget.
-      mCurrentTarget = targetFrame;
-      HandleCrossProcessEvent(remoteEvent, &status);
+    // Although the primary frame was checked in event callback, 
+    // it may not be the same object after event dispatching and handling.
+    // So we need to refetch it.
+    if (mPresContext) {
+      targetFrame = mPresContext->GetPrimaryFrameFor(aTargetContent);
     }
   }
 
@@ -4359,7 +4297,6 @@ EventStateManager::CheckForAndDispatchClick(nsPresContext* aPresContext,
     event.modifiers = aEvent->modifiers;
     event.buttons = aEvent->buttons;
     event.time = aEvent->time;
-    event.timeStamp = aEvent->timeStamp;
     event.mFlags.mNoContentDispatch = notDispatchToContents;
     event.button = aEvent->button;
     event.inputSource = aEvent->inputSource;
@@ -4633,8 +4570,7 @@ EventStateManager::SetContentState(nsIContent* aContent, EventStates aState)
         newHover = aContent;
       } else {
         NS_ASSERTION(!aContent ||
-                     aContent->GetCrossShadowCurrentDoc() ==
-                       mPresContext->PresShell()->GetDocument(),
+                     aContent->GetCurrentDoc() == mPresContext->PresShell()->GetDocument(),
                      "Unexpected document");
         nsIFrame *frame = aContent ? aContent->GetPrimaryFrame() : nullptr;
         if (frame && nsLayoutUtils::IsViewportScrollbarFrame(frame)) {

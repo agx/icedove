@@ -26,11 +26,12 @@ class LInstruction;
 class C1Spewer
 {
     MIRGraph *graph;
+    HandleScript script;
     FILE *spewout_;
 
   public:
     C1Spewer()
-      : graph(nullptr), spewout_(nullptr)
+      : graph(nullptr), script(NullPtr()), spewout_(nullptr)
     { }
 
     bool init(const char *path);

@@ -191,7 +191,7 @@ HUD_SERVICE.prototype =
       client.connect(() =>
         client.listTabs((aResponse) => {
           // Add Global Process debugging...
-          let globals = Cu.cloneInto(aResponse, {});
+          let globals = JSON.parse(JSON.stringify(aResponse));
           delete globals.tabs;
           delete globals.selected;
           // ...only if there are appropriate actors (a 'from' property will

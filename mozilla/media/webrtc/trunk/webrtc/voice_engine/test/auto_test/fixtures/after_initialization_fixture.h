@@ -32,22 +32,27 @@ class LoopBackTransport : public webrtc::Transport {
     unsigned int id;
     thread_->Start(id);
   }
+  ~LoopBackTransport() {
+    thread_->Stop();
+  }
 
-  ~LoopBackTransport() { thread_->Stop(); }
-
-  virtual int SendPacket(int channel, const void* data, int len) {
+  virtual int SendPacket(int channel, const void *data, int len) {
     StorePacket(Packet::Rtp, channel, data, len);
     return len;
   }
 
-  virtual int SendRTCPPacket(int channel, const void* data, int len) {
+  virtual int SendRTCPPacket(int channel, const void *data, int len) {
     StorePacket(Packet::Rtcp, channel, data, len);
     return len;
   }
 
+
  private:
   struct Packet {
-    enum Type { Rtp, Rtcp, } type;
+    enum Type {
+      Rtp,
+      Rtcp,
+    } type;
 
     Packet() : len(0) {}
     Packet(Type type, int channel, const void* data, int len)
@@ -62,11 +67,10 @@ class LoopBackTransport : public webrtc::Transport {
   };
 
   void StorePacket(Packet::Type type, int channel, const void* data, int len) {
-    webrtc::CriticalSectionScoped lock(crit_.get());
+    webrtc::CriticalSectionScoped(crit_.get());
     packet_queue_.push_back(Packet(type, channel, data, len));
     packet_event_->Set();
   }
-
   static bool NetworkProcess(void* transport) {
     return static_cast<LoopBackTransport*>(transport)->SendPackets();
   }
@@ -108,8 +112,8 @@ class LoopBackTransport : public webrtc::Transport {
   webrtc::scoped_ptr<webrtc::CriticalSectionWrapper> crit_;
   webrtc::scoped_ptr<webrtc::EventWrapper> packet_event_;
   webrtc::scoped_ptr<webrtc::ThreadWrapper> thread_;
-  std::deque<Packet> packet_queue_ GUARDED_BY(crit_.get());
-  webrtc::VoENetwork* const voe_network_;
+  std::deque<Packet> packet_queue_;
+  webrtc::VoENetwork* voe_network_;
 };
 
 // This fixture initializes the voice engine in addition to the work
@@ -121,7 +125,6 @@ class AfterInitializationFixture : public BeforeInitializationFixture {
  public:
   AfterInitializationFixture();
   virtual ~AfterInitializationFixture();
-
  protected:
   webrtc::scoped_ptr<TestErrorObserver> error_observer_;
 };

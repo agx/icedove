@@ -60,10 +60,32 @@ struct ElementAnimations MOZ_FINAL
   ElementAnimations(mozilla::dom::Element *aElement, nsIAtom *aElementProperty,
                     nsAnimationManager *aAnimationManager, TimeStamp aNow);
 
-  // After calling this, be sure to call CheckNeedsRefresh on the animation
-  // manager afterwards.
-  void EnsureStyleRuleFor(TimeStamp aRefreshTime, bool aIsThrottled);
-  void GetEventsAt(TimeStamp aRefreshTime, EventArray &aEventsToDispatch);
+  // This function takes as input the start time, duration, and direction of an
+  // animation and returns the position in the current iteration.  Note that
+  // this only works when we know that the animation is currently running.
+  // This way of calling the function can be used from the compositor.  Note
+  // that if the animation has not started yet, has already ended, or is paused,
+  // it should not be run from the compositor.  When this function is called
+  // from the main thread, we need the actual StyleAnimation* in order to
+  // get correct animation-fill behavior and to fire animation events.
+  // This function returns -1 for the position if the animation should not be
+  // run (because it is not currently active and has no fill behavior), but
+  // only does so if aAnimation is non-null; with a null aAnimation it is an
+  // error to give aElapsedDuration < 0, and fill-forwards is assumed.
+  // After calling GetPositionInIteration with non-null aAnimation and aEa, be
+  // sure to call CheckNeedsRefresh on the animation manager afterwards.
+  static double GetPositionInIteration(TimeDuration aElapsedDuration,
+                                       TimeDuration aIterationDuration,
+                                       double aIterationCount,
+                                       uint32_t aDirection,
+                                       mozilla::StyleAnimation* aAnimation =
+                                         nullptr,
+                                       ElementAnimations* aEa = nullptr,
+                                       EventArray* aEventsToDispatch = nullptr);
+
+  void EnsureStyleRuleFor(TimeStamp aRefreshTime,
+                          EventArray &aEventsToDispatch,
+                          bool aIsThrottled);
 
   bool IsForElement() const { // rather than for a pseudo-element
     return mElementProperty == nsGkAtoms::animationsProperty;
@@ -104,6 +126,8 @@ struct ElementAnimations MOZ_FINAL
   // indefinitely into the future (because all of our animations are
   // either completed or paused).  May be invalidated by a style change.
   bool mNeedsRefreshes;
+
+  InfallibleTArray<mozilla::StyleAnimation> mAnimations;
 };
 
 class nsAnimationManager MOZ_FINAL
@@ -212,7 +236,7 @@ protected:
 
 private:
   void BuildAnimations(nsStyleContext* aStyleContext,
-                       mozilla::ElementAnimationPtrArray& aAnimations);
+                       InfallibleTArray<mozilla::StyleAnimation>& aAnimations);
   bool BuildSegment(InfallibleTArray<mozilla::AnimationPropertySegment>&
                       aSegments,
                     nsCSSProperty aProperty, const nsAnimation& aAnimation,

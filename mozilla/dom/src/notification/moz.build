@@ -5,8 +5,6 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 EXTRA_COMPONENTS += [
-    'ChromeNotifications.js',
-    'ChromeNotifications.manifest',
     'NotificationStorage.js',
     'NotificationStorage.manifest',
 ]
@@ -36,4 +34,3 @@ LOCAL_INCLUDES += [
     '/dom/ipc',
 ]
 
-XPCSHELL_TESTS_MANIFESTS += ['test/unit/xpcshell.ini']

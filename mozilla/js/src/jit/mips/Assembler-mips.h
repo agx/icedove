@@ -89,7 +89,7 @@ class ABIArgGenerator
 
     uint32_t stackBytesConsumedSoFar() const {
         if (usedArgSlots_ <= 4)
-            return ShadowStackSpace;
+            return 4 * sizeof(intptr_t);
 
         return usedArgSlots_ * sizeof(intptr_t);
     }
@@ -106,28 +106,13 @@ static MOZ_CONSTEXPR_VAR FloatRegister InvalidFloatReg = { FloatRegisters::inval
 static MOZ_CONSTEXPR_VAR Register JSReturnReg_Type = v1;
 static MOZ_CONSTEXPR_VAR Register JSReturnReg_Data = v0;
 static MOZ_CONSTEXPR_VAR Register StackPointer = sp;
-static MOZ_CONSTEXPR_VAR Register FramePointer = InvalidReg;
+static MOZ_CONSTEXPR_VAR Register FramePointer = fp;
 static MOZ_CONSTEXPR_VAR Register ReturnReg = v0;
 static MOZ_CONSTEXPR_VAR FloatRegister ReturnFloatReg = { FloatRegisters::f0 };
 static MOZ_CONSTEXPR_VAR FloatRegister ScratchFloatReg = { FloatRegisters::f18 };
 static MOZ_CONSTEXPR_VAR FloatRegister SecondScratchFloatReg = { FloatRegisters::f16 };
 
 static MOZ_CONSTEXPR_VAR FloatRegister NANReg = { FloatRegisters::f30 };
-
-// Registers used in the GenerateFFIIonExit Enable Activation block.
-static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegCallee = t0;
-static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegE0 = a0;
-static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegE1 = a1;
-static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegE2 = a2;
-static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegE3 = a3;
-
-// Registers used in the GenerateFFIIonExit Disable Activation block.
-// None of these may be the second scratch register (t8).
-static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegReturnData = JSReturnReg_Data;
-static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegReturnType = JSReturnReg_Type;
-static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegD0 = a0;
-static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegD1 = a1;
-static MOZ_CONSTEXPR_VAR Register AsmJSIonExitRegD2 = a2;
 
 static MOZ_CONSTEXPR_VAR FloatRegister f0  = {FloatRegisters::f0};
 static MOZ_CONSTEXPR_VAR FloatRegister f2  = {FloatRegisters::f2};
@@ -153,7 +138,8 @@ static const uint32_t CodeAlignment = 4;
 static const bool StackKeptAligned = true;
 // NativeFrameSize is the size of return adress on stack in AsmJS functions.
 static const uint32_t NativeFrameSize = sizeof(void*);
-static const uint32_t AlignmentAtAsmJSPrologue = sizeof(void*);
+static const uint32_t AlignmentAtPrologue = 0;
+static const uint32_t AlignmentMidPrologue = NativeFrameSize;
 
 static const Scale ScalePointer = TimesFour;
 
@@ -185,7 +171,7 @@ static const uint32_t RDBits = 5;
 static const uint32_t SAShift = 6;
 static const uint32_t SABits = 5;
 static const uint32_t FunctionShift = 0;
-static const uint32_t FunctionBits = 6;
+static const uint32_t FunctionBits = 5;
 static const uint32_t Imm16Shift = 0;
 static const uint32_t Imm16Bits = 16;
 static const uint32_t Imm26Shift = 0;
@@ -193,20 +179,6 @@ static const uint32_t Imm26Bits = 26;
 static const uint32_t Imm28Shift = 0;
 static const uint32_t Imm28Bits = 28;
 static const uint32_t ImmFieldShift = 2;
-static const uint32_t FRBits = 5;
-static const uint32_t FRShift = 21;
-static const uint32_t FSShift = 11;
-static const uint32_t FSBits = 5;
-static const uint32_t FTShift = 16;
-static const uint32_t FTBits = 5;
-static const uint32_t FDShift = 6;
-static const uint32_t FDBits = 5;
-static const uint32_t FCccShift = 8;
-static const uint32_t FCccBits = 3;
-static const uint32_t FBccShift = 18;
-static const uint32_t FBccBits = 3;
-static const uint32_t FBtrueShift = 16;
-static const uint32_t FBtrueBits = 1;
 static const uint32_t FccMask = 0x7;
 static const uint32_t FccShift = 2;
 
@@ -313,7 +285,6 @@ enum RSField {
     rs_s     = 16 << RSShift,
     rs_d     = 17 << RSShift,
     rs_w     = 20 << RSShift,
-    rs_l     = 21 << RSShift,
     rs_ps    = 22 << RSShift
 };
 
@@ -362,13 +333,6 @@ enum FunctionField {
     ff_slt         = 42,
     ff_sltu        = 43,
 
-    ff_tge         = 48,
-    ff_tgeu        = 49,
-    ff_tlt         = 50,
-    ff_tltu        = 51,
-    ff_teq         = 52,
-    ff_tne         = 54,
-
     // special2 encoding of function field.
     ff_mul         = 2,
     ff_clz         = 32,
@@ -388,11 +352,6 @@ enum FunctionField {
     ff_mov_fmt     = 6,
     ff_neg_fmt     = 7,
 
-    ff_round_l_fmt = 8,
-    ff_trunc_l_fmt = 9,
-    ff_ceil_l_fmt  = 10,
-    ff_floor_l_fmt = 11,
-
     ff_round_w_fmt = 12,
     ff_trunc_w_fmt = 13,
     ff_ceil_w_fmt  = 14,
@@ -401,8 +360,6 @@ enum FunctionField {
     ff_cvt_s_fmt   = 32,
     ff_cvt_d_fmt   = 33,
     ff_cvt_w_fmt   = 36,
-    ff_cvt_l_fmt   = 37,
-    ff_cvt_ps_s    = 38,
 
     ff_c_f_fmt     = 48,
     ff_c_un_fmt    = 49,
@@ -412,11 +369,6 @@ enum FunctionField {
     ff_c_ult_fmt   = 53,
     ff_c_ole_fmt   = 54,
     ff_c_ule_fmt   = 55,
-
-    ff_madd_s      = 32,
-    ff_madd_d      = 33,
-
-    ff_null        = 0
 };
 
 class MacroAssemblerMIPS;
@@ -429,21 +381,21 @@ class BOffImm16
 
   public:
     uint32_t encode() {
-        MOZ_ASSERT(!isInvalid());
+        JS_ASSERT(!isInvalid());
         return data;
     }
     int32_t decode() {
-        MOZ_ASSERT(!isInvalid());
+        JS_ASSERT(!isInvalid());
         return (int32_t(data << 18) >> 16) + 4;
     }
 
     explicit BOffImm16(int offset)
       : data ((offset - 4) >> 2 & Imm16Mask)
     {
-        MOZ_ASSERT((offset & 0x3) == 0);
-        MOZ_ASSERT(IsInRange(offset));
+        JS_ASSERT((offset & 0x3) == 0);
+        JS_ASSERT(isInRange(offset));
     }
-    static bool IsInRange(int offset) {
+    static bool isInRange(int offset) {
         if ((offset - 4) < (INT16_MIN << 2))
             return false;
         if ((offset - 4) > (INT16_MAX << 2))
@@ -470,21 +422,21 @@ class JOffImm26
 
   public:
     uint32_t encode() {
-        MOZ_ASSERT(!isInvalid());
+        JS_ASSERT(!isInvalid());
         return data;
     }
     int32_t decode() {
-        MOZ_ASSERT(!isInvalid());
+        JS_ASSERT(!isInvalid());
         return (int32_t(data << 8) >> 6) + 4;
     }
 
     explicit JOffImm26(int offset)
       : data ((offset - 4) >> 2 & Imm26Mask)
     {
-        MOZ_ASSERT((offset & 0x3) == 0);
-        MOZ_ASSERT(IsInRange(offset));
+        JS_ASSERT((offset & 0x3) == 0);
+        JS_ASSERT(isInRange(offset));
     }
-    static bool IsInRange(int offset) {
+    static bool isInRange(int offset) {
         if ((offset - 4) < -536870912)
             return false;
         if ((offset - 4) > 536870908)
@@ -521,16 +473,16 @@ class Imm16
     uint32_t decodeUnsigned() {
         return value;
     }
-    static bool IsInSignedRange(int32_t imm) {
+    static bool isInSignedRange(int32_t imm) {
         return imm >= INT16_MIN  && imm <= INT16_MAX;
     }
-    static bool IsInUnsignedRange(uint32_t imm) {
+    static bool isInUnsignedRange(uint32_t imm) {
         return imm <= UINT16_MAX ;
     }
-    static Imm16 Lower (Imm32 imm) {
+    static Imm16 lower (Imm32 imm) {
         return Imm16(imm.value & 0xffff);
     }
-    static Imm16 Upper (Imm32 imm) {
+    static Imm16 upper (Imm32 imm) {
         return Imm16((imm.value >> 16) & 0xffff);
     }
 };
@@ -575,35 +527,35 @@ class Operand
     }
 
     Register toReg() const {
-        MOZ_ASSERT(tag == REG);
+        JS_ASSERT(tag == REG);
         return Register::FromCode(reg);
     }
 
     FloatRegister toFReg() const {
-        MOZ_ASSERT(tag == FREG);
+        JS_ASSERT(tag == FREG);
         return FloatRegister::FromCode(reg);
     }
 
     void toAddr(Register *r, Imm32 *dest) const {
-        MOZ_ASSERT(tag == MEM);
+        JS_ASSERT(tag == MEM);
         *r = Register::FromCode(reg);
         *dest = Imm32(offset);
     }
     Address toAddress() const {
-        MOZ_ASSERT(tag == MEM);
+        JS_ASSERT(tag == MEM);
         return Address(Register::FromCode(reg), offset);
     }
     int32_t disp() const {
-        MOZ_ASSERT(tag == MEM);
+        JS_ASSERT(tag == MEM);
         return offset;
     }
 
     int32_t base() const {
-        MOZ_ASSERT(tag == MEM);
+        JS_ASSERT(tag == MEM);
         return reg;
     }
     Register baseReg() const {
-        MOZ_ASSERT(tag == MEM);
+        JS_ASSERT(tag == MEM);
         return Register::FromCode(reg);
     }
 };
@@ -724,11 +676,14 @@ class Assembler : public AssemblerShared
     CompactBufferWriter relocations_;
     CompactBufferWriter preBarriers_;
 
+    bool enoughMemory_;
+
     MIPSBuffer m_buffer;
 
   public:
     Assembler()
-      : m_buffer(),
+      : enoughMemory_(true),
+        m_buffer(),
         isFinished(false)
     { }
 
@@ -743,7 +698,7 @@ class Assembler : public AssemblerShared
 
     // As opposed to x86/x64 version, the data relocation has to be executed
     // before to recover the pointer, and not after.
-    void writeDataRelocation(ImmGCPtr ptr) {
+    void writeDataRelocation(const ImmGCPtr &ptr) {
         if (ptr.value)
             dataRelocations_.writeUnsigned(nextOffset().getOffset());
     }
@@ -752,7 +707,7 @@ class Assembler : public AssemblerShared
     }
 
   public:
-    static uintptr_t GetPointer(uint8_t *);
+    static uintptr_t getPointer(uint8_t *);
 
     bool oom() const;
 
@@ -794,7 +749,7 @@ class Assembler : public AssemblerShared
     BufferOffset writeInst(uint32_t x, uint32_t *dest = nullptr);
     // A static variant for the cases where we don't want to have an assembler
     // object at all. Normally, you would use the dummy (nullptr) object.
-    static void WriteInstStatic(uint32_t x, uint32_t *dest);
+    static void writeInstStatic(uint32_t x, uint32_t *dest);
 
   public:
     BufferOffset align(int alignment);
@@ -901,7 +856,7 @@ class Assembler : public AssemblerShared
     // This is used to access the odd regiter form the pair of single
     // precision registers that make one double register.
     FloatRegister getOddPair(FloatRegister reg) {
-        MOZ_ASSERT(reg.code() % 2 == 0);
+        JS_ASSERT(reg.code() % 2 == 0);
         return FloatRegister::FromCode(reg.code() + 1);
     }
 
@@ -936,7 +891,6 @@ class Assembler : public AssemblerShared
 
     BufferOffset as_abss(FloatRegister fd, FloatRegister fs);
     BufferOffset as_absd(FloatRegister fd, FloatRegister fs);
-    BufferOffset as_negs(FloatRegister fd, FloatRegister fs);
     BufferOffset as_negd(FloatRegister fd, FloatRegister fs);
 
     BufferOffset as_muls(FloatRegister fd, FloatRegister fs, FloatRegister ft);
@@ -1015,51 +969,47 @@ class Assembler : public AssemblerShared
     void flushBuffer() {
     }
 
-    static uint32_t PatchWrite_NearCallSize();
-    static uint32_t NopSize() { return 4; }
+    static uint32_t patchWrite_NearCallSize();
+    static uint32_t nopSize() { return 4; }
 
-    static uint32_t ExtractLuiOriValue(Instruction *inst0, Instruction *inst1);
-    static void UpdateLuiOriValue(Instruction *inst0, Instruction *inst1, uint32_t value);
-    static void WriteLuiOriInstructions(Instruction *inst, Instruction *inst1,
+    static uint32_t extractLuiOriValue(Instruction *inst0, Instruction *inst1);
+    static void updateLuiOriValue(Instruction *inst0, Instruction *inst1, uint32_t value);
+    static void writeLuiOriInstructions(Instruction *inst, Instruction *inst1,
                                         Register reg, uint32_t value);
 
-    static void PatchWrite_NearCall(CodeLocationLabel start, CodeLocationLabel toCall);
-    static void PatchDataWithValueCheck(CodeLocationLabel label, PatchedImmPtr newValue,
+    static void patchWrite_NearCall(CodeLocationLabel start, CodeLocationLabel toCall);
+    static void patchDataWithValueCheck(CodeLocationLabel label, PatchedImmPtr newValue,
                                         PatchedImmPtr expectedValue);
-    static void PatchDataWithValueCheck(CodeLocationLabel label, ImmPtr newValue,
+    static void patchDataWithValueCheck(CodeLocationLabel label, ImmPtr newValue,
                                         ImmPtr expectedValue);
-    static void PatchWrite_Imm32(CodeLocationLabel label, Imm32 imm);
-
-    static void PatchInstructionImmediate(uint8_t *code, PatchedImmPtr imm);
-
-    static uint32_t AlignDoubleArg(uint32_t offset) {
+    static void patchWrite_Imm32(CodeLocationLabel label, Imm32 imm);
+    static uint32_t alignDoubleArg(uint32_t offset) {
         return (offset + 1U) &~ 1U;
     }
 
-    static uint8_t *NextInstruction(uint8_t *instruction, uint32_t *count = nullptr);
+    static uint8_t *nextInstruction(uint8_t *instruction, uint32_t *count = nullptr);
 
     static void ToggleToJmp(CodeLocationLabel inst_);
     static void ToggleToCmp(CodeLocationLabel inst_);
 
     static void ToggleCall(CodeLocationLabel inst_, bool enabled);
 
-    static void UpdateBoundsCheck(uint32_t logHeapSize, Instruction *inst);
+    static void updateBoundsCheck(uint32_t logHeapSize, Instruction *inst);
     void processCodeLabels(uint8_t *rawCode);
-    static int32_t ExtractCodeLabelOffset(uint8_t *code);
 
     bool bailed() {
         return m_buffer.bail();
     }
 }; // Assembler
 
-// sll zero, zero, 0
-const uint32_t NopInst = 0x00000000;
-
 // An Instruction is a structure for both encoding and decoding any and all
 // MIPS instructions.
 class Instruction
 {
   protected:
+    // sll zero, zero, 0
+    static const uint32_t NopInst = 0x00000000;
+
     uint32_t data;
 
     // Standard constructor
@@ -1277,7 +1227,7 @@ GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register *out)
 {
     // NOTE: We can't properly determine which regs are used if there are
     // float arguments. If this is needed, we will have to guess.
-    MOZ_ASSERT(usedFloatArgs == 0);
+    JS_ASSERT(usedFloatArgs == 0);
 
     if (GetIntArgReg(usedIntArgs, out))
         return true;
@@ -1294,7 +1244,7 @@ GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register *out)
 static inline uint32_t
 GetArgStackDisp(uint32_t usedArgSlots)
 {
-    MOZ_ASSERT(usedArgSlots >= NumIntArgRegs);
+    JS_ASSERT(usedArgSlots >= NumIntArgRegs);
     // Even register arguments have place reserved on stack.
     return usedArgSlots * sizeof(intptr_t);
 }

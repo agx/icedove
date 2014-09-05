@@ -279,6 +279,9 @@ function run_test() {
     assert.equal(e.toString().split("\n")[0], "AssertionError: oh no - 1 == 2")
   }
 
+  // Export Assert.jsm methods to become globally accessible.
+  export_assertions();
+
   // Test XPCShell-test integration:
   ok(true, "OK, this went well");
   deepEqual(/a/g, /a/g, "deep equal should work on RegExp");

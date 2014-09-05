@@ -25,12 +25,6 @@ FMRadioParent::~FMRadioParent()
   IFMRadioService::Singleton()->RemoveObserver(this);
 }
 
-void
-FMRadioParent::ActorDestroy(ActorDestroyReason aWhy)
-{
-  // Implement me! Bug 1005146
-}
-
 bool
 FMRadioParent::RecvGetStatusInfo(StatusInfo* aStatusInfo)
 {

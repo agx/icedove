@@ -133,7 +133,7 @@ interface MozIcc : EventTarget
    *         e.g. {lockType: "pin", enabled: true}.
    */
   [Throws]
-  DOMRequest getCardLock(DOMString lockType);
+  nsISupports getCardLock(DOMString lockType);
 
   /**
    * Unlock a card lock.
@@ -273,7 +273,7 @@ interface MozIcc : EventTarget
    *     }
    */
   [Throws]
-  DOMRequest unlockCardLock(any info);
+  nsISupports unlockCardLock(any info);
 
   /**
    * Modify the state of a card lock.
@@ -327,7 +327,7 @@ interface MozIcc : EventTarget
    *     }
    */
   [Throws]
-  DOMRequest setCardLock(any info);
+  nsISupports setCardLock(any info);
 
   /**
    * Retrieve the number of remaining tries for unlocking the card.
@@ -342,7 +342,7 @@ interface MozIcc : EventTarget
    *         lock. For any other lock type, the result is undefined.
    */
   [Throws]
-  DOMRequest getCardLockRetryCount(DOMString lockType);
+  nsISupports getCardLockRetryCount(DOMString lockType);
 
   // Integrated Circuit Card Phonebook Interfaces.
 
@@ -353,12 +353,11 @@ interface MozIcc : EventTarget
    *        One of type as below,
    *        - 'adn': Abbreviated Dialling Number.
    *        - 'fdn': Fixed Dialling Number.
-   *        - 'sdn': Service Dialling Number.
    *
    * @return a DOMRequest.
    */
   [Throws]
-  DOMRequest readContacts(DOMString contactType);
+  nsISupports readContacts(DOMString contactType);
 
   /**
    * Update ICC Phonebook contact.
@@ -375,7 +374,7 @@ interface MozIcc : EventTarget
    * @return a DOMRequest.
    */
   [Throws]
-  DOMRequest updateContact(DOMString contactType,
+  nsISupports updateContact(DOMString contactType,
                            any contact,
                            optional DOMString? pin2 = null);
 
@@ -401,7 +400,7 @@ interface MozIcc : EventTarget
    *         if available or null.
    */
   [Throws]
-  DOMRequest iccOpenChannel(DOMString aid);
+  nsISupports iccOpenChannel(DOMString aid);
 
   /**
    * Interface, used to communicate with an applet through the
@@ -417,7 +416,7 @@ interface MozIcc : EventTarget
    *         The request's result will be response APDU.
    */
   [Throws]
-  DOMRequest iccExchangeAPDU(long channel, any apdu);
+  nsISupports iccExchangeAPDU(long channel, any apdu);
 
   /**
    * Send request to close the selected logical channel identified by its
@@ -429,7 +428,7 @@ interface MozIcc : EventTarget
    * @return a DOMRequest.
    */
   [Throws]
-  DOMRequest iccCloseChannel(long channel);
+  nsISupports iccCloseChannel(long channel);
 
   // Integrated Circuit Card Helpers.
 
@@ -451,5 +450,5 @@ interface MozIcc : EventTarget
    *       B2G RIL: use ipdl as IPC in MozIccManager
    */
   [Throws]
-  DOMRequest matchMvno(DOMString mvnoType, DOMString matchData);
+  nsISupports matchMvno(DOMString mvnoType, DOMString matchData);
 };

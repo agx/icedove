@@ -433,7 +433,6 @@ UpdateParser.prototype = {
   onLoad: function UP_onLoad() {
     let request = this.request;
     this.request = null;
-    this._doneAt = new Error("place holder");
 
     let requireBuiltIn = true;
     try {
@@ -479,7 +478,7 @@ UpdateParser.prototype = {
         results = parseRDFManifest(this.id, this.updateKey, request);
       }
       catch (e) {
-        logger.warn("onUpdateCheckComplete failed to parse RDF manifest", e);
+        logger.warn(e);
         this.notifyError(AddonUpdateChecker.ERROR_PARSE_ERROR);
         return;
       }
@@ -490,9 +489,6 @@ UpdateParser.prototype = {
         catch (e) {
           logger.warn("onUpdateCheckComplete notification failed", e);
         }
-      }
-      else {
-        logger.warn("onUpdateCheckComplete may not properly cancel", new Error("stack marker"));
       }
       return;
     }
@@ -506,7 +502,6 @@ UpdateParser.prototype = {
    */
   onTimeout: function() {
     this.request = null;
-    this._doneAt = new Error("Timed out");
     logger.warn("Request for " + this.url + " timed out");
     this.notifyError(AddonUpdateChecker.ERROR_TIMEOUT);
   },
@@ -535,7 +530,6 @@ UpdateParser.prototype = {
     }
 
     this.request = null;
-    this._doneAt = new Error("UP_onError");
 
     this.notifyError(AddonUpdateChecker.ERROR_DOWNLOAD_ERROR);
   },
@@ -558,13 +552,8 @@ UpdateParser.prototype = {
    * Called to cancel an in-progress update check.
    */
   cancel: function UP_cancel() {
-    if (!this.request) {
-      logger.error("Trying to cancel already-complete request", this._doneAt);
-      return;
-    }
     this.request.abort();
     this.request = null;
-    this._doneAt = new Error("UP_cancel");
     this.notifyError(AddonUpdateChecker.ERROR_CANCELLED);
   }
 };

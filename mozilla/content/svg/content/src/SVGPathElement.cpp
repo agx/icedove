@@ -47,16 +47,6 @@ SVGPathElement::SVGPathElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
 }
 
 //----------------------------------------------------------------------
-// memory reporting methods
-
-size_t
-SVGPathElement::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
-{
-  return SVGPathElementBase::SizeOfExcludingThis(aMallocSizeOf) +
-         mD.SizeOfExcludingThis(aMallocSizeOf);
-}
-
-//----------------------------------------------------------------------
 // nsIDOMNode methods
 
 NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGPathElement)

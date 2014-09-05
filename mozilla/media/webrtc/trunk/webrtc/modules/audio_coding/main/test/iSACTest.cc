@@ -86,13 +86,16 @@ int16_t SetISAConfig(ACMTestISACConfig& isacConfig, AudioCodingModule* acm,
   return 0;
 }
 
-ISACTest::ISACTest(int testMode, const Config& config)
-    : _acmA(config.Get<AudioCodingModuleFactory>().Create(1)),
-      _acmB(config.Get<AudioCodingModuleFactory>().Create(2)),
+ISACTest::ISACTest(int testMode)
+    : _acmA(AudioCodingModule::Create(1)),
+      _acmB(AudioCodingModule::Create(2)),
       _testMode(testMode) {
 }
 
-ISACTest::~ISACTest() {}
+ISACTest::~ISACTest() {
+  delete _channel_A2B;
+  delete _channel_B2A;
+}
 
 void ISACTest::Setup() {
   int codecCntr;
@@ -120,14 +123,14 @@ void ISACTest::Setup() {
   EXPECT_EQ(0, _acmB->RegisterReceiveCodec(_paramISAC32kHz));
 
   //--- Set A-to-B channel
-  _channel_A2B.reset(new Channel);
-  EXPECT_EQ(0, _acmA->RegisterTransportCallback(_channel_A2B.get()));
-  _channel_A2B->RegisterReceiverACM(_acmB.get());
+  _channel_A2B = new Channel;
+  EXPECT_EQ(0, _acmA->RegisterTransportCallback(_channel_A2B));
+  _channel_A2B->RegisterReceiverACM(_acmB);
 
   //--- Set B-to-A channel
-  _channel_B2A.reset(new Channel);
-  EXPECT_EQ(0, _acmB->RegisterTransportCallback(_channel_B2A.get()));
-  _channel_B2A->RegisterReceiverACM(_acmA.get());
+  _channel_B2A = new Channel;
+  EXPECT_EQ(0, _acmB->RegisterTransportCallback(_channel_B2A));
+  _channel_B2A->RegisterReceiverACM(_acmA);
 
   file_name_swb_ = webrtc::test::ResourcePath("audio_coding/testfile32kHz",
                                               "pcm");
@@ -281,8 +284,8 @@ void ISACTest::EncodeDecode(int testNr, ACMTestISACConfig& wbISACConfig,
   EXPECT_EQ(0, _acmB->RegisterSendCodec(_paramISAC16kHz));
 
   // Side A is sending super-wideband, and side B is sending wideband.
-  SetISAConfig(swbISACConfig, _acmA.get(), _testMode);
-  SetISAConfig(wbISACConfig, _acmB.get(), _testMode);
+  SetISAConfig(swbISACConfig, _acmA, _testMode);
+  SetISAConfig(wbISACConfig, _acmB, _testMode);
 
   bool adaptiveMode = false;
   if ((swbISACConfig.currentRateBitPerSec == -1)

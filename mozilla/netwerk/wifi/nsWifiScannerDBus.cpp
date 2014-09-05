@@ -332,7 +332,7 @@ nsWifiMonitor::DoScan()
 
     LOG(("waiting on monitor\n"));
     mozilla::ReentrantMonitorAutoEnter mon(mReentrantMonitor);
-    mon.Wait(PR_SecondsToInterval(kDefaultWifiScanInterval));
+    mon.Wait(PR_SecondsToInterval(60));
   }
 
   return NS_OK;

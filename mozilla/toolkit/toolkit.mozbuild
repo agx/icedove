@@ -91,7 +91,8 @@ if CONFIG['MOZ_OMX_PLUGIN']:
 if CONFIG['ENABLE_TESTS']:
     add_tier_dir('platform', 'testing/specialpowers')
 
-add_tier_dir('platform', 'testing/gtest')
+if CONFIG['ENABLE_TESTS']:
+    add_tier_dir('platform', 'testing/gtest')
 
 add_tier_dir('platform', [
     'uriloader',

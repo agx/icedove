@@ -15,7 +15,7 @@
 
 #include "mozilla/Attributes.h"
 #include "nsCOMPtr.h"
-#include "nsContainerFrame.h"
+#include "nsIFrame.h"
 #include "nsPoint.h"
 #include "nsRect.h"
 #include "nsCaret.h"
@@ -44,10 +44,6 @@ class ImageLayer;
 class ImageContainer;
 } //namepsace
 } //namepsace
-
-// A set of blend modes, that never includes OP_OVER (since it's
-// considered the default, rather than a specific blend mode).
-typedef mozilla::EnumSet<mozilla::gfx::CompositionOp> BlendModeSet;
 
 /*
  * An nsIFrame can have many different visual parts. For example an image frame
@@ -118,7 +114,6 @@ public:
   typedef mozilla::DisplayListClipState DisplayListClipState;
   typedef nsIWidget::ThemeGeometry ThemeGeometry;
   typedef mozilla::layers::Layer Layer;
-  typedef mozilla::layers::FrameMetrics FrameMetrics;
   typedef mozilla::layers::FrameMetrics::ViewID ViewID;
 
   /**
@@ -258,15 +253,6 @@ public:
    * Get the ViewID of the nearest scrolling ancestor frame.
    */
   ViewID GetCurrentScrollParentId() const { return mCurrentScrollParentId; }
-  /**
-   * Get the ViewID and the scrollbar flags corresponding to the scrollbar for
-   * which we are building display items at the moment.
-   */
-  void GetScrollbarInfo(ViewID* aOutScrollbarTarget, uint32_t* aOutScrollbarFlags)
-  {
-    *aOutScrollbarTarget = mCurrentScrollbarTarget;
-    *aOutScrollbarFlags = mCurrentScrollbarFlags;
-  }
   /**
    * Calling this setter makes us include all out-of-flow descendant
    * frames in the display list, wherever they may be positioned (even
@@ -640,29 +626,6 @@ public:
     ViewID                mOldValue;
   };
 
-  /**
-   * A helper class to temporarily set the value of mCurrentScrollbarTarget
-   * and mCurrentScrollbarFlags.
-   */
-  class AutoCurrentScrollbarInfoSetter;
-  friend class AutoCurrentScrollbarInfoSetter;
-  class AutoCurrentScrollbarInfoSetter {
-  public:
-    AutoCurrentScrollbarInfoSetter(nsDisplayListBuilder* aBuilder, ViewID aScrollTargetID,
-                                   uint32_t aScrollbarFlags)
-     : mBuilder(aBuilder) {
-      aBuilder->mCurrentScrollbarTarget = aScrollTargetID;
-      aBuilder->mCurrentScrollbarFlags = aScrollbarFlags;
-    }
-    ~AutoCurrentScrollbarInfoSetter() {
-      // No need to restore old values because scrollbars cannot be nested.
-      mBuilder->mCurrentScrollbarTarget = FrameMetrics::NULL_SCROLL_ID;
-      mBuilder->mCurrentScrollbarFlags = 0;
-    }
-  private:
-    nsDisplayListBuilder* mBuilder;
-  };
-
   // Helpers for tables
   nsDisplayTableItem* GetCurrentTableItem() { return mCurrentTableItem; }
   void SetCurrentTableItem(nsDisplayTableItem* aTableItem) { mCurrentTableItem = aTableItem; }
@@ -725,14 +688,8 @@ public:
    * has a blend mode attached. We do this so we can insert a 
    * nsDisplayBlendContainer in the parent stacking context.
    */
-  void SetContainsBlendMode(uint8_t aBlendMode);
-  void SetContainsBlendModes(const BlendModeSet& aModes) {
-    mContainedBlendModes = aModes;
-  }
-  bool ContainsBlendMode() const { return !mContainedBlendModes.isEmpty(); }
-  BlendModeSet& ContainedBlendModes() {
-    return mContainedBlendModes;
-  }
+  void SetContainsBlendMode(bool aContainsBlendMode) { mContainsBlendMode = aContainsBlendMode; }
+  bool ContainsBlendMode() const { return mContainsBlendMode; }
 
   DisplayListClipState& ClipState() { return mClipState; }
 
@@ -774,9 +731,6 @@ private:
   nsTArray<DisplayItemClip*>     mDisplayItemClipsToDestroy;
   Mode                           mMode;
   ViewID                         mCurrentScrollParentId;
-  ViewID                         mCurrentScrollbarTarget;
-  uint32_t                       mCurrentScrollbarFlags;
-  BlendModeSet                   mContainedBlendModes;
   bool                           mBuildCaret;
   bool                           mIgnoreSuppression;
   bool                           mHadToIgnoreSuppression;
@@ -795,6 +749,7 @@ private:
   bool                           mIsPaintingToWindow;
   bool                           mIsCompositingCheap;
   bool                           mContainsPluginItem;
+  bool                           mContainsBlendMode;
   bool                           mAncestorHasTouchEventHandler;
   // True when the first async-scrollable scroll frame for which we build a
   // display list has a display port. An async-scrollable scroll frame is one
@@ -967,14 +922,6 @@ public:
   {
     *aSnap = false;
     return nsRect(ToReferenceFrame(), Frame()->GetSize());
-  }
-  /**
-   * Returns true if nothing will be rendered inside aRect, false if uncertain.
-   * aRect is assumed to be contained in this item's bounds.
-   */
-  virtual bool IsInvisibleInRect(const nsRect& aRect)
-  {
-    return false;
   }
   /**
    * Returns the result of GetBounds intersected with the item's clip.
@@ -1234,7 +1181,8 @@ public:
    */
   virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
                                    nsRegion* aVisibleRegion,
-                                   const nsRect& aAllowVisibleRegionExpansion);
+                                   const nsRect& aAllowVisibleRegionExpansion)
+  { return !mVisibleRect.IsEmpty(); }
 
   /**
    * Try to merge with the other item (which is below us in the display
@@ -2064,9 +2012,11 @@ public:
   }
 #endif
 
-  virtual bool IsInvisibleInRect(const nsRect& aRect) MOZ_OVERRIDE;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) MOZ_OVERRIDE;
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) MOZ_OVERRIDE;
+  virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
+                                   nsRegion* aVisibleRegion,
+                                   const nsRect& aAllowVisibleRegionExpansion) MOZ_OVERRIDE;
   NS_DISPLAY_DECL_NAME("Border", TYPE_BORDER)
   
   virtual nsDisplayItemGeometry* AllocateGeometry(nsDisplayListBuilder* aBuilder) MOZ_OVERRIDE;
@@ -2384,7 +2334,6 @@ public:
 
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) MOZ_OVERRIDE;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) MOZ_OVERRIDE;
-  virtual bool IsInvisibleInRect(const nsRect& aRect) MOZ_OVERRIDE;
   virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
                                    nsRegion* aVisibleRegion,
                                    const nsRect& aAllowVisibleRegionExpansion) MOZ_OVERRIDE;
@@ -2471,9 +2420,11 @@ public:
   }
 #endif
 
-  virtual bool IsInvisibleInRect(const nsRect& aRect) MOZ_OVERRIDE;
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder, bool* aSnap) MOZ_OVERRIDE;
   virtual void Paint(nsDisplayListBuilder* aBuilder, nsRenderingContext* aCtx) MOZ_OVERRIDE;
+  virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
+                                   nsRegion* aVisibleRegion,
+                                   const nsRect& aAllowVisibleRegionExpansion) MOZ_OVERRIDE;
   NS_DISPLAY_DECL_NAME("Outline", TYPE_OUTLINE)
 };
 
@@ -2779,7 +2730,10 @@ public:
   }
   virtual LayerState GetLayerState(nsDisplayListBuilder* aBuilder,
                                    LayerManager* aManager,
-                                   const ContainerLayerParameters& aParameters) MOZ_OVERRIDE;
+                                   const ContainerLayerParameters& aParameters) MOZ_OVERRIDE
+  {
+    return mozilla::LAYER_INACTIVE;
+  }
   virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
                                  nsRegion* aVisibleRegion,
                                  const nsRect& aAllowVisibleRegionExpansion) MOZ_OVERRIDE;
@@ -2790,10 +2744,7 @@ public:
 class nsDisplayBlendContainer : public nsDisplayWrapList {
 public:
     nsDisplayBlendContainer(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                            nsDisplayList* aList,
-                            BlendModeSet& aContainedBlendModes);
-    nsDisplayBlendContainer(nsDisplayListBuilder* aBuilder, nsIFrame* aFrame,
-                            nsDisplayList* aList);
+                          nsDisplayList* aList, uint32_t aFlags = 0);
 #ifdef NS_BUILD_REFCNT_LOGGING
     virtual ~nsDisplayBlendContainer();
 #endif
@@ -2805,20 +2756,10 @@ public:
                                      LayerManager* aManager,
                                      const ContainerLayerParameters& aParameters) MOZ_OVERRIDE
     {
-      if (mCanBeActive && aManager->SupportsMixBlendModes(mContainedBlendModes)) {
-        return mozilla::LAYER_ACTIVE;
-      }
-      return mozilla::LAYER_INACTIVE;
+        return mozilla::LAYER_INACTIVE;
     }
     virtual bool TryMerge(nsDisplayListBuilder* aBuilder, nsDisplayItem* aItem) MOZ_OVERRIDE;
     NS_DISPLAY_DECL_NAME("BlendContainer", TYPE_BLEND_CONTAINER)
-
-private:
-    // The set of all blend modes used by nsDisplayMixBlendMode descendents of this container.
-    BlendModeSet mContainedBlendModes;
-    // If this is true, then we should make the layer active if all contained blend
-    // modes can be supported by the current layer manager.
-    bool mCanBeActive;
 };
 
 /**
@@ -3384,15 +3325,12 @@ public:
    *        for the frame's bounding rectangle. Otherwise, it will use the
    *        value of aBoundsOverride.  This is mostly for internal use and in
    *        most cases you will not need to specify a value.
-   * @param aOffsetByOrigin If true, the resulting matrix will be translated
-   *        by aOrigin. This translation is applied *before* the CSS transform.
    */
   static gfx3DMatrix GetResultingTransformMatrix(const nsIFrame* aFrame,
                                                  const nsPoint& aOrigin,
                                                  float aAppUnitsPerPixel,
                                                  const nsRect* aBoundsOverride = nullptr,
-                                                 nsIFrame** aOutAncestor = nullptr,
-                                                 bool aOffsetByOrigin = false);
+                                                 nsIFrame** aOutAncestor = nullptr);
   static gfx3DMatrix GetResultingTransformMatrix(const FrameTransformProperties& aProperties,
                                                  const nsPoint& aOrigin,
                                                  float aAppUnitsPerPixel,
@@ -3409,16 +3347,12 @@ public:
 
   virtual bool SetVisibleRegionOnLayer() MOZ_OVERRIDE { return false; }
 
-#ifdef MOZ_DUMP_PAINTING
-  virtual void WriteDebugInfo(nsACString& aTo) MOZ_OVERRIDE;
-#endif
 private:
   static gfx3DMatrix GetResultingTransformMatrixInternal(const FrameTransformProperties& aProperties,
                                                          const nsPoint& aOrigin,
                                                          float aAppUnitsPerPixel,
                                                          const nsRect* aBoundsOverride,
-                                                         nsIFrame** aOutAncestor,
-                                                         bool aOffsetByOrigin);
+                                                         nsIFrame** aOutAncestor);
 
   nsDisplayWrapList mStoredList;
   gfx3DMatrix mTransform;

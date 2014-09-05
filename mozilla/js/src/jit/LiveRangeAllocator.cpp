@@ -76,7 +76,6 @@ bool
 LiveInterval::addRangeAtHead(CodePosition from, CodePosition to)
 {
     JS_ASSERT(from < to);
-    JS_ASSERT(ranges_.empty() || from <= ranges_.back().from);
 
     Range newRange(from, to);
 
@@ -111,28 +110,23 @@ LiveInterval::addRange(CodePosition from, CodePosition to)
 
     Range *i;
     // Find the location to insert the new range
-    for (i = ranges_.end(); i > ranges_.begin(); i--) {
-        if (newRange.from <= i[-1].to) {
-            if (i[-1].from < newRange.from)
-                newRange.from = i[-1].from;
+    for (i = ranges_.end() - 1; i >= ranges_.begin(); i--) {
+        if (newRange.from <= i->to) {
+            if (i->from < newRange.from)
+                newRange.from = i->from;
             break;
         }
     }
     // Perform coalescing on overlapping ranges
-    Range *coalesceEnd = i;
-    for (; i > ranges_.begin(); i--) {
-        if (newRange.to < i[-1].from)
+    for (; i >= ranges_.begin(); i--) {
+        if (newRange.to < i->from)
             break;
-        if (newRange.to < i[-1].to)
-            newRange.to = i[-1].to;
+        if (newRange.to < i->to)
+            newRange.to = i->to;
+        ranges_.erase(i);
     }
 
-    if (i == coalesceEnd)
-        return ranges_.insert(i, newRange);
-
-    i[0] = newRange;
-    ranges_.erase(i + 1, coalesceEnd);
-    return true;
+    return ranges_.insert(i + 1, newRange);
 }
 
 void
@@ -140,10 +134,10 @@ LiveInterval::setFrom(CodePosition from)
 {
     while (!ranges_.empty()) {
         if (ranges_.back().to < from) {
-            ranges_.popBack();
+            ranges_.erase(&ranges_.back());
         } else {
             if (from == ranges_.back().to)
-                ranges_.popBack();
+                ranges_.erase(&ranges_.back());
             else
                 ranges_.back().from = from;
             break;
@@ -818,15 +812,14 @@ LiveRangeAllocator<VREG, forLSRA>::buildLivenessInfo()
                     break;
 
                 // Grab the next block off the work list, skipping any OSR block.
-                MBasicBlock *osrBlock = graph.mir().osrBlock();
                 while (!loopWorkList.empty()) {
                     loopBlock = loopWorkList.popCopy();
-                    if (loopBlock != osrBlock)
+                    if (loopBlock->lir() != graph.osrBlock())
                         break;
                 }
 
                 // If end is reached without finding a non-OSR block, then no more work items were found.
-                if (loopBlock == osrBlock) {
+                if (loopBlock->lir() == graph.osrBlock()) {
                     JS_ASSERT(loopWorkList.empty());
                     break;
                 }
@@ -903,8 +896,6 @@ LiveInterval::rangesToString() const
 void
 LiveInterval::dump()
 {
-    if (hasVreg())
-        fprintf(stderr, "v%u: ", vreg());
-    fprintf(stderr, "index=%u allocation=%s %s\n",
-            index(), getAllocation()->toString(), rangesToString());
+    fprintf(stderr, "v%u: index=%u allocation=%s %s\n",
+            vreg(), index(), getAllocation()->toString(), rangesToString());
 }

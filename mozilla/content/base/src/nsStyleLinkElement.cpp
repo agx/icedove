@@ -15,7 +15,6 @@
 #include "mozilla/css/Loader.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/ShadowRoot.h"
-#include "mozilla/Preferences.h"
 #include "nsCSSStyleSheet.h"
 #include "nsIContent.h"
 #include "nsIDocument.h"
@@ -121,31 +120,7 @@ nsStyleLinkElement::SetLineNumber(uint32_t aLineNumber)
   mLineNumber = aLineNumber;
 }
 
-/* static */ bool
-nsStyleLinkElement::IsImportEnabled(nsIPrincipal* aPrincipal)
-{
-  static bool sAdded = false;
-  static bool sWebComponentsEnabled;
-  if (!sAdded) {
-    // This part runs only once because of the static flag.
-    Preferences::AddBoolVarCache(&sWebComponentsEnabled,
-                                 "dom.webcomponents.enabled",
-                                 false);
-    sAdded = true;
-  }
-
-  if (sWebComponentsEnabled) {
-    return true;
-  }
-
-  // If the web components pref is not enabled, check
-  // if we are in a certified app because imports is enabled
-  // for certified apps.
-  return aPrincipal &&
-    aPrincipal->GetAppStatus() == nsIPrincipal::APP_STATUS_CERTIFIED;
-}
-
-static uint32_t ToLinkMask(const nsAString& aLink, nsIPrincipal* aPrincipal)
+static uint32_t ToLinkMask(const nsAString& aLink)
 { 
   if (aLink.EqualsLiteral("prefetch"))
     return nsStyleLinkElement::ePREFETCH;
@@ -157,14 +132,11 @@ static uint32_t ToLinkMask(const nsAString& aLink, nsIPrincipal* aPrincipal)
     return nsStyleLinkElement::eNEXT;
   else if (aLink.EqualsLiteral("alternate"))
     return nsStyleLinkElement::eALTERNATE;
-  else if (aLink.EqualsLiteral("import") && aPrincipal &&
-           nsStyleLinkElement::IsImportEnabled(aPrincipal))
-    return nsStyleLinkElement::eHTMLIMPORT;
   else 
     return 0;
 }
 
-uint32_t nsStyleLinkElement::ParseLinkTypes(const nsAString& aTypes, nsIPrincipal* aPrincipal)
+uint32_t nsStyleLinkElement::ParseLinkTypes(const nsAString& aTypes)
 {
   uint32_t linkMask = 0;
   nsAString::const_iterator start, done;
@@ -181,7 +153,7 @@ uint32_t nsStyleLinkElement::ParseLinkTypes(const nsAString& aTypes, nsIPrincipa
     if (nsContentUtils::IsHTMLWhitespace(*current)) {
       if (inString) {
         nsContentUtils::ASCIIToLower(Substring(start, current), subString);
-        linkMask |= ToLinkMask(subString, aPrincipal);
+        linkMask |= ToLinkMask(subString);
         inString = false;
       }
     }
@@ -195,7 +167,7 @@ uint32_t nsStyleLinkElement::ParseLinkTypes(const nsAString& aTypes, nsIPrincipa
   }
   if (inString) {
     nsContentUtils::ASCIIToLower(Substring(start, current), subString);
-    linkMask |= ToLinkMask(subString, aPrincipal);
+    linkMask |= ToLinkMask(subString);
   }
   return linkMask;
 }
@@ -327,16 +299,11 @@ nsStyleLinkElement::DoUpdateStyleSheet(nsIDocument* aOldDocument,
 
   Element* oldScopeElement = GetScopeElement(mStyleSheet);
 
-  if (mStyleSheet && (aOldDocument || aOldShadowRoot)) {
-    MOZ_ASSERT(!(aOldDocument && aOldShadowRoot),
-               "ShadowRoot content is never in document, thus "
-               "there should not be a old document and old "
-               "ShadowRoot simultaneously.");
-
-    // We're removing the link element from the document or shadow tree,
-    // unload the stylesheet.  We want to do this even if updates are
-    // disabled, since otherwise a sheet with a stale linking element pointer
-    // will be hanging around -- not good!
+  if (mStyleSheet && aOldDocument) {
+    // We're removing the link element from the document, unload the
+    // stylesheet.  We want to do this even if updates are disabled, since
+    // otherwise a sheet with a stale linking element pointer will be hanging
+    // around -- not good!
     if (aOldShadowRoot) {
       aOldShadowRoot->RemoveSheet(mStyleSheet);
     } else {
@@ -357,7 +324,8 @@ nsStyleLinkElement::DoUpdateStyleSheet(nsIDocument* aOldDocument,
     return NS_OK;
   }
 
-  nsCOMPtr<nsIDocument> doc = thisContent->GetCrossShadowCurrentDoc();
+  nsCOMPtr<nsIDocument> doc = thisContent->GetDocument();
+
   if (!doc || !doc->CSSLoader()->GetEnabled()) {
     return NS_OK;
   }

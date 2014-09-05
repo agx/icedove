@@ -202,7 +202,7 @@ XULDocument::XULDocument(void)
     mCharacterSet.AssignLiteral("UTF-8");
 
     mDefaultElementType = kNameSpaceID_XUL;
-    mType = eXUL;
+    mIsXUL = true;
 
     mDelayFrameLoaderInitialization = true;
 
@@ -966,7 +966,8 @@ XULDocument::AttributeWillChange(nsIDocument* aDocument,
 
     // XXXbz check aNameSpaceID, dammit!
     // See if we need to update our ref map.
-    if (aAttribute == nsGkAtoms::ref) {
+    if (aAttribute == nsGkAtoms::ref ||
+        (aAttribute == nsGkAtoms::id && !aElement->GetIDAttributeName())) {
         // Might not need this, but be safe for now.
         nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
         RemoveElementFromRefMap(aElement);
@@ -985,7 +986,8 @@ XULDocument::AttributeChanged(nsIDocument* aDocument,
 
     // XXXbz check aNameSpaceID, dammit!
     // See if we need to update our ref map.
-    if (aAttribute == nsGkAtoms::ref) {
+    if (aAttribute == nsGkAtoms::ref ||
+        (aAttribute == nsGkAtoms::id && !aElement->GetIDAttributeName())) {
         AddElementToRefMap(aElement);
     }
     
@@ -1031,7 +1033,7 @@ XULDocument::AttributeChanged(nsIDocument* aDocument,
                                                                attrSet,
                                                                needsAttrChange);
 
-                        size_t index =
+                        uint32_t index =
                             mDelayedAttrChangeBroadcasts.IndexOf(delayedUpdate,
                                 0, nsDelayedBroadcastUpdate::Comparator());
                         if (index != mDelayedAttrChangeBroadcasts.NoIndex) {
@@ -1925,6 +1927,9 @@ static void
 GetRefMapAttribute(Element* aElement, nsAutoString* aValue)
 {
     aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::ref, *aValue);
+    if (aValue->IsEmpty() && !aElement->GetIDAttributeName()) {
+        aElement->GetAttr(kNameSpaceID_None, nsGkAtoms::id, *aValue);
+    }
 }
 
 nsresult
@@ -3544,7 +3549,10 @@ XULDocument::OnStreamComplete(nsIStreamLoader* aLoader,
             mOffThreadCompileStringBuf = nullptr;
             mOffThreadCompileStringLength = 0;
 
-            rv = mCurrentScriptProto->Compile(srcBuf, uri, 1, this, this);
+            rv = mCurrentScriptProto->Compile(srcBuf,
+                                              uri, 1, this,
+                                              mMasterPrototype,
+                                              this);
             if (NS_SUCCEEDED(rv) && !mCurrentScriptProto->GetScriptObject()) {
                 // We will be notified via OnOffThreadCompileComplete when the
                 // compile finishes. Keep the contents of the compiled script
@@ -4241,7 +4249,7 @@ XULDocument::BroadcasterHookup::~BroadcasterHookup()
         }
         else {
             mObservesElement->GetAttr(kNameSpaceID_None, nsGkAtoms::observes, broadcasterID);
-            attribute.Assign('*');
+            attribute.AssignLiteral("*");
         }
 
         nsAutoCString attributeC,broadcasteridC;
@@ -4390,7 +4398,7 @@ XULDocument::FindBroadcaster(Element* aElement,
         *aListener = aElement;
         NS_ADDREF(*aListener);
 
-        aAttribute.Assign('*');
+        aAttribute.AssignLiteral("*");
     }
 
     // Make sure we got a valid listener.
@@ -4692,11 +4700,9 @@ XULDocument::ParserObserver::OnStopRequest(nsIRequest *request,
 already_AddRefed<nsPIWindowRoot>
 XULDocument::GetWindowRoot()
 {
-  if (!mDocumentContainer) {
-    return nullptr;
-  }
-
-    nsCOMPtr<nsPIDOMWindow> piWin = mDocumentContainer->GetWindow();
+    nsCOMPtr<nsIInterfaceRequestor> ir(mDocumentContainer);
+    nsCOMPtr<nsIDOMWindow> window(do_GetInterface(ir));
+    nsCOMPtr<nsPIDOMWindow> piWin(do_QueryInterface(window));
     return piWin ? piWin->GetTopWindowRoot() : nullptr;
 }
 

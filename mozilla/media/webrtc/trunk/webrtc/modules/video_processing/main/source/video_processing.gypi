@@ -17,6 +17,14 @@
         '<(webrtc_root)/common_video/common_video.gyp:common_video',
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
       ],
+      'include_dirs': [
+        '../interface',
+      ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '../interface',
+        ],
+      },
       'sources': [
         '../interface/video_processing.h',
         '../interface/video_processing_defines.h',
@@ -57,6 +65,10 @@
           'type': 'static_library',
           'sources': [
             'content_analysis_sse2.cc',
+          ],
+          'include_dirs': [
+            '../interface',
+            '../../../interface',
           ],
           'conditions': [
             ['os_posix==1 and OS!="mac"', {

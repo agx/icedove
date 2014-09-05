@@ -20,15 +20,12 @@
 #include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_generic_codec.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_resampler.h"
-#include "webrtc/modules/audio_coding/main/acm2/call_statistics.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/rw_lock_wrapper.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
-
-namespace acm2 {
 
 enum {
   kACMToneEnd = 999
@@ -141,6 +138,7 @@ AudioCodingModuleImpl::AudioCodingModuleImpl(int id)
       receiver_initialized_(false),
       callback_crit_sect_(CriticalSectionWrapper::CreateCriticalSection()),
       secondary_send_codec_inst_(),
+      secondary_encoder_(NULL),
       codec_timestamp_(expected_codec_ts_),
       first_10ms_data_(false) {
 
@@ -1471,7 +1469,7 @@ int AudioCodingModuleImpl::SetVADSafe(bool enable_dtx,
 
   // If a send codec is registered, set VAD/DTX for the codec.
   if (HaveValidEncoder("SetVAD") && codecs_[current_send_codec_idx_]->SetVAD(
-      &dtx_enabled_, &vad_enabled_,  &vad_mode_) < 0) {
+      &enable_dtx, &enable_vad,  &mode) < 0) {
       // SetVAD failed.
       WEBRTC_TRACE(webrtc::kTraceError, webrtc::kTraceAudioCoding, id_,
                    "SetVAD failed");
@@ -1538,7 +1536,8 @@ int AudioCodingModuleImpl::InitializeReceiverSafe() {
 // removing and registering a decoder we can achieve the effect of resetting.
 // Reset the decoder state.
 int AudioCodingModuleImpl::ResetDecoder() {
-  return 0;
+  CriticalSectionScoped lock(acm_crit_sect_);
+  return -1;
 }
 
 // Get current receive frequency.
@@ -1975,16 +1974,5 @@ std::vector<uint16_t> AudioCodingModuleImpl::GetNackList(
 int AudioCodingModuleImpl::LeastRequiredDelayMs() const {
   return receiver_.LeastRequiredDelayMs();
 }
-
-const char* AudioCodingModuleImpl::Version() const {
-  return kExperimentalAcmVersion;
-}
-
-void AudioCodingModuleImpl::GetDecodingCallStatistics(
-      AudioDecodingCallStats* call_stats) const {
-  receiver_.GetDecodingCallStatistics(call_stats);
-}
-
-}  // namespace acm2
 
 }  // namespace webrtc

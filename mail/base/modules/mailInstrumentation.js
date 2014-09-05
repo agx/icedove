@@ -65,8 +65,7 @@ var mailInstrumentationManager =
   },
   _smtpServerAdded: function() {
     mailInstrumentationManager.addEvent("smtpServerAdded", true);
-    mailInstrumentationManager._removeObserver("mail.smtpservers",
-      mailInstrumentationManager._smtpServerAdded);
+    this._removeObserver("mail.smtpservers", _smtpServerAdded);
   },
   _userOptedIn: function() {
     try {
@@ -95,19 +94,11 @@ var mailInstrumentationManager =
    * Writes the state object to disk.
    */
   _postStateObject: function minst_postStateObject() {
-    let defaultAccount;
+    // Getting defaultAccount will throw an exception if no account is set up,
+    // so we wrap the whole thing.
     try {
-      // Getting defaultAccount will throw an exception if no account is set up.
-      defaultAccount = MailServices.accounts.defaultAccount;
-    } catch (e if MailServices.accounts.accounts.length > 0) {
-      // Only report this failure if there are some accounts but fetching
-      // the default one failed. That is a problem.
-      logException(e);
-      return;
-    }
-
       if (!this._currentState.userEmailHash) {
-        let identity = defaultAccount.defaultIdentity;
+        let identity = MailServices.accounts.defaultAccount.defaultIdentity;
         if (identity) // When we have only a feed account, there is no identity.
           this._currentState.userEmailHash = this._hashEmailAddress(identity.email);
       }
@@ -120,6 +111,7 @@ var mailInstrumentationManager =
       let userOptedIn = Services.prefs.getBoolPref("mail.instrumentation.userOptedIn");
       if (userOptedIn)
         this._postData();
+    } catch (ex) {logException(ex);}
   },
 
   /**
@@ -176,15 +168,15 @@ var mailInstrumentationManager =
   },
   // keeps track of whether or not we've removed the observer for a given
   // pref name.
-  _prefsObserved : new Map(),
+  _prefsObserved : {},
   _addObserver : function(pref, observer) {
     Services.prefs.addObserver(pref, observer, false);
-    this._prefsObserved.set(pref, true);
+    this._prefsObserved[pref] = true;
   },
   _removeObserver : function(pref, observer) {
-    if (this._prefsObserved.has(pref)) {
+    if (this._prefsObserved[pref]) {
       Services.prefs.removeObserver(pref, observer);
-      this._prefsObserved.set(pref, false);
+      this._prefsObserved[pref] = false;
     }
   },
 /* ........ Public API ................*/

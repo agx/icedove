@@ -32,7 +32,8 @@ namespace nsStyleTransformMatrix {
                              nsStyleContext* aContext,
                              nsPresContext* aPresContext,
                              bool& aCanStoreInRuleTree,
-                             nscoord aSize);
+                             nscoord aSize,
+                             float aAppUnitsPerMatrixUnit);
 
   void
   ProcessInterpolateMatrix(gfx3DMatrix& aMatrix,
@@ -40,7 +41,7 @@ namespace nsStyleTransformMatrix {
                             nsStyleContext* aContext,
                             nsPresContext* aPresContext,
                             bool& aCanStoreInRuleTree,
-                            nsRect& aBounds);
+                            nsRect& aBounds, float aAppUnitsPerMatrixUnit);
 
   /**
    * Given an nsCSSValueList containing -moz-transform functions,

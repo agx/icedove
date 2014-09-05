@@ -9,7 +9,6 @@
 #include <stdint.h>                     // for uint8_t, uint16_t
 #include <sys/types.h>                  // for int16_t
 #include "gfxCore.h"                    // for NS_GFX
-#include "gfxFontFamilyList.h"
 #include "gfxFontFeatures.h"
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCoord.h"                    // for nscoord
@@ -41,9 +40,8 @@ const uint8_t kGenericFont_fantasy      = 0x20;
 
 // Font structure.
 struct NS_GFX nsFont {
-
-  // list of font families, either named or generic
-  mozilla::FontFamilyList fontlist;
+  // The family name of the font
+  nsString name;
 
   // The style of font (normal, italic, oblique; see gfxFontConstants.h)
   uint8_t style;
@@ -114,13 +112,13 @@ struct NS_GFX nsFont {
   // (see http://www.microsoft.com/typography/otspec/languagetags.htm).
   nsString languageOverride;
 
-  // initialize the font with a fontlist
-  nsFont(const mozilla::FontFamilyList& aFontlist, uint8_t aStyle,
-         uint8_t aVariant, uint16_t aWeight, int16_t aStretch,
-         uint8_t aDecoration, nscoord aSize);
+  // Initialize the font struct with an ASCII name
+  nsFont(const char* aName, uint8_t aStyle, uint8_t aVariant,
+         uint16_t aWeight, int16_t aStretch, uint8_t aDecoration,
+         nscoord aSize);
 
-  // initialize the font with a single generic
-  nsFont(mozilla::FontFamilyType aGenericType, uint8_t aStyle, uint8_t aVariant,
+  // Initialize the font struct with a (potentially) unicode name
+  nsFont(const nsSubstring& aName, uint8_t aStyle, uint8_t aVariant,
          uint16_t aWeight, int16_t aStretch, uint8_t aDecoration,
          nscoord aSize);
 
@@ -145,8 +143,15 @@ struct NS_GFX nsFont {
   // Add featureSettings into style
   void AddFontFeaturesToStyle(gfxFontStyle *aStyle) const;
 
-protected:
-  void Init(); // helper method for initialization
+  // Utility method to interpret name string
+  // enumerates all families specified by this font only
+  // returns true if completed, false if stopped
+  // enclosing quotes will be removed, and whitespace compressed (as needed)
+  bool EnumerateFamilies(nsFontFamilyEnumFunc aFunc, void* aData) const;
+  void GetFirstFamily(nsString& aFamily) const;
+
+  // Utility method to return the ID of a generic font
+  static void GetGenericID(const nsString& aGeneric, uint8_t* aID);
 };
 
 #define NS_FONT_VARIANT_NORMAL            0

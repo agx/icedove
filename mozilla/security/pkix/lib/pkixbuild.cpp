@@ -1,13 +1,6 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
-/* This code is made available to you under your choice of the following sets
- * of licensing terms:
- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/.
- */
-/* Copyright 2013 Mozilla Contributors
+/* Copyright 2013 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,20 +31,8 @@ namespace mozilla { namespace pkix {
 // certificate decoder so that the results are cached with the certificate, so
 // that the decoding doesn't have to happen more than once per cert.
 Result
-BackCert::Init(const SECItem& certDER)
+BackCert::Init()
 {
-  // XXX: Currently-known uses of mozilla::pkix create CERTCertificate objects
-  // for all certs anyway, so the overhead of CERT_NewTempCertificate will be
-  // reduced to a lookup in NSS's SECItem* -> CERTCertificate cache and
-  // a CERT_DupCertificate. Eventually, we should parse the certificate using
-  // mozilla::pkix::der and avoid the need to create a CERTCertificate at all.
-  nssCert = CERT_NewTempCertificate(CERT_GetDefaultCertDB(),
-                                    const_cast<SECItem*>(&certDER),
-                                    nullptr, false, true);
-  if (!nssCert) {
-    return MapSECStatus(SECFailure);
-  }
-
   const CERTCertExtension* const* exts = nssCert->extensions;
   if (!exts) {
     return Success;
@@ -121,22 +102,13 @@ BackCert::Init(const SECItem& certDER)
   return Success;
 }
 
-
-Result
-BackCert::VerifyOwnSignatureWithKey(TrustDomain& trustDomain,
-                                    const SECItem& subjectPublicKeyInfo) const
-{
-  return MapSECStatus(trustDomain.VerifySignedData(&nssCert->signatureWrap,
-                                                   subjectPublicKeyInfo));
-}
-
 static Result BuildForward(TrustDomain& trustDomain,
                            BackCert& subject,
                            PRTime time,
                            EndEntityOrCA endEntityOrCA,
                            KeyUsage requiredKeyUsageIfPresent,
-                           KeyPurposeId requiredEKUIfPresent,
-                           const CertPolicyId& requiredPolicy,
+                           SECOidTag requiredEKUIfPresent,
+                           SECOidTag requiredPolicy,
                            /*optional*/ const SECItem* stapledOCSPResponse,
                            unsigned int subCACount,
                            /*out*/ ScopedCERTCertList& results);
@@ -146,14 +118,19 @@ static Result
 BuildForwardInner(TrustDomain& trustDomain,
                   BackCert& subject,
                   PRTime time,
-                  KeyPurposeId requiredEKUIfPresent,
-                  const CertPolicyId& requiredPolicy,
-                  const SECItem& potentialIssuerDER,
+                  EndEntityOrCA endEntityOrCA,
+                  SECOidTag requiredEKUIfPresent,
+                  SECOidTag requiredPolicy,
+                  CERTCertificate* potentialIssuerCertToDup,
+                  /*optional*/ const SECItem* stapledOCSPResponse,
                   unsigned int subCACount,
-                  /*out*/ ScopedCERTCertList& results)
+                  ScopedCERTCertList& results)
 {
-  BackCert potentialIssuer(&subject, BackCert::IncludeCN::No);
-  Result rv = potentialIssuer.Init(potentialIssuerDER);
+  PORT_Assert(potentialIssuerCertToDup);
+
+  BackCert potentialIssuer(potentialIssuerCertToDup, &subject,
+                           BackCert::ExcludeCN);
+  Result rv = potentialIssuer.Init();
   if (rv != Success) {
     return rv;
   }
@@ -167,10 +144,10 @@ BuildForwardInner(TrustDomain& trustDomain,
   bool loopDetected = false;
   for (BackCert* prev = potentialIssuer.childCert;
        !loopDetected && prev != nullptr; prev = prev->childCert) {
-    if (SECITEM_ItemsAreEqual(&potentialIssuer.GetSubjectPublicKeyInfo(),
-                              &prev->GetSubjectPublicKeyInfo()) &&
-        SECITEM_ItemsAreEqual(&potentialIssuer.GetSubject(),
-                              &prev->GetSubject())) {
+    if (SECITEM_ItemsAreEqual(&potentialIssuer.GetNSSCert()->derPublicKey,
+                              &prev->GetNSSCert()->derPublicKey) &&
+        SECITEM_ItemsAreEqual(&potentialIssuer.GetNSSCert()->derSubject,
+                              &prev->GetNSSCert()->derSubject)) {
       return Fail(RecoverableError, SEC_ERROR_UNKNOWN_ISSUER); // XXX: error code
     }
   }
@@ -180,18 +157,25 @@ BuildForwardInner(TrustDomain& trustDomain,
     return rv;
   }
 
-  // RFC 5280, Section 4.2.1.3: "If the keyUsage extension is present, then the
-  // subject public key MUST NOT be used to verify signatures on certificates
-  // or CRLs unless the corresponding keyCertSign or cRLSign bit is set."
-  rv = BuildForward(trustDomain, potentialIssuer, time, EndEntityOrCA::MustBeCA,
+  unsigned int newSubCACount = subCACount;
+  if (endEntityOrCA == MustBeCA) {
+    newSubCACount = subCACount + 1;
+  } else {
+    PR_ASSERT(newSubCACount == 0);
+  }
+  rv = BuildForward(trustDomain, potentialIssuer, time, MustBeCA,
                     KeyUsage::keyCertSign, requiredEKUIfPresent,
-                    requiredPolicy, nullptr, subCACount, results);
+                    requiredPolicy, nullptr, newSubCACount, results);
   if (rv != Success) {
     return rv;
   }
 
-  return subject.VerifyOwnSignatureWithKey(
-                   trustDomain, potentialIssuer.GetSubjectPublicKeyInfo());
+  if (trustDomain.VerifySignedData(&subject.GetNSSCert()->signatureWrap,
+                                   potentialIssuer.GetNSSCert()) != SECSuccess) {
+    return MapSECStatus(SECFailure);
+  }
+
+  return Success;
 }
 
 // Recursively build the path from the given subject certificate to the root.
@@ -206,15 +190,22 @@ BuildForward(TrustDomain& trustDomain,
              PRTime time,
              EndEntityOrCA endEntityOrCA,
              KeyUsage requiredKeyUsageIfPresent,
-             KeyPurposeId requiredEKUIfPresent,
-             const CertPolicyId& requiredPolicy,
+             SECOidTag requiredEKUIfPresent,
+             SECOidTag requiredPolicy,
              /*optional*/ const SECItem* stapledOCSPResponse,
              unsigned int subCACount,
              /*out*/ ScopedCERTCertList& results)
 {
+  // Avoid stack overflows and poor performance by limiting cert length.
+  // XXX: 6 is not enough for chains.sh anypolicywithlevel.cfg tests
+  static const size_t MAX_DEPTH = 8;
+  if (subCACount >= MAX_DEPTH - 1) {
+    return Fail(RecoverableError, SEC_ERROR_UNKNOWN_ISSUER);
+  }
+
   Result rv;
 
-  TrustLevel trustLevel;
+  TrustDomain::TrustLevel trustLevel;
   // If this is an end-entity and not a trust anchor, we defer reporting
   // any error found here until after attempting to find a valid chain.
   // See the explanation of error prioritization in pkix.h.
@@ -225,51 +216,23 @@ BuildForward(TrustDomain& trustDomain,
                                         subCACount, &trustLevel);
   PRErrorCode deferredEndEntityError = 0;
   if (rv != Success) {
-    if (endEntityOrCA == EndEntityOrCA::MustBeEndEntity &&
-        trustLevel != TrustLevel::TrustAnchor) {
+    if (endEntityOrCA == MustBeEndEntity &&
+        trustLevel != TrustDomain::TrustAnchor) {
       deferredEndEntityError = PR_GetError();
     } else {
       return rv;
     }
   }
 
-  if (trustLevel == TrustLevel::TrustAnchor) {
-    // End of the recursion.
-
-    // Construct the results cert chain.
+  if (trustLevel == TrustDomain::TrustAnchor) {
+    // End of the recursion. Create the result list and add the trust anchor to
+    // it.
     results = CERT_NewCertList();
     if (!results) {
-      return MapSECStatus(SECFailure);
+      return FatalError;
     }
-    for (BackCert* cert = &subject; cert; cert = cert->childCert) {
-      CERTCertificate* dup = CERT_DupCertificate(cert->GetNSSCert());
-      if (CERT_AddCertToListHead(results.get(), dup) != SECSuccess) {
-        CERT_DestroyCertificate(dup);
-        return MapSECStatus(SECFailure);
-      }
-      // dup is now owned by results.
-    }
-
-    // This must be done here, after the chain is built but before any
-    // revocation checks have been done.
-    SECStatus srv = trustDomain.IsChainValid(results.get());
-    if (srv != SECSuccess) {
-      return MapSECStatus(srv);
-    }
-
-    return Success;
-  }
-
-  if (endEntityOrCA == EndEntityOrCA::MustBeCA) {
-    // Avoid stack overflows and poor performance by limiting cert chain
-    // length.
-    static const unsigned int MAX_SUBCA_COUNT = 6;
-    if (subCACount >= MAX_SUBCA_COUNT) {
-      return Fail(RecoverableError, SEC_ERROR_UNKNOWN_ISSUER);
-    }
-    ++subCACount;
-  } else {
-    PR_ASSERT(subCACount == 0);
+    rv = subject.PrependNSSCertToList(results.get());
+    return rv;
   }
 
   // Find a trusted issuer.
@@ -287,14 +250,16 @@ BuildForward(TrustDomain& trustDomain,
 
   for (CERTCertListNode* n = CERT_LIST_HEAD(candidates);
        !CERT_LIST_END(n, candidates); n = CERT_LIST_NEXT(n)) {
-    rv = BuildForwardInner(trustDomain, subject, time, requiredEKUIfPresent,
-                           requiredPolicy, n->cert->derCert, subCACount,
+    rv = BuildForwardInner(trustDomain, subject, time, endEntityOrCA,
+                           requiredEKUIfPresent, requiredPolicy,
+                           n->cert, stapledOCSPResponse, subCACount,
                            results);
     if (rv == Success) {
       // If we found a valid chain but deferred reporting an error with the
       // end-entity certificate, report it now.
       if (deferredEndEntityError != 0) {
-        return Fail(FatalError, deferredEndEntityError);
+        PR_SetError(deferredEndEntityError, 0);
+        return FatalError;
       }
 
       SECStatus srv = trustDomain.CheckRevocation(endEntityOrCA,
@@ -306,8 +271,7 @@ BuildForward(TrustDomain& trustDomain,
       }
 
       // We found a trusted issuer. At this point, we know the cert is valid
-      // and results contains the complete cert chain.
-      return Success;
+      return subject.PrependNSSCertToList(results.get());
     }
     if (rv != RecoverableError) {
       return rv;
@@ -317,7 +281,8 @@ BuildForward(TrustDomain& trustDomain,
     switch (currentError) {
       case 0:
         PR_NOT_REACHED("Error code not set!");
-        return Fail(FatalError, PR_INVALID_STATE_ERROR);
+        PR_SetError(PR_INVALID_STATE_ERROR, 0);
+        return FatalError;
       case SEC_ERROR_UNTRUSTED_CERT:
         currentError = SEC_ERROR_UNTRUSTED_ISSUER;
         break;
@@ -340,31 +305,35 @@ BuildForward(TrustDomain& trustDomain,
 
 SECStatus
 BuildCertChain(TrustDomain& trustDomain,
-               const CERTCertificate* nssCert,
+               CERTCertificate* certToDup,
                PRTime time,
                EndEntityOrCA endEntityOrCA,
-               KeyUsage requiredKeyUsageIfPresent,
-               KeyPurposeId requiredEKUIfPresent,
-               const CertPolicyId& requiredPolicy,
+               /*optional*/ KeyUsage requiredKeyUsageIfPresent,
+               /*optional*/ SECOidTag requiredEKUIfPresent,
+               /*optional*/ SECOidTag requiredPolicy,
                /*optional*/ const SECItem* stapledOCSPResponse,
                /*out*/ ScopedCERTCertList& results)
 {
-  if (!nssCert) {
-    PR_NOT_REACHED("null cert passed to BuildCertChain");
+  PORT_Assert(certToDup);
+
+  if (!certToDup) {
     PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
     return SECFailure;
   }
 
+  // The only non-const operation on the cert we are allowed to do is
+  // CERT_DupCertificate.
+
   // XXX: Support the legacy use of the subject CN field for indicating the
   // domain name the certificate is valid for.
-  BackCert::IncludeCN includeCN
-    = endEntityOrCA == EndEntityOrCA::MustBeEndEntity &&
-      requiredEKUIfPresent == KeyPurposeId::id_kp_serverAuth
-    ? BackCert::IncludeCN::Yes
-    : BackCert::IncludeCN::No;
+  BackCert::ConstrainedNameOptions cnOptions
+    = endEntityOrCA == MustBeEndEntity &&
+      requiredEKUIfPresent == SEC_OID_EXT_KEY_USAGE_SERVER_AUTH
+    ? BackCert::IncludeCN
+    : BackCert::ExcludeCN;
 
-  BackCert cert(nullptr, includeCN);
-  Result rv = cert.Init(nssCert->derCert);
+  BackCert cert(certToDup, nullptr, cnOptions);
+  Result rv = cert.Init();
   if (rv != Success) {
     return SECFailure;
   }
@@ -387,6 +356,20 @@ BackCert::GetArena()
     arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
   }
   return arena.get();
+}
+
+Result
+BackCert::PrependNSSCertToList(CERTCertList* results)
+{
+  PORT_Assert(results);
+
+  CERTCertificate* dup = CERT_DupCertificate(nssCert);
+  if (CERT_AddCertToListHead(results, dup) != SECSuccess) { // takes ownership
+    CERT_DestroyCertificate(dup);
+    return FatalError;
+  }
+
+  return Success;
 }
 
 } } // namespace mozilla::pkix

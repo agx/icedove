@@ -23,7 +23,7 @@ FILE* operator<<(FILE* out, const nsRect& rect)
   nsAutoString tmp;
 
   // Output the coordinates in fractional pixels so they're easier to read
-  tmp.Append('{');
+  tmp.AppendLiteral("{");
   tmp.AppendFloat(NSAppUnitsToFloatPixels(rect.x,
                        nsDeviceContext::AppUnitsPerCSSPixel()));
   tmp.AppendLiteral(", ");
@@ -35,7 +35,7 @@ FILE* operator<<(FILE* out, const nsRect& rect)
   tmp.AppendLiteral(", ");
   tmp.AppendFloat(NSAppUnitsToFloatPixels(rect.height,
                        nsDeviceContext::AppUnitsPerCSSPixel()));
-  tmp.Append('}');
+  tmp.AppendLiteral("}");
   fputs(NS_LossyConvertUTF16toASCII(tmp).get(), out);
   return out;
 }

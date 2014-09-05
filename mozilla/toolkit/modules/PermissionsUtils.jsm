@@ -26,16 +26,8 @@ function importPrefBranch(aPrefBranch, aPermission, aAction) {
     hosts = hosts.split(",");
 
     for (let host of hosts) {
-      let uri = null;
       try {
-        uri = Services.io.newURI("http://" + host, null, null);
-      } catch (e) {
-        try {
-          uri = Services.io.newURI(host, null, null);
-        } catch (e2) {}
-      }
-
-      try {
+        let uri = Services.io.newURI("http://" + host, null, null);
         Services.perms.add(uri, aPermission, aAction);
       } catch (e) {}
     }

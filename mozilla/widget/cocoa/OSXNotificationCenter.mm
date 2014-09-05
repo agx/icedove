@@ -113,14 +113,12 @@ typedef NSInteger NSUserNotificationActivationType;
 
 namespace mozilla {
 
-class OSXNotificationInfo {
-private:
-  ~OSXNotificationInfo();
-
+class OSXNotificationInfo : public RefCounted<OSXNotificationInfo> {
 public:
-  NS_INLINE_DECL_REFCOUNTING(OSXNotificationInfo)
+  MOZ_DECLARE_REFCOUNTED_TYPENAME(OSXNotificationInfo)
   OSXNotificationInfo(NSString *name, nsIObserver *observer,
                       const nsAString & alertCookie);
+  ~OSXNotificationInfo();
 
   NSString *mName;
   nsCOMPtr<nsIObserver> mObserver;

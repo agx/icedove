@@ -8,8 +8,7 @@ TEST_DIRS += ['tests']
 
 EXPORTS.mozilla.dom += [
     'Promise.h',
-    'PromiseNativeHandler.h',
-    'PromiseWorkerProxy.h',
+    'PromiseNativeHandler.h'
 ]
 
 SOURCES += [

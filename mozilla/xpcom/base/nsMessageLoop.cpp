@@ -33,9 +33,7 @@ class MessageLoopIdleTask
 public:
   MOZ_DECLARE_REFCOUNTED_TYPENAME(MessageLoopIdleTask)
   MessageLoopIdleTask(nsIRunnable* aTask, uint32_t aEnsureRunsAfterMS);
-  virtual ~MessageLoopIdleTask()
-  {
-  }
+  virtual ~MessageLoopIdleTask() {}
   virtual void Run();
 
 private:
@@ -90,9 +88,8 @@ nsresult
 MessageLoopIdleTask::Init(uint32_t aEnsureRunsAfterMS)
 {
   mTimer = do_CreateInstance("@mozilla.org/timer;1");
-  if (NS_WARN_IF(!mTimer)) {
+  if (NS_WARN_IF(!mTimer))
     return NS_ERROR_UNEXPECTED;
-  }
 
   nsRefPtr<MessageLoopTimerCallback> callback =
     new MessageLoopTimerCallback(this);
@@ -121,8 +118,7 @@ MessageLoopIdleTask::Run()
 
 MessageLoopTimerCallback::MessageLoopTimerCallback(MessageLoopIdleTask* aTask)
   : mTask(aTask->asWeakPtr())
-{
-}
+{}
 
 NS_IMETHODIMP
 MessageLoopTimerCallback::Notify(nsITimer* aTimer)
@@ -159,9 +155,8 @@ nsMessageLoopConstructor(nsISupports* aOuter,
                          const nsIID& aIID,
                          void** aInstancePtr)
 {
-  if (NS_WARN_IF(aOuter)) {
+  if (NS_WARN_IF(aOuter))
     return NS_ERROR_NO_AGGREGATION;
-  }
   nsISupports* messageLoop = new nsMessageLoop();
   return messageLoop->QueryInterface(aIID, aInstancePtr);
 }

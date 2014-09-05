@@ -28,11 +28,11 @@ public:
   NS_IMETHOD
   InheritAutomaticData(nsIFrame* aParent) MOZ_OVERRIDE;
 
-  virtual void
+  virtual nsresult
   SetInitialChildList(ChildListID     aListID,
                       nsFrameList&    aChildList) MOZ_OVERRIDE;
 
-  virtual void
+  virtual nsresult
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,

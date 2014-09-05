@@ -43,11 +43,8 @@ nsWindowMediator::GetDOMWindow(nsIXULWindow* inWindow,
 {
   nsCOMPtr<nsIDocShell> docShell;
 
-  outDOMWindow = nullptr;
   inWindow->GetDocShell(getter_AddRefs(docShell));
-  NS_ENSURE_TRUE(docShell, NS_ERROR_FAILURE);
-
-  outDOMWindow = docShell->GetWindow();
+  outDOMWindow = do_GetInterface(docShell);
   return outDOMWindow ? NS_OK : NS_ERROR_FAILURE;
 }
 

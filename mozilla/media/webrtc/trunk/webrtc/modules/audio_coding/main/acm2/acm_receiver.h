@@ -18,7 +18,6 @@
 #include "webrtc/modules/audio_coding/main/interface/audio_coding_module.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_codec_database.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_resampler.h"
-#include "webrtc/modules/audio_coding/main/acm2/call_statistics.h"
 #include "webrtc/modules/audio_coding/main/acm2/initial_delay_manager.h"
 #include "webrtc/modules/audio_coding/neteq4/interface/neteq.h"
 #include "webrtc/modules/interface/module_common_types.h"
@@ -27,14 +26,11 @@
 
 namespace webrtc {
 
-struct CodecInst;
 class CriticalSectionWrapper;
 class RWLockWrapper;
 class NetEq;
-
-namespace acm2 {
-
 class Nack;
+struct CodecInst;
 
 class AcmReceiver {
  public:
@@ -321,10 +317,6 @@ class AcmReceiver {
   //
   NetEqBackgroundNoiseMode BackgroundNoiseModeForTest() const;
 
-  //
-  // Get statistics of calls to GetAudio().
-  void GetDecodingCallStatistics(AudioDecodingCallStats* stats) const;
-
  private:
   int PayloadType2CodecIndex(uint8_t payload_type) const;
 
@@ -366,11 +358,7 @@ class AcmReceiver {
   // initial delay is set.
   scoped_ptr<InitialDelayManager::SyncStream> missing_packets_sync_stream_;
   scoped_ptr<InitialDelayManager::SyncStream> late_packets_sync_stream_;
-
-  CallStatistics call_stats_;
 };
-
-}  // namespace acm2
 
 }  // namespace webrtc
 

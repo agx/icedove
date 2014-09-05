@@ -16,10 +16,11 @@
 
 'use strict';
 
+var Cu = require('chrome').Cu;
 var Cc = require('chrome').Cc;
 var Ci = require('chrome').Ci;
 
-var Task = require('resource://gre/modules/Task.jsm').Task;
+var OS = Cu.import('resource://gre/modules/osfile.jsm', {}).OS;
 
 var promise = require('./promise');
 var util = require('./util');
@@ -58,17 +59,10 @@ Highlighter.prototype._unhighlightNode = function(node) {
 exports.Highlighter = Highlighter;
 
 /**
- * See docs in lib/gcli/util/host.js
+ * See docs in lib/gcli/util/host.js:exec
  */
-exports.spawn = function(spawnSpec) {
+exports.exec = function(execSpec) {
   throw new Error('Not supported');
-};
-
-/**
- * See docs in lib/gcli/util/host.js
- */
-exports.exec = function(task) {
-  return Task.spawn(task);
 };
 
 /**

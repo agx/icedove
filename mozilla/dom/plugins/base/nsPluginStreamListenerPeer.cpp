@@ -420,8 +420,7 @@ nsPluginStreamListenerPeer::OnStartRequest(nsIRequest *request,
                                            nsISupports* aContext)
 {
   nsresult rv = NS_OK;
-  PROFILER_LABEL("nsPluginStreamListenerPeer", "OnStartRequest",
-    js::ProfileEntry::Category::OTHER);
+  PROFILER_LABEL("nsPluginStreamListenerPeer", "OnStartRequest");
 
   if (mRequests.IndexOfObject(GetBaseRequest(request)) == -1) {
     NS_ASSERTION(mRequests.Count() == 0,
@@ -609,10 +608,10 @@ nsPluginStreamListenerPeer::MakeByteRangeString(NPByteRange* aRangeList, nsACStr
 
     // XXX needs to be fixed for negative offsets
     string.AppendInt(range->offset);
-    string.Append('-');
+    string.Append("-");
     string.AppendInt(range->offset + range->length - 1);
     if (range->next)
-      string.Append(',');
+      string += ",";
 
     requestCnt++;
   }

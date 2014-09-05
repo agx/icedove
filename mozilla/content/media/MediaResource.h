@@ -422,7 +422,7 @@ public:
     // Not owned:
     // - mDecoder
     size_t size = MediaResource::SizeOfExcludingThis(aMallocSizeOf);
-    size += mContentType.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+    size += mContentType.SizeOfIncludingThisIfUnshared(aMallocSizeOf);
 
     return size;
   }
@@ -639,7 +639,7 @@ protected:
   nsresult OpenChannel(nsIStreamListener** aStreamListener);
   nsresult RecreateChannel();
   // Add headers to HTTP request. Main thread only.
-  nsresult SetupChannelHeaders();
+  void SetupChannelHeaders();
   // Closes the channel. Main thread only.
   void CloseChannel();
 

@@ -54,6 +54,9 @@ JS_SetGrayGCRootsTracer(JSRuntime *rt, JSTraceDataOp traceOp, void *data);
 extern JS_FRIEND_API(JSString *)
 JS_GetAnonymousString(JSRuntime *rt);
 
+extern JS_FRIEND_API(void)
+JS_SetIsWorkerRuntime(JSRuntime *rt);
+
 extern JS_FRIEND_API(JSObject *)
 JS_FindCompilationScope(JSContext *cx, JS::HandleObject obj);
 
@@ -125,12 +128,6 @@ JS_GetCompartmentPrincipals(JSCompartment *compartment);
 
 extern JS_FRIEND_API(void)
 JS_SetCompartmentPrincipals(JSCompartment *compartment, JSPrincipals *principals);
-
-extern JS_FRIEND_API(JSPrincipals *)
-JS_GetScriptPrincipals(JSScript *script);
-
-extern JS_FRIEND_API(JSPrincipals *)
-JS_GetScriptOriginPrincipals(JSScript *script);
 
 /* Safe to call with input obj == nullptr. Returns non-nullptr iff obj != nullptr. */
 extern JS_FRIEND_API(JSObject *)
@@ -293,7 +290,8 @@ namespace js {
             js::proxy_SetElement,                                                       \
             js::proxy_GetGenericAttributes,                                             \
             js::proxy_SetGenericAttributes,                                             \
-            js::proxy_DeleteGeneric,                                                    \
+            js::proxy_DeleteProperty,                                                   \
+            js::proxy_DeleteElement,                                                    \
             js::proxy_Watch, js::proxy_Unwatch,                                         \
             js::proxy_Slice,                                                            \
             nullptr,             /* enumerate       */                                  \
@@ -358,7 +356,10 @@ proxy_GetGenericAttributes(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
 extern JS_FRIEND_API(bool)
 proxy_SetGenericAttributes(JSContext *cx, JS::HandleObject obj, JS::HandleId id, unsigned *attrsp);
 extern JS_FRIEND_API(bool)
-proxy_DeleteGeneric(JSContext *cx, JS::HandleObject obj, JS::HandleId id, bool *succeeded);
+proxy_DeleteProperty(JSContext *cx, JS::HandleObject obj, JS::Handle<PropertyName*> name,
+                     bool *succeeded);
+extern JS_FRIEND_API(bool)
+proxy_DeleteElement(JSContext *cx, JS::HandleObject obj, uint32_t index, bool *succeeded);
 
 extern JS_FRIEND_API(void)
 proxy_Trace(JSTracer *trc, JSObject *obj);
@@ -375,7 +376,7 @@ proxy_Call(JSContext *cx, unsigned argc, JS::Value *vp);
 extern JS_FRIEND_API(bool)
 proxy_Construct(JSContext *cx, unsigned argc, JS::Value *vp);
 extern JS_FRIEND_API(JSObject *)
-proxy_innerObject(JSObject *obj);
+proxy_innerObject(JSContext *cx, JS::HandleObject obj);
 extern JS_FRIEND_API(bool)
 proxy_Watch(JSContext *cx, JS::HandleObject obj, JS::HandleId id, JS::HandleObject callable);
 extern JS_FRIEND_API(bool)
@@ -590,16 +591,9 @@ struct Function {
 };
 
 struct Atom {
-    static const uint32_t INLINE_CHARS_BIT = JS_BIT(2);
-    static const uint32_t LATIN1_CHARS_BIT = JS_BIT(6);
-    uint32_t flags;
-    uint32_t length;
-    union {
-        const JS::Latin1Char *nonInlineCharsLatin1;
-        const jschar *nonInlineCharsTwoByte;
-        JS::Latin1Char inlineStorageLatin1[1];
-        jschar inlineStorageTwoByte[1];
-    };
+    static const size_t LENGTH_SHIFT = 4;
+    size_t lengthAndFlags;
+    const jschar *chars;
 };
 
 } /* namespace shadow */
@@ -692,7 +686,7 @@ NotifyAnimationActivity(JSObject *obj);
  * thus it will really return the outermost enclosing function *since the
  * innermost eval*.
  */
-JS_FRIEND_API(JSFunction *)
+JS_FRIEND_API(JSScript *)
 GetOutermostEnclosingFunctionOfScriptedCaller(JSContext *cx);
 
 JS_FRIEND_API(JSFunction *)
@@ -778,20 +772,14 @@ GetObjectSlot(JSObject *obj, size_t slot)
 inline const jschar *
 GetAtomChars(JSAtom *atom)
 {
-    using shadow::Atom;
-    Atom *atom_ = reinterpret_cast<Atom *>(atom);
-    JS_ASSERT(!(atom_->flags & Atom::LATIN1_CHARS_BIT));
-    if (atom_->flags & Atom::INLINE_CHARS_BIT) {
-        char *p = reinterpret_cast<char *>(atom);
-        return reinterpret_cast<const jschar *>(p + offsetof(Atom, inlineStorageTwoByte));
-    }
-    return atom_->nonInlineCharsTwoByte;
+    return reinterpret_cast<shadow::Atom *>(atom)->chars;
 }
 
 inline size_t
 GetAtomLength(JSAtom *atom)
 {
-    return reinterpret_cast<shadow::Atom*>(atom)->length;
+    using shadow::Atom;
+    return reinterpret_cast<Atom*>(atom)->lengthAndFlags >> Atom::LENGTH_SHIFT;
 }
 
 inline JSLinearString *
@@ -933,10 +921,9 @@ extern JS_FRIEND_API(bool)
 IsContextRunningJS(JSContext *cx);
 
 typedef bool
-(* DOMInstanceClassHasProtoAtDepth)(const Class *instanceClass,
-                                    uint32_t protoID, uint32_t depth);
+(* DOMInstanceClassMatchesProto)(JSObject *protoObject, uint32_t protoID, uint32_t depth);
 struct JSDOMCallbacks {
-    DOMInstanceClassHasProtoAtDepth instanceClassMatchesProto;
+    DOMInstanceClassMatchesProto instanceClassMatchesProto;
 };
 typedef struct JSDOMCallbacks DOMCallbacks;
 
@@ -1006,13 +993,13 @@ struct ChromeCompartmentsOnly : public CompartmentFilter {
 
 struct SingleCompartment : public CompartmentFilter {
     JSCompartment *ours;
-    explicit SingleCompartment(JSCompartment *c) : ours(c) {}
+    SingleCompartment(JSCompartment *c) : ours(c) {}
     virtual bool match(JSCompartment *c) const { return c == ours; }
 };
 
 struct CompartmentsWithPrincipals : public CompartmentFilter {
     JSPrincipals *principals;
-    explicit CompartmentsWithPrincipals(JSPrincipals *p) : principals(p) {}
+    CompartmentsWithPrincipals(JSPrincipals *p) : principals(p) {}
     virtual bool match(JSCompartment *c) const {
         return JS_GetCompartmentPrincipals(c) == principals;
     }
@@ -1343,7 +1330,7 @@ extern JS_FRIEND_DATA(const Class* const) Uint32ArrayClassPtr;
 extern JS_FRIEND_DATA(const Class* const) Float32ArrayClassPtr;
 extern JS_FRIEND_DATA(const Class* const) Float64ArrayClassPtr;
 
-const size_t TypedArrayLengthSlot = 1;
+const size_t TypedArrayLengthSlot = 4;
 
 } // namespace detail
 
@@ -1549,7 +1536,7 @@ JS_GetArrayBufferViewData(JSObject *obj);
  * object that would return true for JS_IsArrayBufferViewObject().
  */
 extern JS_FRIEND_API(JSObject *)
-JS_GetArrayBufferViewBuffer(JSContext *cx, JS::HandleObject obj);
+JS_GetArrayBufferViewBuffer(JSContext *cx, JSObject *obj);
 
 typedef enum {
     ChangeData,
@@ -1568,14 +1555,6 @@ typedef enum {
 extern JS_FRIEND_API(bool)
 JS_NeuterArrayBuffer(JSContext *cx, JS::HandleObject obj,
                      NeuterDataDisposition changeData);
-
-/*
- * Check whether the obj is ArrayBufferObject and neutered. Note that this
- * may return false if a security wrapper is encountered that denies the
- * unwrapping.
- */
-extern JS_FRIEND_API(bool)
-JS_IsNeuteredArrayBufferObject(JSObject *obj);
 
 /*
  * Check whether obj supports JS_GetDataView* APIs.
@@ -1886,18 +1865,12 @@ struct JSJitInfo {
                                   not be enough (e.g. in cases when it can
                                   throw). */
     // XXXbz should we have a JSValueType for the type of the member?
-    uint32_t isAlwaysInSlot : 1; /* True if this is a getter that can always
-                                    get the value from a slot of the "this"
-                                    object. */
-    uint32_t isLazilyCachedInSlot : 1; /* True if this is a getter that can
-                                          sometimes (if the slot doesn't contain
-                                          UndefinedValue()) get the value from a
-                                          slot of the "this" object. */
+    uint32_t isInSlot : 1;     /* True if this is a getter that can get a member
+                                  from a slot of the "this" object directly. */
     uint32_t isTypedMethod : 1; /* True if this is an instance of
                                    JSTypedMethodJitInfo. */
-    uint32_t slotIndex : 11;   /* If isAlwaysInSlot or isSometimesInSlot is
-                                  true, the index of the slot to get the value
-                                  from.  Otherwise 0. */
+    uint32_t slotIndex : 12;   /* If isInSlot is true, the index of the slot to
+                                  get the value from.  Otherwise 0. */
 };
 
 static_assert(sizeof(JSJitInfo) == (sizeof(void*) + 2 * sizeof(uint32_t)),
@@ -1955,7 +1928,7 @@ inline int CheckIsParallelNative(JSParallelNative parallelNative);
  */
 #define JS_JITINFO_NATIVE_PARALLEL(infoName, parallelOp)                \
     const JSJitInfo infoName =                                          \
-        {{JS_CAST_PARALLEL_NATIVE_TO(parallelOp, JSJitGetterOp)},0,0,JSJitInfo::ParallelNative,JSJitInfo::AliasEverything,JSVAL_TYPE_MISSING,false,false,false,false,false,0}
+        {{JS_CAST_PARALLEL_NATIVE_TO(parallelOp, JSJitGetterOp)},0,0,JSJitInfo::ParallelNative,JSJitInfo::AliasEverything,JSVAL_TYPE_MISSING,false,false,false,false,0}
 
 #define JS_JITINFO_NATIVE_PARALLEL_THREADSAFE(infoName, wrapperName, serialOp) \
     bool wrapperName##_ParallelNativeThreadSafeWrapper(js::ForkJoinContext *cx, unsigned argc, \
@@ -2185,8 +2158,7 @@ DefaultValue(JSContext *cx, JS::HandleObject obj, JSType hint, JS::MutableHandle
  */
 extern JS_FRIEND_API(bool)
 CheckDefineProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id, JS::HandleValue value,
-                    unsigned attrs,
-                    JSPropertyOp getter = nullptr, JSStrictPropertyOp setter = nullptr);
+                    JSPropertyOp getter, JSStrictPropertyOp setter, unsigned attrs);
 
 /*
  * Helper function for HTMLDocument and HTMLFormElement.

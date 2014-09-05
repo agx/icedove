@@ -61,9 +61,9 @@ void WebGLExtensionVertexArray::BindVertexArrayOES(WebGLVertexArray* array)
 
 bool WebGLExtensionVertexArray::IsSupported(const WebGLContext* context)
 {
-    // If it is not supported then it's emulated, therefore it's always 'supported'
-    // See - WebGLVertexArrayFake.h/cpp for the emulation
-    return true;
+    gl::GLContext* gl = context->GL();
+
+    return gl->IsSupported(gl::GLFeature::vertex_array_object);
 }
 
 IMPL_WEBGL_EXTENSION_GOOP(WebGLExtensionVertexArray)

@@ -8,17 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TESTVADDTX_H_
-#define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TESTVADDTX_H_
+#ifndef TEST_VAD_DTX_H
+#define TEST_VAD_DTX_H
 
-#include "webrtc/modules/audio_coding/main/test/ACMTest.h"
-#include "webrtc/modules/audio_coding/main/test/Channel.h"
-#include "webrtc/modules/audio_coding/main/test/PCMFile.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "ACMTest.h"
+#include "Channel.h"
+#include "PCMFile.h"
 
 namespace webrtc {
-
-class Config;
 
 typedef struct {
   bool statusDTX;
@@ -49,7 +47,7 @@ class ActivityMonitor : public ACMVADCallback {
 
 class TestVADDTX : public ACMTest {
  public:
-  explicit TestVADDTX(const Config& config);
+  TestVADDTX();
   ~TestVADDTX();
 
   void Perform();
@@ -84,4 +82,4 @@ class TestVADDTX : public ACMTest {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_TESTVADDTX_H_
+#endif

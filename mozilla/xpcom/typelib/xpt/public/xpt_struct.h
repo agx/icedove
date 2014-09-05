@@ -14,7 +14,9 @@
 #include "xpt_arena.h"
 #include <stdint.h>
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 /*
  * Originally, I was going to have structures that exactly matched the on-disk
@@ -192,8 +194,7 @@ struct XPTInterfaceDirectoryEntry {
 extern XPT_PUBLIC_API(PRBool)
 XPT_FillInterfaceDirectoryEntry(XPTArena *arena, 
                                 XPTInterfaceDirectoryEntry *ide,
-                                nsID *iid, const char *name,
-                                const char *name_space,
+                                nsID *iid, char *name, char *name_space,
                                 XPTInterfaceDescriptor *descriptor);
 
 extern XPT_PUBLIC_API(void)
@@ -249,7 +250,7 @@ struct XPTInterfaceDescriptor {
 
 extern XPT_PUBLIC_API(PRBool)
 XPT_GetInterfaceIndexByName(XPTInterfaceDirectoryEntry *ide_block,
-                            uint16_t num_interfaces, const char *name,
+                            uint16_t num_interfaces, char *name, 
                             uint16_t *indexp);
 
 extern XPT_PUBLIC_API(XPTInterfaceDescriptor *)
@@ -282,10 +283,10 @@ struct XPTString {
 };
 
 extern XPT_PUBLIC_API(XPTString *)
-XPT_NewString(XPTArena *arena, uint16_t length, const char *bytes);
+XPT_NewString(XPTArena *arena, uint16_t length, char *bytes);
 
 extern XPT_PUBLIC_API(XPTString *)
-XPT_NewStringZ(XPTArena *arena, const char *bytes);
+XPT_NewStringZ(XPTArena *arena, char *bytes);
 
 /* 
  * A TypeDescriptor is a variable-size record used to identify the type of a 
@@ -476,9 +477,9 @@ struct XPTMethodDescriptor {
 #define XPT_MD_WANTS_CONTEXT(flags)  (flags & XPT_MD_CONTEXT)
 
 extern XPT_PUBLIC_API(PRBool)
-XPT_FillMethodDescriptor(XPTArena *arena,
-                         XPTMethodDescriptor *meth, uint8_t flags,
-                         const char *name, uint8_t num_args);
+XPT_FillMethodDescriptor(XPTArena *arena, 
+                         XPTMethodDescriptor *meth, uint8_t flags, char *name,
+                         uint8_t num_args);
 
 /*
  * Annotation records are variable-size records used to store secondary 
@@ -516,6 +517,8 @@ extern XPT_PUBLIC_API(XPTAnnotation *)
 XPT_NewAnnotation(XPTArena *arena, uint8_t flags, XPTString *creator, 
                   XPTString *private_data);
 
+#ifdef __cplusplus
 }
+#endif
 
 #endif /* __xpt_struct_h__ */

@@ -21,7 +21,8 @@ DEFINE_bool(logs, false, "print logs to stderr");
 namespace webrtc {
 namespace test {
 
-TestSuite::TestSuite(int argc, char** argv) {
+TestSuite::TestSuite(int argc, char** argv)
+    : trace_to_stderr_(NULL) {
   SetExecutablePath(argv[0]);
   testing::InitGoogleMock(&argc, argv);  // Runs InitGoogleTest() internally.
   // AllowCommandLineParsing allows us to ignore flags passed on to us by

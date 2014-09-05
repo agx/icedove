@@ -97,11 +97,9 @@ function ctcpHandleMessage(aMessage) {
     if (!ircHandlers.handleCTCPMessage(this, message)) {
       this.WARN("Unhandled CTCP message: " + message.ctcp.rawMessage +
                 "\nin IRC message: " + message.rawMessage);
-      // For unhandled CTCP message, respond with a NOTICE ERRMSG that echoes
-      // back the original command.
-      this.sendCTCPMessage(message.nickname || message.servername, true,
-                           "ERRMSG",
-                           [message.ctcp.rawMessage, ":Unhandled CTCP command"]);
+      this.sendCTCPMessage("ERRMSG",
+                           [message.ctcp.rawMessage, ":Unhandled CTCP command"],
+                           message.nickname || message.servername, true);
     }
   }
 
@@ -149,8 +147,8 @@ var ctcpBase = {
         // Received PING request, send PING response.
         this.LOG("Received PING request from " + aMessage.nickname +
                  ". Sending PING response: \"" + aMessage.ctcp.param + "\".");
-        this.sendCTCPMessage(aMessage.nickname, true, "PING",
-                             aMessage.ctcp.param);
+        this.sendCTCPMessage("PING", aMessage.ctcp.param, aMessage.nickname,
+                             true);
         return true;
       }
       else
@@ -171,7 +169,7 @@ var ctcpBase = {
         let now = (new Date()).toString();
         this.LOG("Received TIME request from " + aMessage.nickname +
                  ". Sending TIME response: \"" + now + "\".");
-        this.sendCTCPMessage(aMessage.nickname, true, "TIME", ":" + now);
+        this.sendCTCPMessage("TIME", ":" + now, aMessage.nickname, true);
       }
       else {
         // TIME :<human-readable-time-string>
@@ -197,7 +195,7 @@ var ctcpBase = {
         let version = Services.appinfo.name + " " + Services.appinfo.version;
         this.LOG("Received VERSION request from " + aMessage.nickname +
                  ". Sending VERSION response: \"" + version + "\".");
-        this.sendCTCPMessage(aMessage.nickname, true, "VERSION", version);
+        this.sendCTCPMessage("VERSION", version, aMessage.nickname, true);
       }
       else if (aMessage.command == "NOTICE" && aMessage.ctcp.param.length) {
         // VERSION #:#:#

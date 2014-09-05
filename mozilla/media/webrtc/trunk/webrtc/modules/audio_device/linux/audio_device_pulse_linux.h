@@ -97,6 +97,8 @@ public:
     AudioDeviceLinuxPulse(const int32_t id);
     virtual ~AudioDeviceLinuxPulse();
 
+    static bool PulseAudioIsSupported();
+
     // Retrieve the currently utilized audio layer
     virtual int32_t ActiveAudioLayer(
         AudioDeviceModule::AudioLayer& audioLayer) const OVERRIDE;
@@ -226,12 +228,16 @@ public:
     virtual void AttachAudioBuffer(AudioDeviceBuffer* audioBuffer) OVERRIDE;
 
 private:
-    void Lock() EXCLUSIVE_LOCK_FUNCTION(_critSect) {
+    void Lock()
+    {
         _critSect.Enter();
     }
-    void UnLock() UNLOCK_FUNCTION(_critSect) {
+    ;
+    void UnLock()
+    {
         _critSect.Leave();
     }
+    ;
     void WaitForOperationCompletion(pa_operation* paOperation) const;
     void WaitForSuccess(pa_operation* paOperation) const;
 

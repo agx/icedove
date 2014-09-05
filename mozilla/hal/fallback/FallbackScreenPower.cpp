@@ -14,17 +14,7 @@ GetScreenEnabled()
 }
 
 void
-SetScreenEnabled(bool aEnabled)
-{}
-
-bool
-GetKeyLightEnabled()
-{
-  return true;
-}
-
-void
-SetKeyLightEnabled(bool aEnabled)
+SetScreenEnabled(bool enabled)
 {}
 
 double
@@ -34,7 +24,7 @@ GetScreenBrightness()
 }
 
 void
-SetScreenBrightness(double aBrightness)
+SetScreenBrightness(double brightness)
 {}
 
 } // hal_impl

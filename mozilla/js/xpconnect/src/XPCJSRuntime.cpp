@@ -81,7 +81,6 @@ const char* const XPCJSRuntime::mStrings[] = {
     "__exposedProps__",     // IDX_EXPOSEDPROPS
     "eval",                 // IDX_EVAL
     "controllers",           // IDX_CONTROLLERS
-    "realFrameElement",     // IDX_REALFRAMEELEMENT
 };
 
 /***************************************************************************/
@@ -409,7 +408,7 @@ static bool
 PrincipalImmuneToScriptPolicy(nsIPrincipal* aPrincipal)
 {
     // System principal gets a free pass.
-    if (nsXPConnect::SecurityManager()->IsSystemPrincipal(aPrincipal))
+    if (XPCWrapper::GetSecurityManager()->IsSystemPrincipal(aPrincipal))
         return true;
 
     // nsExpandedPrincipal gets a free pass.
@@ -450,11 +449,12 @@ Scriptability::Scriptability(JSCompartment *c) : mScriptBlocks(0)
     // If we're not immune, we should have a real principal with a codebase URI.
     // Check the URI against the new-style domain policy.
     if (!mImmuneToScriptPolicy) {
+        nsIScriptSecurityManager* ssm = XPCWrapper::GetSecurityManager();
         nsCOMPtr<nsIURI> codebase;
         nsresult rv = prin->GetURI(getter_AddRefs(codebase));
         bool policyAllows;
         if (NS_SUCCEEDED(rv) && codebase &&
-            NS_SUCCEEDED(nsXPConnect::SecurityManager()->PolicyAllowsScript(codebase, &policyAllows)))
+            NS_SUCCEEDED(ssm->PolicyAllowsScript(codebase, &policyAllows)))
         {
             mScriptBlockedByPolicy = !policyAllows;
         } else {
@@ -504,19 +504,19 @@ Scriptability::Get(JSObject *aScope)
 }
 
 bool
-IsContentXBLScope(JSCompartment *compartment)
+IsXBLScope(JSCompartment *compartment)
 {
     // We always eagerly create compartment privates for XBL scopes.
     CompartmentPrivate *priv = GetCompartmentPrivate(compartment);
     if (!priv || !priv->scope)
         return false;
-    return priv->scope->IsContentXBLScope();
+    return priv->scope->IsXBLScope();
 }
 
 bool
-IsInContentXBLScope(JSObject *obj)
+IsInXBLScope(JSObject *obj)
 {
-    return IsContentXBLScope(js::GetObjectCompartment(obj));
+    return IsXBLScope(js::GetObjectCompartment(obj));
 }
 
 bool
@@ -815,10 +815,7 @@ XPCJSRuntime::CustomGCCallback(JSGCStatus status)
 }
 
 /* static */ void
-XPCJSRuntime::FinalizeCallback(JSFreeOp *fop,
-                               JSFinalizeStatus status,
-                               bool isCompartmentGC,
-                               void *data)
+XPCJSRuntime::FinalizeCallback(JSFreeOp *fop, JSFinalizeStatus status, bool isCompartmentGC)
 {
     XPCJSRuntime* self = nsXPConnect::GetRuntimeInstance();
     if (!self)
@@ -1386,16 +1383,12 @@ XPCJSRuntime::InterruptCallback(JSContext *cx)
         return true;
     }
 
-    // Sometimes we get called back during XPConnect initialization, before Gecko
-    // has finished bootstrapping. Avoid crashing in nsContentUtils below.
-    if (!nsContentUtils::IsInitialized())
-        return true;
-
     // This is at least the second interrupt callback we've received since
     // returning to the event loop. See how long it's been, and what the limit
     // is.
     TimeDuration duration = TimeStamp::NowLoRes() - self->mSlowScriptCheckpoint;
-    bool chrome = nsContentUtils::IsCallerChrome();
+    bool chrome =
+      nsContentUtils::IsSystemPrincipal(nsContentUtils::GetSubjectPrincipal());
     const char *prefName = chrome ? "dom.max_chrome_script_run_time"
                                   : "dom.max_script_run_time";
     int32_t limit = Preferences::GetInt(prefName, chrome ? 20 : 10);
@@ -1442,8 +1435,8 @@ XPCJSRuntime::InterruptCallback(JSContext *cx)
     return true;
 }
 
-void
-XPCJSRuntime::CustomOutOfMemoryCallback()
+/* static */ void
+XPCJSRuntime::OutOfMemoryCallback(JSContext *cx)
 {
     if (!Preferences::GetBool("memory.dump_reports_on_oom")) {
         return;
@@ -1458,15 +1451,6 @@ XPCJSRuntime::CustomOutOfMemoryCallback()
     // If this fails, it fails silently.
     dumper->DumpMemoryInfoToTempDir(NS_LITERAL_STRING("due-to-JS-OOM"),
                                     /* minimizeMemoryUsage = */ false);
-}
-
-void
-XPCJSRuntime::CustomLargeAllocationFailureCallback()
-{
-    nsCOMPtr<nsIObserverService> os = mozilla::services::GetObserverService();
-    if (os) {
-        os->NotifyObservers(nullptr, "memory-pressure", MOZ_UTF16("heap-minimize"));
-    }
 }
 
 size_t
@@ -1568,7 +1552,6 @@ ReloadPrefsCallback(const char *pref, void *data)
     bool useBaseline = Preferences::GetBool(JS_OPTIONS_DOT_STR "baselinejit") && !safeMode;
     bool useIon = Preferences::GetBool(JS_OPTIONS_DOT_STR "ion") && !safeMode;
     bool useAsmJS = Preferences::GetBool(JS_OPTIONS_DOT_STR "asmjs") && !safeMode;
-    bool useNativeRegExp = Preferences::GetBool(JS_OPTIONS_DOT_STR "native_regexp") && !safeMode;
 
     bool parallelParsing = Preferences::GetBool(JS_OPTIONS_DOT_STR "parallel_parsing");
     bool parallelIonCompilation = Preferences::GetBool(JS_OPTIONS_DOT_STR
@@ -1581,8 +1564,7 @@ ReloadPrefsCallback(const char *pref, void *data)
 
     JS::RuntimeOptionsRef(rt).setBaseline(useBaseline)
                              .setIon(useIon)
-                             .setAsmJS(useAsmJS)
-                             .setNativeRegExp(useNativeRegExp);
+                           .  setAsmJS(useAsmJS);
 
     JS_SetParallelParsingEnabled(rt, parallelParsing);
     JS_SetParallelIonCompilationEnabled(rt, parallelIonCompilation);
@@ -1599,7 +1581,7 @@ XPCJSRuntime::~XPCJSRuntime()
     // one final GC, which can call back into the runtime with various
     // callback if we aren't careful. Null out the relevant callbacks.
     js::SetActivityCallback(Runtime(), nullptr, nullptr);
-    JS_RemoveFinalizeCallback(Runtime(), FinalizeCallback);
+    JS_SetFinalizeCallback(Runtime(), nullptr);
 
     // Clear any pending exception.  It might be an XPCWrappedJS, and if we try
     // to destroy it later we will crash.
@@ -2155,7 +2137,7 @@ ReportCompartmentStats(const JS::CompartmentStats &cStats,
 
     ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("regexp-compartment"),
         cStats.regexpCompartment,
-        "The regexp compartment and regexp data.");
+        "The regexp compartment.");
 
     ZCREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("debuggees-set"),
         cStats.debuggeesSet,
@@ -2323,11 +2305,9 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats &rtStats,
         "Transient data (mostly parse nodes) held by the JSRuntime during "
         "compilation.");
 
-#ifdef JS_YARR
     RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/regexp-data"),
         KIND_NONHEAP, rtStats.runtime.regexpData,
         "Regexp JIT data.");
-#endif
 
     RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/interpreter-stack"),
         KIND_HEAP, rtStats.runtime.interpreterStack,
@@ -3051,7 +3031,7 @@ static const JSWrapObjectCallbacks WrapObjectCallbacks = {
 };
 
 XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
-   : CycleCollectedJSRuntime(nullptr, JS::DefaultHeapMaxBytes, JS::DefaultNurseryBytes),
+   : CycleCollectedJSRuntime(nullptr, 32L * 1024L * 1024L, JS_USE_HELPER_THREADS),
    mJSContextStack(new XPCJSContextStack(MOZ_THIS_IN_INITIALIZER_LIST())),
    mCallContext(nullptr),
    mAutoRoots(nullptr),
@@ -3135,9 +3115,9 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
 
 #if defined(XP_MACOSX) || defined(DARWIN)
     // MacOS has a gargantuan default stack size of 8MB. Go wild with 7MB,
-    // and give trusted script 180k extra. The stack is huge on mac anyway.
+    // and give trusted script 140k extra. The stack is huge on mac anyway.
     const size_t kStackQuota = 7 * 1024 * 1024;
-    const size_t kTrustedScriptBuffer = 180 * 1024;
+    const size_t kTrustedScriptBuffer = 140 * 1024;
 #elif defined(MOZ_ASAN)
     // ASan requires more stack space due to red-zones, so give it double the
     // default (2MB on 32-bit, 4MB on 64-bit). ASAN stack frame measurements
@@ -3178,7 +3158,7 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     JS_SetDestroyCompartmentCallback(runtime, CompartmentDestroyedCallback);
     JS_SetCompartmentNameCallback(runtime, CompartmentNameCallback);
     mPrevGCSliceCallback = JS::SetGCSliceCallback(runtime, GCSliceCallback);
-    JS_AddFinalizeCallback(runtime, FinalizeCallback, nullptr);
+    JS_SetFinalizeCallback(runtime, FinalizeCallback);
     JS_SetWrapObjectCallbacks(runtime, &WrapObjectCallbacks);
     js::SetPreserveWrapperCallback(runtime, PreserveWrapper);
 #ifdef MOZ_CRASHREPORTER
@@ -3193,6 +3173,7 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     js::SetActivityCallback(runtime, ActivityCallback, this);
     js::SetCTypesActivityCallback(runtime, CTypesActivityCallback);
     JS_SetInterruptCallback(runtime, InterruptCallback);
+    JS::SetOutOfMemoryCallback(runtime, OutOfMemoryCallback);
 
     // The JS engine needs to keep the source code around in order to implement
     // Function.prototype.toSource(). It'd be nice to not have to do this for

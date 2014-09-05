@@ -36,7 +36,7 @@ function testConferenceRemoveError() {
   let inInfo2 = gInCallStrPool(inNumber2);
 
   return Promise.resolve()
-    .then(() => gSetupConference([outNumber, inNumber]))
+    .then(() => gSetupConferenceTwoCalls(outNumber, inNumber))
     .then(calls => {
       [outCall, inCall] = calls;
     })

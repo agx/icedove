@@ -40,17 +40,17 @@ public:
   PropertyList(nsIAtom*           aName,
                NSPropertyDtorFunc aDtorFunc,
                void*              aDtorData,
-               bool               aTransfer);
-  ~PropertyList();
+               bool               aTransfer) NS_HIDDEN;
+  ~PropertyList() NS_HIDDEN;
 
   // Removes the property associated with the given object, and destroys
   // the property value
-  bool DeletePropertyFor(nsPropertyOwner aObject);
+  NS_HIDDEN_(bool) DeletePropertyFor(nsPropertyOwner aObject);
 
   // Destroy all remaining properties (without removing them)
-  void Destroy();
+  NS_HIDDEN_(void) Destroy();
 
-  bool Equals(nsIAtom *aPropertyName)
+  NS_HIDDEN_(bool) Equals(nsIAtom *aPropertyName)
   {
     return mName == aPropertyName;
   }
@@ -360,12 +360,6 @@ nsPropertyTable::SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
   }
 
   return n;
-}
-
-size_t
-nsPropertyTable::SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const
-{
-  return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
 }
 
 /* static */

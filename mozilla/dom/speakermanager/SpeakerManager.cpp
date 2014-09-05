@@ -11,7 +11,6 @@
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsIDocShell.h"
 #include "AudioChannelService.h"
-#include "mozilla/Services.h"
 
 namespace mozilla {
 namespace dom {
@@ -148,7 +147,8 @@ SpeakerManager::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
     return nullptr;
   }
 
-  nsCOMPtr<nsIPermissionManager> permMgr = services::GetPermissionManager();
+  nsCOMPtr<nsIPermissionManager> permMgr =
+    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
   NS_ENSURE_TRUE(permMgr, nullptr);
 
   uint32_t permission = nsIPermissionManager::DENY_ACTION;

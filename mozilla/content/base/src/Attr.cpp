@@ -321,7 +321,19 @@ Attr::SetTextContentInternal(const nsAString& aTextContent,
 NS_IMETHODIMP
 Attr::GetIsId(bool* aReturn)
 {
-  *aReturn = mNodeInfo->Equals(nsGkAtoms::id, kNameSpaceID_None);
+  Element* element = GetElement();
+  if (!element) {
+    *aReturn = false;
+    return NS_OK;
+  }
+
+  nsIAtom* idAtom = element->GetIDAttributeName();
+  if (!idAtom) {
+    *aReturn = false;
+    return NS_OK;
+  }
+
+  *aReturn = mNodeInfo->Equals(idAtom, kNameSpaceID_None);
   return NS_OK;
 }
 

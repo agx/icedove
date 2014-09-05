@@ -51,10 +51,11 @@
 
 class nsIWidget;
 
+using namespace mozilla::dom;
+using namespace mozilla::gfx;
+
 namespace mozilla {
 namespace layers {
-
-using namespace mozilla::gfx;
 
 /**
  * Clips to the smallest device-pixel-aligned rectangle containing aRect
@@ -136,12 +137,13 @@ class PaintLayerContext {
 public:
   PaintLayerContext(gfxContext* aTarget, Layer* aLayer,
                     LayerManager::DrawThebesLayerCallback aCallback,
-                    void* aCallbackData)
+                    void* aCallbackData, ReadbackProcessor* aReadback)
    : mTarget(aTarget)
    , mTargetMatrixSR(aTarget)
    , mLayer(aLayer)
    , mCallback(aCallback)
    , mCallbackData(aCallbackData)
+   , mReadback(aReadback)
    , mPushedOpaqueRect(false)
   {}
 
@@ -227,6 +229,7 @@ public:
   Layer* mLayer;
   LayerManager::DrawThebesLayerCallback mCallback;
   void* mCallbackData;
+  ReadbackProcessor* mReadback;
   Matrix mTransform;
   bool mPushedOpaqueRect;
 };
@@ -570,9 +573,7 @@ BasicLayerManager::EndTransactionInternal(DrawThebesLayerCallback aCallback,
                                           void* aCallbackData,
                                           EndTransactionFlags aFlags)
 {
-  PROFILER_LABEL("BasicLayerManager", "EndTransactionInternal",
-    js::ProfileEntry::Category::GRAPHICS);
-
+  PROFILER_LABEL("BasicLayerManager", "EndTransactionInternal");
 #ifdef MOZ_LAYERS_HAVE_LOG
   MOZ_LAYERS_LOG(("  ----- (beginning paint)"));
   Log();
@@ -592,9 +593,9 @@ BasicLayerManager::EndTransactionInternal(DrawThebesLayerCallback aCallback,
       mTarget ? !(mTarget->GetFlags() & gfxContext::FLAG_DISABLE_SNAPPING) : true;
     mRoot->ComputeEffectiveTransforms(mTarget ? Matrix4x4::From2D(ToMatrix(mTarget->CurrentMatrix())) : Matrix4x4());
 
-    ToData(mRoot)->Validate(aCallback, aCallbackData, nullptr);
+    ToData(mRoot)->Validate(aCallback, aCallbackData);
     if (mRoot->GetMaskLayer()) {
-      ToData(mRoot->GetMaskLayer())->Validate(aCallback, aCallbackData, nullptr);
+      ToData(mRoot->GetMaskLayer())->Validate(aCallback, aCallbackData);
     }
 
     if (aFlags & END_NO_COMPOSITE) {
@@ -623,7 +624,7 @@ BasicLayerManager::EndTransactionInternal(DrawThebesLayerCallback aCallback,
       }
     }
 
-    PaintLayer(mTarget, mRoot, aCallback, aCallbackData);
+    PaintLayer(mTarget, mRoot, aCallback, aCallbackData, nullptr);
     if (!mRegionToClear.IsEmpty()) {
       AutoSetOperator op(mTarget, gfxContext::OPERATOR_CLEAR);
       nsIntRegionRectIterator iter(mRegionToClear);
@@ -830,20 +831,25 @@ BasicLayerManager::PaintSelfOrChildren(PaintLayerContext& aPaintContext,
   if (!child) {
     if (aPaintContext.mLayer->AsThebesLayer()) {
       data->PaintThebes(aGroupTarget, aPaintContext.mLayer->GetMaskLayer(),
-          aPaintContext.mCallback, aPaintContext.mCallbackData);
+          aPaintContext.mCallback, aPaintContext.mCallbackData,
+          aPaintContext.mReadback);
     } else {
       data->Paint(aGroupTarget->GetDrawTarget(),
                   aGroupTarget->GetDeviceOffset(),
                   aPaintContext.mLayer->GetMaskLayer());
     }
   } else {
+    ReadbackProcessor readback;
     ContainerLayer* container =
         static_cast<ContainerLayer*>(aPaintContext.mLayer);
+    if (IsRetained()) {
+      readback.BuildUpdates(container);
+    }
     nsAutoTArray<Layer*, 12> children;
     container->SortChildrenBy3DZOrder(children);
     for (uint32_t i = 0; i < children.Length(); i++) {
       PaintLayer(aGroupTarget, children.ElementAt(i), aPaintContext.mCallback,
-          aPaintContext.mCallbackData);
+          aPaintContext.mCallbackData, &readback);
       if (mTransactionIncomplete)
         break;
     }
@@ -880,12 +886,11 @@ void
 BasicLayerManager::PaintLayer(gfxContext* aTarget,
                               Layer* aLayer,
                               DrawThebesLayerCallback aCallback,
-                              void* aCallbackData)
+                              void* aCallbackData,
+                              ReadbackProcessor* aReadback)
 {
-  PROFILER_LABEL("BasicLayerManager", "PaintLayer",
-    js::ProfileEntry::Category::GRAPHICS);
-
-  PaintLayerContext paintLayerContext(aTarget, aLayer, aCallback, aCallbackData);
+  PROFILER_LABEL("BasicLayerManager", "PaintLayer");
+  PaintLayerContext paintLayerContext(aTarget, aLayer, aCallback, aCallbackData, aReadback);
 
   // Don't attempt to paint layers with a singular transform, cairo will
   // just throw an error.

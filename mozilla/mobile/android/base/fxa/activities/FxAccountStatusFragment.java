@@ -17,8 +17,6 @@ import org.mozilla.gecko.fxa.authenticator.AndroidFxAccount;
 import org.mozilla.gecko.fxa.login.Married;
 import org.mozilla.gecko.fxa.login.State;
 import org.mozilla.gecko.fxa.sync.FxAccountSyncStatusHelper;
-import org.mozilla.gecko.fxa.tasks.FxAccountCodeResender;
-import org.mozilla.gecko.sync.SharedPreferencesClientsDataDelegate;
 import org.mozilla.gecko.sync.SyncConfiguration;
 
 import android.accounts.Account;
@@ -29,13 +27,10 @@ import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.preference.CheckBoxPreference;
-import android.preference.EditTextPreference;
 import android.preference.Preference;
-import android.preference.Preference.OnPreferenceChangeListener;
 import android.preference.Preference.OnPreferenceClickListener;
 import android.preference.PreferenceCategory;
 import android.preference.PreferenceScreen;
-import android.text.TextUtils;
 
 /**
  * A fragment that displays the status of an AndroidFxAccount.
@@ -43,9 +38,7 @@ import android.text.TextUtils;
  * The owning activity is responsible for providing an AndroidFxAccount at
  * appropriate times.
  */
-public class FxAccountStatusFragment
-    extends PreferenceFragment
-    implements OnPreferenceClickListener, OnPreferenceChangeListener {
+public class FxAccountStatusFragment extends PreferenceFragment implements OnPreferenceClickListener {
   private static final String LOG_TAG = FxAccountStatusFragment.class.getSimpleName();
 
   // When a checkbox is toggled, wait 5 seconds (for other checkbox actions)
@@ -71,12 +64,7 @@ public class FxAccountStatusFragment
   protected CheckBoxPreference tabsPreference;
   protected CheckBoxPreference passwordsPreference;
 
-  protected EditTextPreference deviceNamePreference;
-
   protected volatile AndroidFxAccount fxAccount;
-  // The contract is: when fxAccount is non-null, then clientsDataDelegate is
-  // non-null.  If violated then an IllegalStateException is thrown.
-  protected volatile SharedPreferencesClientsDataDelegate clientsDataDelegate;
 
   // Used to post delayed sync requests.
   protected Handler handler;
@@ -99,10 +87,6 @@ public class FxAccountStatusFragment
   @Override
   public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
-    addPreferences();
-  }
-
-  protected void addPreferences() {
     addPreferencesFromResource(R.xml.fxaccount_status_prefscreen);
 
     emailPreference = ensureFindPreference("email");
@@ -134,9 +118,6 @@ public class FxAccountStatusFragment
     historyPreference.setOnPreferenceClickListener(this);
     tabsPreference.setOnPreferenceClickListener(this);
     passwordsPreference.setOnPreferenceClickListener(this);
-
-    deviceNamePreference = (EditTextPreference) ensureFindPreference("device_name");
-    deviceNamePreference.setOnPreferenceChangeListener(this);
   }
 
   /**
@@ -161,7 +142,7 @@ public class FxAccountStatusFragment
     }
 
     if (preference == needsVerificationPreference) {
-      FxAccountCodeResender.resendCode(getActivity().getApplicationContext(), fxAccount);
+      FxAccountConfirmAccountActivity.resendCode(getActivity().getApplicationContext(), fxAccount);
 
       Intent intent = new Intent(getActivity(), FxAccountConfirmAccountActivity.class);
       // Per http://stackoverflow.com/a/8992365, this triggers a known bug with
@@ -195,8 +176,6 @@ public class FxAccountStatusFragment
     historyPreference.setEnabled(enabled);
     tabsPreference.setEnabled(enabled);
     passwordsPreference.setEnabled(enabled);
-    // Since we can't sync, we can't update our remote client record.
-    deviceNamePreference.setEnabled(enabled);
   }
 
   /**
@@ -314,14 +293,6 @@ public class FxAccountStatusFragment
       throw new IllegalArgumentException("fxAccount must not be null");
     }
     this.fxAccount = fxAccount;
-    try {
-      this.clientsDataDelegate = new SharedPreferencesClientsDataDelegate(fxAccount.getSyncPrefs());
-    } catch (Exception e) {
-      Logger.error(LOG_TAG, "Got exception fetching Sync prefs associated to Firefox Account; aborting.", e);
-      // Something is terribly wrong; best to get a stack trace rather than
-      // continue with a null clients delegate.
-      throw new IllegalStateException(e);
-    }
 
     handler = new Handler(); // Attached to current (assumed to be UI) thread.
 
@@ -345,17 +316,6 @@ public class FxAccountStatusFragment
   public void onPause() {
     super.onPause();
     FxAccountSyncStatusHelper.getInstance().stopObserving(syncStatusDelegate);
-  }
-
-  protected void hardRefresh() {
-    // This is the only way to guarantee that the EditText dialogs created by
-    // EditTextPreferences are re-created. This works around the issue described
-    // at http://androiddev.orkitra.com/?p=112079.
-    final PreferenceScreen statusScreen = (PreferenceScreen) ensureFindPreference("status_screen");
-    statusScreen.removeAll();
-    addPreferences();
-
-    refresh();
   }
 
   protected void refresh() {
@@ -411,10 +371,6 @@ public class FxAccountStatusFragment
       // No matter our state, we should update the checkboxes.
       updateSelectedEngines();
     }
-
-    final String clientName = clientsDataDelegate.getClientName();
-    deviceNamePreference.setSummary(clientName);
-    deviceNamePreference.setText(clientName);
   }
 
   /**
@@ -613,23 +569,5 @@ public class FxAccountStatusFragment
       button.setTitle(debugKey); // Not very friendly, but this is for debugging only!
       button.setOnPreferenceClickListener(listener);
     }
-  }
-
-  @Override
-  public boolean onPreferenceChange(Preference preference, Object newValue) {
-    if (preference == deviceNamePreference) {
-      String newClientName = (String) newValue;
-      if (TextUtils.isEmpty(newClientName)) {
-        newClientName = clientsDataDelegate.getDefaultClientName();
-      }
-      final long now = System.currentTimeMillis();
-      clientsDataDelegate.setClientName(newClientName, now);
-      requestDelayedSync(); // Try to update our remote client record.
-      hardRefresh(); // Updates the value displayed to the user, among other things.
-      return true;
-    }
-
-    // For everything else, accept the change.
-    return true;
   }
 }

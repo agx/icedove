@@ -36,12 +36,14 @@ WebGLContext::BindVertexArray(WebGLVertexArray *array)
     MakeContextCurrent();
 
     if (array) {
+        gl->fBindVertexArray(array->GLName());
+        array->SetHasEverBeenBound(true);
         mBoundVertexArray = array;
-    } else {
+    }
+    else {
+        gl->fBindVertexArray(0);
         mBoundVertexArray = mDefaultVertexArray;
     }
-
-    mBoundVertexArray->BindVertexArray();
 }
 
 already_AddRefed<WebGLVertexArray>
@@ -50,10 +52,12 @@ WebGLContext::CreateVertexArray()
     if (IsContextLost())
         return nullptr;
 
-    nsRefPtr<WebGLVertexArray> globj = WebGLVertexArray::Create(this);
+    nsRefPtr<WebGLVertexArray> globj = new WebGLVertexArray(this);
 
     MakeContextCurrent();
-    globj->GenVertexArray();
+    gl->fGenVertexArrays(1, &globj->mGLName);
+
+    mVertexArrays.insertBack(globj);
 
     return globj.forget();
 }

@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_CHANNEL_H_
-#define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_CHANNEL_H_
+#ifndef CHANNEL_H
+#define CHANNEL_H
 
 #include <stdio.h>
 
@@ -121,4 +121,4 @@ class Channel : public AudioPacketizationCallback {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_CHANNEL_H_
+#endif

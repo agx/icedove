@@ -57,7 +57,7 @@
   <menuitem id="sendMailToItem"
             label="&SendMailTo.label;"
             accesskey="&SendMailTo.accesskey;"
-            oncommand="SendMailToNode(document.popupNode, event)"/>
+            oncommand="SendMailToNode(document.popupNode)"/>
   <menuitem id="createFilterFromItem"
             label="&CreateFilterFrom.label;"
             accesskey="&CreateFilterFrom.accesskey;"

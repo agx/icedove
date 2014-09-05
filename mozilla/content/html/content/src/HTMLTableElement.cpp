@@ -89,7 +89,7 @@ TableRowsCollection::WrapObject(JSContext* aCx)
   return HTMLCollectionBinding::Wrap(aCx, this);
 }
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(TableRowsCollection, mOrphanRows)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(TableRowsCollection, mOrphanRows)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(TableRowsCollection)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(TableRowsCollection)
 
@@ -548,12 +548,17 @@ HTMLTableElement::InsertRow(int32_t aIndex, ErrorResult& aError)
     }
   } else {
     // the row count was 0, so 
-    // find the last row group and insert there as first child
+    // find the first row group and insert there as first child
     nsCOMPtr<nsIContent> rowGroup;
-    for (nsIContent* child = nsINode::GetLastChild();
+    for (nsIContent* child = nsINode::GetFirstChild();
          child;
-         child = child->GetPreviousSibling()) {
-      if (child->IsHTML(nsGkAtoms::tbody)) {
+         child = child->GetNextSibling()) {
+      nsINodeInfo *childInfo = child->NodeInfo();
+      nsIAtom *localName = childInfo->NameAtom();
+      if (childInfo->NamespaceID() == kNameSpaceID_XHTML &&
+          (localName == nsGkAtoms::thead ||
+           localName == nsGkAtoms::tbody ||
+           localName == nsGkAtoms::tfoot)) {
         rowGroup = child;
         break;
       }

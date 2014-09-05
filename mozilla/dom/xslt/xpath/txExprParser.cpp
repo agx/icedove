@@ -9,7 +9,6 @@
  * @see ExprLexer
 **/
 
-#include "mozilla/Move.h"
 #include "txExprParser.h"
 #include "txExprLexer.h"
 #include "txExpr.h"
@@ -20,8 +19,6 @@
 #include "txStringUtils.h"
 #include "txXPathNode.h"
 #include "txXPathOptimizer.h"
-
-using mozilla::Move;
 
 /**
  * Creates an Attribute Value Template using the given value
@@ -116,7 +113,7 @@ txExprParser::createAVT(const nsSubstring& aAttrValue,
         
         // Add expression, create a concat() call if necessary
         if (!expr) {
-            expr = Move(newExpr);
+            expr = newExpr;
         }
         else {
             if (!concat) {
@@ -314,7 +311,7 @@ txExprParser::createExpr(txExprLexer& lexer, txIParseContext* aContext,
                    <= precedence(static_cast<Token*>(ops.peek()))) {
                 // can't use expr as argument due to order of evaluation
                 nsAutoPtr<Expr> left(static_cast<Expr*>(exprs.pop()));
-                nsAutoPtr<Expr> right(Move(expr));
+                nsAutoPtr<Expr> right(expr);
                 rv = createBinaryExpr(left, right,
                                       static_cast<Token*>(ops.pop()),
                                       getter_Transfers(expr));
@@ -333,7 +330,7 @@ txExprParser::createExpr(txExprLexer& lexer, txIParseContext* aContext,
 
     while (NS_SUCCEEDED(rv) && !exprs.isEmpty()) {
         nsAutoPtr<Expr> left(static_cast<Expr*>(exprs.pop()));
-        nsAutoPtr<Expr> right(Move(expr));
+        nsAutoPtr<Expr> right(expr);
         rv = createBinaryExpr(left, right, static_cast<Token*>(ops.pop()),
                               getter_Transfers(expr));
     }

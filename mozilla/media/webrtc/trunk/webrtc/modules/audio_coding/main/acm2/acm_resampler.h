@@ -18,8 +18,6 @@ namespace webrtc {
 
 class CriticalSectionWrapper;
 
-namespace acm2 {
-
 class ACMResampler {
  public:
   ACMResampler();
@@ -36,8 +34,6 @@ class ACMResampler {
   Resampler resampler_;
   CriticalSectionWrapper* resampler_crit_sect_;
 };
-
-}  // namespace acm2
 
 }  // namespace webrtc
 

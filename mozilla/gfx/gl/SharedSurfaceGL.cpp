@@ -322,8 +322,18 @@ void
 SharedSurface_Basic::Fence()
 {
     mGL->MakeCurrent();
+
     ScopedBindFramebuffer autoFB(mGL, mFB);
-    ReadPixelsIntoDataSurface(mGL, mData);
+
+    DataSourceSurface::MappedSurface map;
+    mData->Map(DataSourceSurface::MapType::WRITE, &map);
+    nsRefPtr<gfxImageSurface> wrappedData =
+      new gfxImageSurface(map.mData,
+                          ThebesIntSize(mData->GetSize()),
+                          map.mStride,
+                          SurfaceFormatToImageFormat(mData->GetFormat()));
+    ReadPixelsIntoImageSurface(mGL, wrappedData);
+    mData->Unmap();
 }
 
 

@@ -7,7 +7,6 @@ package org.mozilla.gecko.home;
 
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.R;
@@ -119,14 +118,14 @@ public class HomeBanner extends LinearLayout
             }
         });
 
-        EventDispatcher.getInstance().registerGeckoThreadListener(this, "HomeBanner:Data");
+        GeckoAppShell.getEventDispatcher().registerEventListener("HomeBanner:Data", this);
     }
 
     @Override
     public void onDetachedFromWindow() {
         super.onDetachedFromWindow();
 
-        EventDispatcher.getInstance().unregisterGeckoThreadListener(this, "HomeBanner:Data");
+        GeckoAppShell.getEventDispatcher().unregisterEventListener("HomeBanner:Data", this);
     }
 
     @Override
@@ -194,7 +193,6 @@ public class HomeBanner extends LinearLayout
                             mIconView.setVisibility(View.GONE);
                         } else {
                             mIconView.setImageDrawable(d);
-                            mIconView.setVisibility(View.VISIBLE);
                         }
                     }
                 });

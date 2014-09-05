@@ -8,6 +8,8 @@ function verifyDataCellLocationInfo(aLac, aCid) {
   let cell = mobileConnection.data.cell;
   ok(cell, "location available");
 
+  // Initial LAC/CID. Android emulator initializes both value to
+  // 0xffff/0xffffffff.
   is(cell.gsmLocationAreaCode, aLac, "data.cell.gsmLocationAreaCode");
   is(cell.gsmCellId, aCid, "data.cell.gsmCellId");
   is(cell.cdmaBaseStationId, -1, "data.cell.cdmaBaseStationId");
@@ -24,7 +26,10 @@ function testDataCellLocationUpdate(aLac, aCid) {
   // Set emulator's lac/cid and wait for 'ondatachange' event.
   log("Test cell location with lac=" + aLac + " and cid=" + aCid);
 
-  return setEmulatorGsmLocationAndWait(aLac, aCid, false, true)
+  let promises = [];
+  promises.push(waitForManagerEvent("datachange"));
+  promises.push(setEmulatorGsmLocation(aLac, aCid));
+  return Promise.all(promises)
     .then(() => verifyDataCellLocationInfo(aLac, aCid));
 }
 

@@ -20,19 +20,19 @@ class RegExpStatics
 {
     /* The latest RegExp output, set after execution. */
     VectorMatchPairs        matches;
-    HeapPtrLinearString     matchesInput;
+    HeapPtr<JSLinearString> matchesInput;
 
     /*
      * The previous RegExp input, used to resolve lazy state.
      * A raw RegExpShared cannot be stored because it may be in
      * a different compartment via evalcx().
      */
-    HeapPtrAtom             lazySource;
+    HeapPtr<JSAtom>         lazySource;
     RegExpFlag              lazyFlags;
     size_t                  lazyIndex;
 
     /* The latest RegExp input, set before execution. */
-    HeapPtrString           pendingInput;
+    HeapPtr<JSString>       pendingInput;
     RegExpFlag              flags;
 
     /*
@@ -47,7 +47,7 @@ class RegExpStatics
 
   public:
     RegExpStatics() : bufferLink(nullptr), copied(false) { clear(); }
-    static JSObject *create(ExclusiveContext *cx, GlobalObject *parent);
+    static JSObject *create(JSContext *cx, GlobalObject *parent);
 
   private:
     bool executeLazy(JSContext *cx);

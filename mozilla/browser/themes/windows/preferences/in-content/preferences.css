@@ -4,28 +4,26 @@
 
 %include ../../../shared/incontentprefs/preferences.css
 
-caption {
-  background-color: transparent;
-}
-
 menulist:not([editable="true"]) > .menulist-dropmarker {
   margin-top: 1px;
   margin-bottom: 1px;
 }
 
-checkbox {
-  -moz-padding-start: 0;
+checkbox:hover::before,
+checkbox[checked]::before {
+  -moz-margin-end: -19px;
+  -moz-margin-start: 4px;
 }
 
 radio {
   -moz-binding: url("chrome://global/content/bindings/radio.xml#radio");
   -moz-margin-start: 0;
-  -moz-padding-start: 0;
 }
 
-.radio-icon,
-.checkbox-icon {
-  -moz-margin-end: 0;
+radio:hover::before,
+radio[selected]::before {
+  -moz-margin-end: -17px;
+  -moz-margin-start: 6px;
 }
 
 .actionsMenu > .menulist-label-box > .menulist-icon {

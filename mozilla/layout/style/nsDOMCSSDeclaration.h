@@ -11,7 +11,6 @@
 #include "nsICSSDeclaration.h"
 
 #include "mozilla/Attributes.h"
-#include "nsIURI.h"
 #include "nsCOMPtr.h"
 
 class nsIPrincipal;

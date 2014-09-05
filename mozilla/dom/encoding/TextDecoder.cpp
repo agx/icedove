@@ -15,12 +15,14 @@ void
 TextDecoder::Init(const nsAString& aLabel, const bool aFatal,
                   ErrorResult& aRv)
 {
+  nsAutoString label(aLabel);
+  EncodingUtils::TrimSpaceCharacters(label);
+
   nsAutoCString encoding;
   // Let encoding be the result of getting an encoding from label.
   // If encoding is failure or replacement, throw a TypeError.
-  if (!EncodingUtils::FindEncodingForLabelNoReplacement(aLabel, encoding)) {
-    nsAutoString label(aLabel);
-    EncodingUtils::TrimSpaceCharacters(label);
+  if (!EncodingUtils::FindEncodingForLabel(label, encoding) ||
+      encoding.EqualsLiteral("replacement")) {
     aRv.ThrowTypeError(MSG_ENCODING_NOT_SUPPORTED, &label);
     return;
   }

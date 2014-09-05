@@ -74,12 +74,9 @@ function test1() {
   // When the popupshown DOM event is fired, the actual showing of the popup
   // may still be pending. Clear the event loop before continuing so that
   // subsequently-opened popups aren't cancelled by accident.
-  let goToNext = function(aEvent) {
+  let goToNext = function() {
     window.document.removeEventListener("popupshown", goToNext, false);
-    executeSoon(function() {
-      test2();
-      aEvent.target.hidePopup();
-    });
+    executeSoon(test2);
   };
   window.document.addEventListener("popupshown", goToNext, false);
   EventUtils.synthesizeMouseAtCenter(plugin,

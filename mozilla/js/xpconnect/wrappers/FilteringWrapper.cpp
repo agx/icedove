@@ -35,7 +35,7 @@ Filter(JSContext *cx, HandleObject wrapper, AutoIdVector &props)
     for (size_t n = 0; n < props.length(); ++n) {
         id = props[n];
         if (Policy::check(cx, wrapper, id, Wrapper::GET))
-            props[w++].set(id);
+            props[w++] = id;
         else if (JS_IsExceptionPending(cx))
             return false;
     }

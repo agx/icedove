@@ -179,7 +179,7 @@ function forcegc()
   setTimeout(function()
   {
     SpecialPowers.gc();
-  }, 0);
+  }, 1);
 }
 
 function doTest(number)
@@ -1498,8 +1498,6 @@ function testWebSocket ()
   doTest(first_test);
 }
 
-SimpleTest.requestFlakyTimeout("The web socket tests are really fragile, but avoiding timeouts might be hard, since it's testing stuff on the network. " +
-                               "Expect all sorts of flakiness in this test...");
 SimpleTest.waitForExplicitFinish();
 
 </script>

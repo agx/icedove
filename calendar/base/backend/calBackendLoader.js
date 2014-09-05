@@ -23,7 +23,7 @@ calBackendLoader.prototype = {
         classID: calBackendLoaderClassID,
         contractID: "@mozilla.org/calendar/backend-loader;1",
         classDescription: "Calendar Backend Loader",
-        interfaces: calBackendLoaderInterfaces,
+        interaces: calBackendLoaderInterfaces,
         flags: Components.interfaces.nsIClassInfo.SINGLETON
     }),
 

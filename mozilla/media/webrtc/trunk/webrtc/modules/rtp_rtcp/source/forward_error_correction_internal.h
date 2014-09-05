@@ -67,4 +67,5 @@ void GeneratePacketMasks(int num_media_packets, int num_fec_packets,
 
 }  // namespace internal
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_RTP_RTCP_SOURCE_FORWARD_ERROR_CORRECTION_INTERNAL_H_
+
+#endif

@@ -278,8 +278,6 @@ class TickSample {
   bool    isSamplingCurrentThread;
   ThreadProfile* threadProfile;
   mozilla::TimeStamp timestamp;
-  int64_t rssMemory;
-  int64_t ussMemory;
 };
 
 class ThreadInfo;

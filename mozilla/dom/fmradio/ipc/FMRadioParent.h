@@ -22,9 +22,6 @@ public:
   FMRadioParent();
   ~FMRadioParent();
 
-  virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
-
   virtual bool
   RecvGetStatusInfo(StatusInfo* aStatusInfo) MOZ_OVERRIDE;
 

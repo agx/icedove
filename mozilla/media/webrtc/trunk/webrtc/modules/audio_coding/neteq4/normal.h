@@ -53,7 +53,7 @@ class Normal {
   int Process(const int16_t* input, size_t length,
               Modes last_mode,
               int16_t* external_mute_factor_array,
-              AudioMultiVector* output);
+              AudioMultiVector<int16_t>* output);
 
  private:
   int fs_hz_;
@@ -65,4 +65,4 @@ class Normal {
 };
 
 }  // namespace webrtc
-#endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ4_NORMAL_H_
+#endif  // SRC_MODULES_AUDIO_CODING_NETEQ4_NORMAL_H_

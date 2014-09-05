@@ -11,7 +11,6 @@
 
 #include "mozilla/ipc/BrowserProcessSubThread.h"
 #include "mozilla/plugins/PluginMessageUtils.h"
-#include "mozilla/Telemetry.h"
 
 using std::vector;
 using std::string;
@@ -76,7 +75,6 @@ PluginProcessParent::Launch(int32_t timeoutMs)
 
     vector<string> args;
     args.push_back(MungePluginDsoPath(mPluginFilePath));
-    Telemetry::AutoTimer<Telemetry::PLUGIN_STARTUP_MS> timer;
     return SyncLaunch(args, timeoutMs, selectedArchitecture);
 }
 

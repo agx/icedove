@@ -18,17 +18,14 @@
 
 #define A_RTP_SESSION_H_
 
-#include "mozilla/Types.h"
 #include <media/stagefright/foundation/AHandler.h>
-
-#include "prio.h"
 
 namespace android {
 
 struct APacketSource;
 struct ARTPConnection;
 struct ASessionDescription;
-struct MOZ_EXPORT MediaSource;
+struct MediaSource;
 
 struct ARTPSession : public AHandler {
     ARTPSession();
@@ -49,8 +46,8 @@ private:
     };
 
     struct TrackInfo {
-        PRFileDesc *mRTPSocket;
-        PRFileDesc *mRTCPSocket;
+        int mRTPSocket;
+        int mRTCPSocket;
 
         sp<APacketSource> mPacketSource;
     };

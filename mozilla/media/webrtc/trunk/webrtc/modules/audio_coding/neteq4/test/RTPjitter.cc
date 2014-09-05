@@ -64,9 +64,7 @@ int main(int argc, char* argv[])
 	unsigned int	dat_len, rtp_len, Npack, k;
 	arr_time		*time_vec;
 	char			firstline[FIRSTLINELEN];
-	unsigned char* rtp_vec = NULL;
-        unsigned char** packet_ptr = NULL;
-        unsigned char* temp_packet = NULL;
+	unsigned char	*rtp_vec = NULL, **packet_ptr, *temp_packet;
 	const unsigned int kRtpDumpHeaderSize = 4 + 4 + 4 + 2 + 2;
 	uint16_t			len;
 	uint32_t			*offset;
@@ -115,11 +113,6 @@ int main(int argc, char* argv[])
 		dat_len++;
 	}
 	
-  if (dat_len == 0) {
-    fprintf(stderr, "Error: dat_file is empty, no arrival time is given.\n");
-    goto closing;
-  }
-
 	qsort(time_vec,dat_len,sizeof(arr_time),compare_arr_time);
 
 
@@ -151,11 +144,6 @@ int main(int argc, char* argv[])
 		rtp_len += len-2;
 		Npack++;
 		len=(uint16_t) fread(&rtp_vec[rtp_len], sizeof(unsigned char), 2, in_file); // read length of next packet
-	}
-
-	if (Npack == 0) {
-	  fprintf(stderr, "Error: No RTP packet found.\n");
-	  goto closing;
 	}
 
 	packet_ptr = (unsigned char **) malloc(Npack*sizeof(unsigned char*));
@@ -194,10 +182,7 @@ int main(int argc, char* argv[])
 closing:
 	free(time_vec);
 	free(rtp_vec);
-        if (packet_ptr != NULL) {
-	  free(packet_ptr);
-        }
-        fclose(in_file);
+	fclose(in_file);
 	fclose(dat_file);
 	fclose(out_file);
 

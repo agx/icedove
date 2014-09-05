@@ -22,8 +22,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 const PROPERTIES_URL = "chrome://browser/locale/devtools/styleeditor.properties";
 
-const require = Cu.import("resource://gre/modules/devtools/Loader.jsm", {}).devtools.require;
-const console = require("resource://gre/modules/devtools/Console.jsm").console;
+const console = Services.console;
 const gStringBundle = Services.strings.createBundle(PROPERTIES_URL);
 
 
@@ -37,17 +36,12 @@ const gStringBundle = Services.strings.createBundle(PROPERTIES_URL);
  */
 this._ = function _(aName)
 {
-  try {
-    if (arguments.length == 1) {
-      return gStringBundle.GetStringFromName(aName);
-    }
-    let rest = Array.prototype.slice.call(arguments, 1);
-    return gStringBundle.formatStringFromName(aName, rest, rest.length);
+
+  if (arguments.length == 1) {
+    return gStringBundle.GetStringFromName(aName);
   }
-  catch (ex) {
-    console.error(ex);
-    throw new Error("L10N error. '" + aName + "' is missing from " + PROPERTIES_URL);
-  }
+  let rest = Array.prototype.slice.call(arguments, 1);
+  return gStringBundle.formatStringFromName(aName, rest, rest.length);
 }
 
 /**

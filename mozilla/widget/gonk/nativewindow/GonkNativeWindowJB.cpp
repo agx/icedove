@@ -36,10 +36,10 @@ using namespace mozilla::layers;
 
 namespace android {
 
-GonkNativeWindow::GonkNativeWindow(int bufferCount) :
+GonkNativeWindow::GonkNativeWindow() :
     GonkConsumerBase(new GonkBufferQueue(true) )
 {
-    mBufferQueue->setMaxAcquiredBufferCount(bufferCount);
+    mBufferQueue->setMaxAcquiredBufferCount(GonkBufferQueue::MIN_UNDEQUEUED_BUFFERS);
 }
 
 GonkNativeWindow::~GonkNativeWindow() {

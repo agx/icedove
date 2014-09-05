@@ -106,7 +106,7 @@ void
 ScopedGfxFeatureReporter::WriteAppNote(char statusChar)
 {
   nsCOMPtr<nsIRunnable> r = new AppNoteWritingRunnable(statusChar, mFeature);
-  NS_DispatchToMainThread(r);
+  NS_DispatchToMainThread(r.get(), NS_DISPATCH_NORMAL);
 }
 
 } // end namespace mozilla

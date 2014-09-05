@@ -138,7 +138,7 @@ public:
     : mRefCntAndFlags(0)
   {}
 
-  explicit nsCycleCollectingAutoRefCnt(uintptr_t aValue)
+  nsCycleCollectingAutoRefCnt(uintptr_t aValue)
     : mRefCntAndFlags(aValue << NS_NUMBER_OF_FLAGS_IN_REFCNT)
   {
   }
@@ -233,7 +233,7 @@ class nsAutoRefCnt {
 
  public:
     nsAutoRefCnt() : mValue(0) {}
-    explicit nsAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
+    nsAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
 
     // only support prefix increment/decrement
     nsrefcnt operator++() { return ++mValue; }
@@ -255,7 +255,7 @@ namespace mozilla {
 class ThreadSafeAutoRefCnt {
  public:
     ThreadSafeAutoRefCnt() : mValue(0) {}
-    explicit ThreadSafeAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
+    ThreadSafeAutoRefCnt(nsrefcnt aValue) : mValue(aValue) {}
     
     // only support prefix increment/decrement
     MOZ_ALWAYS_INLINE nsrefcnt operator++() { return ++mValue; }
@@ -662,14 +662,14 @@ NS_IMETHODIMP _class::QueryInterface(REFNSIID aIID, void** aInstancePtr)      \
   static const QITableEntry table[] = {
 
 #define NS_INTERFACE_TABLE_ENTRY(_class, _interface)                          \
-  { &NS_GET_IID(_interface),                                                  \
+  { &_interface::COMTypeInfo<int>::kIID,                                      \
     int32_t(reinterpret_cast<char*>(                                          \
                         static_cast<_interface*>((_class*) 0x1000)) -         \
                reinterpret_cast<char*>((_class*) 0x1000))                     \
   },
 
 #define NS_INTERFACE_TABLE_ENTRY_AMBIGUOUS(_class, _interface, _implClass)    \
-  { &NS_GET_IID(_interface),                                                  \
+  { &_interface::COMTypeInfo<int>::kIID,                                      \
     int32_t(reinterpret_cast<char*>(                                          \
                         static_cast<_interface*>(                             \
                                        static_cast<_implClass*>(              \

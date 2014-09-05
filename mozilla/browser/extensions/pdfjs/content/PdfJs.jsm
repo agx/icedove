@@ -64,7 +64,7 @@ function initializeDefaultPreferences() {
 var DEFAULT_PREFERENCES = {
   showPreviousViewOnLoad: true,
   defaultZoomValue: '',
-  sidebarViewOnLoad: 0,
+  ifAvailableShowOutlineOnLoad: false,
   enableHandToolOnLoad: false,
   enableWebGL: false
 };

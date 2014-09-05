@@ -530,17 +530,11 @@
                     /*len*/    Type.size_t,
                     /*flags*/  Type.unsigned_int); // Linux/Android-specific
 
-       libc.declareLazyFFI(SysFile,  "statfs",
-                               "statfs", ctypes.default_abi,
-                    /*return*/ Type.negativeone_or_nothing,
-                    /*path*/   Type.path,
-                    /*buf*/    Type.statvfs.out_ptr); // Android,B2G
-
        libc.declareLazyFFI(SysFile,  "statvfs",
                                "statvfs", ctypes.default_abi,
                     /*return*/ Type.negativeone_or_nothing,
                     /*path*/   Type.path,
-                    /*buf*/    Type.statvfs.out_ptr); // Other platforms
+                    /*buf*/    Type.statvfs.out_ptr);
 
        libc.declareLazyFFI(SysFile,  "symlink",
                                "symlink", ctypes.default_abi,

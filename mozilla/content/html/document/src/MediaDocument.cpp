@@ -170,7 +170,7 @@ MediaDocument::StartDocumentLoad(const char*         aCommand,
   docShell->GetParentCharset(charset, &source, getter_AddRefs(principal));
 
   if (!charset.IsEmpty() &&
-      !charset.EqualsLiteral("UTF-8") &&
+      !charset.Equals("UTF-8") &&
       NodePrincipal()->Equals(principal)) {
     SetDocumentCharacterSetSource(source);
     SetDocumentCharacterSet(charset);

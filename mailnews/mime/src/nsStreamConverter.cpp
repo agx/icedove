@@ -8,6 +8,7 @@
 #include "modmimee.h"
 #include "nscore.h"
 #include "nsStreamConverter.h"
+#include "comi18n.h"
 #include "prmem.h"
 #include "prprf.h"
 #include "prlog.h"

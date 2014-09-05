@@ -73,11 +73,11 @@ private:
   // this constructor always, the compiler wouldn't generate a trivial
   // default constructor for us in non-debug mode.
 #ifdef DEBUG
-  StaticMutex(StaticMutex& aOther);
+  StaticMutex(StaticMutex &other);
 #endif
 
   // Disallow these operators.
-  StaticMutex& operator=(StaticMutex* aRhs);
+  StaticMutex& operator=(StaticMutex* rhs);
   static void* operator new(size_t) CPP_THROW_NEW;
   static void operator delete(void*);
 };

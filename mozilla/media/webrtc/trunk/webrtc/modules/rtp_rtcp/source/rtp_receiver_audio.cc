@@ -198,10 +198,12 @@ int32_t RTPReceiverAudio::ParseRtpPacket(WebRtcRTPHeader* rtp_header,
            rtp_header->type.Audio.arrOfEnergy,
            rtp_header->type.Audio.numEnergy);
   }
+  const uint16_t payload_data_length = payload_length -
+      rtp_header->header.paddingLength;
 
   return ParseAudioCodecSpecific(rtp_header,
                                  payload,
-                                 payload_length,
+                                 payload_data_length,
                                  specific_payload.Audio,
                                  is_red);
 }

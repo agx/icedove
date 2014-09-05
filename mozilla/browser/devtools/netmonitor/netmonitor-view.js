@@ -2222,7 +2222,7 @@ NetworkDetailsView.prototype = {
       // information available, then nothing else is to be displayed.
       let cookieProps = Object.keys(cookie);
       if (cookieProps.length == 2) {
-        continue;
+        return;
       }
 
       // Display any other information other than the cookie name and value

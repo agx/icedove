@@ -392,7 +392,10 @@ nsJSIID::NewResolve(nsIXPConnectWrappedNative *wrapper,
 
     AutoMarkingNativeInterfacePtr iface(ccx);
 
-    iface = XPCNativeInterface::GetNewOrUsed(mInfo);
+    const nsIID* iid;
+    mInfo->GetIIDShared(&iid);
+
+    iface = XPCNativeInterface::GetNewOrUsed(iid);
 
     if (!iface)
         return NS_OK;
@@ -404,7 +407,7 @@ nsJSIID::NewResolve(nsIXPConnectWrappedNative *wrapper,
             return NS_ERROR_OUT_OF_MEMORY;
 
         *objp = obj;
-        *_retval = JS_DefinePropertyById(cx, obj, id, val,
+        *_retval = JS_DefinePropertyById(cx, obj, id, val, nullptr, nullptr,
                                          JSPROP_ENUMERATE | JSPROP_READONLY |
                                          JSPROP_PERMANENT);
     }
@@ -424,7 +427,10 @@ nsJSIID::Enumerate(nsIXPConnectWrappedNative *wrapper,
 
     AutoMarkingNativeInterfacePtr iface(ccx);
 
-    iface = XPCNativeInterface::GetNewOrUsed(mInfo);
+    const nsIID* iid;
+    mInfo->GetIIDShared(&iid);
+
+    iface = XPCNativeInterface::GetNewOrUsed(iid);
 
     if (!iface)
         return NS_OK;
@@ -465,7 +471,7 @@ FindObjectForHasInstance(JSContext *cx, HandleObject objArg)
     RootedObject obj(cx, objArg), proto(cx);
 
     while (obj && !IS_WN_REFLECTOR(obj) &&
-           !IsDOMObject(obj) && !mozilla::jsipc::IsCPOW(obj))
+           !IsDOMObject(obj) && !mozilla::jsipc::JavaScriptParent::IsCPOW(obj))
     {
         if (js::IsWrapper(obj)) {
             obj = js::CheckedUnwrap(obj, /* stopAtOuter = */ false);
@@ -487,24 +493,45 @@ xpc::HasInstance(JSContext *cx, HandleObject objArg, const nsID *iid, bool *bp)
     if (!obj)
         return NS_OK;
 
-    if (mozilla::jsipc::IsCPOW(obj))
-        return mozilla::jsipc::InstanceOf(obj, iid, bp);
+    if (IsDOMObject(obj)) {
+        // Not all DOM objects implement nsISupports. But if they don't,
+        // there's nothing to do in this HasInstance hook.
+        nsISupports *identity = UnwrapDOMObjectToISupports(obj);
+        if (!identity)
+            return NS_OK;;
+        nsCOMPtr<nsISupports> supp;
+        identity->QueryInterface(*iid, getter_AddRefs(supp));
+        *bp = supp;
+        return NS_OK;
+    }
 
-    nsISupports *identity = UnwrapReflectorToISupports(obj);
-    if (!identity)
+    if (mozilla::jsipc::JavaScriptParent::IsCPOW(obj))
+        return mozilla::jsipc::JavaScriptParent::InstanceOf(obj, iid, bp);
+
+    MOZ_ASSERT(IS_WN_REFLECTOR(obj));
+    XPCWrappedNative* other_wrapper = XPCWrappedNative::Get(obj);
+    if (!other_wrapper)
         return NS_OK;
 
-    nsCOMPtr<nsISupports> supp;
-    identity->QueryInterface(*iid, getter_AddRefs(supp));
-    *bp = supp;
+    // We'll trust the interface set of the wrapper if this is known
+    // to be an interface that the objects *expects* to be able to
+    // handle.
+    if (other_wrapper->HasInterfaceNoQI(*iid)) {
+        *bp = true;
+        return NS_OK;
+    }
 
-    // Our old HasInstance implementation operated by invoking FindTearOff on
-    // XPCWrappedNatives, and various bits of chrome JS came to depend on
-    // |instanceof| doing an implicit QI if it succeeds. Do a drive-by QI to
-    // preserve that behavior. This is just a compatibility hack, so we don't
-    // really care if it fails.
-    if (IS_WN_REFLECTOR(obj))
-        (void) XPCWrappedNative::Get(obj)->FindTearOff(*iid);
+    // Otherwise, we'll end up Querying the native object to be sure.
+    XPCCallContext ccx(JS_CALLER, cx);
+
+    AutoMarkingNativeInterfacePtr iface(ccx);
+    iface = XPCNativeInterface::GetNewOrUsed(iid);
+
+    nsresult findResult = NS_OK;
+    if (iface && other_wrapper->FindTearOff(iface, false, &findResult))
+        *bp = true;
+    if (NS_FAILED(findResult) && findResult != NS_ERROR_NO_INTERFACE)
+        return findResult;
 
     return NS_OK;
 }
@@ -617,8 +644,8 @@ GetIIDArg(uint32_t argc, const JS::Value& val, JSContext* cx)
     // If an IID was passed in then use it
     if (argc) {
         JSObject* iidobj;
-        if (val.isPrimitive() ||
-            !(iidobj = val.toObjectOrNull()) ||
+        if (JSVAL_IS_PRIMITIVE(val) ||
+            !(iidobj = JSVAL_TO_OBJECT(val)) ||
             !(iid = xpc_JSObjectToID(cx, iidobj))) {
             return nullptr;
         }
@@ -626,6 +653,21 @@ GetIIDArg(uint32_t argc, const JS::Value& val, JSContext* cx)
         iid = &NS_GET_IID(nsISupports);
 
     return iid;
+}
+
+static void
+GetWrapperObject(MutableHandleObject obj)
+{
+    obj.set(nullptr);
+    nsXPConnect* xpc = nsXPConnect::XPConnect();
+    nsAXPCNativeCallContext *ccxp = nullptr;
+    xpc->GetCurrentNativeCallContext(&ccxp);
+    if (!ccxp)
+        return;
+
+    nsCOMPtr<nsIXPConnectWrappedNative> wrapper;
+    ccxp->GetCalleeWrapper(getter_AddRefs(wrapper));
+    obj.set(wrapper->GetJSObject());
 }
 
 /* nsISupports createInstance (); */
@@ -636,7 +678,14 @@ nsJSCID::CreateInstance(HandleValue iidval, JSContext *cx,
     if (!mDetails.IsValid())
         return NS_ERROR_XPC_BAD_CID;
 
-    if (NS_FAILED(nsXPConnect::SecurityManager()->CanCreateInstance(cx, mDetails.ID()))) {
+    RootedObject obj(cx);
+    GetWrapperObject(&obj);
+    if (!obj) {
+        return NS_ERROR_UNEXPECTED;
+    }
+
+    nsIXPCSecurityManager* sm = nsXPConnect::XPConnect()->GetDefaultSecurityManager();
+    if (sm && NS_FAILED(sm->CanCreateInstance(cx, mDetails.ID()))) {
         NS_ERROR("how are we not being called from chrome here?");
         return NS_OK;
     }
@@ -658,7 +707,7 @@ nsJSCID::CreateInstance(HandleValue iidval, JSContext *cx,
     if (NS_FAILED(rv) || !inst)
         return NS_ERROR_XPC_CI_RETURNED_FAILURE;
 
-    rv = nsContentUtils::WrapNative(cx, inst, iid, retval);
+    rv = nsXPConnect::XPConnect()->WrapNativeToJSVal(cx, obj, inst, nullptr, iid, true, retval);
     if (NS_FAILED(rv) || retval.isPrimitive())
         return NS_ERROR_XPC_CANT_CREATE_WN;
     return NS_OK;
@@ -672,7 +721,15 @@ nsJSCID::GetService(HandleValue iidval, JSContext *cx, uint8_t optionalArgc,
     if (!mDetails.IsValid())
         return NS_ERROR_XPC_BAD_CID;
 
-    if (NS_FAILED(nsXPConnect::SecurityManager()->CanCreateInstance(cx, mDetails.ID()))) {
+    RootedObject obj(cx);
+    GetWrapperObject(&obj);
+    if (!obj) {
+        return NS_ERROR_UNEXPECTED;
+    }
+
+    nsIXPCSecurityManager *sm;
+    sm = nsXPConnect::XPConnect()->GetDefaultSecurityManager();
+    if (sm && NS_FAILED(sm->CanCreateInstance(cx, mDetails.ID()))) {
         MOZ_ASSERT(JS_IsExceptionPending(cx),
                    "security manager vetoed GetService without setting exception");
         return NS_OK;
@@ -694,12 +751,12 @@ nsJSCID::GetService(HandleValue iidval, JSContext *cx, uint8_t optionalArgc,
     if (NS_FAILED(rv) || !srvc)
         return NS_ERROR_XPC_GS_RETURNED_FAILURE;
 
-    RootedValue v(cx);
-    rv = nsContentUtils::WrapNative(cx, srvc, iid, &v);
-    if (NS_FAILED(rv) || !v.isObject())
+    nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+    rv = nsXPConnect::XPConnect()->WrapNative(cx, obj, srvc, *iid, getter_AddRefs(holder));
+    if (NS_FAILED(rv) || !holder || !holder->GetJSObject())
         return NS_ERROR_XPC_CANT_CREATE_WN;
 
-    retval.set(v);
+    retval.setObject(*holder->GetJSObject());
     return NS_OK;
 }
 

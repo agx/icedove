@@ -31,11 +31,6 @@
 #include <media/stagefright/MetaData.h>
 #include <utils/ByteOrder.h>
 
-#include "mozilla/NullPtr.h"
-#include "NetworkActivityMonitor.h"
-
-using namespace mozilla::net;
-
 #define PT      97
 #define PT_STR  "97"
 
@@ -59,26 +54,23 @@ ARTPWriter::ARTPWriter(int fd)
     mLooper->registerHandler(mReflector);
     mLooper->start();
 
-    mSocket = PR_OpenUDPSocket(PR_AF_INET);
-    if (!mSocket) {
-        TRESPASS();
-    }
+    mSocket = socket(AF_INET, SOCK_DGRAM, 0);
+    CHECK_GE(mSocket, 0);
 
-    NetworkActivityMonitor::AttachIOLayer(mSocket);
-
-    mRTPAddr.inet.family = PR_AF_INET;
+    memset(mRTPAddr.sin_zero, 0, sizeof(mRTPAddr.sin_zero));
+    mRTPAddr.sin_family = AF_INET;
 
 #if 1
-    mRTPAddr.inet.ip = PR_htonl(PR_INADDR_ANY);
+    mRTPAddr.sin_addr.s_addr = INADDR_ANY;
 #else
-    PR_StringToNetAddr("172.19.18.246", &mRTPAddr);
+    mRTPAddr.sin_addr.s_addr = inet_addr("172.19.18.246");
 #endif
 
-    mRTPAddr.inet.port = PR_htons(5634);
-    CHECK_EQ(0, PR_ntohs(mRTPAddr.inet.port) & 1);
+    mRTPAddr.sin_port = htons(5634);
+    CHECK_EQ(0, ntohs(mRTPAddr.sin_port) & 1);
 
     mRTCPAddr = mRTPAddr;
-    mRTCPAddr.inet.port = PR_htons(PR_ntohs(mRTPAddr.inet.port) | 1);
+    mRTCPAddr.sin_port = htons(ntohs(mRTPAddr.sin_port) | 1);
 
 #if LOG_TO_FILES
     mRTPFd = open(
@@ -104,10 +96,8 @@ ARTPWriter::~ARTPWriter() {
     mRTPFd = -1;
 #endif
 
-    if (mSocket) {
-        PR_Close(mSocket);
-        mSocket = nullptr;
-    }
+    close(mSocket);
+    mSocket = -1;
 
     close(mFd);
     mFd = -1;
@@ -318,9 +308,10 @@ void ARTPWriter::onSendSR(const sp<AMessage> &msg) {
 }
 
 void ARTPWriter::send(const sp<ABuffer> &buffer, bool isRTCP) {
-    ssize_t n = PR_SendTo(
+    ssize_t n = sendto(
             mSocket, buffer->data(), buffer->size(), 0,
-            (isRTCP ? &mRTCPAddr : &mRTPAddr), PR_INTERVAL_NO_WAIT);
+            (const struct sockaddr *)(isRTCP ? &mRTCPAddr : &mRTPAddr),
+            sizeof(mRTCPAddr));
 
     CHECK_EQ(n, (ssize_t)buffer->size());
 
@@ -451,12 +442,10 @@ void ARTPWriter::dumpSessionDesc() {
           "i=Playing around\r\n"
           "c=IN IP4 ");
 
-    PRNetAddr addr;
-    addr.inet.ip = PR_htonl(PR_INADDR_LOOPBACK);
+    struct in_addr addr;
+    addr.s_addr = ntohl(INADDR_LOOPBACK);
 
-    char buf[256];
-    PR_NetAddrToString(&addr, buf, sizeof(buf));
-    sdp.append(buf);
+    sdp.append(inet_ntoa(addr));
 
     sdp.append(
           "\r\n"
@@ -471,7 +460,7 @@ void ARTPWriter::dumpSessionDesc() {
         sdp.append("m=audio ");
     }
 
-    sdp.append(StringPrintf("%d", PR_ntohs(mRTPAddr.inet.port)));
+    sdp.append(StringPrintf("%d", ntohs(mRTPAddr.sin_port)));
     sdp.append(
           " RTP/AVP " PT_STR "\r\n"
           "b=AS 320000\r\n"

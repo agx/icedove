@@ -13,7 +13,7 @@ function testConferenceTwoCalls() {
   let inNumber  = "5555550201";
 
   return Promise.resolve()
-    .then(() => gSetupConference([outNumber, inNumber]))
+    .then(() => gSetupConferenceTwoCalls(outNumber, inNumber))
     .then(calls => {
       [outCall, inCall] = calls;
     })

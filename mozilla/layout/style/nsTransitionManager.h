@@ -23,11 +23,8 @@ struct ElementDependentRuleProcessorData;
  * Per-Element data                                                          *
  *****************************************************************************/
 
-struct ElementPropertyTransition : public mozilla::ElementAnimation
+struct ElementPropertyTransition : public mozilla::StyleAnimation
 {
-  virtual ElementPropertyTransition* AsTransition() { return this; }
-  virtual const ElementPropertyTransition* AsTransition() const { return this; }
-
   // This is the start value to be used for a check for whether a
   // transition is being reversed.  Normally the same as
   // mProperties[0].mSegments[0].mFromValue, except when this transition
@@ -52,7 +49,7 @@ struct ElementPropertyTransition : public mozilla::ElementAnimation
 
   bool IsRemovedSentinel() const
   {
-    // Note that mozilla::ElementAnimation::IsRunningAt depends on removed
+    // Note that mozilla::StyleAnimation::IsRunningAt depends on removed
     // sentinels being represented by a null mStartTime.
     return mStartTime.IsNull();
   }
@@ -89,6 +86,9 @@ struct ElementTransitions MOZ_FINAL
   // as a side-effect, notifies the ActiveLayerTracker.  FIXME:  This
   // should probably move to the relevant callers.
   virtual bool CanPerformOnCompositorThread(CanAnimateFlags aFlags) const MOZ_OVERRIDE;
+
+  // Either zero or one for each CSS property:
+  nsTArray<ElementPropertyTransition> mPropertyTransitions;
 };
 
 

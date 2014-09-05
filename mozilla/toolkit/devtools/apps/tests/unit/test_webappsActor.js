@@ -1,6 +1,7 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+Cu.import("resource://gre/modules/osfile.jsm");
 const {devtools} = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
 const {require} = devtools;
 const {installHosted, installPackaged} = require("devtools/app-actor-front");
@@ -174,32 +175,12 @@ add_test(function testUninstall() {
 
 add_test(function testFileUploadInstall() {
   let packageFile = do_get_file("data/app.zip");
-
-  // Disable the bulk trait temporarily to test the JSON upload path
-  gClient.traits.bulk = false;
-
   installPackaged(gClient, gActor, packageFile.path, gAppId)
     .then(function ({ appId }) {
       do_check_eq(appId, gAppId);
-
-      // Restore default bulk trait value
-      gClient.traits.bulk = true;
-
       run_next_test();
     }, function (e) {
       do_throw("Failed install uploaded packaged app: " + e.error + ": " + e.message);
-    });
-});
-
-add_test(function testBulkUploadInstall() {
-  let packageFile = do_get_file("data/app.zip");
-  do_check_true(gClient.traits.bulk);
-  installPackaged(gClient, gActor, packageFile.path, gAppId)
-    .then(function ({ appId }) {
-      do_check_eq(appId, gAppId);
-      run_next_test();
-    }, function (e) {
-      do_throw("Failed bulk install uploaded packaged app: " + e.error + ": " + e.message);
     });
 });
 

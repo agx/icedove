@@ -10,18 +10,18 @@ const { Cc, Ci, Cr } = require('chrome'),
       { WindowTabs, WindowTabTracker } = require('./tabs-firefox'),
       { WindowDom } = require('./dom'),
       { WindowLoader } = require('./loader'),
-      { isBrowser, getWindowDocShell,
-        windows: windowIterator, isWindowPrivate } = require('../window/utils'),
+      { isBrowser, getWindowDocShell, windows: windowIterator } = require('../window/utils'),
       { Options } = require('../tabs/common'),
       apiUtils = require('../deprecated/api-utils'),
       unload = require('../system/unload'),
       windowUtils = require('../deprecated/window-utils'),
       { WindowTrackerTrait } = windowUtils,
       { ns } = require('../core/namespace'),
-      { observer: windowObserver } = require('./observer');
+      { observer: windowObserver } = require('./observer'),
+      { getOwnerWindow } = require('../private-browsing/window/utils');
 const { windowNS } = require('../window/namespace');
 const { isPrivateBrowsingSupported } = require('../self');
-const { ignoreWindow, isPrivate } = require('sdk/private-browsing/utils');
+const { ignoreWindow } = require('sdk/private-browsing/utils');
 const { viewFor } = require('../view/core');
 
 /**
@@ -76,8 +76,7 @@ const BrowserWindowTrait = Trait.compose(
       this._load();
 
       windowNS(this._public).window = this._window;
-
-      isPrivate.implement(this._public, window => isWindowPrivate(getChromeWindow(window)));
+      getOwnerWindow.implement(this._public, getChromeWindow);
       viewFor.implement(this._public, getChromeWindow);
 
       return this;

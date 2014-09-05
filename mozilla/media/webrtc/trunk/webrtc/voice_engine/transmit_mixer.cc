@@ -47,19 +47,17 @@ TransmitMixer::OnPeriodicProcess()
         if (_voiceEngineObserverPtr)
         {
             if (_typingNoiseDetected) {
-                WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, -1),
-                             "TransmitMixer::OnPeriodicProcess() => "
-                             "CallbackOnError(VE_TYPING_NOISE_WARNING)");
-                _voiceEngineObserverPtr->CallbackOnError(
-                    -1,
-                    VE_TYPING_NOISE_WARNING);
+              WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, -1),
+                           "TransmitMixer::OnPeriodicProcess() => "
+                           "CallbackOnError(VE_TYPING_NOISE_WARNING)");
+              _voiceEngineObserverPtr->CallbackOnError(-1,
+                                                       VE_TYPING_NOISE_WARNING);
             } else {
-                WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, -1),
-                             "TransmitMixer::OnPeriodicProcess() => "
-                             "CallbackOnError(VE_TYPING_NOISE_OFF_WARNING)");
-                _voiceEngineObserverPtr->CallbackOnError(
-                    -1,
-                    VE_TYPING_NOISE_OFF_WARNING);
+              WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId, -1),
+                           "TransmitMixer::OnPeriodicProcess() => "
+                           "CallbackOnError(VE_TYPING_NOISE_OFF_WARNING)");
+              _voiceEngineObserverPtr->CallbackOnError(
+                  -1, VE_TYPING_NOISE_OFF_WARNING);
             }
         }
         _typingNoiseWarningPending = false;
@@ -196,8 +194,16 @@ TransmitMixer::TransmitMixer(uint32_t instanceId) :
     _critSect(*CriticalSectionWrapper::CreateCriticalSection()),
     _callbackCritSect(*CriticalSectionWrapper::CreateCriticalSection()),
 #ifdef WEBRTC_VOICE_ENGINE_TYPING_DETECTION
+    _timeActive(0),
+    _timeSinceLastTyping(0),
+    _penaltyCounter(0),
     _typingNoiseWarningPending(false),
     _typingNoiseDetected(false),
+    _timeWindow(10), // 10ms slots accepted to count as a hit
+    _costPerTyping(100), // Penalty added for a typing + activity coincide
+    _reportingThreshold(300), // Threshold for _penaltyCounter
+    _penaltyDecay(1), // how much we reduce _penaltyCounter every 10 ms.
+    _typeEventDelay(2), // how "old" event we check for
 #endif
     _saturationWarning(false),
     _instanceId(instanceId),
@@ -362,7 +368,7 @@ TransmitMixer::PrepareDemux(const void* audioSamples,
     }
 
     // --- Near-end audio processing.
-    ProcessAudio(totalDelayMS, clockDrift, currentMicLevel, keyPressed);
+    ProcessAudio(totalDelayMS, clockDrift, currentMicLevel);
 
     if (swap_stereo_channels_ && stereo_codec_)
       // Only bother swapping if we're using a stereo codec.
@@ -488,6 +494,7 @@ void TransmitMixer::EncodeAndSend(const int voe_channels[],
 
 uint32_t TransmitMixer::CaptureLevel() const
 {
+    CriticalSectionScoped cs(&_critSect);
     return _captureLevel;
 }
 
@@ -1311,18 +1318,25 @@ int32_t TransmitMixer::MixOrReplaceAudioWithFile(
 }
 
 void TransmitMixer::ProcessAudio(int delay_ms, int clock_drift,
-                                 int current_mic_level, bool key_pressed) {
+                                 int current_mic_level) {
+  if (audioproc_->set_num_channels(_audioFrame.num_channels_,
+                                   _audioFrame.num_channels_) != 0) {
+    LOG_FERR2(LS_ERROR, set_num_channels, _audioFrame.num_channels_,
+              _audioFrame.num_channels_);
+  }
+
+  if (audioproc_->set_sample_rate_hz(_audioFrame.sample_rate_hz_) != 0) {
+    LOG_FERR1(LS_ERROR, set_sample_rate_hz, _audioFrame.sample_rate_hz_);
+  }
+
   if (audioproc_->set_stream_delay_ms(delay_ms) != 0) {
-    // A redundant warning is reported in AudioDevice, which we've throttled
-    // to avoid flooding the logs. Relegate this one to LS_VERBOSE to avoid
-    // repeating the problem here.
-    LOG_FERR1(LS_VERBOSE, set_stream_delay_ms, delay_ms);
+    // Report as a warning; we can occasionally run into very large delays.
+    LOG_FERR1(LS_WARNING, set_stream_delay_ms, delay_ms);
   }
 
   GainControl* agc = audioproc_->gain_control();
   if (agc->set_stream_analog_level(current_mic_level) != 0) {
     LOG_FERR1(LS_ERROR, set_stream_analog_level, current_mic_level);
-    assert(false);
   }
 
   EchoCancellation* aec = audioproc_->echo_cancellation();
@@ -1330,42 +1344,70 @@ void TransmitMixer::ProcessAudio(int delay_ms, int clock_drift,
     aec->set_stream_drift_samples(clock_drift);
   }
 
-  audioproc_->set_stream_key_pressed(key_pressed);
-
   int err = audioproc_->ProcessStream(&_audioFrame);
   if (err != 0) {
     LOG(LS_ERROR) << "ProcessStream() error: " << err;
-    assert(false);
   }
+
+  CriticalSectionScoped cs(&_critSect);
 
   // Store new capture level. Only updated when analog AGC is enabled.
   _captureLevel = agc->stream_analog_level();
 
-  CriticalSectionScoped cs(&_critSect);
   // Triggers a callback in OnPeriodicProcess().
   _saturationWarning |= agc->stream_is_saturated();
 }
 
 #ifdef WEBRTC_VOICE_ENGINE_TYPING_DETECTION
-void TransmitMixer::TypingDetection(bool keyPressed)
+int TransmitMixer::TypingDetection(bool keyPressed)
 {
-  // We let the VAD determine if we're using this feature or not.
-  if (_audioFrame.vad_activity_ == AudioFrame::kVadUnknown) {
-    return;
-  }
 
-  bool vadActive = _audioFrame.vad_activity_ == AudioFrame::kVadActive;
-  if (_typingDetection.Process(keyPressed, vadActive)) {
-    _typingNoiseWarningPending = true;
-    _typingNoiseDetected = true;
-  } else {
+    // We let the VAD determine if we're using this feature or not.
+    if (_audioFrame.vad_activity_ == AudioFrame::kVadUnknown)
+    {
+        return (0);
+    }
+
+    if (_audioFrame.vad_activity_ == AudioFrame::kVadActive)
+        _timeActive++;
+    else
+        _timeActive = 0;
+
+    // Keep track if time since last typing event
+    if (keyPressed)
+    {
+      _timeSinceLastTyping = 0;
+    }
+    else
+    {
+      ++_timeSinceLastTyping;
+    }
+
+    if ((_timeSinceLastTyping < _typeEventDelay)
+        && (_audioFrame.vad_activity_ == AudioFrame::kVadActive)
+        && (_timeActive < _timeWindow))
+    {
+        _penaltyCounter += _costPerTyping;
+        if (_penaltyCounter > _reportingThreshold)
+        {
+            // Triggers a callback in OnPeriodicProcess().
+            _typingNoiseWarningPending = true;
+            _typingNoiseDetected = true;
+        }
+    }
+
     // If there is already a warning pending, do not change the state.
-    // Otherwise set a warning pending if last callback was for noise detected.
+    // Otherwise sets a warning pending if noise is off now but previously on.
     if (!_typingNoiseWarningPending && _typingNoiseDetected) {
+      // Triggers a callback in OnPeriodicProcess().
       _typingNoiseWarningPending = true;
       _typingNoiseDetected = false;
     }
-  }
+
+    if (_penaltyCounter > 0)
+        _penaltyCounter-=_penaltyDecay;
+
+    return (0);
 }
 #endif
 
@@ -1378,10 +1420,12 @@ int TransmitMixer::GetMixingFrequency()
 #ifdef WEBRTC_VOICE_ENGINE_TYPING_DETECTION
 int TransmitMixer::TimeSinceLastTyping(int &seconds)
 {
-    // We check in VoEAudioProcessingImpl that this is only called when
-    // typing detection is active.
-    seconds = _typingDetection.TimeSinceLastDetectionInSeconds();
-    return 0;
+  // We check in VoEAudioProcessingImpl that this is only called when
+  // typing detection is active.
+
+  // Round to whole seconds
+  seconds = (_timeSinceLastTyping + 50) / 100;
+  return(0);
 }
 #endif
 
@@ -1392,13 +1436,19 @@ int TransmitMixer::SetTypingDetectionParameters(int timeWindow,
                                                 int penaltyDecay,
                                                 int typeEventDelay)
 {
-    _typingDetection.SetParameters(timeWindow,
-                                   costPerTyping,
-                                   reportingThreshold,
-                                   penaltyDecay,
-                                   typeEventDelay,
-                                   0);
-    return 0;
+  if(timeWindow != 0)
+    _timeWindow = timeWindow;
+  if(costPerTyping != 0)
+    _costPerTyping = costPerTyping;
+  if(reportingThreshold != 0)
+    _reportingThreshold = reportingThreshold;
+  if(penaltyDecay != 0)
+    _penaltyDecay = penaltyDecay;
+  if(typeEventDelay != 0)
+    _typeEventDelay = typeEventDelay;
+
+
+  return(0);
 }
 #endif
 

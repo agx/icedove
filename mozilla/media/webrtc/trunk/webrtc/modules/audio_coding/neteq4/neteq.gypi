@@ -47,12 +47,10 @@
       ],
       'include_dirs': [
         'interface',
-        '<(webrtc_root)',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
           'interface',
-          '<(webrtc_root)',
         ],
       },
       'sources': [
@@ -171,7 +169,7 @@
           'dependencies': [
             '<(DEPTH)/testing/gmock.gyp:gmock',
             '<(DEPTH)/testing/gtest.gyp:gtest',
-            'PCM16B',  # Needed by neteq_performance_test.
+            '<(webrtc_root)/test/test.gyp:test_support_main',
           ],
           'direct_dependent_settings': {
             'include_dirs': [
@@ -186,8 +184,6 @@
             'tools/audio_loop.h',
             'tools/input_audio_file.cc',
             'tools/input_audio_file.h',
-            'tools/neteq_performance_test.cc',
-            'tools/neteq_performance_test.h',
             'tools/rtp_generator.cc',
             'tools/rtp_generator.h',
           ],
@@ -213,10 +209,10 @@
               'target_name': 'audio_decoder_unittests_run',
               'type': 'none',
               'dependencies': [
+                '<(import_isolate_path):import_isolate_gypi',
                 'audio_decoder_unittests',
               ],
               'includes': [
-                '../../../build/isolate.gypi',
                 'audio_decoder_unittests.isolate',
               ],
               'sources': [

@@ -43,7 +43,7 @@ function stringifyCallstack (aStack) {
   return msg;
 }
 
-this.Deprecated = {
+const Deprecated = {
   /**
    * Log a deprecation warning.
    *

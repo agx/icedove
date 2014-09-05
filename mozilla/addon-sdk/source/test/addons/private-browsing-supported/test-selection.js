@@ -87,6 +87,25 @@ function open(url, options) {
 };
 
 /**
+ * Close the Active Tab
+ */
+function close(window) {
+  let { promise, resolve } = defer();
+
+  if (window && typeof(window.close) === "function") {
+    closeWindow(window).then(function() resolve());
+  }
+  else {
+    // Here we assuming that the most recent browser window is the one we're
+    // doing the test, and the active tab is the one we just opened.
+    closeTab(getActiveTab(getMostRecentBrowserWindow()));
+    resolve();
+  }
+
+  return promise;
+}
+
+/**
  * Reload the window given and return a promise, that will be resolved with the
  * content window after a small delay.
  */
@@ -230,7 +249,7 @@ exports["test PWPB Selection Listener"] = function(assert, done) {
 
           assert.equal(selection.text, "fo");
 
-          closeWindow(window).
+          close(window).
             then(loader.unload).
             then(done).
             then(null, assert.fail);
@@ -260,7 +279,7 @@ exports["test PWPB Textarea OnSelect Listener"] = function(assert, done) {
         focus(window).then(function() {
           assert.equal(selection.text, "noodles");
 
-          closeWindow(window).
+          close(window).
             then(loader.unload).
             then(done).
             then(null, assert.fail);
@@ -279,7 +298,7 @@ exports["test PWPB Single DOM Selection"] = function(assert, done) {
 
   open(URL, {private: true, title: "PWPB Single DOM Selection"}).
     then(selectFirstDiv).
-    then(focus).then(function(window) {
+    then(focus).then(function() {
       assert.equal(selection.isContiguous, true,
         "selection.isContiguous with single DOM Selection works.");
 
@@ -302,9 +321,7 @@ exports["test PWPB Single DOM Selection"] = function(assert, done) {
 
       assert.equal(selectionCount, 1,
         "One iterable selection");
-
-      return closeWindow(window);
-    }).then(loader.unload).then(done).then(null, assert.fail);
+    }).then(close).then(loader.unload).then(done).then(null, assert.fail);
 }
 
 exports["test PWPB Textarea Selection"] = function(assert, done) {
@@ -314,7 +331,7 @@ exports["test PWPB Textarea Selection"] = function(assert, done) {
   open(URL, {private: true, title: "PWPB Textarea Listener"}).
     then(selectTextarea).
     then(focus).
-    then(function(window) {
+    then(function() {
 
       assert.equal(selection.isContiguous, true,
         "selection.isContiguous with Textarea Selection works.");
@@ -338,9 +355,7 @@ exports["test PWPB Textarea Selection"] = function(assert, done) {
 
       assert.equal(selectionCount, 1,
         "One iterable selection");
-
-      return closeWindow(window);
-    }).then(loader.unload).then(done).then(null, assert.fail);
+    }).then(close).then(loader.unload).then(done).then(null, assert.fail);
 };
 
 exports["test PWPB Set HTML in Multiple DOM Selection"] = function(assert, done) {
@@ -350,7 +365,7 @@ exports["test PWPB Set HTML in Multiple DOM Selection"] = function(assert, done)
   open(URL, {private: true, title: "PWPB Set HTML in Multiple DOM Selection"}).
     then(selectAllDivs).
     then(focus).
-    then(function(window) {
+    then(function() {
       let html = "<span>b<b>a</b>r</span>";
 
       let expectedText = ["bar", "and"];
@@ -378,9 +393,7 @@ exports["test PWPB Set HTML in Multiple DOM Selection"] = function(assert, done)
 
       assert.equal(selectionCount, 2,
         "Two iterable selections");
-
-      return closeWindow(window);
-    }).then(loader.unload).then(done).then(null, assert.fail);
+    }).then(close).then(loader.unload).then(done).then(null, assert.fail);
 };
 
 exports["test PWPB Set Text in Textarea Selection"] = function(assert, done) {
@@ -390,7 +403,7 @@ exports["test PWPB Set Text in Textarea Selection"] = function(assert, done) {
   open(URL, {private: true, title: "test PWPB Set Text in Textarea Selection"}).
     then(selectTextarea).
     then(focus).
-    then(function(window) {
+    then(function() {
 
       let text = "bar";
 
@@ -416,8 +429,7 @@ exports["test PWPB Set Text in Textarea Selection"] = function(assert, done) {
       assert.equal(selectionCount, 1,
         "One iterable selection");
 
-      return closeWindow(window);
-    }).then(loader.unload).then(done).then(null, assert.fail);
+    }).then(close).then(loader.unload).then(done).then(null, assert.fail);
 };
 
 // If the platform doesn't support the PBPW, we're replacing PBPW tests

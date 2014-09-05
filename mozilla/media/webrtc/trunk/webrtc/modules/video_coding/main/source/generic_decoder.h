@@ -22,7 +22,7 @@ namespace webrtc
 
 class VCMReceiveCallback;
 
-enum { kDecoderFrameMemoryLength = 30 };
+enum { kDecoderFrameMemoryLength = 10 };
 
 struct VCMFrameInformation
 {

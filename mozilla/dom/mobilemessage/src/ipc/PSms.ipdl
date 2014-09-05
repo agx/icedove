@@ -122,8 +122,6 @@ child:
 
   NotifyReadErrorMessage(MobileMessageData aMessageData);
 
-  NotifyDeletedMessageInfo(DeletedMessageInfoData aDeletedInfo);
-
 parent:
   /**
    * Sent when the child no longer needs to use sms.

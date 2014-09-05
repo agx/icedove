@@ -10,27 +10,26 @@
 
 const PREF_UPDATE_EXTENSIONS_ENABLED            = "extensions.update.enabled";
 const PREF_XPINSTALL_ENABLED                    = "xpinstall.enabled";
+const PREF_EM_HOTFIX_ID                         = "extensions.hotfix.id";
 
 // timeout (in milliseconds) to wait for response to the metadata ping
 const METADATA_TIMEOUT    = 30000;
 
-Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AddonManager", "resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AddonManagerPrivate", "resource://gre/modules/AddonManager.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Services", "resource://gre/modules/Services.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "AddonRepository", "resource://gre/modules/addons/AddonRepository.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Task", "resource://gre/modules/Task.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Promise", "resource://gre/modules/Promise.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Log", "resource://gre/modules/Log.jsm");
-let logger = null;
+Components.utils.import("resource://gre/modules/Services.jsm");
+Components.utils.import("resource://gre/modules/AddonManager.jsm");
+Components.utils.import("resource://gre/modules/addons/AddonRepository.jsm");
+
+Components.utils.import("resource://gre/modules/Log.jsm");
+let logger = Log.repository.getLogger("addons.update-dialog");
 
 var gUpdateWizard = {
   // When synchronizing app compatibility info this contains all installed
   // add-ons. When checking for compatible versions this contains only
   // incompatible add-ons.
   addons: [],
-  // Contains a Set of IDs for add-on that were disabled by the application update.
-  affectedAddonIDs: null,
+  // Contains a list of add-ons that were disabled prior to the application
+  // upgrade.
+  inactiveAddonIDs: [],
   // The add-ons that we found updates available for
   addonsToUpdate: [],
   shouldSuggestAutoChecking: false,
@@ -52,9 +51,7 @@ var gUpdateWizard = {
 
   init: function gUpdateWizard_init()
   {
-    logger = Log.repository.getLogger("addons.update-dialog");
-    // XXX could we pass the addons themselves rather than the IDs?
-    this.affectedAddonIDs = new Set(window.arguments[0]);
+    this.inactiveAddonIDs = window.arguments[0];
 
     try {
       this.shouldSuggestAutoChecking =
@@ -165,11 +162,11 @@ var gOfflinePage = {
 // Addon listener to count addons enabled/disabled by metadata checks
 let listener = {
   onDisabled: function listener_onDisabled(aAddon) {
-    gUpdateWizard.affectedAddonIDs.add(aAddon.id);
+    logger.debug("onDisabled for ${id}", aAddon);
     gUpdateWizard.metadataDisabled++;
   },
   onEnabled: function listener_onEnabled(aAddon) {
-    gUpdateWizard.affectedAddonIDs.delete(aAddon.id);
+    logger.debug("onEnabled for ${id}", aAddon);
     gUpdateWizard.metadataEnabled++;
   }
 };
@@ -178,49 +175,54 @@ var gVersionInfoPage = {
   _completeCount: 0,
   _totalCount: 0,
   _versionInfoDone: false,
-  onPageShow: Task.async(function* gVersionInfoPage_onPageShow() {
+  onPageShow: function gVersionInfoPage_onPageShow()
+  {
     gUpdateWizard.setButtonLabels(null, true,
                                   "nextButtonText", true,
                                   "cancelButtonText", false);
 
-    gUpdateWizard.disabled = gUpdateWizard.affectedAddonIDs.size;
+    try {
+      var hotfixID = Services.prefs.getCharPref(PREF_EM_HOTFIX_ID);
+    }
+    catch (e) { }
 
-    // Ensure compatibility overrides are up to date before checking for
-    // individual addon updates.
-    AddonManager.addAddonListener(listener);
-    if (AddonRepository.isMetadataStale()) {
-      // Do the metadata ping, listening for any newly enabled/disabled add-ons.
-      yield AddonRepository.repopulateCache(METADATA_TIMEOUT);
+    // Retrieve all add-ons in order to sync their app compatibility information
+    AddonManager.getAllAddons(function gVersionInfoPage_getAllAddons(aAddons) {
       if (gUpdateWizard.shuttingDown) {
-        logger.debug("repopulateCache completed after dialog closed");
+        logger.debug("getAllAddons completed after dialog closed");
       }
-    }
-    // Fetch the add-ons that are still affected by this update,
-    // excluding the hotfix add-on.
-    let idlist = [id for (id of gUpdateWizard.affectedAddonIDs)
-                     if (id != AddonManager.hotfixID)];
-    if (idlist.length < 1) {
-      gVersionInfoPage.onAllUpdatesFinished();
-      return;
-    }
 
-    logger.debug("Fetching affected addons " + idlist.toSource());
-    let fetchedAddons = yield new Promise((resolve, reject) =>
-      AddonManager.getAddonsByIDs(idlist, resolve));
-    // We shouldn't get nulls here, but let's be paranoid...
-    gUpdateWizard.addons = [a for (a of fetchedAddons) if (a)];
-    if (gUpdateWizard.addons.length < 1) {
-      gVersionInfoPage.onAllUpdatesFinished();
-      return;
-    }
+      gUpdateWizard.addons = [a for (a of aAddons)
+                               if (a.type != "plugin" && a.id != hotfixID)];
 
-    gVersionInfoPage._totalCount = gUpdateWizard.addons.length;
+      gVersionInfoPage._totalCount = gUpdateWizard.addons.length;
 
-    for (let addon of gUpdateWizard.addons) {
-      logger.debug("VersionInfo Finding updates for ${id}", addon);
-      addon.findUpdates(gVersionInfoPage, AddonManager.UPDATE_WHEN_NEW_APP_INSTALLED);
-    }
-  }),
+      // Count the add-ons newly disabled by this application update
+      for (let addon of gUpdateWizard.addons) {
+        if (gUpdateWizard.inactiveAddonIDs.indexOf(addon.id) != -1) {
+          gUpdateWizard.disabled++;
+        }
+      }
+
+      // Ensure compatibility overrides are up to date before checking for
+      // individual addon updates.
+      let ids = [addon.id for (addon of gUpdateWizard.addons)];
+
+      // Do the metadata ping, listening for any newly enabled/disabled add-ons.
+      AddonManager.addAddonListener(listener);
+      AddonRepository.repopulateCache(ids, function gVersionInfoPage_repopulateCache() {
+
+        if (gUpdateWizard.shuttingDown) {
+          logger.debug("repopulateCache completed after dialog closed");
+        }
+
+        for (let addon of gUpdateWizard.addons) {
+          logger.debug("VersionInfo Finding updates for " + addon.id);
+          addon.findUpdates(gVersionInfoPage, AddonManager.UPDATE_WHEN_NEW_APP_INSTALLED);
+        }
+      }, METADATA_TIMEOUT);
+    });
+  },
 
   onAllUpdatesFinished: function gVersionInfoPage_onAllUpdatesFinished() {
     AddonManager.removeAddonListener(listener);
@@ -235,12 +237,14 @@ var gVersionInfoPage = {
     AddonManagerPrivate.recordSimpleMeasure("appUpdate_upgraded", 0);
     AddonManagerPrivate.recordSimpleMeasure("appUpdate_upgradeFailed", 0);
     AddonManagerPrivate.recordSimpleMeasure("appUpdate_upgradeDeclined", 0);
-    // Filter out any add-ons that are now enabled.
-    logger.debug("VersionInfo updates finished: found " +
+    // Filter out any add-ons that were disabled before the application was
+    // upgraded or are already compatible
+    logger.debug("VersionInfo updates finished: inactive " +
+         gUpdateWizard.inactiveAddonIDs.toSource() + " found " +
          [addon.id + ":" + addon.appDisabled for (addon of gUpdateWizard.addons)].toSource());
     let filteredAddons = [];
     for (let a of gUpdateWizard.addons) {
-      if (a.appDisabled) {
+      if (a.appDisabled && gUpdateWizard.inactiveAddonIDs.indexOf(a.id) < 0) {
         logger.debug("Continuing with add-on " + a.id);
         filteredAddons.push(a);
       }
@@ -297,7 +301,7 @@ var gVersionInfoPage = {
       // If we're still in the update check window and the add-on is now active
       // then it won't have been disabled by startup
       if (aAddon.active) {
-        AddonManagerPrivate.removeStartupChange(AddonManager.STARTUP_CHANGE_DISABLED, aAddon.id);
+        AddonManagerPrivate.removeStartupChange("disabled", aAddon.id);
         gUpdateWizard.metadataEnabled++;
       }
 

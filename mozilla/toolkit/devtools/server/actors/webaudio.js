@@ -11,7 +11,6 @@ const { Promise: promise } = Cu.import("resource://gre/modules/Promise.jsm", {})
 const events = require("sdk/event/core");
 const protocol = require("devtools/server/protocol");
 const { CallWatcherActor, CallWatcherFront } = require("devtools/server/actors/call-watcher");
-const { ThreadActor } = require("devtools/server/actors/script");
 
 const { on, once, off, emit } = events;
 const { method, Arg, Option, RetVal } = protocol;
@@ -99,7 +98,7 @@ const NODE_PROPERTIES = {
     "fftSize": {},
     "minDecibels": {},
     "maxDecibels": {},
-    "smoothingTimeConstant": {},
+    "smoothingTimeConstraint": {},
     "frequencyBinCount": { "readonly": true },
   },
   "AudioDestinationNode": {},
@@ -129,7 +128,7 @@ let AudioNodeActor = exports.AudioNodeActor = protocol.ActorClass({
     protocol.Actor.prototype.initialize.call(this, conn);
     this.node = unwrap(node);
     try {
-      this.type = getConstructorName(this.node);
+      this.type = this.node.toString().match(/\[object (.*)\]$/)[1];
     } catch (e) {
       this.type = "";
     }
@@ -156,8 +155,9 @@ let AudioNodeActor = exports.AudioNodeActor = protocol.ActorClass({
   }),
 
   /**
-   * Changes a param on the audio node. Responds with either `undefined`
-   * on success, or a description of the error upon param set failure.
+   * Changes a param on the audio node. Responds with a `string` that's either
+   * an empty string `""` on success, or a description of the error upon
+   * param set failure.
    *
    * @param String param
    *        Name of the AudioParam to change.
@@ -165,6 +165,10 @@ let AudioNodeActor = exports.AudioNodeActor = protocol.ActorClass({
    *        Value to change AudioParam to.
    */
   setParam: method(function (param, value) {
+    // Strip quotes because sometimes UIs include that for strings
+    if (typeof value === "string") {
+      value = value.replace(/[\'\"]*/g, "");
+    }
     try {
       if (isAudioParam(this.node, param))
         this.node[param].value = value;
@@ -189,23 +193,11 @@ let AudioNodeActor = exports.AudioNodeActor = protocol.ActorClass({
    *        Name of the AudioParam to fetch.
    */
   getParam: method(function (param) {
-    // Check to see if it's an AudioParam -- if so,
-    // return the `value` property of the parameter.
+    // If property does not exist, just return "undefined"
+    if (!this.node[param])
+      return undefined;
     let value = isAudioParam(this.node, param) ? this.node[param].value : this.node[param];
-
-    // Return the grip form of the value; at this time,
-    // there shouldn't be any non-primitives at the moment, other than
-    // AudioBuffer or Float32Array references and the like,
-    // so this just formats the value to be displayed in the VariablesView,
-    // without using real grips and managing via actor pools.
-    let grip;
-    try {
-      grip = ThreadActor.prototype.createValueGrip(value);
-    }
-    catch (e) {
-      grip = createObjectGrip(value);
-    }
-    return grip;
+    return value;
   }, {
     request: {
       param: Arg(0, "string")
@@ -278,10 +270,6 @@ let WebAudioActor = exports.WebAudioActor = protocol.ActorClass({
    * See ContentObserver and WebAudioInstrumenter for more details.
    */
   setup: method(function({ reload }) {
-    // Used to track when something is happening with the web audio API
-    // the first time, to ultimately fire `start-context` event
-    this._firstNodeCreated = false;
-
     if (this._initialized) {
       return;
     }
@@ -297,6 +285,10 @@ let WebAudioActor = exports.WebAudioActor = protocol.ActorClass({
       startRecording: true,
       performReload: reload
     });
+
+    // Used to track when something is happening with the web audio API
+    // the first time, to ultimately fire `start-context` event
+    this._firstNodeCreated = false;
   }, {
     request: { reload: Option(0, "boolean") },
     oneway: true
@@ -512,7 +504,7 @@ WebAudioFront.NODE_ROUTING_METHODS = new Set(NODE_ROUTING_METHODS);
  * @return Boolean
  */
 function isAudioParam (node, prop) {
-  return !!(node[prop] && /AudioParam/.test(node[prop].toString()));
+  return /AudioParam/.test(node[prop].toString());
 }
 
 /**
@@ -529,31 +521,6 @@ function constructError (err) {
   };
 }
 
-/**
- * Takes an object and converts it's `toString()` form, like
- * "[object OscillatorNode]" or "[object Float32Array]"
- * to a string of just the constructor name, like "OscillatorNode",
- * or "Float32Array".
- */
-function getConstructorName (obj) {
-  return obj.toString().match(/\[object (.*)\]$/)[1];
-}
-
-/**
- * Create a grip-like object to pass in renderable information
- * to the front-end for things like Float32Arrays, AudioBuffers,
- * without tracking them in an actor pool.
- */
-function createObjectGrip (value) {
-  return {
-    type: "object",
-    preview: {
-      kind: "ObjectWithText",
-      text: ""
-    },
-    class: getConstructorName(value)
-  };
-}
 function unwrap (obj) {
   return XPCNativeWrapper.unwrap(obj);
 }

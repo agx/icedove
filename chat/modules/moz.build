@@ -14,7 +14,6 @@ EXTRA_JS_MODULES += [
     'imThemes.jsm',
     'imXPCOMUtils.jsm',
     'jsProtoHelper.jsm',
-    'NormalizedMap.jsm',
     'socket.jsm',
 ]
 

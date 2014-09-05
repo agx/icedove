@@ -1,13 +1,6 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
-/* This code is made available to you under your choice of the following sets
- * of licensing terms:
- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/.
- */
-/* Copyright 2013 Mozilla Contributors
+/* Copyright 2013 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,19 +18,6 @@
 #ifndef mozilla_pkix__pkixder_h
 #define mozilla_pkix__pkixder_h
 
-// Expect* functions advance the input mark and return Success if the input
-// matches the given criteria; they return Failure with the input mark in an
-// undefined state if the input does not match the criteria.
-//
-// Match* functions advance the input mark and return true if the input matches
-// the given criteria; they return false without changing the input mark if the
-// input does not match the criteria.
-//
-// Skip* functions unconditionally advance the input mark and return Success if
-// they are able to do so; otherwise they return Failure with the input mark in
-// an undefined state.
-
-#include "pkix/enumclass.h"
 #include "pkix/nullptr.h"
 
 #include "prerror.h"
@@ -46,8 +26,6 @@
 #include "secerr.h"
 #include "secoidt.h"
 #include "stdint.h"
-
-typedef struct CERTSignedDataStr CERTSignedData;
 
 namespace mozilla { namespace pkix { namespace der {
 
@@ -83,7 +61,7 @@ enum Result
   Success = 0
 };
 
-MOZILLA_PKIX_ENUM_CLASS EmptyAllowed { No = 0, Yes = 1 };
+enum EmptyAllowed { MayBeEmpty = 0, MustNotBeEmpty = 1 };
 
 Result Fail(PRErrorCode errorCode);
 
@@ -118,7 +96,7 @@ public:
   Result Expect(const uint8_t* expected, uint16_t expectedLen)
   {
     if (EnsureLength(expectedLen) != Success) {
-      return Failure;
+      return Fail(SEC_ERROR_BAD_DER);
     }
     if (memcmp(input, expected, expectedLen)) {
       return Fail(SEC_ERROR_BAD_DER);
@@ -134,8 +112,8 @@ public:
 
   Result Read(uint8_t& out)
   {
-    if (EnsureLength(1) != Success) {
-      return Failure;
+    if (input == end) {
+      return Fail(SEC_ERROR_BAD_DER);
     }
     out = *input++;
     return Success;
@@ -143,8 +121,8 @@ public:
 
   Result Read(uint16_t& out)
   {
-    if (EnsureLength(2) != Success) {
-      return Failure;
+    if (input == end || input + 1 == end) {
+      return Fail(SEC_ERROR_BAD_DER);
     }
     out = *input++;
     out <<= 8u;
@@ -152,51 +130,10 @@ public:
     return Success;
   }
 
-  template <uint16_t N>
-  bool MatchRest(const uint8_t (&toMatch)[N])
-  {
-    // Normally we use EnsureLength which compares (input + len < end), but
-    // here we want to be sure that there is nothing following the matched
-    // bytes
-    if (static_cast<size_t>(end - input) != N) {
-      return false;
-    }
-    if (memcmp(input, toMatch, N)) {
-      return false;
-    }
-    input += N;
-    return true;
-  }
-
-  template <uint16_t N>
-  bool MatchTLV(uint8_t tag, uint16_t len, const uint8_t (&value)[N])
-  {
-    static_assert(N <= 127, "buffer larger than largest length supported");
-    if (len > N) {
-      PR_NOT_REACHED("overflow prevented dynamically instead of statically");
-      return false;
-    }
-    uint16_t totalLen = 2u + len;
-    if (EnsureLength(totalLen) != Success) {
-      return false;
-    }
-    if (*input != tag) {
-      return false;
-    }
-    if (*(input + 1) != len) {
-      return false;
-    }
-    if (memcmp(input + 2, value, len)) {
-      return false;
-    }
-    input += totalLen;
-    return true;
-  }
-
   Result Skip(uint16_t len)
   {
     if (EnsureLength(len) != Success) {
-      return Failure;
+      return Fail(SEC_ERROR_BAD_DER);
     }
     input += len;
     return Success;
@@ -205,7 +142,7 @@ public:
   Result Skip(uint16_t len, Input& skippedInput)
   {
     if (EnsureLength(len) != Success) {
-      return Failure;
+      return Fail(SEC_ERROR_BAD_DER);
     }
     if (skippedInput.Init(input, len) != Success) {
       return Failure;
@@ -217,7 +154,7 @@ public:
   Result Skip(uint16_t len, SECItem& skippedItem)
   {
     if (EnsureLength(len) != Success) {
-      return Failure;
+      return Fail(SEC_ERROR_BAD_DER);
     }
     skippedItem.type = siBuffer;
     skippedItem.data = const_cast<uint8_t*>(input);
@@ -245,24 +182,21 @@ public:
   {
   private:
     friend class Input;
-    Mark(const Input& input, const uint8_t* mark) : input(input), mark(mark) { }
-    const Input& input;
-    const uint8_t* const mark;
+    explicit Mark(const uint8_t* mark) : mMark(mark) { }
+    const uint8_t* const mMark;
     void operator=(const Mark&) /* = delete */;
   };
 
-  Mark GetMark() const { return Mark(*this, input); }
+  Mark GetMark() const { return Mark(input); }
 
-  Result GetSECItem(SECItemType type, const Mark& mark, /*out*/ SECItem& item)
+  bool GetSECItem(SECItemType type, const Mark& mark, /*out*/ SECItem& item)
   {
-    if (&mark.input != this || mark.mark > input) {
-      PR_NOT_REACHED("invalid mark");
-      return Fail(SEC_ERROR_INVALID_ARGS);
-    }
+    PR_ASSERT(mark.mMark < input);
     item.type = type;
-    item.data = const_cast<uint8_t*>(mark.mark);
-    item.len = static_cast<decltype(item.len)>(input - mark.mark);
-    return Success;
+    item.data = const_cast<uint8_t*>(mark.mMark);
+    // TODO: Return false if bounds check fails
+    item.len = input - mark.mMark;
+    return true;
   }
 
 private:
@@ -294,45 +228,21 @@ ExpectTagAndLength(Input& input, uint8_t expectedTag, uint8_t expectedLength)
   return Success;
 }
 
-namespace internal {
-
 Result
 ExpectTagAndGetLength(Input& input, uint8_t expectedTag, uint16_t& length);
 
-} // namespace internal
-
 inline Result
-ExpectTagAndSkipLength(Input& input, uint8_t expectedTag)
+ExpectTagAndIgnoreLength(Input& input, uint8_t expectedTag)
 {
   uint16_t ignored;
-  return internal::ExpectTagAndGetLength(input, expectedTag, ignored);
-}
-
-inline Result
-ExpectTagAndSkipValue(Input& input, uint8_t tag)
-{
-  uint16_t length;
-  if (internal::ExpectTagAndGetLength(input, tag, length) != Success) {
-    return Failure;
-  }
-  return input.Skip(length);
-}
-
-inline Result
-ExpectTagAndGetValue(Input& input, uint8_t tag, /*out*/ SECItem& value)
-{
-  uint16_t length;
-  if (internal::ExpectTagAndGetLength(input, tag, length) != Success) {
-    return Failure;
-  }
-  return input.Skip(length, value);
+  return ExpectTagAndGetLength(input, expectedTag, ignored);
 }
 
 inline Result
 ExpectTagAndGetValue(Input& input, uint8_t tag, /*out*/ Input& value)
 {
   uint16_t length;
-  if (internal::ExpectTagAndGetLength(input, tag, length) != Success) {
+  if (ExpectTagAndGetLength(input, tag, length) != Success) {
     return Failure;
   }
   return input.Skip(length, value);
@@ -352,13 +262,20 @@ template <typename Decoder>
 inline Result
 Nested(Input& input, uint8_t tag, Decoder decoder)
 {
-  Input nested;
-  if (ExpectTagAndGetValue(input, tag, nested) != Success) {
+  uint16_t length;
+  if (ExpectTagAndGetLength(input, tag, length) != Success) {
     return Failure;
   }
+
+  Input nested;
+  if (input.Skip(length, nested) != Success) {
+    return Failure;
+  }
+
   if (decoder(nested) != Success) {
     return Failure;
   }
+
   return End(nested);
 }
 
@@ -369,13 +286,18 @@ Nested(Input& input, uint8_t outerTag, uint8_t innerTag, Decoder decoder)
   // XXX: This doesn't work (in VS2010):
   // return Nested(input, outerTag, bind(Nested, _1, innerTag, decoder));
 
+  uint16_t length;
+  if (ExpectTagAndGetLength(input, outerTag, length) != Success) {
+    return Failure;
+  }
   Input nestedInput;
-  if (ExpectTagAndGetValue(input, outerTag, nestedInput) != Success) {
+  if (input.Skip(length, nestedInput) != Success) {
     return Failure;
   }
   if (Nested(nestedInput, innerTag, decoder) != Success) {
     return Failure;
   }
+
   return End(nestedInput);
 }
 
@@ -401,13 +323,18 @@ inline Result
 NestedOf(Input& input, uint8_t outerTag, uint8_t innerTag,
          EmptyAllowed mayBeEmpty, Decoder decoder)
 {
+  uint16_t responsesLength;
+  if (ExpectTagAndGetLength(input, outerTag, responsesLength) != Success) {
+    return Failure;
+  }
+
   Input inner;
-  if (ExpectTagAndGetValue(input, outerTag, inner) != Success) {
+  if (input.Skip(responsesLength, inner) != Success) {
     return Failure;
   }
 
   if (inner.AtEnd()) {
-    if (mayBeEmpty != EmptyAllowed::Yes) {
+    if (mayBeEmpty != MayBeEmpty) {
       return Fail(SEC_ERROR_BAD_DER);
     }
     return Success;
@@ -422,33 +349,27 @@ NestedOf(Input& input, uint8_t outerTag, uint8_t innerTag,
   return Success;
 }
 
-// Universal types
-
-namespace internal {
-
-// This parser will only parse values between 0..127. If this range is
-// increased then callers will need to be changed.
-template <typename T> inline Result
-IntegralValue(Input& input, uint8_t tag, T& value)
+inline Result
+Skip(Input& input, uint8_t tag)
 {
-  // Conveniently, all the Integers that we actually have to be able to parse
-  // are positive and very small. Consequently, this parser is *much* simpler
-  // than a general Integer parser would need to be.
-  if (ExpectTagAndLength(input, tag, 1) != Success) {
+  uint16_t length;
+  if (ExpectTagAndGetLength(input, tag, length) != Success) {
     return Failure;
   }
-  uint8_t valueByte;
-  if (input.Read(valueByte) != Success) {
-    return Failure;
-  }
-  if (valueByte & 0x80) { // negative
-    return Fail(SEC_ERROR_BAD_DER);
-  }
-  value = valueByte;
-  return Success;
+  return input.Skip(length);
 }
 
-} // namespace internal
+inline Result
+Skip(Input& input, uint8_t tag, /*out*/ SECItem& value)
+{
+  uint16_t length;
+  if (ExpectTagAndGetLength(input, tag, length) != Success) {
+    return Failure;
+  }
+  return input.Skip(length, value);
+}
+
+// Universal types
 
 inline Result
 Boolean(Input& input, /*out*/ bool& value)
@@ -465,7 +386,8 @@ Boolean(Input& input, /*out*/ bool& value)
     case 0: value = false; return Success;
     case 0xFF: value = true; return Success;
     default:
-      return Fail(SEC_ERROR_BAD_DER);
+      PR_SetError(SEC_ERROR_BAD_DER, 0);
+      return Failure;
   }
 }
 
@@ -489,115 +411,42 @@ OptionalBoolean(Input& input, bool allowInvalidExplicitEncoding,
   return Success;
 }
 
-// This parser will only parse values between 0..127. If this range is
-// increased then callers will need to be changed.
 inline Result
 Enumerated(Input& input, uint8_t& value)
 {
-  return internal::IntegralValue(input, ENUMERATED | 0, value);
+  if (ExpectTagAndLength(input, ENUMERATED | 0, 1) != Success) {
+    return Failure;
+  }
+  return input.Read(value);
 }
 
 inline Result
 GeneralizedTime(Input& input, PRTime& time)
 {
+  uint16_t length;
   SECItem encoded;
-  if (ExpectTagAndGetValue(input, GENERALIZED_TIME, encoded) != Success) {
+  if (ExpectTagAndGetLength(input, GENERALIZED_TIME, length) != Success) {
+    return Failure;
+  }
+  if (input.Skip(length, encoded)) {
     return Failure;
   }
   if (DER_GeneralizedTimeToTime(&time, &encoded) != SECSuccess) {
     return Failure;
   }
-  return Success;
-}
 
-// This parser will only parse values between 0..127. If this range is
-// increased then callers will need to be changed.
-inline Result
-Integer(Input& input, /*out*/ uint8_t& value)
-{
-  if (internal::IntegralValue(input, INTEGER, value) != Success) {
-    return Failure;
-  }
-  return Success;
-}
-
-// This parser will only parse values between 0..127. If this range is
-// increased then callers will need to be changed. The default value must be
-// -1; defaultValue is only a parameter to make it clear in the calling code
-// what the default value is.
-inline Result
-OptionalInteger(Input& input, long defaultValue, /*out*/ long& value)
-{
-  // If we need to support a different default value in the future, we need to
-  // test that parsedValue != defaultValue.
-  if (defaultValue != -1) {
-    return Fail(SEC_ERROR_INVALID_ARGS);
-  }
-
-  if (!input.Peek(INTEGER)) {
-    value = defaultValue;
-    return Success;
-  }
-
-  uint8_t parsedValue;
-  if (Integer(input, parsedValue) != Success) {
-    return Failure;
-  }
-  value = parsedValue;
   return Success;
 }
 
 inline Result
-Null(Input& input)
+Integer(Input& input, /*out*/ SECItem& value)
 {
-  return ExpectTagAndLength(input, NULLTag, 0);
-}
-
-template <uint8_t Len>
-Result
-OID(Input& input, const uint8_t (&expectedOid)[Len])
-{
-  if (ExpectTagAndLength(input, OIDTag, Len) != Success) {
+  uint16_t length;
+  if (ExpectTagAndGetLength(input, INTEGER, length) != Success) {
     return Failure;
   }
 
-  return input.Expect(expectedOid, Len);
-}
-
-// PKI-specific types
-
-// AlgorithmIdentifier  ::=  SEQUENCE  {
-//         algorithm               OBJECT IDENTIFIER,
-//         parameters              ANY DEFINED BY algorithm OPTIONAL  }
-inline Result
-AlgorithmIdentifier(Input& input, SECAlgorithmID& algorithmID)
-{
-  if (ExpectTagAndGetValue(input, OIDTag, algorithmID.algorithm) != Success) {
-    return Failure;
-  }
-  algorithmID.parameters.data = nullptr;
-  algorithmID.parameters.len = 0;
-  if (input.AtEnd()) {
-    return Success;
-  }
-  return Null(input);
-}
-
-inline Result
-CertificateSerialNumber(Input& input, /*out*/ SECItem& value)
-{
-  // http://tools.ietf.org/html/rfc5280#section-4.1.2.2:
-  //
-  // * "The serial number MUST be a positive integer assigned by the CA to
-  //   each certificate."
-  // * "Certificate users MUST be able to handle serialNumber values up to 20
-  //   octets. Conforming CAs MUST NOT use serialNumber values longer than 20
-  //   octets."
-  // * "Note: Non-conforming CAs may issue certificates with serial numbers
-  //   that are negative or zero.  Certificate users SHOULD be prepared to
-  //   gracefully handle such certificates."
-
-  if (ExpectTagAndGetValue(input, INTEGER, value) != Success) {
+  if (input.Skip(length, value) != Success) {
     return Failure;
   }
 
@@ -618,6 +467,59 @@ CertificateSerialNumber(Input& input, /*out*/ SECItem& value)
   }
 
   return Success;
+}
+
+inline Result
+Null(Input& input)
+{
+  return ExpectTagAndLength(input, NULLTag, 0);
+}
+
+template <uint16_t Len>
+Result
+OID(Input& input, const uint8_t (&expectedOid)[Len])
+{
+  if (ExpectTagAndLength(input, OIDTag, Len) != Success) {
+    return Failure;
+  }
+
+  return input.Expect(expectedOid, Len);
+}
+
+// PKI-specific types
+
+// AlgorithmIdentifier  ::=  SEQUENCE  {
+//         algorithm               OBJECT IDENTIFIER,
+//         parameters              ANY DEFINED BY algorithm OPTIONAL  }
+inline Result
+AlgorithmIdentifier(Input& input, SECAlgorithmID& algorithmID)
+{
+  if (Skip(input, OIDTag, algorithmID.algorithm) != Success) {
+    return Failure;
+  }
+  algorithmID.parameters.data = nullptr;
+  algorithmID.parameters.len = 0;
+  if (input.AtEnd()) {
+    return Success;
+  }
+  return Null(input);
+}
+
+inline Result
+CertificateSerialNumber(Input& input, /*out*/ SECItem& serialNumber)
+{
+  // http://tools.ietf.org/html/rfc5280#section-4.1.2.2:
+  //
+  // * "The serial number MUST be a positive integer assigned by the CA to
+  //   each certificate."
+  // * "Certificate users MUST be able to handle serialNumber values up to 20
+  //   octets. Conforming CAs MUST NOT use serialNumber values longer than 20
+  //   octets."
+  // * "Note: Non-conforming CAs may issue certificates with serial numbers
+  //   that are negative or zero.  Certificate users SHOULD be prepared to
+  //   gracefully handle such certificates."
+
+  return Integer(input, serialNumber);
 }
 
 // x.509 and OCSP both use this same version numbering scheme, though OCSP
@@ -649,25 +551,6 @@ OptionalVersion(Input& input, /*out*/ uint8_t& version)
   }
   return Success;
 }
-
-// Parses a SEQUENCE into tbs and then parses an AlgorithmIdentifier followed
-// by a BIT STRING into signedData. This handles the commonality between
-// parsing the signed/signature fields of certificates and OCSP responses. In
-// the case of an OCSP response, the caller needs to parse the certs
-// separately.
-//
-// Certificate  ::=  SEQUENCE  {
-//        tbsCertificate       TBSCertificate,
-//        signatureAlgorithm   AlgorithmIdentifier,
-//        signatureValue       BIT STRING  }
-//
-// BasicOCSPResponse       ::= SEQUENCE {
-//    tbsResponseData      ResponseData,
-//    signatureAlgorithm   AlgorithmIdentifier,
-//    signature            BIT STRING,
-//    certs            [0] EXPLICIT SEQUENCE OF Certificate OPTIONAL }
-Result
-SignedData(Input& input, /*out*/ Input& tbs, /*out*/ CERTSignedData& signedData);
 
 } } } // namespace mozilla::pkix::der
 

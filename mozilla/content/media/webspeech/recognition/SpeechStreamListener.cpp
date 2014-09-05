@@ -84,8 +84,7 @@ SpeechStreamListener::ConvertAndDispatchAudioChunk(int aDuration, float aVolume,
 }
 
 void
-SpeechStreamListener::NotifyEvent(MediaStreamGraph* aGraph,
-                                  MediaStreamListener::MediaStreamGraphEvent event)
+SpeechStreamListener::NotifyFinished(MediaStreamGraph* aGraph)
 {
   // TODO dispatch SpeechEnd event so services can be informed
 }

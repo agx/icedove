@@ -918,18 +918,10 @@ var Input = {
   },
 
   moveToPoint: function moveToPoint(aRule, aX, aY) {
-    // XXX: Bug 1013408 - There is no alignment between the chrome window's
-    // viewport size and the content viewport size in Android. This makes
-    // sending mouse events beyond its bounds impossible.
-    if (Utils.MozBuildApp === 'mobile/android') {
-      let mm = Utils.getMessageManager(Utils.CurrentBrowser);
-      mm.sendAsyncMessage('AccessFu:MoveToPoint',
-        {rule: aRule, x: aX, y: aY, origin: 'top'});
-    } else {
-      let win = Utils.win;
-      Utils.winUtils.sendMouseEvent('mousemove',
-        aX - win.mozInnerScreenX, aY - win.mozInnerScreenY, 0, 0, 0);
-    }
+    let mm = Utils.getMessageManager(Utils.CurrentBrowser);
+    mm.sendAsyncMessage('AccessFu:MoveToPoint', {rule: aRule,
+                                                 x: aX, y: aY,
+                                                 origin: 'top'});
   },
 
   moveCursor: function moveCursor(aAction, aRule, aInputType) {
@@ -1007,9 +999,11 @@ var Input = {
     let page = aDetails.page;
     let p = AccessFu.adjustContentBounds(aDetails.bounds, Utils.CurrentBrowser,
                                          true, true).center();
-    Utils.winUtils.sendWheelEvent(p.x, p.y,
-      horizontal ? page : 0, horizontal ? 0 : page, 0,
-      Utils.win.WheelEvent.DOM_DELTA_PAGE, 0, 0, 0, 0);
+    let wu = Utils.win.QueryInterface(Ci.nsIInterfaceRequestor).
+      getInterface(Ci.nsIDOMWindowUtils);
+    wu.sendWheelEvent(p.x, p.y,
+                      horizontal ? page : 0, horizontal ? 0 : page, 0,
+                      Utils.win.WheelEvent.DOM_DELTA_PAGE, 0, 0, 0, 0);
   },
 
   get keyMap() {

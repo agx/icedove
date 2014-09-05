@@ -11,8 +11,13 @@
 
 namespace mozilla {
 
+class CameraPreviewFrameCallback {
+public:
+  virtual void OnNewFrame(const gfxIntSize& aIntrinsicSize, layers::Image* aImage) = 0;
+};
+
 /**
- * This is a stream for camera preview.
+ * This is a stream for camere preview.
  *
  * XXX It is a temporary fix of SourceMediaStream.
  * A camera preview requests no delay and no buffering stream.
@@ -35,21 +40,20 @@ public:
   virtual void RemoveListener(MediaStreamListener* aListener) MOZ_OVERRIDE;
   virtual void Destroy();
 
-  void Invalidate();
-
   // Call these on any thread.
   void SetCurrentFrame(const gfxIntSize& aIntrinsicSize, Image* aImage);
   void ClearCurrentFrame();
-  void RateLimit(bool aLimit);
+
+  void SetFrameCallback(CameraPreviewFrameCallback* aCallback) {
+    mFrameCallback = aCallback;
+  }
 
 protected:
   // mMutex protects all the class' fields.
   // This class is not registered to MediaStreamGraph.
   // It needs to protect all the fields.
   Mutex mMutex;
-  int32_t mInvalidatePending;
-  uint32_t mDiscardedFrames;
-  bool mRateLimit;
+  CameraPreviewFrameCallback* mFrameCallback;
 };
 
 }

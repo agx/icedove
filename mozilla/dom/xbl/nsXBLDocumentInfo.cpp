@@ -51,9 +51,9 @@ TraverseProtos(const nsACString &aKey, nsXBLPrototypeBinding *aProto, void* aClo
 }
 
 static PLDHashOperator
-UnlinkProto(const nsACString &aKey, nsXBLPrototypeBinding *aProto, void* aClosure)
+UnlinkProtoJSObjects(const nsACString &aKey, nsXBLPrototypeBinding *aProto, void* aClosure)
 {
-  aProto->Unlink();
+  aProto->UnlinkJSObjects();
   return PL_DHASH_NEXT;
 }
 
@@ -75,7 +75,7 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(nsXBLDocumentInfo)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXBLDocumentInfo)
   if (tmp->mBindingTable) {
-    tmp->mBindingTable->EnumerateRead(UnlinkProto, nullptr);
+    tmp->mBindingTable->EnumerateRead(UnlinkProtoJSObjects, nullptr);
   }
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDocument)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END

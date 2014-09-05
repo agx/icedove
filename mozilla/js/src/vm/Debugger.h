@@ -70,6 +70,7 @@ class DebuggerWeakMap : private WeakMap<Key, Value, DefaultHasher<Key> >
 
     /* Expose WeakMap public interface */
 
+    using Base::clearWithoutCallingDestructors;
     using Base::lookupForAdd;
     using Base::all;
     using Base::trace;
@@ -218,15 +219,15 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     FrameMap frames;
 
     /* An ephemeral map from JSScript* to Debugger.Script instances. */
-    typedef DebuggerWeakMap<PreBarrieredScript, RelocatablePtrObject> ScriptWeakMap;
+    typedef DebuggerWeakMap<EncapsulatedPtrScript, RelocatablePtrObject> ScriptWeakMap;
     ScriptWeakMap scripts;
 
     /* The map from debuggee source script objects to their Debugger.Source instances. */
-    typedef DebuggerWeakMap<PreBarrieredObject, RelocatablePtrObject, true> SourceWeakMap;
+    typedef DebuggerWeakMap<EncapsulatedPtrObject, RelocatablePtrObject, true> SourceWeakMap;
     SourceWeakMap sources;
 
     /* The map from debuggee objects to their Debugger.Object instances. */
-    typedef DebuggerWeakMap<PreBarrieredObject, RelocatablePtrObject> ObjectWeakMap;
+    typedef DebuggerWeakMap<EncapsulatedPtrObject, RelocatablePtrObject> ObjectWeakMap;
     ObjectWeakMap objects;
 
     /* The map from debuggee Envs to Debugger.Environment instances. */
@@ -442,7 +443,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
     static JSTrapStatus onSingleStep(JSContext *cx, MutableHandleValue vp);
     static bool handleBaselineOsr(JSContext *cx, InterpreterFrame *from, jit::BaselineFrame *to);
     static bool handleIonBailout(JSContext *cx, jit::RematerializedFrame *from, jit::BaselineFrame *to);
-    static void propagateForcedReturn(JSContext *cx, AbstractFramePtr frame, HandleValue rval);
 
     /************************************* Functions for use by Debugger.cpp. */
 
@@ -507,8 +507,6 @@ class Debugger : private mozilla::LinkedListElement<Debugger>
      * happens in the target compartment--rotational symmetry.)
      */
     bool unwrapDebuggeeValue(JSContext *cx, MutableHandleValue vp);
-    bool unwrapPropDescInto(JSContext *cx, HandleObject obj, Handle<PropDesc> wrapped,
-                            MutableHandle<PropDesc> unwrapped);
 
     /*
      * Store the Debugger.Frame object for frame in *vp.
@@ -643,7 +641,7 @@ class Breakpoint {
     BreakpointSite * const site;
   private:
     /* |handler| is marked unconditionally during minor GC. */
-    js::PreBarrieredObject handler;
+    js::EncapsulatedPtrObject handler;
     JSCList debuggerLinks;
     JSCList siteLinks;
 
@@ -654,8 +652,8 @@ class Breakpoint {
     void destroy(FreeOp *fop);
     Breakpoint *nextInDebugger();
     Breakpoint *nextInSite();
-    const PreBarrieredObject &getHandler() const { return handler; }
-    PreBarrieredObject &getHandlerRef() { return handler; }
+    const EncapsulatedPtrObject &getHandler() const { return handler; }
+    EncapsulatedPtrObject &getHandlerRef() { return handler; }
 };
 
 Breakpoint *

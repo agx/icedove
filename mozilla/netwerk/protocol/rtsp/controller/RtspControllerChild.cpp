@@ -237,8 +237,7 @@ enum IPCEvent
   SendSeekEvent,
   SendResumeEvent,
   SendSuspendEvent,
-  SendStopEvent,
-  SendPlaybackEndedEvent
+  SendStopEvent
 };
 
 class SendIPCEvent : public nsRunnable
@@ -282,8 +281,6 @@ public:
       rv = mController->SendSuspend();
     } else if (mEvent == SendStopEvent) {
       rv = mController->SendStop();
-    } else if (mEvent == SendPlaybackEndedEvent) {
-      rv = mController->SendPlaybackEnded();
     } else {
       LOG(("RtspControllerChild::SendIPCEvent"));
     }
@@ -424,24 +421,6 @@ RtspControllerChild::GetTotalTracks(uint8_t *aTracks)
     *aTracks = mTotalTracks;
   }
   LOG(("RtspControllerChild::GetTracks() %d", *aTracks));
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-RtspControllerChild::PlaybackEnded()
-{
-  LOG(("RtspControllerChild::PlaybackEnded"));
-
-  if (NS_IsMainThread()) {
-    if (!OKToSendIPC() || !SendPlaybackEnded()) {
-      return NS_ERROR_FAILURE;
-    }
-  } else {
-    nsresult rv = NS_DispatchToMainThread(
-                    new SendIPCEvent(this, SendPlaybackEndedEvent));
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
   return NS_OK;
 }
 

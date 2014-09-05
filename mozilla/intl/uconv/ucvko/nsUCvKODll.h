@@ -10,5 +10,6 @@ extern const uint16_t g_utKSC5601Mapping[];
 extern const uint16_t g_ufKSC5601Mapping[];
 extern const uint16_t g_ASCIIMappingTable[];
 extern const uint16_t g_HangulNullMapping[];
+extern const uint16_t g_ufJohabJamoMapping[];
 
 #endif /* nsUCvKODll_h_ */

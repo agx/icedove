@@ -39,8 +39,8 @@ enum nsLinkState {
 
 // IID for the nsIContent interface
 #define NS_ICONTENT_IID \
-{ 0xc534a378, 0x7b5f, 0x43a4, \
-  { 0xaf, 0x65, 0x5f, 0xfe, 0xea, 0xd6, 0x00, 0xfb } }
+{ 0x1329e5b7, 0x4bcd, 0x450c, \
+  { 0xa2, 0x3a, 0x98, 0xc5, 0x85, 0xcd, 0x73, 0xf9 } }
 
 /**
  * A node of content in a document's content model. This interface
@@ -70,11 +70,9 @@ public:
    * appended to a parent, this will be called after the node has been added to
    * the parent's child list and before nsIDocumentObserver notifications for
    * the addition are dispatched.
-   * @param aDocument The new document for the content node.  May not be null
-   *                  if aParent is null.  Must match the current document of
-   *                  aParent, if aParent is not null (note that
-   *                  aParent->GetCurrentDoc() can be null, in which case this
-   *                  must also be null).
+   * @param aDocument The new document for the content node.  Must match the
+   *                  current document of aParent, if aParent is not null.
+   *                  May not be null if aParent is null.
    * @param aParent The new parent for the content node.  May be null if the
    *                node is being bound as a direct child of the document.
    * @param aBindingParent The new binding parent for the content node.
@@ -319,6 +317,13 @@ public:
     return mNodeInfo->Equals(nsGkAtoms::children, kNameSpaceID_XBL) &&
            GetBindingParent();
   }
+
+  /**
+   * Returns an atom holding the name of the attribute of type ID on
+   * this content node (if applicable).  Returns null for non-element
+   * content nodes.
+   */
+  virtual nsIAtom *GetIDAttributeName() const = 0;
 
   /**
    * Set attribute values. All attribute values are assumed to have a
@@ -664,20 +669,6 @@ public:
   virtual mozilla::dom::ShadowRoot *GetContainingShadow() const = 0;
 
   /**
-   * Gets an array of destination insertion points where this content
-   * is distributed by web component distribution algorithms.
-   * The array is created if it does not already exist.
-   */
-  virtual nsTArray<nsIContent*> &DestInsertionPoints() = 0;
-
-  /**
-   * Same as DestInsertionPoints except that this method will return
-   * null if the array of destination insertion points does not already
-   * exist.
-   */
-  virtual nsTArray<nsIContent*> *GetExistingDestInsertionPoints() const = 0;
-
-  /**
    * Gets the insertion parent element of the XBL binding.
    * The insertion parent is our one true parent in the transformed DOM.
    *
@@ -824,7 +815,8 @@ public:
 
   /**
    * Get the ID of this content node (the atom corresponding to the
-   * value of the id attribute).  This may be null if there is no ID.
+   * value of the null-namespace attribute whose name is given by
+   * GetIDAttributeName().  This may be null if there is no ID.
    */
   nsIAtom* GetID() const {
     if (HasID()) {
@@ -835,7 +827,8 @@ public:
 
   /**
    * Get the class list of this content node (this corresponds to the
-   * value of the class attribute).  This may be null if there are no
+   * value of the null-namespace attribute whose name is given by
+   * GetClassAttributeName()).  This may be null if there are no
    * classes, but that's not guaranteed.
    */
   const nsAttrValue* GetClasses() const {
@@ -883,10 +876,10 @@ public:
    */
   nsIFrame* GetPrimaryFrame() const
   {
-    return (IsInDoc() || HasFlag(NODE_IS_IN_SHADOW_TREE)) ? mPrimaryFrame : nullptr;
+    return IsInDoc() ? mPrimaryFrame : nullptr;
   }
   void SetPrimaryFrame(nsIFrame* aFrame) {
-    MOZ_ASSERT(IsInDoc() || HasFlag(NODE_IS_IN_SHADOW_TREE), "This will end badly!");
+    NS_ASSERTION(IsInDoc(), "This will end badly!");
     NS_PRECONDITION(!aFrame || !mPrimaryFrame || aFrame == mPrimaryFrame,
                     "Losing track of existing primary frame");
     mPrimaryFrame = aFrame;
@@ -948,14 +941,14 @@ protected:
    * Hook for implementing GetID.  This is guaranteed to only be
    * called if HasID() is true.
    */
-  nsIAtom* DoGetID() const;
+  virtual nsIAtom* DoGetID() const = 0;
 
 private:
   /**
    * Hook for implementing GetClasses.  This is guaranteed to only be
    * called if the NODE_MAY_HAVE_CLASS flag is set.
    */
-  const nsAttrValue* DoGetClasses() const;
+  virtual const nsAttrValue* DoGetClasses() const = 0;
 
 public:
 #ifdef DEBUG

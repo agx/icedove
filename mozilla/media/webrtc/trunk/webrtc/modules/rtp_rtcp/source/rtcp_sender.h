@@ -63,9 +63,6 @@ public:
    uint32_t last_rr_ntp_frac;
    uint32_t remote_sr;
 
-   bool has_last_xr_rr;
-   RtcpReceiveTimeInfo last_xr_rr;
-
    // Used when generating TMMBR.
    ModuleRtpRtcpImpl* module;
  };
@@ -112,8 +109,6 @@ public:
                                uint32_t *timeOfSend,
                                uint32_t *packetCount,
                                uint64_t *octetCount);
-
-    bool SendTimeOfXrRrReport(uint32_t mid_ntp, int64_t* time_ms) const;
 
     bool TimeToSendRTCPReport(const bool sendKeyframeBeforeRTP = false) const;
 
@@ -171,10 +166,6 @@ public:
                                        const uint16_t length);
 
     int32_t SetRTCPVoIPMetrics(const RTCPVoIPMetric* VoIPMetric);
-
-    void SendRtcpXrReceiverReferenceTime(bool enable);
-
-    bool RtcpXrReceiverReferenceTime() const;
 
     int32_t SetCSRCs(const uint32_t arrOfCSRC[kRtpCsrcSize],
                      const uint8_t arrLength);
@@ -262,14 +253,6 @@ private:
                       const uint16_t* nackList,
                           std::string* nackString);
 
-    int32_t BuildReceiverReferenceTime(uint8_t* buffer,
-                                       int& pos,
-                                       uint32_t ntp_sec,
-                                       uint32_t ntp_frac);
-    int32_t BuildDlrr(uint8_t* buffer,
-                      int& pos,
-                      const RtcpReceiveTimeInfo& info);
-
 private:
     int32_t            _id;
     const bool               _audio;
@@ -311,10 +294,6 @@ private:
     uint32_t        _lastSRPacketCount[RTCP_NUMBER_OF_SR];
     uint64_t        _lastSROctetCount[RTCP_NUMBER_OF_SR];
 
-    // Sent XR receiver reference time report.
-    // <mid ntp (mid 32 bits of the 64 bits NTP timestamp), send time in ms>.
-    std::map<uint32_t, int64_t> last_xr_rr_;
-
     // send CSRCs
     uint8_t         _CSRCs;
     uint32_t        _CSRC[kRtpCsrcSize];
@@ -339,9 +318,6 @@ private:
     uint32_t       _appName;
     uint8_t*       _appData;
     uint16_t       _appLength;
-
-    // True if sending of XR Receiver reference time report is enabled.
-    bool xrSendReceiverReferenceTimeEnabled_;
 
     // XR VoIP metric
     bool                _xrSendVoIPMetric;

@@ -72,7 +72,7 @@ EchoCancellationImpl::EchoCancellationImpl(const AudioProcessingImpl* apm)
     was_stream_drift_set_(false),
     stream_has_echo_(false),
     delay_logging_enabled_(false),
-    delay_correction_enabled_(true) {} // default to long AEC tail in Mozilla
+    delay_correction_enabled_(true) {}
 
 EchoCancellationImpl::~EchoCancellationImpl() {}
 
@@ -335,6 +335,8 @@ int EchoCancellationImpl::Initialize() {
   if (err != apm_->kNoError || !is_component_enabled()) {
     return err;
   }
+
+  was_stream_drift_set_ = false;
 
   return apm_->kNoError;
 }

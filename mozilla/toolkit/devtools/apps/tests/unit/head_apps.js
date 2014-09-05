@@ -82,12 +82,6 @@ function setup() {
   // as only launchable apps are returned
   Components.utils.import('resource://gre/modules/Webapps.jsm');
   DOMApplicationRegistry.allAppsLaunchable = true;
-
-  // Mock WebappOSUtils
-  Cu.import("resource://gre/modules/WebappOSUtils.jsm");
-  WebappOSUtils.getPackagePath = function(aApp) {
-    return aApp.basePath + "/" + aApp.id;
-  }
 }
 
 function do_get_webappsdir() {

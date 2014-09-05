@@ -1,4 +1,4 @@
-// |jit-test| allow-oom; allow-overrecursed
+// |jit-test| error:out of memory
 
 gcPreserveCode();
 evaluate("gcparam(\"maxBytes\", gcparam(\"gcBytes\") + 4*1024);");

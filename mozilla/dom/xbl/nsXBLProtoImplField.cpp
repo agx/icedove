@@ -189,7 +189,7 @@ InstallXBLField(JSContext* cx,
 
     JS::Rooted<JS::Value> name(cx, js::GetFunctionNativeReserved(callee, FIELD_SLOT));
     JSFlatString* fieldStr = JS_ASSERT_STRING_IS_FLAT(name.toString());
-    fieldName.infallibleInit(fieldStr);
+    fieldName.init(fieldStr);
 
     MOZ_ALWAYS_TRUE(JS_ValueToId(cx, name, idp));
 
@@ -365,10 +365,10 @@ nsXBLProtoImplField::InstallAccessors(JSContext* aCx,
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
-  if (!::JS_DefinePropertyById(aCx, aTargetClassObject, id, JS::UndefinedHandleValue,
-                               AccessorAttributes(),
+  if (!::JS_DefinePropertyById(aCx, aTargetClassObject, id, JS::UndefinedValue(),
                                JS_DATA_TO_FUNC_PTR(JSPropertyOp, get.get()),
-                               JS_DATA_TO_FUNC_PTR(JSStrictPropertyOp, set.get()))) {
+                               JS_DATA_TO_FUNC_PTR(JSStrictPropertyOp, set.get()),
+                               AccessorAttributes())) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 
@@ -444,7 +444,8 @@ nsXBLProtoImplField::InstallField(JS::Handle<JSObject*> aBoundNode,
   if (!JS_WrapValue(cx, &result) ||
       !::JS_DefineUCProperty(cx, aBoundNode,
                              reinterpret_cast<const jschar*>(mName),
-                             name.Length(), result, mJSAttributes)) {
+                             name.Length(), result, nullptr, nullptr,
+                             mJSAttributes)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
 

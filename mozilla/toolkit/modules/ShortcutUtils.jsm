@@ -100,11 +100,6 @@ let ShortcutUtils = {
       key = key.toUpperCase();
     }
     return elemString + key;
-  },
-
-  findShortcut: function(aElemCommand) {
-    let document = aElemCommand.ownerDocument;
-    return document.querySelector("key[command=\"" + aElemCommand.getAttribute("id") + "\"]");
   }
 };
 

@@ -617,6 +617,27 @@ gfxWindowsPlatform::CreateOffscreenSurface(const IntSize& size,
     return surf.forget();
 }
 
+already_AddRefed<gfxASurface>
+gfxWindowsPlatform::CreateOffscreenImageSurface(const gfxIntSize& aSize,
+                                                gfxContentType aContentType)
+{
+#ifdef CAIRO_HAS_D2D_SURFACE
+    if (mRenderMode == RENDER_DIRECT2D) {
+        nsRefPtr<gfxASurface> surface =
+          new gfxImageSurface(aSize, OptimalFormatForContent(aContentType));
+        return surface.forget();
+    }
+#endif
+
+    nsRefPtr<gfxASurface> surface = CreateOffscreenSurface(aSize.ToIntSize(),
+                                                           aContentType);
+#ifdef DEBUG
+    nsRefPtr<gfxImageSurface> imageSurface = surface->GetAsImageSurface();
+    NS_ASSERTION(imageSurface, "Surface cannot be converted to a gfxImageSurface");
+#endif
+    return surface.forget();
+}
+
 TemporaryRef<ScaledFont>
 gfxWindowsPlatform::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
 {
@@ -743,7 +764,6 @@ static const char kFontNirmalaUI[] = "Nirmala UI";
 static const char kFontNyala[] = "Nyala";
 static const char kFontPlantagenetCherokee[] = "Plantagenet Cherokee";
 static const char kFontSegoeUI[] = "Segoe UI";
-static const char kFontSegoeUIEmoji[] = "Segoe UI Emoji";
 static const char kFontSegoeUISymbol[] = "Segoe UI Symbol";
 static const char kFontSylfaen[] = "Sylfaen";
 static const char kFontTraditionalArabic[] = "Traditional Arabic";
@@ -761,7 +781,6 @@ gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
     if (!IS_IN_BMP(aCh)) {
         uint32_t p = aCh >> 16;
         if (p == 1) { // SMP plane
-            aFontList.AppendElement(kFontSegoeUIEmoji);
             aFontList.AppendElement(kFontSegoeUISymbol);
             aFontList.AppendElement(kFontEbrima);
             aFontList.AppendElement(kFontNirmalaUI);
@@ -840,7 +859,6 @@ gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
         case 0x2b:
         case 0x2c:
             aFontList.AppendElement(kFontSegoeUI);
-            aFontList.AppendElement(kFontSegoeUIEmoji);
             aFontList.AppendElement(kFontSegoeUISymbol);
             aFontList.AppendElement(kFontCambria);
             aFontList.AppendElement(kFontMeiryo);
@@ -934,6 +952,35 @@ gfxWindowsPlatform::GetCommonFallbackFonts(const uint32_t aCh,
     aFontList.AppendElement(kFontArialUnicodeMS);
 }
 
+struct ResolveData {
+    ResolveData(gfxPlatform::FontResolverCallback aCallback,
+                gfxWindowsPlatform *aCaller, const nsAString *aFontName,
+                void *aClosure) :
+        mFoundCount(0), mCallback(aCallback), mCaller(aCaller),
+        mFontName(aFontName), mClosure(aClosure) {}
+    uint32_t mFoundCount;
+    gfxPlatform::FontResolverCallback mCallback;
+    gfxWindowsPlatform *mCaller;
+    const nsAString *mFontName;
+    void *mClosure;
+};
+
+nsresult
+gfxWindowsPlatform::ResolveFontName(const nsAString& aFontName,
+                                    FontResolverCallback aCallback,
+                                    void *aClosure,
+                                    bool& aAborted)
+{
+    nsAutoString resolvedName;
+    if (!gfxPlatformFontList::PlatformFontList()->
+             ResolveFontName(aFontName, resolvedName)) {
+        aAborted = false;
+        return NS_OK;
+    }
+    aAborted = !(*aCallback)(resolvedName, aClosure);
+    return NS_OK;
+}
+
 nsresult
 gfxWindowsPlatform::GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName)
 {
@@ -942,11 +989,11 @@ gfxWindowsPlatform::GetStandardFamilyName(const nsAString& aFontName, nsAString&
 }
 
 gfxFontGroup *
-gfxWindowsPlatform::CreateFontGroup(const FontFamilyList& aFontFamilyList,
+gfxWindowsPlatform::CreateFontGroup(const nsAString &aFamilies,
                                     const gfxFontStyle *aStyle,
                                     gfxUserFontSet *aUserFontSet)
 {
-    return new gfxFontGroup(aFontFamilyList, aStyle, aUserFontSet);
+    return new gfxFontGroup(aFamilies, aStyle, aUserFontSet);
 }
 
 gfxFontEntry* 
@@ -1083,7 +1130,7 @@ gfxWindowsPlatform::GetDLLVersion(char16ptr_t aDLLPath, nsAString& aVersion)
 {
     DWORD versInfoSize, vers[4] = {0};
     // version info not available case
-    aVersion.AssignLiteral(MOZ_UTF16("0.0.0.0"));
+    aVersion.Assign(NS_LITERAL_STRING("0.0.0.0"));
     versInfoSize = GetFileVersionInfoSizeW(aDLLPath, nullptr);
     nsAutoTArray<BYTE,512> versionInfo;
     
@@ -1439,18 +1486,7 @@ gfxWindowsPlatform::GetD3D11Device()
 bool
 gfxWindowsPlatform::IsOptimus()
 {
-    static int knowIsOptimus = -1;
-    if (knowIsOptimus == -1) {
-        // other potential optimus -- nvd3d9wrapx.dll & nvdxgiwrap.dll
-        if (GetModuleHandleA("nvumdshim.dll") ||
-            GetModuleHandleA("nvumdshimx.dll"))
-        {
-            knowIsOptimus = 1;
-        } else {
-            knowIsOptimus = 0;
-        }
-    }
-    return knowIsOptimus;
+  return GetModuleHandleA("nvumdshim.dll");
 }
 
 int

@@ -276,7 +276,10 @@ this.DownloadIntegration = {
       // Now get the path for this storage area.
       if (preferredStorageName) {
         let volume = volumeService.getVolumeByName(preferredStorageName);
-        if (volume && volume.state === Ci.nsIVolume.STATE_MOUNTED){
+        if (volume &&
+            volume.isMediaPresent &&
+            !volume.isMountLocked &&
+            !volume.isSharing) {
           directoryPath = OS.Path.join(volume.mountPoint, "downloads");
           yield OS.File.makeDir(directoryPath, { ignoreExisting: true });
         }
@@ -500,13 +503,11 @@ this.DownloadIntegration = {
     }
     let hash;
     let sigInfo;
-    let channelRedirects;
     try {
       hash = aDownload.saver.getSha256Hash();
       sigInfo = aDownload.saver.getSignatureInfo();
-      channelRedirects = aDownload.saver.getRedirects();
     } catch (ex) {
-      // Bail if DownloadSaver doesn't have a hash or signature info.
+      // Bail if DownloadSaver doesn't have a hash.
       return Promise.resolve(false);
     }
     if (!hash || !sigInfo) {
@@ -522,9 +523,7 @@ this.DownloadIntegration = {
       referrerURI: aReferrer,
       fileSize: aDownload.currentBytes,
       sha256Hash: hash,
-      suggestedFileName: OS.Path.basename(aDownload.target.path),
-      signatureInfo: sigInfo,
-      redirects: channelRedirects },
+      signatureInfo: sigInfo },
       function onComplete(aShouldBlock, aRv) {
         deferred.resolve(aShouldBlock);
       });

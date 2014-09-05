@@ -70,8 +70,8 @@ private:
 JSObject *
 TransplantObject(JSContext *cx, JS::HandleObject origobj, JS::HandleObject target);
 
-bool IsContentXBLScope(JSCompartment *compartment);
-bool IsInContentXBLScope(JSObject *obj);
+bool IsXBLScope(JSCompartment *compartment);
+bool IsInXBLScope(JSObject *obj);
 
 // Return a raw XBL scope object corresponding to contentScope, which must
 // be an object whose global is a DOM window.
@@ -90,24 +90,23 @@ JSObject *
 GetXBLScope(JSContext *cx, JSObject *contentScope);
 
 inline JSObject *
-GetXBLScopeOrGlobal(JSContext *cx, JSObject *obj)
-{
-    if (IsInContentXBLScope(obj))
+GetXBLScopeOrGlobal(JSContext *cx, JSObject *obj) {
+    if (IsInXBLScope(obj))
         return js::GetGlobalForObjectCrossCompartment(obj);
     return GetXBLScope(cx, obj);
 }
 
 // Returns whether XBL scopes have been explicitly disabled for code running
-// in this compartment. See the comment around mAllowContentXBLScope.
+// in this compartment. See the comment around mAllowXBLScope.
 bool
-AllowContentXBLScope(JSCompartment *c);
+AllowXBLScope(JSCompartment *c);
 
 // Returns whether we will use an XBL scope for this compartment. This is
 // semantically equivalent to comparing global != GetXBLScope(global), but it
 // does not have the side-effect of eagerly creating the XBL scope if it does
 // not already exist.
 bool
-UseContentXBLScope(JSCompartment *c);
+UseXBLScope(JSCompartment *c);
 
 bool
 IsSandboxPrototypeProxy(JSObject *obj);
@@ -416,13 +415,6 @@ Throw(JSContext *cx, nsresult rv);
  */
 nsIGlobalObject *
 GetNativeForGlobal(JSObject *global);
-
-/**
- * Returns the nsISupports native behind a given reflector (either DOM or
- * XPCWN).
- */
-nsISupports *
-UnwrapReflectorToISupports(JSObject *reflector);
 
 /**
  * In some cases a native object does not really belong to any compartment (XBL,

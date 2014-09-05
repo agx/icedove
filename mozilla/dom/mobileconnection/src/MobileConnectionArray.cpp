@@ -11,20 +11,17 @@
 using namespace mozilla::dom;
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(MobileConnectionArray)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(MobileConnectionArray)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow)
   // Notify our mobile connections that we're going away.
   tmp->DropConnections();
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(MobileConnectionArray)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMobileConnections)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(MobileConnectionArray)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(MobileConnectionArray)
@@ -36,8 +33,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(MobileConnectionArray)
 NS_INTERFACE_MAP_END
 
 MobileConnectionArray::MobileConnectionArray(nsPIDOMWindow* aWindow)
-  : mInitialized(false)
-  , mWindow(aWindow)
+: mWindow(aWindow), mInitialized(false)
 {
   uint32_t numRil = mozilla::Preferences::GetUint("ril.numRadioInterfaces", 1);
   MOZ_ASSERT(numRil > 0);
@@ -58,7 +54,8 @@ MobileConnectionArray::Init()
   mInitialized = true;
 
   for (uint32_t id = 0; id < mMobileConnections.Length(); id++) {
-    nsRefPtr<MobileConnection> mobileConnection = new MobileConnection(mWindow, id);
+    nsRefPtr<MobileConnection> mobileConnection = new MobileConnection(id);
+    mobileConnection->Init(mWindow);
     mMobileConnections[id] = mobileConnection;
   }
 }
@@ -88,7 +85,7 @@ MobileConnectionArray::WrapObject(JSContext* aCx)
   return MozMobileConnectionArrayBinding::Wrap(aCx, this);
 }
 
-MobileConnection*
+nsIDOMMozMobileConnection*
 MobileConnectionArray::Item(uint32_t aIndex)
 {
   bool unused;
@@ -101,7 +98,7 @@ MobileConnectionArray::Length() const
   return mMobileConnections.Length();
 }
 
-MobileConnection*
+nsIDOMMozMobileConnection*
 MobileConnectionArray::IndexedGetter(uint32_t aIndex, bool& aFound)
 {
   if (!mInitialized) {

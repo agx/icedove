@@ -119,12 +119,8 @@ private:
   void DispatchSimpleEvent(const char* aName);
   void QueueAsyncSimpleEvent(const char* aName);
 
-  // Create a new decoder for mType, and store the result in mDecoder.
-  // Returns true if mDecoder was set.
+  // Create a new decoder for mType, add it to mDecoders and update mCurrentDecoder.
   bool InitNewDecoder();
-
-  // Set mDecoder to null and reset mDecoderInitialized.
-  void DiscardDecoder();
 
   // Update mUpdating and fire the appropriate events.
   void StartUpdating();
@@ -140,11 +136,14 @@ private:
 
   nsRefPtr<MediaSource> mMediaSource;
 
-  const nsCString mType;
+  const nsAutoCString mType;
 
   nsAutoPtr<ContainerParser> mParser;
 
-  nsRefPtr<SubBufferDecoder> mDecoder;
+  // XXX: We only want to keep the current decoder alive, but need a way to
+  // query @buffered for everything this SourceBuffer is responsible for.
+  nsTArray<nsRefPtr<SubBufferDecoder>> mDecoders;
+  nsRefPtr<SubBufferDecoder> mCurrentDecoder;
 
   double mAppendWindowStart;
   double mAppendWindowEnd;
@@ -153,8 +152,6 @@ private:
 
   SourceBufferAppendMode mAppendMode;
   bool mUpdating;
-
-  bool mDecoderInitialized;
 };
 
 } // namespace dom

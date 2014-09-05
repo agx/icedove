@@ -160,7 +160,7 @@ let sendLaterModule =
     // We want to use the identity and subject later, so store them for now.
     this._identity = aIdentity;
     if (aMessageHeader)
-      this._subject = aMessageHeader.mime2DecodedSubject;
+      this._subject = aMessageHeader.subject;
 
     // Create the process to display the send activity.
     let process = this._newProcess("sendingMessage", true);

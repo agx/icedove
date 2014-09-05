@@ -27,8 +27,6 @@ public:
     static void ClearMessageList(int32_t a0);
     static void CloseCamera();
     static void CloseNotification(const nsAString& a0);
-    static jstring ConnectionGetMimeType(jobject a0);
-    static jobject CreateInputStream(jobject a0);
     static void CreateMessageListWrapper(int64_t a0, int64_t a1, jobjectArray a2, int32_t a3, int32_t a4, bool a5, int32_t a6);
     static void CreateShortcut(const nsAString& a0, const nsAString& a1, const nsAString& a2, const nsAString& a3);
     static void DeleteMessageWrapper(int32_t a0, int32_t a1);
@@ -42,8 +40,6 @@ public:
     static void EnableNetworkNotifications();
     static void EnableScreenOrientationNotifications();
     static void EnableSensor(int32_t a0);
-    static void GamepadAdded(int32_t a0, int32_t a1);
-    static jobject GetConnection(const nsACString& a0);
     static jobject GetContext();
     static jdoubleArray GetCurrentBatteryInformationWrapper();
     static jdoubleArray GetCurrentNetworkInformationWrapper();
@@ -93,8 +89,6 @@ public:
     static void SetURITitle(const nsAString& a0, const nsAString& a1);
     static void ShowAlertNotificationWrapper(const nsAString& a0, const nsAString& a1, const nsAString& a2, const nsAString& a3, const nsAString& a4);
     static void ShowInputMethodPicker();
-    static void StartMonitoringGamepad();
-    static void StopMonitoringGamepad();
     static bool UnlockProfile();
     static void UnlockScreenOrientation();
     static void UnregisterSurfaceTextureFrameListener(jobject a0);
@@ -111,8 +105,6 @@ protected:
     static jmethodID jClearMessageList;
     static jmethodID jCloseCamera;
     static jmethodID jCloseNotification;
-    static jmethodID jConnectionGetMimeType;
-    static jmethodID jCreateInputStream;
     static jmethodID jCreateMessageListWrapper;
     static jmethodID jCreateShortcut;
     static jmethodID jDeleteMessageWrapper;
@@ -126,8 +118,6 @@ protected:
     static jmethodID jEnableNetworkNotifications;
     static jmethodID jEnableScreenOrientationNotifications;
     static jmethodID jEnableSensor;
-    static jmethodID jGamepadAdded;
-    static jmethodID jGetConnection;
     static jmethodID jGetContext;
     static jmethodID jGetCurrentBatteryInformationWrapper;
     static jmethodID jGetCurrentNetworkInformationWrapper;
@@ -177,8 +167,6 @@ protected:
     static jmethodID jSetURITitle;
     static jmethodID jShowAlertNotificationWrapper;
     static jmethodID jShowInputMethodPicker;
-    static jmethodID jStartMonitoringGamepad;
-    static jmethodID jStopMonitoringGamepad;
     static jmethodID jUnlockProfile;
     static jmethodID jUnlockScreenOrientation;
     static jmethodID jUnregisterSurfaceTextureFrameListener;
@@ -266,7 +254,7 @@ public:
     static void InitStubs(JNIEnv *jEnv);
     static ThumbnailHelper* Wrap(jobject obj);
     ThumbnailHelper(jobject obj, JNIEnv* env) : AutoGlobalWrappedJavaObject(obj, env) {};
-    static void SendThumbnail(jobject a0, int32_t a1, bool a2, bool a3);
+    static void SendThumbnail(jobject a0, int32_t a1, bool a2);
     ThumbnailHelper() : AutoGlobalWrappedJavaObject() {};
 protected:
     static jclass mThumbnailHelperClass;
@@ -380,8 +368,12 @@ public:
     void setViewport(jobject a0);
     bool getabort();
     void setabort(bool a0);
+    jfloat getheight();
+    void setheight(jfloat a0);
     jfloat getscale();
     void setscale(jfloat a0);
+    jfloat getwidth();
+    void setwidth(jfloat a0);
     jfloat getx();
     void setx(jfloat a0);
     jfloat gety();
@@ -391,7 +383,9 @@ protected:
     static jmethodID jProgressiveUpdateData;
     static jmethodID jsetViewport;
     static jfieldID jabort;
+    static jfieldID jheight;
     static jfieldID jscale;
+    static jfieldID jwidth;
     static jfieldID jx;
     static jfieldID jy;
 };

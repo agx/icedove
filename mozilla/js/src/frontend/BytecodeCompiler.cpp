@@ -544,7 +544,7 @@ CompileFunctionBody(JSContext *cx, MutableHandleFunction fun, const ReadOnlyComp
 
     RootedScriptSource sourceObject(cx, CreateScriptSourceObject(cx, options));
     if (!sourceObject)
-        return false;
+        return nullptr;
     ScriptSource *ss = sourceObject->source();
 
     SourceCompressionTask sct(cx);

@@ -18,7 +18,6 @@
 
 #define A_MPEG4_ELEM_ASSEMBLER_H_
 
-#include "mozilla/Types.h"
 #include "ARTPAssembler.h"
 
 #include <media/stagefright/foundation/AString.h>
@@ -28,8 +27,8 @@
 
 namespace android {
 
-struct MOZ_EXPORT ABuffer;
-struct MOZ_EXPORT AMessage;
+struct ABuffer;
+struct AMessage;
 
 struct AMPEG4ElementaryAssembler : public ARTPAssembler {
     AMPEG4ElementaryAssembler(

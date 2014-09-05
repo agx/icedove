@@ -8,7 +8,6 @@
 
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/DebugOnly.h"
-#include "mozilla/Move.h"
 
 #include "nsCSSParser.h"
 #include "nsCSSProps.h"
@@ -47,7 +46,6 @@
 #include "nsRuleData.h"
 #include "mozilla/CSSVariableValues.h"
 #include "mozilla/dom/URL.h"
-#include "gfxFontFamilyList.h"
 
 using namespace mozilla;
 
@@ -160,11 +158,6 @@ public:
                          css::Declaration* aDeclaration,
                          bool* aChanged,
                          bool aIsImportant);
-
-  bool ParseFontFamilyListString(const nsSubstring& aBuffer,
-                                 nsIURI* aURL, // for error reporting
-                                 uint32_t aLineNumber, // for error reporting
-                                 nsCSSValue& aValue);
 
   bool ParseColorString(const nsSubstring& aBuffer,
                         nsIURI* aURL, // for error reporting
@@ -701,6 +694,7 @@ protected:
   bool ParseGrid();
   bool ParseGridShorthandAutoProps();
   bool ParseGridLine(nsCSSValue& aValue);
+  bool ParseGridAutoPosition();
   bool ParseGridColumnRowStartEnd(nsCSSProperty aPropID);
   bool ParseGridColumnRow(nsCSSProperty aStartPropID,
                           nsCSSProperty aEndPropID);
@@ -723,7 +717,7 @@ protected:
   bool ParseFontVariantLigatures(nsCSSValue& aValue);
   bool ParseFontVariantNumeric(nsCSSValue& aValue);
   bool ParseFontWeight(nsCSSValue& aValue);
-  bool ParseOneFamily(nsAString& aFamily, bool& aOneKeyword, bool& aQuoted);
+  bool ParseOneFamily(nsAString& aFamily, bool& aOneKeyword);
   bool ParseFamily(nsCSSValue& aValue);
   bool ParseFontFeatureSettings(nsCSSValue& aValue);
   bool ParseFontSrc(nsCSSValue& aValue);
@@ -1591,23 +1585,6 @@ CSSParserImpl::ParseColorString(const nsSubstring& aBuffer,
   OUTPUT_ERROR();
   ReleaseScanner();
   return colorParsed;
-}
-
-bool
-CSSParserImpl::ParseFontFamilyListString(const nsSubstring& aBuffer,
-                                         nsIURI* aURI, // for error reporting
-                                         uint32_t aLineNumber, // for error reporting
-                                         nsCSSValue& aValue)
-{
-  nsCSSScanner scanner(aBuffer, aLineNumber);
-  css::ErrorReporter reporter(scanner, mSheet, mChildLoader, aURI);
-  InitScanner(scanner, reporter, aURI, aURI, nullptr);
-
-  // Parse a font family list, and check that there's nothing else after it.
-  bool familyParsed = ParseFamily(aValue) && !GetToken(true);
-  OUTPUT_ERROR();
-  ReleaseScanner();
-  return familyParsed;
 }
 
 nsresult
@@ -2590,7 +2567,8 @@ CSSParserImpl::ParseAtRule(RuleAppendFunc aAppendFunc,
     parseFunc = &CSSParserImpl::ParseKeyframesRule;
     newSection = eCSSSection_General;
 
-  } else if (mToken.mIdent.LowerCaseEqualsLiteral("supports")) {
+  } else if (mToken.mIdent.LowerCaseEqualsLiteral("supports") &&
+             CSSSupportsRule::PrefEnabled()) {
     parseFunc = &CSSParserImpl::ParseSupportsRule;
     newSection = eCSSSection_General;
 
@@ -3330,25 +3308,26 @@ CSSParserImpl::ParseFontFeatureValuesRule(RuleAppendFunc aAppendFunc,
                valuesRule(new nsCSSFontFeatureValuesRule());
 
   // parse family list
-  nsCSSValue fontlistValue;
+  nsCSSValue familyValue;
 
-  if (!ParseFamily(fontlistValue) ||
-      fontlistValue.GetUnit() != eCSSUnit_FontFamilyList)
+  if (!ParseFamily(familyValue) ||
+      familyValue.GetUnit() != eCSSUnit_Families)
   {
     REPORT_UNEXPECTED_TOKEN(PEFFVNoFamily);
     return false;
   }
 
   // add family to rule
-  const FontFamilyList* fontlist = fontlistValue.GetFontFamilyListValue();
+  nsAutoString familyList;
+  bool hasGeneric;
+  familyValue.GetStringValue(familyList);
+  valuesRule->SetFamilyList(familyList, hasGeneric);
 
   // family list has generic ==> parse error
-  if (fontlist->HasGeneric()) {
+  if (hasGeneric) {
     REPORT_UNEXPECTED_TOKEN(PEFFVGenericInFamilyList);
     return false;
   }
-
-  valuesRule->SetFamilyList(*fontlist);
 
   // open brace
   if (!ExpectSymbol('{', true)) {
@@ -3597,7 +3576,7 @@ CSSParserImpl::ParsePageRule(RuleAppendFunc aAppendFunc, void* aData)
   }
 
   // Takes ownership of declaration.
-  nsRefPtr<nsCSSPageRule> rule = new nsCSSPageRule(Move(declaration));
+  nsRefPtr<nsCSSPageRule> rule = new nsCSSPageRule(declaration);
 
   (*aAppendFunc)(rule, aData);
   return true;
@@ -3621,7 +3600,7 @@ CSSParserImpl::ParseKeyframeRule()
 
   // Takes ownership of declaration, and steals contents of selectorList.
   nsRefPtr<nsCSSKeyframeRule> rule =
-    new nsCSSKeyframeRule(selectorList, Move(declaration));
+    new nsCSSKeyframeRule(selectorList, declaration);
 
   return rule.forget();
 }
@@ -6973,8 +6952,7 @@ CSSParserImpl::ParseGridAutoFlow()
   }
 
   static const int32_t mask[] = {
-    NS_STYLE_GRID_AUTO_FLOW_ROW | NS_STYLE_GRID_AUTO_FLOW_COLUMN,
-    NS_STYLE_GRID_AUTO_FLOW_DENSE | NS_STYLE_GRID_AUTO_FLOW_STACK,
+    NS_STYLE_GRID_AUTO_FLOW_COLUMN | NS_STYLE_GRID_AUTO_FLOW_ROW,
     MASK_END_VALUE
   };
   if (!ParseBitmaskValues(value, nsCSSProps::kGridAutoFlowKTable, mask)) {
@@ -6983,16 +6961,16 @@ CSSParserImpl::ParseGridAutoFlow()
   int32_t bitField = value.GetIntValue();
 
   // Requires one of these
-  if (!(bitField & NS_STYLE_GRID_AUTO_FLOW_ROW ||
+  if (!(bitField & NS_STYLE_GRID_AUTO_FLOW_NONE ||
         bitField & NS_STYLE_GRID_AUTO_FLOW_COLUMN ||
-        bitField & NS_STYLE_GRID_AUTO_FLOW_STACK)) {
+        bitField & NS_STYLE_GRID_AUTO_FLOW_ROW)) {
     return false;
   }
 
-  // 'stack' without 'row' or 'column' defaults to 'stack row'
-  if (bitField == NS_STYLE_GRID_AUTO_FLOW_STACK) {
-    value.SetIntValue(bitField | NS_STYLE_GRID_AUTO_FLOW_ROW,
-                      eCSSUnit_Enumerated);
+  // 'none' is only valid if it occurs alone:
+  if (bitField & NS_STYLE_GRID_AUTO_FLOW_NONE &&
+      bitField != NS_STYLE_GRID_AUTO_FLOW_NONE) {
+    return false;
   }
 
   AppendValue(eCSSProperty_grid_auto_flow, value);
@@ -7509,11 +7487,8 @@ CSSParserImpl::ParseGridTemplateAreasLine(const nsAutoString& aInput,
   nsCSSGridTemplateAreaToken token;
   css::GridNamedArea* currentArea = nullptr;
   uint32_t row = aAreas->NRows();
-  // Column numbers starts at 1, but we might not have any, eg
-  // grid-template-areas:""; which will result in mNColumns == 0.
-  uint32_t column = 0;
-  while (scanner.Next(token)) {
-    ++column;
+  uint32_t column;
+  for (column = 1; scanner.Next(token); column++) {
     if (token.isTrash) {
       return false;
     }
@@ -7565,7 +7540,7 @@ CSSParserImpl::ParseGridTemplateAreasLine(const nsAutoString& aInput,
       }
     }
   }
-  if (currentArea && currentArea->mColumnEnd != column + 1) {
+  if (currentArea && currentArea->mColumnEnd != column) {
     NS_ASSERTION(currentArea->mRowStart != row,
                  "Inconsistent column end for the first row of a named area.");
     // Not a rectangle
@@ -7847,17 +7822,37 @@ CSSParserImpl::ParseGrid()
     return true;
   }
 
+  // 'none' at the beginning could be a <'grid-auto-flow'>
+  // (which also covers 'none' by itself)
+  // or a <'grid-template-columns'> (as part of <'grid-template'>)
+  if (ParseVariant(value, VARIANT_NONE, nullptr)) {
+    if (ExpectSymbol('/', true)) {
+      AppendValue(eCSSProperty_grid_template_columns, value);
+
+      // Set grid-auto-* subproperties to their initial values.
+      value.SetIntValue(NS_STYLE_GRID_AUTO_FLOW_NONE, eCSSUnit_Enumerated);
+      AppendValue(eCSSProperty_grid_auto_flow, value);
+      value.SetAutoValue();
+      AppendValue(eCSSProperty_grid_auto_columns, value);
+      AppendValue(eCSSProperty_grid_auto_rows, value);
+
+      return ParseGridTemplateAfterSlash(/* aColumnsIsTrackList = */ false);
+    }
+    value.SetIntValue(NS_STYLE_GRID_AUTO_FLOW_NONE, eCSSUnit_Enumerated);
+    AppendValue(eCSSProperty_grid_auto_flow, value);
+    return ParseGridShorthandAutoProps();
+  }
+
   // An empty value is always invalid.
   if (!GetToken(true)) {
     return false;
   }
 
-  // The values starts with a <'grid-auto-flow'> if and only if
-  // it starts with a 'stack', 'dense', 'column' or 'row' keyword.
+  // If the value starts with a 'dense', 'column' or 'row' keyword,
+  // it can only start with a <'grid-auto-flow'>
   if (mToken.mType == eCSSToken_Ident) {
     nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(mToken.mIdent);
-    if (keyword == eCSSKeyword_stack ||
-        keyword == eCSSKeyword_dense ||
+    if (keyword == eCSSKeyword_dense ||
         keyword == eCSSKeyword_column ||
         keyword == eCSSKeyword_row) {
       UngetToken();
@@ -7868,7 +7863,7 @@ CSSParserImpl::ParseGrid()
 
   // Set other subproperties to their initial values
   // and parse <'grid-template'>.
-  value.SetIntValue(NS_STYLE_GRID_AUTO_FLOW_ROW, eCSSUnit_Enumerated);
+  value.SetIntValue(NS_STYLE_GRID_AUTO_FLOW_NONE, eCSSUnit_Enumerated);
   AppendValue(eCSSProperty_grid_auto_flow, value);
   value.SetAutoValue();
   AppendValue(eCSSProperty_grid_auto_columns, value);
@@ -8010,6 +8005,26 @@ CSSParserImpl::ParseGridLine(nsCSSValue& aValue)
     item->mValue = ident;
   }
   return true;
+}
+
+bool
+CSSParserImpl::ParseGridAutoPosition()
+{
+  nsCSSValue value;
+  if (ParseVariant(value, VARIANT_INHERIT, nullptr)) {
+    AppendValue(eCSSProperty_grid_auto_position, value);
+    return true;
+  }
+  nsCSSValue columnStartValue;
+  nsCSSValue rowStartValue;
+  if (ParseGridLine(columnStartValue) &&
+      ExpectSymbol('/', true) &&
+      ParseGridLine(rowStartValue)) {
+    value.SetPairValue(columnStartValue, rowStartValue);
+    AppendValue(eCSSProperty_grid_auto_position, value);
+    return true;
+  }
+  return false;
 }
 
 bool
@@ -9161,6 +9176,8 @@ CSSParserImpl::ParsePropertyByFunction(nsCSSProperty aPropID)
     return ParseGridTemplate();
   case eCSSProperty_grid:
     return ParseGrid();
+  case eCSSProperty_grid_auto_position:
+    return ParseGridAutoPosition();
   case eCSSProperty_grid_column_start:
   case eCSSProperty_grid_column_end:
   case eCSSProperty_grid_row_start:
@@ -9345,6 +9362,28 @@ CSSParserImpl::ParseSingleValueProperty(nsCSSValue& aValue,
   }
 }
 
+// nsFont::EnumerateFamilies callback for ParseFontDescriptorValue
+struct MOZ_STACK_CLASS ExtractFirstFamilyData {
+  nsAutoString mFamilyName;
+  bool mGood;
+  ExtractFirstFamilyData() : mFamilyName(), mGood(false) {}
+};
+
+static bool
+ExtractFirstFamily(const nsString& aFamily,
+                   bool aGeneric,
+                   void* aData)
+{
+  ExtractFirstFamilyData* realData = (ExtractFirstFamilyData*) aData;
+  if (aGeneric || realData->mFamilyName.Length() > 0) {
+    realData->mGood = false;
+    return false;
+  }
+  realData->mFamilyName.Assign(aFamily);
+  realData->mGood = true;
+  return true;
+}
+
 // font-descriptor: descriptor ':' value ';'
 // caller has advanced mToken to point at the descriptor
 bool
@@ -9355,20 +9394,22 @@ CSSParserImpl::ParseFontDescriptorValue(nsCSSFontDesc aDescID,
     // These four are similar to the properties of the same name,
     // possibly with more restrictions on the values they can take.
   case eCSSFontDesc_Family: {
-    nsCSSValue value;
-    if (!ParseFamily(value) ||
-        value.GetUnit() != eCSSUnit_FontFamilyList)
+    if (!ParseFamily(aValue) ||
+        aValue.GetUnit() != eCSSUnit_Families)
       return false;
 
-    // name can only be a single, non-generic name
-    const FontFamilyList* f = value.GetFontFamilyListValue();
-    const nsTArray<FontFamilyName>& fontlist = f->GetFontlist();
+    // the style parameters to the nsFont constructor are ignored,
+    // because it's only being used to call EnumerateFamilies
+    nsAutoString valueStr;
+    aValue.GetStringValue(valueStr);
+    nsFont font(valueStr, 0, 0, 0, 0, 0, 0);
+    ExtractFirstFamilyData dat;
 
-    if (fontlist.Length() != 1 || !fontlist[0].IsNamed()) {
+    font.EnumerateFamilies(ExtractFirstFamily, (void*) &dat);
+    if (!dat.mGood)
       return false;
-    }
 
-    aValue.SetStringValue(fontlist[0].mName, eCSSUnit_String);
+    aValue.SetStringValue(dat.mFamilyName, eCSSUnit_String);
     return true;
   }
 
@@ -11582,9 +11623,7 @@ CSSParserImpl::ParseFontWeight(nsCSSValue& aValue)
 }
 
 bool
-CSSParserImpl::ParseOneFamily(nsAString& aFamily,
-                              bool& aOneKeyword,
-                              bool& aQuoted)
+CSSParserImpl::ParseOneFamily(nsAString& aFamily, bool& aOneKeyword)
 {
   if (!GetToken(true))
     return false;
@@ -11592,7 +11631,6 @@ CSSParserImpl::ParseOneFamily(nsAString& aFamily,
   nsCSSToken* tk = &mToken;
 
   aOneKeyword = false;
-  aQuoted = false;
   if (eCSSToken_Ident == tk->mType) {
     aOneKeyword = true;
     aFamily.Append(tk->mIdent);
@@ -11619,8 +11657,9 @@ CSSParserImpl::ParseOneFamily(nsAString& aFamily,
     return true;
 
   } else if (eCSSToken_String == tk->mType) {
-    aQuoted = true;
+    aFamily.Append(tk->mSymbol); // replace the quotes
     aFamily.Append(tk->mIdent); // XXX What if it had escaped quotes?
+    aFamily.Append(tk->mSymbol);
     return true;
 
   } else {
@@ -11629,95 +11668,56 @@ CSSParserImpl::ParseOneFamily(nsAString& aFamily,
   }
 }
 
-
-static bool
-AppendGeneric(nsCSSKeyword aKeyword, FontFamilyList *aFamilyList)
-{
-  switch (aKeyword) {
-    case eCSSKeyword_serif:
-      aFamilyList->Append(FontFamilyName(eFamily_serif));
-      return true;
-    case eCSSKeyword_sans_serif:
-      aFamilyList->Append(FontFamilyName(eFamily_sans_serif));
-      return true;
-    case eCSSKeyword_monospace:
-      aFamilyList->Append(FontFamilyName(eFamily_monospace));
-      return true;
-    case eCSSKeyword_cursive:
-      aFamilyList->Append(FontFamilyName(eFamily_cursive));
-      return true;
-    case eCSSKeyword_fantasy:
-      aFamilyList->Append(FontFamilyName(eFamily_fantasy));
-      return true;
-    case eCSSKeyword__moz_fixed:
-      aFamilyList->Append(FontFamilyName(eFamily_moz_fixed));
-      return true;
-    default:
-      break;
-  }
-
-  return false;
-}
-
 bool
 CSSParserImpl::ParseFamily(nsCSSValue& aValue)
 {
-  nsRefPtr<FontFamilyList> familyList = new FontFamilyList();
   nsAutoString family;
-  bool single, quoted;
+  bool single;
 
   // keywords only have meaning in the first position
-  if (!ParseOneFamily(family, single, quoted))
+  if (!ParseOneFamily(family, single))
     return false;
 
   // check for keywords, but only when keywords appear by themselves
   // i.e. not in compounds such as font-family: default blah;
-  bool foundGeneric = false;
   if (single) {
     nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(family);
-    switch (keyword) {
-      case eCSSKeyword_inherit:
-        aValue.SetInheritValue();
-        return true;
-      case eCSSKeyword_default:
-        // 605231 - don't parse unquoted 'default' reserved keyword
-        return false;
-      case eCSSKeyword_initial:
-        aValue.SetInitialValue();
-        return true;
-      case eCSSKeyword_unset:
-        if (nsLayoutUtils::UnsetValueEnabled()) {
-          aValue.SetUnsetValue();
-          return true;
-        }
-        break;
-      case eCSSKeyword__moz_use_system_font:
-        if (!IsParsingCompoundProperty()) {
-          aValue.SetSystemFontValue();
-          return true;
-        }
-        break;
-      default:
-        foundGeneric = AppendGeneric(keyword, familyList);
+    if (keyword == eCSSKeyword_inherit) {
+      aValue.SetInheritValue();
+      return true;
     }
-  }
-
-  if (!foundGeneric) {
-    familyList->Append(
-      FontFamilyName(family, (quoted ? eQuotedName : eUnquotedName)));
+    // 605231 - don't parse unquoted 'default' reserved keyword
+    if (keyword == eCSSKeyword_default) {
+      return false;
+    }
+    if (keyword == eCSSKeyword_initial) {
+      aValue.SetInitialValue();
+      return true;
+    }
+    if (keyword == eCSSKeyword_unset &&
+        nsLayoutUtils::UnsetValueEnabled()) {
+      aValue.SetUnsetValue();
+      return true;
+    }
+    if (keyword == eCSSKeyword__moz_use_system_font &&
+        !IsParsingCompoundProperty()) {
+      aValue.SetSystemFontValue();
+      return true;
+    }
   }
 
   for (;;) {
     if (!ExpectSymbol(',', true))
       break;
 
+    family.Append(char16_t(','));
+
     nsAutoString nextFamily;
-    if (!ParseOneFamily(nextFamily, single, quoted))
+    if (!ParseOneFamily(nextFamily, single))
       return false;
 
     // at this point unquoted keywords are not allowed
     // as font family names but can appear within names
-    foundGeneric = false;
     if (single) {
       nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(nextFamily);
       switch (keyword) {
@@ -11730,24 +11730,19 @@ CSSParserImpl::ParseFamily(nsCSSValue& aValue)
           if (nsLayoutUtils::UnsetValueEnabled()) {
             return false;
           }
-          break;
+          // fall through
         default:
-          foundGeneric = AppendGeneric(keyword, familyList);
           break;
       }
     }
 
-    if (!foundGeneric) {
-      familyList->Append(
-        FontFamilyName(nextFamily, (quoted ? eQuotedName : eUnquotedName)));
-    }
+    family.Append(nextFamily);
   }
 
-  if (familyList->IsEmpty()) {
+  if (family.IsEmpty()) {
     return false;
   }
-
-  aValue.SetFontFamilyListValue(familyList);
+  aValue.SetStringValue(family, eCSSUnit_Families);
   return true;
 }
 
@@ -11780,8 +11775,8 @@ CSSParserImpl::ParseFontSrc(nsCSSValue& aValue)
       // <family-name>, possibly surrounded by whitespace.
 
       nsAutoString family;
-      bool single, quoted;
-      if (!ParseOneFamily(family, single, quoted)) {
+      bool single;
+      if (!ParseOneFamily(family, single)) {
         SkipUntil(')');
         return false;
       }
@@ -11790,23 +11785,16 @@ CSSParserImpl::ParseFontSrc(nsCSSValue& aValue)
         return false;
       }
 
-      // reject generics
-      if (single) {
-        nsCSSKeyword keyword = nsCSSKeywords::LookupKeyword(family);
-        switch (keyword) {
-          case eCSSKeyword_serif:
-          case eCSSKeyword_sans_serif:
-          case eCSSKeyword_monospace:
-          case eCSSKeyword_cursive:
-          case eCSSKeyword_fantasy:
-          case eCSSKeyword__moz_fixed:
-            return false;
-          default:
-            break;
-        }
-      }
+      // the style parameters to the nsFont constructor are ignored,
+      // because it's only being used to call EnumerateFamilies
+      nsFont font(family, 0, 0, 0, 0, 0, 0);
+      ExtractFirstFamilyData dat;
 
-      cur.SetStringValue(family, eCSSUnit_Local_Font);
+      font.EnumerateFamilies(ExtractFirstFamily, (void*) &dat);
+      if (!dat.mGood)
+        return false;
+
+      cur.SetStringValue(dat.mFamilyName, eCSSUnit_Local_Font);
       values.AppendElement(cur);
     } else {
       // We don't know what to do with this token; unget it and error out
@@ -14244,16 +14232,6 @@ nsCSSParser::ParseMediaList(const nsSubstring& aBuffer,
 {
   static_cast<CSSParserImpl*>(mImpl)->
     ParseMediaList(aBuffer, aURI, aLineNumber, aMediaList, aHTMLMode);
-}
-
-bool
-nsCSSParser::ParseFontFamilyListString(const nsSubstring& aBuffer,
-                                       nsIURI*            aURI,
-                                       uint32_t           aLineNumber,
-                                       nsCSSValue&        aValue)
-{
-  return static_cast<CSSParserImpl*>(mImpl)->
-    ParseFontFamilyListString(aBuffer, aURI, aLineNumber, aValue);
 }
 
 bool

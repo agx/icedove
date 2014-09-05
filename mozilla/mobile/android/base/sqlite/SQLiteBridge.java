@@ -227,7 +227,6 @@ public class SQLiteBridge {
             cursor.moveToFirst();
             String version = cursor.getString(0);
             ret = Integer.parseInt(version);
-            cursor.close();
         }
         return ret;
     }

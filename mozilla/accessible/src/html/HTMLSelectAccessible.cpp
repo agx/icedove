@@ -18,7 +18,7 @@
 #include "nsCOMPtr.h"
 #include "mozilla/dom/HTMLOptionElement.h"
 #include "nsIComboboxControlFrame.h"
-#include "nsContainerFrame.h"
+#include "nsIFrame.h"
 #include "nsIListControlFrame.h"
 
 using namespace mozilla::a11y;

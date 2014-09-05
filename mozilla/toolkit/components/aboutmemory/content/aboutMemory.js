@@ -48,11 +48,9 @@ XPCOMUtils.defineLazyGetter(this, "nsGzipConverter",
 let gMgr = Cc["@mozilla.org/memory-reporter-manager;1"]
              .getService(Ci.nsIMemoryReporterManager);
 
-const gUnnamedProcessStr = "Main Process";
+let gUnnamedProcessStr = "Main Process";
 
 let gIsDiff = false;
-
-const DMDFile = "out.dmd";
 
 //---------------------------------------------------------------------------
 
@@ -149,13 +147,12 @@ function updateMainAndFooter(aMsg, aFooterAction, aClassName)
     gMain.classList.add(gVerbose.checked ? 'verbose' : 'non-verbose');
   }
 
-  let msgElement;
   if (aMsg) {
     let className = "section"
     if (aClassName) {
       className = className + " " + aClassName;
     }
-    msgElement = appendElementWithText(gMain, 'div', className, aMsg);
+    appendElementWithText(gMain, 'div', className, aMsg);
   }
 
   switch (aFooterAction) {
@@ -163,7 +160,6 @@ function updateMainAndFooter(aMsg, aFooterAction, aClassName)
    case SHOW_FOOTER:   gFooter.classList.remove('hidden'); break;
    default: assertInput(false, "bad footer action in updateMainAndFooter");
   }
-  return msgElement;
 }
 
 function appendTextNode(aP, aText)
@@ -294,11 +290,6 @@ function onLoad()
                             "collection log.\n" +
                             "WARNING: These logs may be large (>1GB).";
 
-  const DMDEnabledDesc = "Run DMD analysis and save it to '" + DMDFile + "'.\n";
-  const DMDDisabledDesc = "DMD is not running. Please re-start with $DMD and " +
-                          "the other relevant environment variables set " +
-                          "appropriately.";
-
   let ops = appendElement(header, "div", "");
 
   let row1 = appendElement(ops, "div", "opsRow");
@@ -341,21 +332,6 @@ function onLoad()
                saveGCLogAndConciseCCLog, "Save concise", 'saveLogsConcise');
   appendButton(row4, GCAndCCAllLogDesc,
                saveGCLogAndVerboseCCLog, "Save verbose", 'saveLogsVerbose');
-
-  // Three cases here:
-  // - DMD is disabled (i.e. not built): don't show the button.
-  // - DMD is enabled but is not running: show the button, but disable it.
-  // - DMD is enabled and is running: show the button and enable it.
-  if (gMgr.isDMDEnabled) {
-    let row5 = appendElement(ops, "div", "opsRow");
-
-    appendElementWithText(row5, "div", "opsRowLabel", "Save DMD output");
-    let enableButton = gMgr.isDMDRunning;
-    let dmdButton =
-      appendButton(row5, enableButton ? DMDEnabledDesc : DMDDisabledDesc,
-                   doDMD, "Save", "dmdButton");
-    dmdButton.disabled = !enableButton;
-  }
 
   // Generate the main div, where content ("section" divs) will go.  It's
   // hidden at first.
@@ -435,40 +411,27 @@ function saveGCLogAndVerboseCCLog()
   dumpGCLogAndCCLog(true);
 }
 
-function doDMD()
-{
-  updateMainAndFooter('Saving DMD output...', HIDE_FOOTER);
-  try {
-    let x = DMDReportAndDump('out.dmd');
-    updateMainAndFooter('Saved DMD output to ' + DMDFile, HIDE_FOOTER);
-  } catch (ex) {
-    updateMainAndFooter(ex.toString(), HIDE_FOOTER);
-  }
-}
-
 function dumpGCLogAndCCLog(aVerbose)
 {
+  let gcLogPath = {};
+  let ccLogPath = {};
+
   let dumper = Cc["@mozilla.org/memory-info-dumper;1"]
                 .getService(Ci.nsIMemoryInfoDumper);
 
-  let inProgress = updateMainAndFooter("Saving logs...", HIDE_FOOTER);
+  updateMainAndFooter("Saving logs...", HIDE_FOOTER);
+
+  dumper.dumpGCAndCCLogsToFile("", aVerbose, /* dumpChildProcesses = */ false,
+                               gcLogPath, ccLogPath);
+
+  updateMainAndFooter("", HIDE_FOOTER);
   let section = appendElement(gMain, 'div', "section");
+  appendElementWithText(section, 'div', "",
+                        "Saved GC log to " + gcLogPath.value);
 
-  function displayInfo(gcLog, ccLog, isParent) {
-    appendElementWithText(section, 'div', "",
-                          "Saved GC log to " + gcLog.path);
-
-    let ccLogType = aVerbose ? "verbose" : "concise";
-    appendElementWithText(section, 'div', "",
-                          "Saved " + ccLogType + " CC log to " + ccLog.path);
-  }
-
-  dumper.dumpGCAndCCLogsToFile("", aVerbose, /* dumpChildProcesses = */ true,
-                               { onDump: displayInfo,
-                                 onFinish: function() {
-                                   inProgress.remove();
-                                 }
-                               });
+  let ccLogType = aVerbose ? "verbose" : "concise";
+  appendElementWithText(section, 'div', "",
+                        "Saved " + ccLogType + " CC log to " + ccLogPath.value);
 }
 
 /**
@@ -785,14 +748,9 @@ function makeDReportMap(aJSONReports)
     assert(jr.description !== undefined, "Missing description");
 
     // Strip out some non-deterministic stuff that prevents clean diffs --
-    // e.g. PIDs, addresses, null principal UUIDs. (Note that we don't strip
-    // out all UUIDs because some of them -- such as those used by add-ons --
-    // are deterministic.)
+    // e.g. PIDs, addresses.
     let strippedProcess = jr.process.replace(/pid \d+/, "pid NNN");
     let strippedPath = jr.path.replace(/0x[0-9A-Fa-f]+/, "0xNNN");
-    strippedPath = strippedPath.replace(
-      /moz-nullprincipal:{........-....-....-....-............}/,
-      "moz-nullprincipal:{NNNNNNNN-NNNN-NNNN-NNNN-NNNNNNNNNNNN}");
     let processPath = strippedProcess + kProcessPathSep + strippedPath;
 
     let rOld = dreportMap[processPath];
@@ -1066,7 +1024,6 @@ function TreeNode(aUnsafeName, aUnits, aIsDegenerate)
   // - _amount
   // - _description
   // - _hideKids (only defined if true)
-  // - _maxAbsDescendant (on-demand, only when gIsDiff is set)
 }
 
 TreeNode.prototype = {
@@ -1081,32 +1038,6 @@ TreeNode.prototype = {
     return undefined;
   },
 
-  // When gIsDiff is false, tree operations -- sorting and determining if a
-  // sub-tree is significant -- are straightforward. But when gIsDiff is true,
-  // the combination of positive and negative values within a tree complicates
-  // things. So for a non-leaf node, instead of just looking at _amount, we
-  // instead look at the maximum absolute value of the node and all of its
-  // descendants.
-  maxAbsDescendant: function() {
-    if (!this._kids) {
-      // No kids? Just return the absolute value of the amount.
-      return max = Math.abs(this._amount);
-    }
-
-    if ('_maxAbsDescendant' in this) {
-      // We've computed this before? Return the saved value.
-      return this._maxAbsDescendant;
-    }
-
-    // Compute the maximum absolute value of all descendants.
-    let max = Math.abs(this._amount);
-    for (let i = 0; i < this._kids.length; i++) {
-      max = Math.max(max, this._kids[i].maxAbsDescendant());
-    }
-    this._maxAbsDescendant = max;
-    return max;
-  },
-
   toString: function() {
     switch (this._units) {
       case UNITS_BYTES:            return formatBytes(this._amount);
@@ -1119,14 +1050,14 @@ TreeNode.prototype = {
   }
 };
 
-// Sort TreeNodes first by size, then by name.  The latter is important for the
-// about:memory tests, which need a predictable ordering of reporters which
-// have the same amount.
+// Sort TreeNodes first by size, then by name.  This is particularly important
+// for the about:memory tests, which need a predictable ordering of reporters
+// which have the same amount.
 TreeNode.compareAmounts = function(aA, aB) {
   let a, b;
   if (gIsDiff) {
-    a = aA.maxAbsDescendant();
-    b = aB.maxAbsDescendant();
+    a = Math.abs(aA._amount);
+    b = Math.abs(aB._amount);
   } else {
     a = aA._amount;
     b = aB._amount;
@@ -1233,12 +1164,6 @@ function addHeapUnclassifiedNode(aT, aHeapAllocatedNode, aHeapTotal)
   if (aHeapAllocatedNode === undefined)
     return false;
 
-  if (aT.findKid("heap-unclassified")) {
-    // heap-unclassified was already calculated, there's nothing left to do.
-    // This can happen when memory reports are exported from areweslimyet.com.
-    return true;
-  }
-
   assert(aHeapAllocatedNode._isDegenerate, "heap-allocated is not degenerate");
   let heapAllocatedBytes = aHeapAllocatedNode._amount;
   let heapUnclassifiedT = new TreeNode("heap-unclassified", UNITS_BYTES);
@@ -1267,13 +1192,8 @@ function sortTreeAndInsertAggregateNodes(aTotalBytes, aT)
 
   function isInsignificant(aT)
   {
-    if (gVerbose.checked)
-      return false;
-
-    let perc = gIsDiff
-             ? 100 * aT.maxAbsDescendant() / Math.abs(aTotalBytes)
-             : 100 * aT._amount / aTotalBytes;
-    return perc < kSignificanceThresholdPerc;
+    return !gVerbose.checked &&
+           (100 * aT._amount / aTotalBytes) < kSignificanceThresholdPerc;
   }
 
   if (!aT._kids) {

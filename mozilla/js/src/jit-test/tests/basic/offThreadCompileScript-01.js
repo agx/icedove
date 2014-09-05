@@ -5,7 +5,7 @@
 
 load(libdir + 'asserts.js');
 
-if (helperThreadCount() === 0)
+if (workerThreadCount() === 0)
   quit(0);
 
 offThreadCompileScript('Math.sin(Math.PI/2)');

@@ -5,8 +5,3 @@
 #filter substitution
 
 pref("general.useragent.locale", "@AB_CD@");
-
-// Enable sparse localization by setting a few package locale overrides
-pref("chrome.override_package.global", "b2g-l10n");
-pref("chrome.override_package.mozapps", "b2g-l10n");
-pref("chrome.override_package.passwordmgr", "b2g-l10n");

@@ -6,7 +6,5 @@ chat.jar:
 % content chat %content/chat/
 	content/chat/browserRequest.js
 	content/chat/browserRequest.xul
-	content/chat/imtooltip.css
-*	content/chat/imtooltip.xml
 	content/chat/convbrowser.xml
 	content/chat/conv.html

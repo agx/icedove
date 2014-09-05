@@ -33,11 +33,6 @@ public final class ThumbnailHelper {
 
     public static final float THUMBNAIL_ASPECT_RATIO = 0.571f;  // this is a 4:7 ratio (as per UX decision)
 
-    public static enum CachePolicy {
-        STORE,
-        NO_STORE
-    }
-
     // static singleton stuff
 
     private static ThumbnailHelper sInstance;
@@ -68,7 +63,7 @@ public final class ThumbnailHelper {
 
     public void getAndProcessThumbnailFor(Tab tab) {
         if (AboutPages.isAboutHome(tab.getURL())) {
-            tab.updateThumbnail(null, CachePolicy.NO_STORE);
+            tab.updateThumbnail(null);
             return;
         }
 
@@ -77,8 +72,7 @@ public final class ThumbnailHelper {
             if (url != null) {
                 byte[] thumbnail = BrowserDB.getThumbnailForUrl(GeckoAppShell.getContext().getContentResolver(), url);
                 if (thumbnail != null) {
-                    // Since this thumbnail is from the database, its ok to store it
-                    setTabThumbnail(tab, null, thumbnail, CachePolicy.STORE);
+                    setTabThumbnail(tab, null, thumbnail);
                 }
             }
             return;
@@ -161,11 +155,11 @@ public final class ThumbnailHelper {
 
     /* This method is invoked by JNI once the thumbnail data is ready. */
     @WrapElementForJNI(stubName = "SendThumbnail")
-    public static void notifyThumbnail(ByteBuffer data, int tabId, boolean success, boolean shouldStore) {
+    public static void notifyThumbnail(ByteBuffer data, int tabId, boolean success) {
         Tab tab = Tabs.getInstance().getTab(tabId);
         ThumbnailHelper helper = ThumbnailHelper.getInstance();
         if (success && tab != null) {
-            helper.handleThumbnailData(tab, data, shouldStore ? CachePolicy.STORE : CachePolicy.NO_STORE);
+            helper.handleThumbnailData(tab, data);
         }
         helper.processNextThumbnail(tab);
     }
@@ -187,7 +181,7 @@ public final class ThumbnailHelper {
         }
     }
 
-    private void handleThumbnailData(Tab tab, ByteBuffer data, CachePolicy cachePolicy) {
+    private void handleThumbnailData(Tab tab, ByteBuffer data) {
         Log.d(LOGTAG, "handleThumbnailData: " + data.capacity());
         if (data != mBuffer) {
             // This should never happen, but log it and recover gracefully
@@ -195,18 +189,18 @@ public final class ThumbnailHelper {
         }
 
         if (shouldUpdateThumbnail(tab)) {
-            processThumbnailData(tab, data, cachePolicy);
+            processThumbnailData(tab, data);
         }
     }
 
-    private void processThumbnailData(Tab tab, ByteBuffer data, CachePolicy cachePolicy) {
+    private void processThumbnailData(Tab tab, ByteBuffer data) {
         Bitmap b = tab.getThumbnailBitmap(mWidth, mHeight);
         data.position(0);
         b.copyPixelsFromBuffer(data);
-        setTabThumbnail(tab, b, null, cachePolicy);
+        setTabThumbnail(tab, b, null);
     }
 
-    private void setTabThumbnail(Tab tab, Bitmap bitmap, byte[] compressed, CachePolicy cachePolicy) {
+    private void setTabThumbnail(Tab tab, Bitmap bitmap, byte[] compressed) {
         if (bitmap == null) {
             if (compressed == null) {
                 Log.w(LOGTAG, "setTabThumbnail: one of bitmap or compressed must be non-null!");
@@ -214,7 +208,7 @@ public final class ThumbnailHelper {
             }
             bitmap = BitmapUtils.decodeByteArray(compressed);
         }
-        tab.updateThumbnail(bitmap, cachePolicy);
+        tab.updateThumbnail(bitmap);
     }
 
     private boolean shouldUpdateThumbnail(Tab tab) {

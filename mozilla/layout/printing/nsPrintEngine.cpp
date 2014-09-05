@@ -343,13 +343,9 @@ nsPrintEngine::InstallPrintPreviewListener()
 {
   if (!mPrt->mPPEventListeners) {
     nsCOMPtr<nsIDocShell> docShell = do_QueryReferent(mContainer);
-    if (!docShell) {
-      return;
-    }
-
-    nsCOMPtr<nsPIDOMWindow> win(docShell->GetWindow());
+    nsCOMPtr<nsPIDOMWindow> win(do_GetInterface(docShell));
     if (win) {
-      nsCOMPtr<EventTarget> target = win->GetFrameElementInternal();
+      nsCOMPtr<EventTarget> target = do_QueryInterface(win->GetFrameElementInternal());
       mPrt->mPPEventListeners = new nsPrintPreviewListener(target);
       mPrt->mPPEventListeners->AddListeners();
     }
@@ -1145,7 +1141,8 @@ nsPrintEngine::IsParentAFrameSet(nsIDocShell * aParent)
   bool isFrameSet = false;
   // only check to see if there is a frameset if there is
   // NO parent doc for this doc. meaning this parent is the root doc
-  nsCOMPtr<nsIDocument> doc = aParent->GetDocument();
+  nsCOMPtr<nsIDOMDocument> domDoc = do_GetInterface(aParent);
+  nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
   if (doc) {
     nsIContent *rootElement = doc->GetRootElement();
     if (rootElement) {
@@ -1395,8 +1392,7 @@ nsPrintEngine::IsThereAnIFrameSelected(nsIDocShell* aDocShell,
       if (aDOMWin) {
         // Get the main docshell's DOMWin to see if it matches 
         // the frame that is selected
-        nsCOMPtr<nsIDOMWindow> domWin =
-         aDocShell ? aDocShell->GetWindow() : nullptr;
+        nsCOMPtr<nsIDOMWindow> domWin = do_GetInterface(aDocShell);
         if (domWin != aDOMWin) {
           iFrameIsSelected = true; // we have a selected IFRAME
         }
@@ -1915,7 +1911,7 @@ nsPrintEngine::OnStateChange(nsIWebProgress* aWebProgress,
 {
   nsAutoCString name;
   aRequest->GetName(name);
-  if (name.EqualsLiteral("about:document-onload-blocker")) {
+  if (name.Equals("about:document-onload-blocker")) {
     return NS_OK;
   }
   if (aStateFlags & STATE_START) {
@@ -3304,7 +3300,7 @@ nsPrintEngine::EnablePOsForPrinting()
         for (uint32_t i=0;i<mPrt->mPrintDocList.Length();i++) {
           nsPrintObject* po = mPrt->mPrintDocList.ElementAt(i);
           NS_ASSERTION(po, "nsPrintObject can't be null!");
-          nsCOMPtr<nsIDOMWindow> domWin = po->mDocShell->GetWindow();
+          nsCOMPtr<nsIDOMWindow> domWin = do_GetInterface(po->mDocShell);
           if (IsThereARangeSelection(domWin)) {
             mPrt->mCurrentFocusWin = domWin;
             SetPrintPO(po, true);

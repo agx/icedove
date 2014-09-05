@@ -57,9 +57,7 @@ public:
     LocalOnlyOCSPForEV = 4,
   };
   NSSCertDBTrustDomain(SECTrustType certDBTrustType, OCSPFetching ocspFetching,
-                       OCSPCache& ocspCache, void* pinArg,
-                       CertVerifier::ocsp_get_config ocspGETConfig,
-                       CERTChainVerifyCallback* checkChainCallback = nullptr);
+                       OCSPCache& ocspCache, void* pinArg);
 
   virtual SECStatus FindPotentialIssuers(
                         const SECItem* encodedIssuerName,
@@ -67,20 +65,18 @@ public:
                 /*out*/ mozilla::pkix::ScopedCERTCertList& results);
 
   virtual SECStatus GetCertTrust(mozilla::pkix::EndEntityOrCA endEntityOrCA,
-                                 const mozilla::pkix::CertPolicyId& policy,
-                                 const SECItem& candidateCertDER,
-                         /*out*/ mozilla::pkix::TrustLevel* trustLevel);
+                                 SECOidTag policy,
+                                 const CERTCertificate* candidateCert,
+                         /*out*/ TrustLevel* trustLevel);
 
   virtual SECStatus VerifySignedData(const CERTSignedData* signedData,
-                                     const SECItem& subjectPublicKeyInfo);
+                                     const CERTCertificate* cert);
 
   virtual SECStatus CheckRevocation(mozilla::pkix::EndEntityOrCA endEntityOrCA,
                                     const CERTCertificate* cert,
                           /*const*/ CERTCertificate* issuerCert,
                                     PRTime time,
                        /*optional*/ const SECItem* stapledOCSPResponse);
-
-  virtual SECStatus IsChainValid(const CERTCertList* certChain);
 
 private:
   enum EncodedResponseSource {
@@ -97,8 +93,6 @@ private:
   const OCSPFetching mOCSPFetching;
   OCSPCache& mOCSPCache; // non-owning!
   void* mPinArg; // non-owning!
-  const CertVerifier::ocsp_get_config mOCSPGetConfig;
-  CERTChainVerifyCallback* mCheckChainCallback; // non-owning!
 };
 
 } } // namespace mozilla::psm

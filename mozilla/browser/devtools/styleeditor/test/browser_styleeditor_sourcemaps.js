@@ -104,13 +104,9 @@ function togglePref(UI) {
       deferred.resolve();
     }
   })
-  let editorsPromise = deferred.promise;
-
-  let selectedPromise = UI.once("editor-selected");
 
   Services.prefs.setBoolPref(PREF, false);
-
-  return promise.all([editorsPromise, selectedPromise]);
+  return deferred.promise;
 }
 
 function openEditor(editor) {

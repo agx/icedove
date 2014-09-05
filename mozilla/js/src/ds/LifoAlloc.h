@@ -147,9 +147,6 @@ class BumpChunk
 
 } // namespace detail
 
-void
-CrashAtUnhandlableOOM(const char *reason);
-
 // LIFO bump allocator: used for phase-oriented and fast LIFO allocations.
 //
 // Note: |latest| is not necessary "last". We leave BumpChunks latent in the
@@ -272,14 +269,6 @@ class LifoAlloc
         return result;
     }
 
-    MOZ_ALWAYS_INLINE
-    void *allocInfallible(size_t n) {
-        if (void *result = alloc(n))
-            return result;
-        CrashAtUnhandlableOOM("LifoAlloc::allocInfallible");
-        return nullptr;
-    }
-
     // Ensures that enough space exists to satisfy N bytes worth of
     // allocation requests, not necessarily contiguous. Note that this does
     // not guarantee a successful single allocation of N bytes.
@@ -396,7 +385,6 @@ class LifoAlloc
     }
 
     JS_DECLARE_NEW_METHODS(new_, alloc, MOZ_ALWAYS_INLINE)
-    JS_DECLARE_NEW_METHODS(newInfallible, allocInfallible, MOZ_ALWAYS_INLINE)
 
     // A mutable enumeration of the allocated data.
     class Enum
@@ -423,7 +411,7 @@ class LifoAlloc
         }
 
       public:
-        explicit Enum(LifoAlloc &alloc)
+        Enum(LifoAlloc &alloc)
           : alloc_(&alloc),
             chunk_(alloc.first),
             position_(static_cast<char *>(alloc.first ? alloc.first->start() : nullptr))
@@ -502,34 +490,27 @@ class LifoAllocScope
     }
 };
 
-enum Fallibility {
-    Fallible,
-    Infallible
-};
-
-template <Fallibility fb>
 class LifoAllocPolicy
 {
     LifoAlloc &alloc_;
 
   public:
-    MOZ_IMPLICIT LifoAllocPolicy(LifoAlloc &alloc)
+    LifoAllocPolicy(LifoAlloc &alloc)
       : alloc_(alloc)
     {}
     void *malloc_(size_t bytes) {
-        return fb == Fallible ? alloc_.alloc(bytes) : alloc_.allocInfallible(bytes);
+        return alloc_.alloc(bytes);
     }
     void *calloc_(size_t bytes) {
         void *p = malloc_(bytes);
-        if (fb == Fallible && !p)
-            return nullptr;
-        memset(p, 0, bytes);
+        if (p)
+            memset(p, 0, bytes);
         return p;
     }
     void *realloc_(void *p, size_t oldBytes, size_t bytes) {
         void *n = malloc_(bytes);
-        if (fb == Fallible && !n)
-            return nullptr;
+        if (!n)
+            return n;
         memcpy(n, p, Min(oldBytes, bytes));
         return n;
     }

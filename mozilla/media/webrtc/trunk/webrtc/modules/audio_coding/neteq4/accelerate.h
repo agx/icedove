@@ -43,7 +43,7 @@ class Accelerate : public TimeStretch {
   // the outcome of the operation as an enumerator value.
   ReturnCodes Process(const int16_t* input,
                       size_t input_length,
-                      AudioMultiVector* output,
+                      AudioMultiVector<int16_t>* output,
                       int16_t* length_change_samples);
 
  protected:
@@ -58,19 +58,10 @@ class Accelerate : public TimeStretch {
   virtual ReturnCodes CheckCriteriaAndStretch(
       const int16_t* input, size_t input_length, size_t peak_index,
       int16_t best_correlation, bool active_speech,
-      AudioMultiVector* output) const OVERRIDE;
+      AudioMultiVector<int16_t>* output) const OVERRIDE;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(Accelerate);
-};
-
-struct AccelerateFactory {
-  AccelerateFactory() {}
-  virtual ~AccelerateFactory() {}
-
-  virtual Accelerate* Create(int sample_rate_hz,
-                             size_t num_channels,
-                             const BackgroundNoise& background_noise) const;
 };
 
 }  // namespace webrtc

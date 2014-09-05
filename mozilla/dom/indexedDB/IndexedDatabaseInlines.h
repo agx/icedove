@@ -94,14 +94,14 @@ AppendConditionClause(const nsACString& aColumnName,
              NS_LITERAL_CSTRING(" ");
 
   if (aLessThan) {
-    aResult.Append('<');
+    aResult.AppendLiteral("<");
   }
   else {
-    aResult.Append('>');
+    aResult.AppendLiteral(">");
   }
 
   if (aEquals) {
-    aResult.Append('=');
+    aResult.AppendLiteral("=");
   }
 
   aResult += NS_LITERAL_CSTRING(" :") + aArgName;

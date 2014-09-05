@@ -21,7 +21,6 @@ nsWifiAccessPoint::nsWifiAccessPoint()
   mMac[0] = '\0';
   mSsid[0] = '\0';
   mSsidLen = 0;
-  mSignal = -1000;
 }
 
 nsWifiAccessPoint::~nsWifiAccessPoint()
@@ -71,8 +70,7 @@ bool AccessPointsEqual(nsCOMArray<nsWifiAccessPoint>& a, nsCOMArray<nsWifiAccess
     for (int32_t j = 0; j < b.Count(); j++) {
       LOG(("   %s->%s | %s->%s\n", a[i]->mSsid, b[j]->mSsid, a[i]->mMac, b[j]->mMac));
       if (!strcmp(a[i]->mSsid, b[j]->mSsid) &&
-          !strcmp(a[i]->mMac, b[j]->mMac) &&
-          a[i]->mSignal == b[j]->mSignal) {
+          !strcmp(a[i]->mMac, b[j]->mMac)) {
         found = true;
       }
     }

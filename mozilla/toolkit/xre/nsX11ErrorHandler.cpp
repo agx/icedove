@@ -83,13 +83,13 @@ X11Error(Display *display, XErrorEvent *event) {
   if (buffer[0]) {
     notes.Append(buffer);
   } else {
-    notes.AppendLiteral("Request ");
+    notes.Append("Request ");
     notes.AppendInt(event->request_code);
     notes.Append('.');
     notes.AppendInt(event->minor_code);
   }
 
-  notes.AppendLiteral(": ");
+  notes.Append(": ");
 
   // Get a string to describe the error.
   XGetErrorText(display, event->error_code, buffer, sizeof(buffer));
@@ -109,11 +109,11 @@ X11Error(Display *display, XErrorEvent *event) {
     // XSynchronize call returns the same function after an enable call then
     // synchronization must have already been enabled.
     if (XSynchronize(display, True) == XSynchronize(display, False)) {
-      notes.AppendLiteral("; sync");
+      notes.Append("; sync");
     } else {
-      notes.AppendLiteral("; ");
+      notes.Append("; ");
       notes.AppendInt(uint32_t(age));
-      notes.AppendLiteral(" requests ago");
+      notes.Append(" requests ago");
     }
   }
 
@@ -132,14 +132,14 @@ X11Error(Display *display, XErrorEvent *event) {
 #ifdef DEBUG
   // The resource id is unlikely to be useful in a crash report without
   // context of other ids, but add it to the debug console output.
-  notes.AppendLiteral("; id=0x");
+  notes.Append("; id=0x");
   notes.AppendInt(uint32_t(event->resourceid), 16);
 #ifdef MOZ_X11
   // Actually, for requests where Xlib gets the reply synchronously,
   // MOZ_X_SYNC=1 will not be necessary, but we don't have a table to tell us
   // which requests get a synchronous reply.
   if (!PR_GetEnv("MOZ_X_SYNC")) {
-    notes.AppendLiteral("\nRe-running with MOZ_X_SYNC=1 in the environment may give a more helpful backtrace.");
+    notes.Append("\nRe-running with MOZ_X_SYNC=1 in the environment may give a more helpful backtrace.");
   }
 #endif
 #endif

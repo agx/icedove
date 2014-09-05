@@ -82,7 +82,7 @@ RelatedAccIterator::
 {
   mBindingParent = aDependentContent->GetBindingParent();
   nsIAtom* IDAttr = mBindingParent ?
-    nsGkAtoms::anonid : nsGkAtoms::id;
+    nsGkAtoms::anonid : aDependentContent->GetIDAttributeName();
 
   nsAutoString id;
   if (aDependentContent->GetAttr(kNameSpaceID_None, IDAttr, id))

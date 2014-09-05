@@ -1,8 +1,6 @@
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-<!-- Advanced panel -->
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this file,
+   - You can obtain one at http://mozilla.org/MPL/2.0/.  -->
 
 <script type="application/javascript"
         src="chrome://browser/content/preferences/in-content/advanced.js"/>
@@ -131,25 +129,22 @@
       hidden="true"
       data-category="paneAdvanced">
   <image class="header-icon"/>
-  <label class="header-name">&paneAdvanced.title;</label>
+  <label class="header-name"
+         value="&paneAdvanced.title;"/>
 </hbox>
 
-<tabbox id="advancedPrefs"
-        handleCtrlTab="false"
-        handleCtrlPageUpDown="false"
-        flex="1"
-        data-category="paneAdvanced"
-        hidden="true"
+<tabbox id="advancedPrefs" flex="1"
+        data-category="paneAdvanced" hidden="true"
         onselect="gAdvancedPane.tabSelectionChanged();">
 
   <tabs id="tabsElement">
-    <tab id="generalTab" label="&generalTab.label;"/>
+    <tab id="generalTab" label="&generalTab.label;" helpTopic="prefs-advanced-general"/>
 #ifdef MOZ_DATA_REPORTING
-    <tab id="dataChoicesTab" label="&dataChoicesTab.label;"/>
+    <tab id="dataChoicesTab" label="&dataChoicesTab.label;" helpTopic="prefs-advanced-data-choices"/>
 #endif
-    <tab id="networkTab" label="&networkTab.label;"/>
-    <tab id="updateTab" label="&updateTab.label;"/>
-    <tab id="encryptionTab" label="&certificateTab.label;"/>
+    <tab id="networkTab" label="&networkTab.label;" helpTopic="prefs-advanced-network"/>
+    <tab id="updateTab" label="&updateTab.label;"  helpTopic="prefs-advanced-update"/>
+    <tab id="encryptionTab" label="&certificateTab.label;" helpTopic="prefs-advanced-encryption"/>
   </tabs>
 
   <tabpanels flex="1">
@@ -158,7 +153,7 @@
     <tabpanel id="generalPanel" orient="vertical">
       <!-- Accessibility -->
       <groupbox id="accessibilityGroup" align="start">
-        <caption><label>&accessibility.label;</label></caption>
+        <caption label="&accessibility.label;"/>
 
         <checkbox id="useCursorNavigation"
                   label="&useCursorNavigation.label;"
@@ -175,7 +170,7 @@
       </groupbox>
       <!-- Browsing -->
       <groupbox id="browsingGroup" align="start">
-        <caption><label>&browsing.label;</label></caption>
+        <caption label="&browsing.label;"/>
 
         <checkbox id="useAutoScroll"
                   label="&useAutoScroll.label;"
@@ -198,17 +193,19 @@
       </groupbox>
 #ifdef HAVE_SHELL_SERVICE
       <!-- System Defaults -->
-      <groupbox id="systemDefaultsGroup" orient="vertical" align="start">
-        <caption><label>&systemDefaults.label;</label></caption>
+      <groupbox id="systemDefaultsGroup" orient="vertical">
+        <caption label="&systemDefaults.label;"/>
+
         <checkbox id="alwaysCheckDefault" preference="browser.shell.checkDefaultBrowser"
-                  label="&alwaysCheckDefault.label;" accesskey="&alwaysCheckDefault.accesskey;"/>
+                  label="&alwaysCheckDefault.label;" accesskey="&alwaysCheckDefault.accesskey;"
+                  flex="1"/>
         <hbox class="indent">
           <deck id="setDefaultPane">
             <button id="setDefaultButton"
                     label="&setDefault.label;" accesskey="&setDefault.accesskey;"
                     oncommand="gAdvancedPane.setDefaultBrowser();"
                     preference="pref.general.disable_button.default_browser"/>
-            <label id="isDefaultLabel">&isDefault.label;</label>
+            <description>&isDefault.label;</description>
           </deck>
         </hbox>
       </groupbox>
@@ -219,7 +216,7 @@
     <tabpanel id="dataChoicesPanel" orient="vertical">
 #ifdef MOZ_TELEMETRY_REPORTING
       <groupbox>
-        <caption><label>&telemetrySection.label;</label></caption>
+        <caption label="&telemetrySection.label;"/>
         <description>&telemetryDesc.label;</description>
         <hbox>
           <checkbox id="submitTelemetryBox"
@@ -228,13 +225,14 @@
                     accesskey="&enableTelemetry.accesskey;"/>
           <spacer flex="1"/>
           <label id="telemetryLearnMore"
-                 class="text-link">&telemetryLearnMore.label;</label>
+                 class="text-link"
+                 value="&telemetryLearnMore.label;"/>
         </hbox>
       </groupbox>
 #endif
 #ifdef MOZ_SERVICES_HEALTHREPORT
       <groupbox>
-        <caption><label>&healthReportSection.label;</label></caption>
+        <caption label="&healthReportSection.label;"/>
         <description>&healthReportDesc.label;</description>
         <hbox>
           <checkbox id="submitHealthReportBox"
@@ -243,13 +241,14 @@
                     accesskey="&enableHealthReport.accesskey;"/>
           <spacer flex="1"/>
           <label id="FHRLearnMore"
-                 class="text-link">&healthReportLearnMore.label;</label>
+                 class="text-link"
+                 value="&healthReportLearnMore.label;"/>
         </hbox>
       </groupbox>
 #endif
 #ifdef MOZ_CRASHREPORTER
       <groupbox>
-        <caption><label>&crashReporterSection.label;</label></caption>
+        <caption label="&crashReporterSection.label;"/>
         <description>&crashReporterDesc.label;</description>
         <hbox>
           <checkbox id="submitCrashesBox"
@@ -259,7 +258,8 @@
 
           <spacer flex="1"/>
           <label id="crashReporterLearnMore"
-                 class="text-link">&crashReporterLearnMore.label;</label>
+                 class="text-link"
+                 value="&crashReporterLearnMore.label;"/>
         </hbox>
       </groupbox>
 #endif
@@ -271,7 +271,7 @@
 
       <!-- Connection -->
       <groupbox id="connectionGroup">
-        <caption><label>&connection.label;</label></caption>
+        <caption label="&connection.label;"/>
 
         <hbox align="center">
           <description flex="1" control="connectionSettings">&connectionDesc.label;</description>
@@ -283,7 +283,7 @@
 
       <!-- Cache -->
       <groupbox id="cacheGroup">
-        <caption><label>&httpCache.label;</label></caption>
+        <caption label="&httpCache.label;"/>
 
         <hbox align="center">
           <label id="actualDiskCacheSize" flex="1"/>
@@ -291,18 +291,15 @@
                   label="&clearCacheNow.label;" accesskey="&clearCacheNow.accesskey;"
                   oncommand="gAdvancedPane.clearCache();"/>
         </hbox>
-        <hbox>
-          <checkbox preference="browser.cache.disk.smart_size.enabled"
-                    id="allowSmartSize"
-                    onsyncfrompreference="return gAdvancedPane.readSmartSizeEnabled();"
-                    label="&overrideSmartCacheSize.label;"
-                    accesskey="&overrideSmartCacheSize.accesskey;"/>
-        </hbox>
+        <checkbox preference="browser.cache.disk.smart_size.enabled"
+                  id="allowSmartSize" flex="1"
+                  onsyncfrompreference="return gAdvancedPane.readSmartSizeEnabled();"
+                  label="&overrideSmartCacheSize.label;"
+                  accesskey="&overrideSmartCacheSize.accesskey;"/>
         <hbox align="center" class="indent">
           <label id="useCacheBefore" control="cacheSize"
-                 accesskey="&limitCacheSizeBefore.accesskey;">
-            &limitCacheSizeBefore.label;
-          </label>
+                accesskey="&limitCacheSizeBefore.accesskey;"
+                value="&limitCacheSizeBefore.label;"/>
           <textbox id="cacheSize" type="number" size="4" max="1024"
                   preference="browser.cache.disk.capacity"
                   onsyncfrompreference="return gAdvancedPane.readCacheSize();"
@@ -314,7 +311,7 @@
 
       <!-- Offline apps -->
       <groupbox id="offlineGroup">
-        <caption><label>&offlineStorage2.label;</label></caption>
+        <caption label="&offlineStorage2.label;"/>
 
         <hbox align="center">
           <label id="actualAppCacheSize" flex="1"/>
@@ -323,11 +320,10 @@
                   oncommand="gAdvancedPane.clearOfflineAppCache();"/>
         </hbox>
         <hbox align="center">
-          <checkbox id="offlineNotify"
+          <checkbox id="offlineNotify" flex="1"
                     label="&offlineNotify.label;" accesskey="&offlineNotify.accesskey;"
                     preference="browser.offline-apps.notify"
                     onsyncfrompreference="return gAdvancedPane.readOfflineNotify();"/>
-          <spacer flex="1"/>
           <button id="offlineNotifyExceptions"
                   label="&offlineNotifyExceptions.label;"
                   accesskey="&offlineNotifyExceptions.accesskey;"
@@ -357,8 +353,8 @@
     <!-- Update -->
     <tabpanel id="updatePanel" orient="vertical">
 #ifdef MOZ_UPDATER
-      <groupbox id="updateApp" align="start">
-        <caption><label>&updateApp.label;</label></caption>
+      <groupbox id="updateApp">
+        <caption label="&updateApp.label;"/>
         <radiogroup id="updateRadioGroup"
                     oncommand="gAdvancedPane.updateWritePrefs();">
 #ifdef XP_WIN
@@ -369,7 +365,7 @@
                      accesskey="&updateAutoMetro.accesskey;"/>
               <hbox id="autoMetroIndent"
                     class="indent">
-                <label>&updateAutoMetroWarn.label;</label>
+                <label value="&updateAutoMetroWarn.label;"/>
               </hbox>
 #endif
 #endif
@@ -409,8 +405,8 @@
 #endif
       </groupbox>
 #endif
-      <groupbox id="updateOthers" align="start">
-        <caption><label>&updateOthers.label;</label></caption>
+      <groupbox id="updateOthers">
+        <caption label="&updateOthers.label;"/>
         <checkbox id="enableSearchUpdate"
                   label="&enableSearchUpdate.label;"
                   accesskey="&enableSearchUpdate.accesskey;"
@@ -439,6 +435,9 @@
 
         <separator/>
 
+#ifdef XP_MACOSX
+        <vbox>
+#endif
         <hbox>
           <button id="viewCertificatesButton"
                   label="&viewCerts.label;" accesskey="&viewCerts.accesskey;"
@@ -447,11 +446,18 @@
           <button id="verificationButton"
                   label="&verify2.label;" accesskey="&verify2.accesskey;"
                   oncommand="gAdvancedPane.showOCSP();"/>
+#ifdef XP_MACOSX
+        </hbox>
+        <hbox>
+#endif
           <button id="viewSecurityDevicesButton"
                   label="&viewSecurityDevices.label;" accesskey="&viewSecurityDevices.accesskey;"
                   oncommand="gAdvancedPane.showSecurityDevices();"
                   preference="security.disable_button.openDeviceManager"/>
         </hbox>
+#ifdef XP_MACOSX
+        </vbox>
+#endif
     </tabpanel>
   </tabpanels>
 </tabbox>

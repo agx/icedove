@@ -19,13 +19,13 @@ using namespace dom;
  * mozilla::AsyncEventDispatcher
  ******************************************************************************/
 
-AsyncEventDispatcher::AsyncEventDispatcher(EventTarget* aTarget,
+AsyncEventDispatcher::AsyncEventDispatcher(nsINode* aEventNode,
                                            WidgetEvent& aEvent)
-  : mTarget(aTarget)
+  : mEventNode(aEventNode)
   , mDispatchChromeOnly(false)
 {
-  MOZ_ASSERT(mTarget);
-  EventDispatcher::CreateEvent(aTarget, nullptr, &aEvent, EmptyString(),
+  MOZ_ASSERT(mEventNode);
+  EventDispatcher::CreateEvent(aEventNode, nullptr, &aEvent, EmptyString(),
                                getter_AddRefs(mEvent));
   NS_ASSERTION(mEvent, "Should never fail to create an event");
   mEvent->DuplicatePrivateData();
@@ -39,9 +39,8 @@ AsyncEventDispatcher::Run()
     if (mDispatchChromeOnly) {
       MOZ_ASSERT(mEvent->InternalDOMEvent()->IsTrusted());
 
-      nsCOMPtr<nsINode> node = do_QueryInterface(mTarget);
-      MOZ_ASSERT(node, "ChromeOnly dispatch supported with Node targets only!");
-      nsPIDOMWindow* window = node->OwnerDoc()->GetWindow();
+      nsCOMPtr<nsIDocument> ownerDoc = mEventNode->OwnerDoc();
+      nsPIDOMWindow* window = ownerDoc->GetWindow();
       if (!window) {
         return NS_ERROR_INVALID_ARG;
       }
@@ -53,23 +52,18 @@ AsyncEventDispatcher::Run()
       EventDispatcher::DispatchDOMEvent(target, nullptr, mEvent,
                                         nullptr, nullptr);
     } else {
+      nsCOMPtr<EventTarget> target = mEventNode.get();
       bool defaultActionEnabled; // This is not used because the caller is async
-      mTarget->DispatchEvent(mEvent, &defaultActionEnabled);
+      target->DispatchEvent(mEvent, &defaultActionEnabled);
     }
   } else {
+    nsIDocument* doc = mEventNode->OwnerDoc();
     if (mDispatchChromeOnly) {
-      nsCOMPtr<nsINode> node = do_QueryInterface(mTarget);
-      MOZ_ASSERT(node, "ChromeOnly dispatch supported with Node targets only!");
-      nsContentUtils::DispatchChromeEvent(node->OwnerDoc(), node, mEventType,
+      nsContentUtils::DispatchChromeEvent(doc, mEventNode, mEventType,
                                           mBubbles, false);
     } else {
-      nsCOMPtr<nsIDOMEvent> event;
-      NS_NewDOMEvent(getter_AddRefs(event), mTarget, nullptr, nullptr);
-      nsresult rv = event->InitEvent(mEventType, mBubbles, false);
-      NS_ENSURE_SUCCESS(rv, rv);
-      event->SetTrusted(true);
-      bool dummy;
-      mTarget->DispatchEvent(event, &dummy);
+      nsContentUtils::DispatchTrustedEvent(doc, mEventNode, mEventType,
+                                           mBubbles, false);
     }
   }
 
@@ -79,14 +73,12 @@ AsyncEventDispatcher::Run()
 nsresult
 AsyncEventDispatcher::PostDOMEvent()
 {
-  nsRefPtr<AsyncEventDispatcher> ensureDeletionWhenFailing = this;
   return NS_DispatchToCurrentThread(this);
 }
 
 void
 AsyncEventDispatcher::RunDOMEventWhenSafe()
 {
-  nsRefPtr<AsyncEventDispatcher> ensureDeletionWhenFailing = this;
   nsContentUtils::AddScriptRunner(this);
 }
 

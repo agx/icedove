@@ -126,8 +126,6 @@ private:
 
   SkRect SkRectCoveringWholeSurface() const;
 
-  bool UsingSkiaGPU() const;
-
 #ifdef USE_SKIA_GPU
   SkRefPtr<GrContext> mGrContext;
   uint32_t mTexture;

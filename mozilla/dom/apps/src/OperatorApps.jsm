@@ -122,11 +122,6 @@ this.OperatorAppsRegistry = {
           }
           if (mcc && mnc) {
             this._installOperatorApps(mcc, mnc);
-            let messenger = Cc["@mozilla.org/system-message-internal;1"]
-                              .getService(Ci.nsISystemMessagesInternal);
-            messenger.broadcastMessage("first-run-with-sim", { mcc: mcc,
-                                                               mnc: mnc });
-
           } else {
             iccProvider.registerIccMsg(clientId, iccListener);
           }
@@ -240,7 +235,7 @@ this.OperatorAppsRegistry = {
   },
 
   eraseVariantAppsNotInList: function(aIdsApp) {
-    if (!aIdsApp) {
+    if (!aIdsApp || !Array.isArray(aIdsApp)) {
       aIdsApp = [ ];
     }
 
@@ -311,14 +306,6 @@ this.OperatorAppsRegistry = {
   },
 
   _installOperatorApps: function(aMcc, aMnc) {
-    function normalizeCode(aCode) {
-      let ncode = "" + aCode;
-      while (ncode.length < 3) {
-        ncode = "0" + ncode;
-      }
-      return ncode;
-    }
-
     Task.spawn(function() {
       debug("Install operator apps ---> mcc:"+ aMcc + ", mnc:" + aMnc);
       if (!isFirstRunWithSIM()) {
@@ -326,35 +313,7 @@ this.OperatorAppsRegistry = {
         return;
       }
 
-      let key = normalizeCode(aMcc) + "-" + normalizeCode(aMnc);
-      let aIdsApp = yield this._getSingleVariantDatas();
-
-      // aIdsApp will be undefined if the singleVariant config file not exist
-      // or will have the following format:
-      // {"mmc1-mnc1": [ap11,...,ap1N],..., "mmcM-mncM": [apM1,...,apMN]}
-      // Behavior:
-      // * If the configuration file does not exist, it's equivalent to
-      //   passing []
-      // * If the configuration file has data and the phone boots with a SIM
-      //   that isn't on the configuration file then we must have the same
-      //   behavior as if the phone had booted without a SIM inserted
-      //   (that is, don't do anything)
-      // * If the phone boots with a configured SIM (mcc-mnc exists on
-      //   configuration file) then recover the app list to install
-      if (!aIdsApp) {
-        debug("No " + SINGLE_VARIANT_CONF_FILE + " in " + this.appsDir.path);
-        aIdsApp = [];
-      } else if (aIdsApp[key] === undefined) {
-        debug("First Run with SIM not configured");
-        return;
-      } else {
-        debug("First Run with configured SIM ");
-        aIdsApp = aIdsApp[key];
-        if (!Array.isArray(aIdsApp)) {
-          aIdsApp = [aIdsApp];
-        }
-      }
-
+      let aIdsApp = yield this._getSingleVariantApps(aMcc, aMnc);
       debug("installOperatorApps --> aIdsApp:" + JSON.stringify(aIdsApp));
       for (let i = 0; i < aIdsApp.length; i++) {
         let aId = aIdsApp[i];
@@ -394,11 +353,26 @@ this.OperatorAppsRegistry = {
     });
   },
 
-  _getSingleVariantDatas: function() {
+  _getSingleVariantApps: function(aMcc, aMnc) {
+
+    function normalizeCode(aCode) {
+      let ncode = "" + aCode;
+      while (ncode.length < 3) {
+        ncode = "0" + ncode;
+      }
+      return ncode;
+    }
+
     return Task.spawn(function*() {
+      let key = normalizeCode(aMcc) + "-" + normalizeCode(aMnc);
       let file = Path.join(this.appsDir.path, SINGLE_VARIANT_CONF_FILE);
       let aData = yield AppsUtils.loadJSONAsync(file);
-      return aData;
+
+      if (!aData || !(key in aData)) {
+        return [];
+      }
+
+      return aData[key];
     }.bind(this));
   }
 };

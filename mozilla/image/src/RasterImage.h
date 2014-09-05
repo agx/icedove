@@ -181,10 +181,6 @@ public:
   virtual size_t NonHeapSizeOfDecoded() const;
   virtual size_t OutOfProcessSizeOfDecoded() const;
 
-  virtual size_t HeapSizeOfVectorImageDocument(nsACString* aDocURL = nullptr) const MOZ_OVERRIDE {
-    return 0;
-  }
-
   /* Triggers discarding. */
   void Discard(bool force = false);
   void ForceDiscard() { Discard(/* force = */ true); }
@@ -206,7 +202,7 @@ public:
    */
   nsresult EnsureFrame(uint32_t aFramenum, int32_t aX, int32_t aY,
                        int32_t aWidth, int32_t aHeight,
-                       gfx::SurfaceFormat aFormat,
+                       gfxImageFormat aFormat,
                        uint8_t aPaletteDepth,
                        uint8_t** imageData,
                        uint32_t* imageLength,
@@ -220,7 +216,7 @@ public:
    */
   nsresult EnsureFrame(uint32_t aFramenum, int32_t aX, int32_t aY,
                        int32_t aWidth, int32_t aHeight,
-                       gfx::SurfaceFormat aFormat,
+                       gfxImageFormat aFormat,
                        uint8_t** imageData,
                        uint32_t* imageLength,
                        imgFrame** aFrame);
@@ -369,7 +365,7 @@ private:
 
     RasterImage* mImage;
 
-    size_t mBytesToDecode;
+    uint32_t mBytesToDecode;
 
     enum DecodeRequestStatus
     {
@@ -560,8 +556,9 @@ private:
                                     const nsIntRect &aSubimage,
                                     uint32_t aFlags);
 
-  TemporaryRef<gfx::SourceSurface> CopyFrame(uint32_t aWhichFrame,
-                                             uint32_t aFlags);
+  nsresult CopyFrame(uint32_t aWhichFrame,
+                     uint32_t aFlags,
+                     gfxImageSurface **_retval);
 
   /**
    * Deletes and nulls out the frame in mFrames[framenum].
@@ -589,7 +586,7 @@ private:
                                   uint32_t **paletteData, uint32_t *paletteLength,
                                   imgFrame** aRetFrame);
   nsresult InternalAddFrame(uint32_t framenum, int32_t aX, int32_t aY, int32_t aWidth, int32_t aHeight,
-                            gfx::SurfaceFormat aFormat, uint8_t aPaletteDepth,
+                            gfxImageFormat aFormat, uint8_t aPaletteDepth,
                             uint8_t **imageData, uint32_t *imageLength,
                             uint32_t **paletteData, uint32_t *paletteLength,
                             imgFrame** aRetFrame);
@@ -683,7 +680,7 @@ private: // data
   // Decoder and friends
   nsRefPtr<Decoder>          mDecoder;
   nsRefPtr<DecodeRequest>    mDecodeRequest;
-  size_t                     mBytesDecoded;
+  uint32_t                   mBytesDecoded;
 
   bool                       mInDecoder;
   // END LOCKED MEMBER VARIABLES
@@ -731,7 +728,7 @@ private: // data
   nsresult SyncDecode();
   nsresult InitDecoder(bool aDoSizeDecode);
   nsresult WriteToDecoder(const char *aBuffer, uint32_t aCount, DecodeStrategy aStrategy);
-  nsresult DecodeSomeData(size_t aMaxBytes, DecodeStrategy aStrategy);
+  nsresult DecodeSomeData(uint32_t aMaxBytes, DecodeStrategy aStrategy);
   bool     IsDecodeFinished();
   TimeStamp mDrawStartTime;
 

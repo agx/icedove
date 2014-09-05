@@ -422,7 +422,7 @@ NS_QUERYFRAME_HEAD(nsMathMLmtableOuterFrame)
   NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsTableOuterFrame)
 
-nsContainerFrame*
+nsIFrame*
 NS_NewMathMLmtableOuterFrame (nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsMathMLmtableOuterFrame(aContext);
@@ -473,11 +473,11 @@ nsMathMLmtableOuterFrame::AttributeChanged(int32_t  aNameSpaceID,
   // like changing an unit. Blow away and recompute all our automatic
   // presentational data, and issue a style-changed reflow request
   if (aAttribute == nsGkAtoms::displaystyle_) {
-    nsMathMLContainerFrame::RebuildAutomaticDataForChildren(GetParent());
+    nsMathMLContainerFrame::RebuildAutomaticDataForChildren(mParent);
     // Need to reflow the parent, not us, because this can actually
     // affect siblings.
     PresContext()->PresShell()->
-      FrameNeedsReflow(GetParent(), nsIPresShell::eStyleChange, NS_FRAME_IS_DIRTY);
+      FrameNeedsReflow(mParent, nsIPresShell::eStyleChange, NS_FRAME_IS_DIRTY);
     return NS_OK;
   }
 
@@ -545,16 +545,18 @@ nsMathMLmtableOuterFrame::GetRowFrameAt(nsPresContext* aPresContext,
   return nullptr;
 }
 
-void
+nsresult
 nsMathMLmtableOuterFrame::Reflow(nsPresContext*          aPresContext,
                                  nsHTMLReflowMetrics&     aDesiredSize,
                                  const nsHTMLReflowState& aReflowState,
                                  nsReflowStatus&          aStatus)
 {
+  nsresult rv;
   nsAutoString value;
   // we want to return a table that is anchored according to the align attribute
 
-  nsTableOuterFrame::Reflow(aPresContext, aDesiredSize, aReflowState, aStatus);
+  rv = nsTableOuterFrame::Reflow(aPresContext, aDesiredSize, aReflowState,
+                                 aStatus);
   NS_ASSERTION(aDesiredSize.Height() >= 0, "illegal height for mtable");
   NS_ASSERTION(aDesiredSize.Width() >= 0, "illegal width for mtable");
 
@@ -645,9 +647,11 @@ nsMathMLmtableOuterFrame::Reflow(nsPresContext*          aPresContext,
 
   aDesiredSize.mBoundingMetrics = mBoundingMetrics;
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+
+  return rv;
 }
 
-nsContainerFrame*
+nsIFrame*
 NS_NewMathMLmtableFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsMathMLmtableFrame(aContext);
@@ -659,12 +663,14 @@ nsMathMLmtableFrame::~nsMathMLmtableFrame()
 {
 }
 
-void
+nsresult
 nsMathMLmtableFrame::SetInitialChildList(ChildListID  aListID,
                                          nsFrameList& aChildList)
 {
-  nsTableFrame::SetInitialChildList(aListID, aChildList);
+  nsresult rv = nsTableFrame::SetInitialChildList(aListID, aChildList);
+  if (NS_FAILED(rv)) return rv;
   MapAllAttributesIntoCSS(this);
+  return rv;
 }
 
 void
@@ -682,7 +688,7 @@ nsMathMLmtableFrame::RestyleTable()
 // --------
 // implementation of nsMathMLmtrFrame
 
-nsContainerFrame*
+nsIFrame*
 NS_NewMathMLmtrFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsMathMLmtrFrame(aContext);
@@ -728,7 +734,7 @@ nsMathMLmtrFrame::AttributeChanged(int32_t  aNameSpaceID,
 // --------
 // implementation of nsMathMLmtdFrame
 
-nsContainerFrame*
+nsIFrame*
 NS_NewMathMLmtdFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsMathMLmtdFrame(aContext);
@@ -862,7 +868,7 @@ NS_QUERYFRAME_HEAD(nsMathMLmtdInnerFrame)
   NS_QUERYFRAME_ENTRY(nsIMathMLFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
-nsContainerFrame*
+nsIFrame*
 NS_NewMathMLmtdInnerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsMathMLmtdInnerFrame(aContext);
@@ -882,17 +888,18 @@ nsMathMLmtdInnerFrame::~nsMathMLmtdInnerFrame()
   mUniqueStyleText->Destroy(PresContext());
 }
 
-void
+nsresult
 nsMathMLmtdInnerFrame::Reflow(nsPresContext*          aPresContext,
                               nsHTMLReflowMetrics&     aDesiredSize,
                               const nsHTMLReflowState& aReflowState,
                               nsReflowStatus&          aStatus)
 {
   // Let the base class do the reflow
-  nsBlockFrame::Reflow(aPresContext, aDesiredSize, aReflowState, aStatus);
+  nsresult rv = nsBlockFrame::Reflow(aPresContext, aDesiredSize, aReflowState, aStatus);
 
   // more about <maligngroup/> and <malignmark/> later
   // ...
+  return rv;
 }
 
 const

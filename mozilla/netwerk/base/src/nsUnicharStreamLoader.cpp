@@ -7,8 +7,9 @@
 
 #include "nsUnicharStreamLoader.h"
 #include "nsIInputStream.h"
+#include "nsICharsetConverterManager.h"
+#include "nsServiceManagerUtils.h"
 #include <algorithm>
-#include "mozilla/dom/EncodingUtils.h"
 
 // 1024 bytes is specified in
 // http://www.whatwg.org/specs/web-apps/current-work/#charset for HTML; for
@@ -17,7 +18,6 @@
 #define SNIFFING_BUFFER_SIZE 1024
 
 using namespace mozilla;
-using mozilla::dom::EncodingUtils;
 
 NS_IMETHODIMP
 nsUnicharStreamLoader::Init(nsIUnicharStreamLoaderObserver *aObserver)
@@ -162,6 +162,10 @@ nsUnicharStreamLoader::OnDataAvailable(nsIRequest *aRequest,
   return rv;
 }
 
+/* internal */
+static NS_DEFINE_CID(kCharsetConverterManagerCID,
+                     NS_ICHARSETCONVERTERMANAGER_CID);
+
 nsresult
 nsUnicharStreamLoader::DetermineCharset()
 {
@@ -172,21 +176,22 @@ nsUnicharStreamLoader::DetermineCharset()
     mCharset.AssignLiteral("UTF-8");
   }
 
+  // Create the decoder for this character set
+  nsCOMPtr<nsICharsetConverterManager> ccm =
+    do_GetService(kCharsetConverterManagerCID, &rv);
+  if (NS_FAILED(rv)) return rv;
+
   // Sadly, nsIUnicharStreamLoader is exposed to extensions, so we can't
-  // assume mozilla::css::Loader to be the only caller. Special-casing
-  // replacement, since it's not invariant under a second label resolution
-  // operation.
+  // assume mozilla::css::Loader to be the only caller. Since legacy
+  // charset alias code doesn't know about the replacement encoding,
+  // special-case it here, but let other stuff go through legacy alias
+  // resolution for now.
   if (mCharset.EqualsLiteral("replacement")) {
-    mDecoder = EncodingUtils::DecoderForEncoding(mCharset);
+    rv = ccm->GetUnicodeDecoderRaw(mCharset.get(), getter_AddRefs(mDecoder));
   } else {
-    nsAutoCString charset;
-    if (!EncodingUtils::FindEncodingForLabelNoReplacement(mCharset, charset)) {
-      // If we got replacement here, the caller was not mozilla::css::Loader
-      // but an extension.
-      return NS_ERROR_UCONV_NOCONV;
-    }
-    mDecoder = EncodingUtils::DecoderForEncoding(charset);
+    rv = ccm->GetUnicodeDecoder(mCharset.get(), getter_AddRefs(mDecoder));
   }
+  if (NS_FAILED(rv)) return rv;
 
   // Process the data into mBuffer
   uint32_t dummy;

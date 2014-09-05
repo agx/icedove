@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ipc/MessageChannel.h"
-#include "mozilla/ipc/WindowsMessageLoop.h"
 #include "nsAppShell.h"
 #include "nsToolkit.h"
 #include "nsThreadUtils.h"
@@ -36,7 +35,7 @@ public:
 private:
   NS_IMETHOD Callback(const nsAString& aTopic, const nsAString& aState) {
     bool isLocked = mLockedTopics.Contains(aTopic);
-    bool shouldLock = aState.EqualsLiteral("locked-foreground");
+    bool shouldLock = aState.Equals(NS_LITERAL_STRING("locked-foreground"));
     if (isLocked == shouldLock) {
       return NS_OK;
     }
@@ -144,8 +143,6 @@ nsAppShell::Init()
 #endif
 
   mLastNativeEventScheduled = TimeStamp::NowLoRes();
-
-  mozilla::ipc::windows::InitUIThread();
 
   sTaskbarButtonCreatedMsg = ::RegisterWindowMessageW(kTaskbarButtonEventId);
   NS_ASSERTION(sTaskbarButtonCreatedMsg, "Could not register taskbar button creation message");
@@ -308,7 +305,7 @@ nsAppShell::ProcessNextNativeEvent(bool mayWait)
       mozilla::HangMonitor::Suspend();
       {
         GeckoProfilerSleepRAII profiler_sleep;
-        WinUtils::WaitForMessage();
+        ::WaitMessage();
       }
     }
   } while (!gotMessage && mayWait);

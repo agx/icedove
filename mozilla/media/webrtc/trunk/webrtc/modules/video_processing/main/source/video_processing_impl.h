@@ -22,64 +22,67 @@
 namespace webrtc {
 class CriticalSectionWrapper;
 
-class VideoProcessingModuleImpl : public VideoProcessingModule {
- public:
-  VideoProcessingModuleImpl(int32_t id);
+class VideoProcessingModuleImpl : public VideoProcessingModule
+{
+public:
 
-  virtual ~VideoProcessingModuleImpl();
+    VideoProcessingModuleImpl(int32_t id);
 
-  int32_t Id() const;
+    virtual ~VideoProcessingModuleImpl();
 
-  virtual int32_t ChangeUniqueId(const int32_t id);
+    int32_t Id() const;
 
-  virtual void Reset();
+    virtual int32_t ChangeUniqueId(const int32_t id);
 
-  virtual int32_t Deflickering(I420VideoFrame* frame, FrameStats* stats);
+    virtual void Reset();
 
-  virtual int32_t Denoising(I420VideoFrame* frame);
+    virtual int32_t Deflickering(I420VideoFrame* frame, FrameStats* stats);
 
-  virtual int32_t BrightnessDetection(const I420VideoFrame& frame,
-                                      const FrameStats& stats);
+    virtual int32_t Denoising(I420VideoFrame* frame);
 
-  // Frame pre-processor functions
+    virtual int32_t BrightnessDetection(const I420VideoFrame& frame,
+                                        const FrameStats& stats);
 
-  // Enable temporal decimation
-  virtual void EnableTemporalDecimation(bool enable);
+    //Frame pre-processor functions
 
-  virtual void SetInputFrameResampleMode(VideoFrameResampling resampling_mode);
+    //Enable temporal decimation
+    virtual void EnableTemporalDecimation(bool enable);
 
-  // Enable content analysis
-  virtual void EnableContentAnalysis(bool enable);
+    virtual void SetInputFrameResampleMode(VideoFrameResampling resamplingMode);
 
-  // Set max frame rate
-  virtual int32_t SetMaxFramerate(uint32_t max_frame_rate);
+    //Enable content analysis
+    virtual void EnableContentAnalysis(bool enable);
 
-  // Set Target Resolution: frame rate and dimension
-  virtual int32_t SetTargetResolution(uint32_t width,
-                                      uint32_t height,
-                                      uint32_t frame_rate);
+    //Set max frame rate
+    virtual int32_t SetMaxFrameRate(uint32_t maxFrameRate);
+
+    // Set Target Resolution: frame rate and dimension
+    virtual int32_t SetTargetResolution(uint32_t width,
+                                        uint32_t height,
+                                        uint32_t frameRate);
 
 
-  // Get decimated values: frame rate/dimension
-  virtual uint32_t Decimatedframe_rate();
-  virtual uint32_t DecimatedWidth() const;
-  virtual uint32_t DecimatedHeight() const;
+    // Get decimated values: frame rate/dimension
+    virtual uint32_t DecimatedFrameRate();
+    virtual uint32_t DecimatedWidth() const;
+    virtual uint32_t DecimatedHeight() const;
 
-  // Preprocess:
-  // Pre-process incoming frame: Sample when needed and compute content
-  // metrics when enabled.
-  // If no resampling takes place - processed_frame is set to NULL.
-  virtual int32_t PreprocessFrame(const I420VideoFrame& frame,
-                                  I420VideoFrame** processed_frame);
-  virtual VideoContentMetrics* ContentMetrics() const;
+    // Preprocess:
+    // Pre-process incoming frame: Sample when needed and compute content
+    // metrics when enabled.
+    // If no resampling takes place - processedFrame is set to NULL.
+    virtual int32_t PreprocessFrame(const I420VideoFrame& frame,
+                                    I420VideoFrame** processedFrame);
+    virtual VideoContentMetrics* ContentMetrics() const;
 
- private:
-  int32_t  id_;
-  CriticalSectionWrapper& mutex_;
-  VPMDeflickering deflickering_;
-  VPMDenoising  denoising_;
-  VPMBrightnessDetection brightness_detection_;
-  VPMFramePreprocessor  frame_pre_processor_;
+private:
+    int32_t              _id;
+    CriticalSectionWrapper&    _mutex;
+
+    VPMDeflickering            _deflickering;
+    VPMDenoising               _denoising;
+    VPMBrightnessDetection     _brightnessDetection;
+    VPMFramePreprocessor       _framePreProcessor;
 };
 
 }  // namespace

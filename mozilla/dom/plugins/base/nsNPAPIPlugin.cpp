@@ -250,11 +250,6 @@ nsNPAPIPlugin::PluginCrashed(const nsAString& pluginDumpID,
 bool
 nsNPAPIPlugin::RunPluginOOP(const nsPluginTag *aPluginTag)
 {
-#if (MOZ_WIDGET_GTK == 3)
-  // We force OOP on Linux/GTK3 because some plugins use GTK2 and both GTK
-  // libraries can't be loaded in the same process.
-  return true;
-#else
   if (PR_GetEnv("MOZ_DISABLE_OOP_PLUGINS")) {
     return false;
   }
@@ -381,7 +376,6 @@ nsNPAPIPlugin::RunPluginOOP(const nsPluginTag *aPluginTag)
   }
 
   return oopPluginsEnabled;
-#endif
 }
 
 inline PluginLibrary*
@@ -1496,8 +1490,8 @@ _evaluate(NPP npp, NPObject* npobj, NPString *script, NPVariant *result)
     return false;
   }
 
-  dom::AutoEntryScript aes(win);
-  JSContext* cx = aes.cx();
+  AutoSafeJSContext cx;
+  JSAutoCompartment ac(cx, win->FastGetGlobalJSObject());
 
   JS::Rooted<JSObject*> obj(cx, nsNPObjWrapper::GetNewOrUsed(npp, cx, npobj));
 

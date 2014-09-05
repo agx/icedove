@@ -32,7 +32,6 @@
 #include "nsIXULBrowserWindow.h"
 #include "nsIWeakReference.h"
 #include "nsIWidgetListener.h"
-#include "nsITabParent.h"
 
 namespace mozilla {
 namespace dom {
@@ -102,15 +101,15 @@ protected:
    mozilla::dom::Element* GetWindowDOMElement() const;
 
    // See nsIDocShellTreeOwner for docs on next two methods
-   nsresult ContentShellAdded(nsIDocShellTreeItem* aContentShell,
+   NS_HIDDEN_(nsresult) ContentShellAdded(nsIDocShellTreeItem* aContentShell,
                                           bool aPrimary, bool aTargetable,
                                           const nsAString& aID);
-   nsresult ContentShellRemoved(nsIDocShellTreeItem* aContentShell);
+   NS_HIDDEN_(nsresult) ContentShellRemoved(nsIDocShellTreeItem* aContentShell);
    NS_IMETHOD SizeShellTo(nsIDocShellTreeItem* aShellItem, int32_t aCX, 
       int32_t aCY);
    NS_IMETHOD ExitModalLoop(nsresult aStatus);
-   NS_IMETHOD CreateNewChromeWindow(int32_t aChromeFlags, nsITabParent* aOpeningTab, nsIXULWindow **_retval);
-   NS_IMETHOD CreateNewContentWindow(int32_t aChromeFlags, nsITabParent* aOpeningTab, nsIXULWindow **_retval);
+   NS_IMETHOD CreateNewChromeWindow(int32_t aChromeFlags, nsIXULWindow **_retval);
+   NS_IMETHOD CreateNewContentWindow(int32_t aChromeFlags, nsIXULWindow **_retval);
 
    void       EnableParent(bool aEnable);
    bool       ConstrainToZLevel(bool aImmediate, nsWindowZ *aPlacement,

@@ -8,7 +8,6 @@
 #define __FFmpegAACDecoder_h__
 
 #include "FFmpegDataDecoder.h"
-#include "mp4_demuxer/DecoderData.h"
 
 namespace mozilla
 {
@@ -29,6 +28,7 @@ private:
   void DecodePacket(mp4_demuxer::MP4Sample* aSample);
 
   MediaDataDecoderCallback* mCallback;
+  mp4_demuxer::AudioDecoderConfig mConfig;
 };
 
 } // namespace mozilla

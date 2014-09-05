@@ -181,7 +181,9 @@ private:
     typedef nsTArray<PLHashEntry*> HashEntryArray;
     typedef typename HashEntryArray::index_type index_type;
     typedef typename HashEntryArray::size_type size_type;
-    static const HashEntryArray::index_type NoIndex = HashEntryArray::NoIndex;
+    enum {
+        NoIndex = HashEntryArray::NoIndex
+    };
 
     /**
      * Value type for the ordering table.  Contains the other
@@ -227,7 +229,7 @@ private:
     }
     static PLHashNumber HashKey(const void* aKey)
     {
-        return static_cast<PLHashNumber>(NS_PTR_TO_INT32(aKey) >> 2);
+        return NS_PTR_TO_INT32(aKey) >> 2;
     }
     static const PLHashAllocOps kAllocOps;
 

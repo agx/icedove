@@ -11,18 +11,15 @@ import optparse
 import os
 import sys
 
-if __name__ == '__main__':
-  # Make sure we always can import helper_functions.
-  sys.path.append(os.path.dirname(__file__))
-
 import helper_functions
+
 
 # Chrome browsertests will throw away stderr; avoid that output gets lost.
 sys.stderr = sys.stdout
 
 
 def convert_yuv_to_png_files(yuv_file_name, yuv_frame_width, yuv_frame_height,
-                             output_directory, ffmpeg_path):
+                             output_directory, ffmpeg_dir=None):
   """Converts a YUV video file into PNG frames.
 
   The function uses ffmpeg to convert the YUV file. The output of ffmpeg is in
@@ -34,17 +31,18 @@ def convert_yuv_to_png_files(yuv_file_name, yuv_frame_width, yuv_frame_height,
     yuv_frame_height(int): The height of one YUV frame.
     output_directory(string): The output directory where the PNG frames will be
       stored.
-    ffmpeg_path(string): The path to the ffmpeg executable. If None, the PATH
-      will be searched for it.
+    ffmpeg_dir(string): The directory containing the ffmpeg executable. If
+      omitted, the PATH will be searched for it.
 
   Return:
     (bool): True if the conversion was OK.
   """
   size_string = str(yuv_frame_width) + 'x' + str(yuv_frame_height)
   output_files_pattern = os.path.join(output_directory, 'frame_%04d.png')
-  if not ffmpeg_path:
-    ffmpeg_path = 'ffmpeg.exe' if sys.platform == 'win32' else 'ffmpeg'
-  command = [ffmpeg_path, '-s', '%s' % size_string, '-i', '%s'
+  ffmpeg_executable = 'ffmpeg.exe' if sys.platform == 'win32' else 'ffmpeg'
+  if ffmpeg_dir:
+    ffmpeg_executable = os.path.join(ffmpeg_dir, ffmpeg_executable)
+  command = [ffmpeg_executable, '-s', '%s' % size_string, '-i', '%s'
              % yuv_file_name, '-f', 'image2', '-vcodec', 'png',
              '%s' % output_files_pattern]
   try:
@@ -56,12 +54,12 @@ def convert_yuv_to_png_files(yuv_file_name, yuv_frame_width, yuv_frame_height,
     print 'Error executing command: %s. Error: %s' % (command, err)
     return False
   except OSError:
-    print ('Did not find %s. Have you installed it?' % ffmpeg_path)
+    print ('Did not find %s. Have you installed it?' % ffmpeg_executable)
     return False
   return True
 
 
-def decode_frames(input_directory, zxing_path):
+def decode_frames(input_directory, zxing_dir=None):
   """Decodes the barcodes overlaid in each frame.
 
   The function uses the Zxing command-line tool from the Zxing C++ distribution
@@ -75,18 +73,19 @@ def decode_frames(input_directory, zxing_path):
   Args:
     input_directory(string): The input directory from where the PNG frames are
       read.
-    zxing_path(string): The path to the zxing binary. If specified as None,
-      the PATH will be searched for it.
+    zxing_dir(string): The directory containing the zxing executable. If
+      omitted, the PATH will be searched for it.
   Return:
-    (bool): True if the decoding succeeded.
+    (bool): True if the decoding went without errors.
   """
-  if not zxing_path:
-    zxing_path = 'zxing.exe' if sys.platform == 'win32' else 'zxing'
-  print 'Decoding barcodes from PNG files with %s...' % zxing_path
+  zxing_executable = 'zxing.exe' if sys.platform == 'win32' else 'zxing'
+  if zxing_dir:
+    zxing_executable = os.path.join(zxing_dir, zxing_executable)
+  print 'Decoding barcodes from PNG files with %s...' % zxing_executable
   return helper_functions.perform_action_on_all_files(
       directory=input_directory, file_pattern='frame_',
       file_extension='png', start_number=1, action=_decode_barcode_in_file,
-      command_line_decoder=zxing_path)
+      command_line_decoder=zxing_executable)
 
 
 def _decode_barcode_in_file(file_name, command_line_decoder):
@@ -103,6 +102,7 @@ def _decode_barcode_in_file(file_name, command_line_decoder):
   try:
     out = helper_functions.run_shell_command(
         command, fail_msg='Error during decoding of %s' % file_name)
+    print 'Image %s : decoded barcode: %s' % (file_name, out)
     text_file = open('%s.txt' % file_name[:-4], 'w')
     text_file.write(out)
     text_file.close()
@@ -230,14 +230,14 @@ def _parse_args():
   usage = "usage: %prog [options]"
   parser = optparse.OptionParser(usage=usage)
 
-  parser.add_option('--zxing_path', type='string',
-                    help=('The path to where the zxing executable is located. '
-                          'If omitted, it will be assumed to be present in the '
-                          'PATH with the name zxing[.exe].'))
-  parser.add_option('--ffmpeg_path', type='string',
-                    help=('The path to where the ffmpeg executable is located. '
-                          'If omitted, it will be assumed to be present in the '
-                          'PATH with the name ffmpeg[.exe].'))
+  parser.add_option('--zxing_dir', type='string',
+                    help=('The path to the directory where the zxing executable'
+                          'is located. If omitted, it will be assumed to be '
+                          'present in the PATH.'))
+  parser.add_option('--ffmpeg_dir', type='string', default=None,
+                    help=('The path to the directory where the ffmpeg '
+                          'executable is located. If omitted, it will be '
+                          'assumed to be present in the PATH.'))
   parser.add_option('--yuv_frame_width', type='int', default=640,
                     help='Width of the YUV file\'s frames. Default: %default')
   parser.add_option('--yuv_frame_height', type='int', default=480,
@@ -271,13 +271,13 @@ def _main():
   if not convert_yuv_to_png_files(options.yuv_file, options.yuv_frame_width,
                                   options.yuv_frame_height,
                                   output_directory=options.png_working_dir,
-                                  ffmpeg_path=options.ffmpeg_path):
+                                  ffmpeg_dir=options.ffmpeg_dir):
     print 'An error occurred converting from YUV to PNG frames.'
     return -1
 
   # Decode the barcodes from the PNG frames.
   if not decode_frames(input_directory=options.png_working_dir,
-                       zxing_path=options.zxing_path):
+                       zxing_dir=options.zxing_dir):
     print 'An error occurred decoding barcodes from PNG frames.'
     return -2
 

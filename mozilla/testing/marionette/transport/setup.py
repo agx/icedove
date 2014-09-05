@@ -1,18 +1,14 @@
+import os
 from setuptools import setup, find_packages
 
-version = '0.2'
+version = '0.1'
 
-long_description = \
-"""Marionette_ is a Mozilla project to enable remote automation in Gecko-based
-projects, including desktop Firefox, mobile Firefox, and Firefox OS. It is
-inspired by `Selenium Webdriver`_.
-
-This package defines the transport layer used by a Marionette client to
-communicate with the Marionette server embedded in Gecko.  It has no entry
-points; rather it's designed to be used by a Marionette client implementation.
-
-.. _Marionette: https://developer.mozilla.org/en/Marionette
-.. _`Selenium Webdriver`: http://www.seleniumhq.org/projects/webdriver/"""
+# get documentation from the README
+try:
+    here = os.path.dirname(os.path.abspath(__file__))
+    description = file(os.path.join(here, 'README.md')).read()
+except (OSError, IOError):
+    description = ''
 
 # dependencies
 deps = []
@@ -20,7 +16,7 @@ deps = []
 setup(name='marionette-transport',
       version=version,
       description="Transport layer for Marionette client",
-      long_description=long_description,
+      long_description=description,
       classifiers=[], # Get strings from http://pypi.python.org/pypi?%3Aaction=list_classifiers
       keywords='mozilla',
       author='Mozilla Automation and Tools Team',

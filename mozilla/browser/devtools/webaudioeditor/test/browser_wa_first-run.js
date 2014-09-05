@@ -2,7 +2,7 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 /**
- * Tests that the reloading/onContentLoaded hooks work.
+ * Tests if the shader editor shows the appropriate UI when opened.
  */
 
 function spawnTest() {

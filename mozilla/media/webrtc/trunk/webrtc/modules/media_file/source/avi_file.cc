@@ -23,6 +23,7 @@
 
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/file_wrapper.h"
+#include "webrtc/system_wrappers/interface/list_wrapper.h"
 #include "webrtc/system_wrappers/interface/trace.h"
 
 // http://msdn2.microsoft.com/en-us/library/ms779636.aspx
@@ -177,7 +178,8 @@ AviFile::AviFile()
       _videoCodecConfigParamsLength(0),
       _videoStreamDataChunkPrefix(0),
       _audioStreamDataChunkPrefix(0),
-      _created(false)
+      _created(false),
+      _indexList(new ListWrapper())
 {
   ResetComplexMembers();
 }
@@ -186,6 +188,7 @@ AviFile::~AviFile()
 {
     Close();
 
+    delete _indexList;
     delete[] _videoCodecConfigParams;
     delete _crit;
 }
@@ -1709,11 +1712,21 @@ uint32_t AviFile::StreamAndTwoCharCodeToTag(int32_t streamNum,
 
 void AviFile::ClearIndexList()
 {
-  for (IndexList::iterator iter = _indexList.begin();
-       iter != _indexList.end(); ++iter) {
-      delete *iter;
-  }
-  _indexList.clear();
+    while (!_indexList->Empty())
+    {
+        ListItem* listItem = _indexList->First();
+        if (listItem == 0)
+        {
+            break;
+        }
+
+        AVIINDEXENTRY* item = static_cast<AVIINDEXENTRY*>(listItem->GetItem());
+        if (item != NULL)
+        {
+            delete item;
+        }
+        _indexList->PopFront();
+    }
 }
 
 void AviFile::AddChunkToIndexList(uint32_t inChunkId,
@@ -1721,7 +1734,7 @@ void AviFile::AddChunkToIndexList(uint32_t inChunkId,
                                   uint32_t inOffset,
                                   uint32_t inSize)
 {
-    _indexList.push_back(new AVIINDEXENTRY(inChunkId, inFlags, inOffset,
+    _indexList->PushBack(new AVIINDEXENTRY(inChunkId, inFlags, inOffset,
                                            inSize));
 }
 
@@ -1734,13 +1747,19 @@ void AviFile::WriteIndex()
     _bytesWritten += PutLE32(0);
     const size_t idxChunkSize = _bytesWritten;
 
-    for (IndexList::iterator iter = _indexList.begin();
-         iter != _indexList.end(); ++iter) {
-        const AVIINDEXENTRY* item = *iter;
-        _bytesWritten += PutLE32(item->ckid);
-        _bytesWritten += PutLE32(item->dwFlags);
-        _bytesWritten += PutLE32(item->dwChunkOffset);
-        _bytesWritten += PutLE32(item->dwChunkLength);
+    for (ListItem* listItem = _indexList->First();
+         listItem != NULL;
+         listItem = _indexList->Next(listItem))
+    {
+        const AVIINDEXENTRY* item =
+            static_cast<AVIINDEXENTRY*>(listItem->GetItem());
+        if (item != NULL)
+        {
+            _bytesWritten += PutLE32(item->ckid);
+            _bytesWritten += PutLE32(item->dwFlags);
+            _bytesWritten += PutLE32(item->dwChunkOffset);
+            _bytesWritten += PutLE32(item->dwChunkLength);
+        }
     }
     PutLE32LengthFromCurrent(static_cast<long>(idxChunkSize));
 }

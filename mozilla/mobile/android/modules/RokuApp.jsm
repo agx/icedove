@@ -21,14 +21,10 @@ const PROTOCOL_VERSION = 1;
  * The basic interactions all use a REST API.
  * spec: http://sdkdocs.roku.com/display/sdkdoc/External+Control+Guide
  */
-function RokuApp(service) {
+function RokuApp(service, app) {
   this.service = service;
   this.resourceURL = this.service.location;
-#ifdef RELEASE_BUILD
-  this.app = "Firefox";
-#else
-  this.app = "Firefox Nightly";
-#endif
+  this.app = app;
   this.appID = -1;
 }
 

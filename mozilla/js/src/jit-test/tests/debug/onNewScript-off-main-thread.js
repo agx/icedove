@@ -1,6 +1,6 @@
 // We still get onNewScript notifications for code compiled off the main thread.
 
-if (helperThreadCount() === 0)
+if (workerThreadCount() === 0)
   quit(0);
 
 var g = newGlobal();

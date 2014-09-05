@@ -20,7 +20,7 @@ struct Person
 struct GetAge
 {
   Vector<Person> &v;
-  explicit GetAge(Vector<Person> &v) : v(v) {}
+  GetAge(Vector<Person> &v) : v(v) {}
   int operator[](size_t index) const { return v[index].age; }
 };
 

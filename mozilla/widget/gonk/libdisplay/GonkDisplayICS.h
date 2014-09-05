@@ -25,7 +25,7 @@
 
 namespace mozilla {
 
-class MOZ_EXPORT GonkDisplayICS : public GonkDisplay {
+class GonkDisplayICS : public GonkDisplay {
 public:
     GonkDisplayICS();
     ~GonkDisplayICS();

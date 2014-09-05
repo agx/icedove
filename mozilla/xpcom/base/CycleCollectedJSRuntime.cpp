@@ -66,11 +66,6 @@
 #include "nsCycleCollectionParticipant.h"
 #include "nsCycleCollector.h"
 #include "nsDOMJSUtils.h"
-
-#ifdef MOZ_CRASHREPORTER
-#include "nsExceptionHandler.h"
-#endif
-
 #include "nsIException.h"
 #include "nsThreadUtils.h"
 #include "xpcpublic.h"
@@ -83,7 +78,7 @@ namespace mozilla {
 struct DeferredFinalizeFunctionHolder
 {
   DeferredFinalizeFunction run;
-  void* data;
+  void *data;
 };
 
 class IncrementalFinalizeRunnable : public nsRunnable
@@ -105,7 +100,7 @@ class IncrementalFinalizeRunnable : public nsRunnable
 
 public:
   IncrementalFinalizeRunnable(CycleCollectedJSRuntime* aRt,
-                              nsTArray<nsISupports*>& aMSupports,
+                              nsTArray<nsISupports*>& mSupports,
                               DeferredFinalizerTable& aFinalizerTable);
   virtual ~IncrementalFinalizeRunnable();
 
@@ -117,19 +112,18 @@ public:
 } // namespace mozilla
 
 inline bool
-AddToCCKind(JSGCTraceKind aKind)
+AddToCCKind(JSGCTraceKind kind)
 {
-  return aKind == JSTRACE_OBJECT || aKind == JSTRACE_SCRIPT;
+  return kind == JSTRACE_OBJECT || kind == JSTRACE_SCRIPT;
 }
 
 static void
-TraceWeakMappingChild(JSTracer* aTrc, void** aThingp, JSGCTraceKind aKind);
+TraceWeakMappingChild(JSTracer* trc, void** thingp, JSGCTraceKind kind);
 
 struct NoteWeakMapChildrenTracer : public JSTracer
 {
-  NoteWeakMapChildrenTracer(JSRuntime* aRt,
-                            nsCycleCollectionNoteRootCallback& aCb)
-    : JSTracer(aRt, TraceWeakMappingChild), mCb(aCb)
+  NoteWeakMapChildrenTracer(JSRuntime *rt, nsCycleCollectionNoteRootCallback& cb)
+  : JSTracer(rt, TraceWeakMappingChild), mCb(cb)
   {
   }
   nsCycleCollectionNoteRootCallback& mCb;
@@ -140,14 +134,14 @@ struct NoteWeakMapChildrenTracer : public JSTracer
 };
 
 static void
-TraceWeakMappingChild(JSTracer* aTrc, void** aThingp, JSGCTraceKind aKind)
+TraceWeakMappingChild(JSTracer* trc, void** thingp, JSGCTraceKind kind)
 {
-  MOZ_ASSERT(aTrc->callback == TraceWeakMappingChild);
-  void* thing = *aThingp;
+  MOZ_ASSERT(trc->callback == TraceWeakMappingChild);
+  void* thing = *thingp;
   NoteWeakMapChildrenTracer* tracer =
-    static_cast<NoteWeakMapChildrenTracer*>(aTrc);
+    static_cast<NoteWeakMapChildrenTracer*>(trc);
 
-  if (aKind == JSTRACE_STRING) {
+  if (kind == JSTRACE_STRING) {
     return;
   }
 
@@ -155,19 +149,19 @@ TraceWeakMappingChild(JSTracer* aTrc, void** aThingp, JSGCTraceKind aKind)
     return;
   }
 
-  if (AddToCCKind(aKind)) {
+  if (AddToCCKind(kind)) {
     tracer->mCb.NoteWeakMapping(tracer->mMap, tracer->mKey, tracer->mKeyDelegate, thing);
     tracer->mTracedAny = true;
   } else {
-    JS_TraceChildren(aTrc, thing, aKind);
+    JS_TraceChildren(trc, thing, kind);
   }
 }
 
 struct NoteWeakMapsTracer : public js::WeakMapTracer
 {
-  NoteWeakMapsTracer(JSRuntime* aRt, js::WeakMapTraceCallback aCb,
-                     nsCycleCollectionNoteRootCallback& aCccb)
-    : js::WeakMapTracer(aRt, aCb), mCb(aCccb), mChildTracer(aRt, aCccb)
+  NoteWeakMapsTracer(JSRuntime* rt, js::WeakMapTraceCallback cb,
+                     nsCycleCollectionNoteRootCallback& cccb)
+  : js::WeakMapTracer(rt, cb), mCb(cccb), mChildTracer(rt, cccb)
   {
   }
   nsCycleCollectionNoteRootCallback& mCb;
@@ -175,18 +169,16 @@ struct NoteWeakMapsTracer : public js::WeakMapTracer
 };
 
 static void
-TraceWeakMapping(js::WeakMapTracer* aTrc, JSObject* aMap,
-                 void* aKey, JSGCTraceKind aKeyKind,
-                 void* aValue, JSGCTraceKind aValueKind)
+TraceWeakMapping(js::WeakMapTracer* trc, JSObject* m,
+               void* k, JSGCTraceKind kkind,
+               void* v, JSGCTraceKind vkind)
 {
-  MOZ_ASSERT(aTrc->callback == TraceWeakMapping);
-  NoteWeakMapsTracer* tracer = static_cast<NoteWeakMapsTracer*>(aTrc);
+  MOZ_ASSERT(trc->callback == TraceWeakMapping);
+  NoteWeakMapsTracer* tracer = static_cast<NoteWeakMapsTracer* >(trc);
 
   // If nothing that could be held alive by this entry is marked gray, return.
-  if ((!aKey || !xpc_IsGrayGCThing(aKey)) &&
-      MOZ_LIKELY(!tracer->mCb.WantAllTraces())) {
-    if (!aValue || !xpc_IsGrayGCThing(aValue) ||
-        aValueKind == JSTRACE_STRING) {
+  if ((!k || !xpc_IsGrayGCThing(k)) && MOZ_LIKELY(!tracer->mCb.WantAllTraces())) {
+    if (!v || !xpc_IsGrayGCThing(v) || vkind == JSTRACE_STRING) {
       return;
     }
   }
@@ -195,38 +187,37 @@ TraceWeakMapping(js::WeakMapTracer* aTrc, JSObject* aMap,
   // reason about the liveness of their keys, which in turn requires that
   // the key can be represented in the cycle collector graph.  All existing
   // uses of weak maps use either objects or scripts as keys, which are okay.
-  MOZ_ASSERT(AddToCCKind(aKeyKind));
+  MOZ_ASSERT(AddToCCKind(kkind));
 
   // As an emergency fallback for non-debug builds, if the key is not
   // representable in the cycle collector graph, we treat it as marked.  This
   // can cause leaks, but is preferable to ignoring the binding, which could
   // cause the cycle collector to free live objects.
-  if (!AddToCCKind(aKeyKind)) {
-    aKey = nullptr;
+  if (!AddToCCKind(kkind)) {
+    k = nullptr;
   }
 
   JSObject* kdelegate = nullptr;
-  if (aKey && aKeyKind == JSTRACE_OBJECT) {
-    kdelegate = js::GetWeakmapKeyDelegate((JSObject*)aKey);
+  if (k && kkind == JSTRACE_OBJECT) {
+    kdelegate = js::GetWeakmapKeyDelegate((JSObject*)k);
   }
 
-  if (AddToCCKind(aValueKind)) {
-    tracer->mCb.NoteWeakMapping(aMap, aKey, kdelegate, aValue);
+  if (AddToCCKind(vkind)) {
+    tracer->mCb.NoteWeakMapping(m, k, kdelegate, v);
   } else {
     tracer->mChildTracer.mTracedAny = false;
-    tracer->mChildTracer.mMap = aMap;
-    tracer->mChildTracer.mKey = aKey;
+    tracer->mChildTracer.mMap = m;
+    tracer->mChildTracer.mKey = k;
     tracer->mChildTracer.mKeyDelegate = kdelegate;
 
-    if (aValue && aValueKind != JSTRACE_STRING) {
-      JS_TraceChildren(&tracer->mChildTracer, aValue, aValueKind);
+    if (v && vkind != JSTRACE_STRING) {
+      JS_TraceChildren(&tracer->mChildTracer, v, vkind);
     }
 
     // The delegate could hold alive the key, so report something to the CC
     // if we haven't already.
-    if (!tracer->mChildTracer.mTracedAny &&
-        aKey && xpc_IsGrayGCThing(aKey) && kdelegate) {
-      tracer->mCb.NoteWeakMapping(aMap, aKey, kdelegate, nullptr);
+    if (!tracer->mChildTracer.mTracedAny && k && xpc_IsGrayGCThing(k) && kdelegate) {
+      tracer->mCb.NoteWeakMapping(m, k, kdelegate, nullptr);
     }
   }
 }
@@ -234,10 +225,9 @@ TraceWeakMapping(js::WeakMapTracer* aTrc, JSObject* aMap,
 // This is based on the logic in TraceWeakMapping.
 struct FixWeakMappingGrayBitsTracer : public js::WeakMapTracer
 {
-  FixWeakMappingGrayBitsTracer(JSRuntime* aRt)
-    : js::WeakMapTracer(aRt, FixWeakMappingGrayBits)
-  {
-  }
+  FixWeakMappingGrayBitsTracer(JSRuntime* rt)
+    : js::WeakMapTracer(rt, FixWeakMappingGrayBits)
+  {}
 
   void
   FixAll()
@@ -251,39 +241,40 @@ struct FixWeakMappingGrayBitsTracer : public js::WeakMapTracer
 private:
 
   static void
-  FixWeakMappingGrayBits(js::WeakMapTracer* aTrc, JSObject* aMap,
-                         void* aKey, JSGCTraceKind aKeyKind,
-                         void* aValue, JSGCTraceKind aValueKind)
+  FixWeakMappingGrayBits(js::WeakMapTracer* trc, JSObject* m,
+                         void* k, JSGCTraceKind kkind,
+                         void* v, JSGCTraceKind vkind)
   {
-    FixWeakMappingGrayBitsTracer* tracer =
-      static_cast<FixWeakMappingGrayBitsTracer*>(aTrc);
+    MOZ_ASSERT(!JS::IsIncrementalGCInProgress(trc->runtime),
+               "Don't call FixWeakMappingGrayBits during a GC.");
+
+    FixWeakMappingGrayBitsTracer* tracer = static_cast<FixWeakMappingGrayBitsTracer*>(trc);
 
     // If nothing that could be held alive by this entry is marked gray, return.
-    bool delegateMightNeedMarking = aKey && xpc_IsGrayGCThing(aKey);
-    bool valueMightNeedMarking = aValue && xpc_IsGrayGCThing(aValue) &&
-                                 aValueKind != JSTRACE_STRING;
+    bool delegateMightNeedMarking = k && xpc_IsGrayGCThing(k);
+    bool valueMightNeedMarking = v && xpc_IsGrayGCThing(v) && vkind != JSTRACE_STRING;
     if (!delegateMightNeedMarking && !valueMightNeedMarking) {
       return;
     }
 
-    if (!AddToCCKind(aKeyKind)) {
-      aKey = nullptr;
+    if (!AddToCCKind(kkind)) {
+      k = nullptr;
     }
 
-    if (delegateMightNeedMarking && aKeyKind == JSTRACE_OBJECT) {
-      JSObject* kdelegate = js::GetWeakmapKeyDelegate((JSObject*)aKey);
+    if (delegateMightNeedMarking && kkind == JSTRACE_OBJECT) {
+      JSObject* kdelegate = js::GetWeakmapKeyDelegate((JSObject*)k);
       if (kdelegate && !xpc_IsGrayGCThing(kdelegate)) {
-        if (JS::UnmarkGrayGCThingRecursively(aKey, JSTRACE_OBJECT)) {
+        if (JS::UnmarkGrayGCThingRecursively(k, JSTRACE_OBJECT)) {
           tracer->mAnyMarked = true;
         }
       }
     }
 
-    if (aValue && xpc_IsGrayGCThing(aValue) &&
-        (!aKey || !xpc_IsGrayGCThing(aKey)) &&
-        (!aMap || !xpc_IsGrayGCThing(aMap)) &&
-        aValueKind != JSTRACE_SHAPE) {
-      if (JS::UnmarkGrayGCThingRecursively(aValue, aValueKind)) {
+    if (v && xpc_IsGrayGCThing(v) &&
+        (!k || !xpc_IsGrayGCThing(k)) &&
+        (!m || !xpc_IsGrayGCThing(m)) &&
+        vkind != JSTRACE_SHAPE) {
+      if (JS::UnmarkGrayGCThingRecursively(v, vkind)) {
         tracer->mAnyMarked = true;
       }
     }
@@ -313,44 +304,42 @@ CheckParticipatesInCycleCollection(void* aThing, const char* aName, void* aClosu
   }
 
   if (AddToCCKind(js::GCThingTraceKind(aThing)) &&
-      xpc_IsGrayGCThing(aThing)) {
+      xpc_IsGrayGCThing(aThing))
+  {
     closure->mCycleCollectionEnabled = true;
   }
 }
 
 static PLDHashOperator
-NoteJSHolder(void* aHolder, nsScriptObjectTracer*& aTracer, void* aArg)
+NoteJSHolder(void *holder, nsScriptObjectTracer *&tracer, void *arg)
 {
-  Closure* closure = static_cast<Closure*>(aArg);
+  Closure *closure = static_cast<Closure*>(arg);
 
   bool noteRoot;
   if (MOZ_UNLIKELY(closure->mCb->WantAllTraces())) {
     noteRoot = true;
   } else {
     closure->mCycleCollectionEnabled = false;
-    aTracer->Trace(aHolder,
-                   TraceCallbackFunc(CheckParticipatesInCycleCollection),
-                   closure);
+    tracer->Trace(holder, TraceCallbackFunc(CheckParticipatesInCycleCollection), closure);
     noteRoot = closure->mCycleCollectionEnabled;
   }
 
   if (noteRoot) {
-    closure->mCb->NoteNativeRoot(aHolder, aTracer);
+    closure->mCb->NoteNativeRoot(holder, tracer);
   }
 
   return PL_DHASH_NEXT;
 }
 
 NS_IMETHODIMP
-JSGCThingParticipant::Traverse(void* aPtr,
-                               nsCycleCollectionTraversalCallback& aCb)
+JSGCThingParticipant::Traverse(void* p, nsCycleCollectionTraversalCallback& cb)
 {
   CycleCollectedJSRuntime* runtime = reinterpret_cast<CycleCollectedJSRuntime*>
     (reinterpret_cast<char*>(this) -
      offsetof(CycleCollectedJSRuntime, mGCThingCycleCollectorGlobal));
 
   runtime->TraverseGCThing(CycleCollectedJSRuntime::TRAVERSE_FULL,
-                           aPtr, js::GCThingTraceKind(aPtr), aCb);
+                           p, js::GCThingTraceKind(p), cb);
   return NS_OK;
 }
 
@@ -359,16 +348,16 @@ JSGCThingParticipant::Traverse(void* aPtr,
 static JSGCThingParticipant sGCThingCycleCollectorGlobal;
 
 NS_IMETHODIMP
-JSZoneParticipant::Traverse(void* aPtr, nsCycleCollectionTraversalCallback& aCb)
+JSZoneParticipant::Traverse(void* p, nsCycleCollectionTraversalCallback& cb)
 {
   CycleCollectedJSRuntime* runtime = reinterpret_cast<CycleCollectedJSRuntime*>
     (reinterpret_cast<char*>(this) -
      offsetof(CycleCollectedJSRuntime, mJSZoneCycleCollectorGlobal));
 
-  MOZ_ASSERT(!aCb.WantAllTraces());
-  JS::Zone* zone = static_cast<JS::Zone*>(aPtr);
+  MOZ_ASSERT(!cb.WantAllTraces());
+  JS::Zone* zone = static_cast<JS::Zone*>(p);
 
-  runtime->TraverseZone(zone, aCb);
+  runtime->TraverseZone(zone, cb);
   return NS_OK;
 }
 
@@ -377,8 +366,8 @@ NoteJSChildTracerShim(JSTracer* aTrc, void** aThingp, JSGCTraceKind aTraceKind);
 
 struct TraversalTracer : public JSTracer
 {
-  TraversalTracer(JSRuntime* aRt, nsCycleCollectionTraversalCallback& aCb)
-    : JSTracer(aRt, NoteJSChildTracerShim, DoNotTraceWeakMaps), mCb(aCb)
+  TraversalTracer(JSRuntime *rt, nsCycleCollectionTraversalCallback& aCb)
+    : JSTracer(rt, NoteJSChildTracerShim, DoNotTraceWeakMaps), mCb(aCb)
   {
   }
   nsCycleCollectionTraversalCallback& mCb;
@@ -412,7 +401,7 @@ NoteJSChild(JSTracer* aTrc, void* aThing, JSGCTraceKind aTraceKind)
       } else if (tracer->debugPrintIndex() != (size_t)-1) {
         char buffer[200];
         JS_snprintf(buffer, sizeof(buffer), "%s[%lu]",
-                    static_cast<const char*>(tracer->debugPrintArg()),
+                    static_cast<const char *>(tracer->debugPrintArg()),
                     tracer->debugPrintIndex());
         tracer->mCb.NoteNextEdgeName(buffer);
       } else {
@@ -466,18 +455,16 @@ NoteJSChildGrayWrapperShim(void* aData, void* aThing)
 static const JSZoneParticipant sJSZoneCycleCollectorGlobal;
 
 CycleCollectedJSRuntime::CycleCollectedJSRuntime(JSRuntime* aParentRuntime,
-                                                 uint32_t aMaxBytes,
-                                                 uint32_t aMaxNurseryBytes)
-  : mGCThingCycleCollectorGlobal(sGCThingCycleCollectorGlobal)
-  , mJSZoneCycleCollectorGlobal(sJSZoneCycleCollectorGlobal)
-  , mJSRuntime(nullptr)
-  , mJSHolders(512)
-  , mOutOfMemoryState(OOMState::OK)
-  , mLargeAllocationFailureState(OOMState::OK)
+                                                 uint32_t aMaxbytes,
+                                                 JSUseHelperThreads aUseHelperThreads)
+  : mGCThingCycleCollectorGlobal(sGCThingCycleCollectorGlobal),
+    mJSZoneCycleCollectorGlobal(sJSZoneCycleCollectorGlobal),
+    mJSRuntime(nullptr),
+    mJSHolders(512)
 {
   mozilla::dom::InitScriptSettings();
 
-  mJSRuntime = JS_NewRuntime(aMaxBytes, aMaxNurseryBytes, aParentRuntime);
+  mJSRuntime = JS_NewRuntime(aMaxbytes, aUseHelperThreads, aParentRuntime);
   if (!mJSRuntime) {
     MOZ_CRASH();
   }
@@ -487,8 +474,6 @@ CycleCollectedJSRuntime::CycleCollectedJSRuntime(JSRuntime* aParentRuntime,
   }
   JS_SetGrayGCRootsTracer(mJSRuntime, TraceGrayJS, this);
   JS_SetGCCallback(mJSRuntime, GCCallback, this);
-  JS::SetOutOfMemoryCallback(mJSRuntime, OutOfMemoryCallback, this);
-  JS::SetLargeAllocationFailureCallback(mJSRuntime, LargeAllocationFailureCallback, this);
   JS_SetContextCallback(mJSRuntime, ContextCallback, this);
   JS_SetDestroyZoneCallback(mJSRuntime, XPCStringConvert::FreeZoneCache);
   JS_SetSweepZoneCallback(mJSRuntime, XPCStringConvert::ClearZoneCache);
@@ -525,9 +510,9 @@ CycleCollectedJSRuntime::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
 }
 
 static PLDHashOperator
-UnmarkJSHolder(void* aHolder, nsScriptObjectTracer*& aTracer, void* aArg)
+UnmarkJSHolder(void* holder, nsScriptObjectTracer*& tracer, void* arg)
 {
-  aTracer->CanSkip(aHolder, true);
+  tracer->CanSkip(holder, true);
   return PL_DHASH_NEXT;
 }
 
@@ -662,8 +647,7 @@ CycleCollectedJSRuntime::TraverseGCThing(TraverseSelect aTs, void* aThing,
   }
 }
 
-struct TraverseObjectShimClosure
-{
+struct TraverseObjectShimClosure {
   nsCycleCollectionTraversalCallback& cb;
   CycleCollectedJSRuntime* self;
 };
@@ -707,7 +691,7 @@ CycleCollectedJSRuntime::TraverseZone(JS::Zone* aZone,
 CycleCollectedJSRuntime::TraverseObjectShim(void* aData, void* aThing)
 {
   TraverseObjectShimClosure* closure =
-    static_cast<TraverseObjectShimClosure*>(aData);
+      static_cast<TraverseObjectShimClosure*>(aData);
 
   MOZ_ASSERT(js::GCThingTraceKind(aThing) == JSTRACE_OBJECT);
   closure->self->TraverseGCThing(CycleCollectedJSRuntime::TRAVERSE_CPP, aThing,
@@ -754,25 +738,6 @@ CycleCollectedJSRuntime::GCCallback(JSRuntime* aRuntime,
   self->OnGC(aStatus);
 }
 
-/* static */ void
-CycleCollectedJSRuntime::OutOfMemoryCallback(JSContext *aContext,
-                                             void* aData)
-{
-  CycleCollectedJSRuntime* self = static_cast<CycleCollectedJSRuntime*>(aData);
-
-  MOZ_ASSERT(JS_GetRuntime(aContext) == self->Runtime());
-
-  self->OnOutOfMemory();
-}
-
-/* static */ void
-CycleCollectedJSRuntime::LargeAllocationFailureCallback(void* aData)
-{
-  CycleCollectedJSRuntime* self = static_cast<CycleCollectedJSRuntime*>(aData);
-
-  self->OnLargeAllocationFailure();
-}
-
 /* static */ bool
 CycleCollectedJSRuntime::ContextCallback(JSContext* aContext,
                                          unsigned aOperation,
@@ -787,40 +752,26 @@ CycleCollectedJSRuntime::ContextCallback(JSContext* aContext,
 
 struct JsGcTracer : public TraceCallbacks
 {
-  virtual void Trace(JS::Heap<JS::Value>* aPtr, const char* aName,
-                     void* aClosure) const MOZ_OVERRIDE
-  {
-    JS_CallHeapValueTracer(static_cast<JSTracer*>(aClosure), aPtr, aName);
+  virtual void Trace(JS::Heap<JS::Value> *p, const char *name, void *closure) const MOZ_OVERRIDE {
+    JS_CallHeapValueTracer(static_cast<JSTracer*>(closure), p, name);
   }
-  virtual void Trace(JS::Heap<jsid>* aPtr, const char* aName,
-                     void* aClosure) const MOZ_OVERRIDE
-  {
-    JS_CallHeapIdTracer(static_cast<JSTracer*>(aClosure), aPtr, aName);
+  virtual void Trace(JS::Heap<jsid> *p, const char *name, void *closure) const MOZ_OVERRIDE {
+    JS_CallHeapIdTracer(static_cast<JSTracer*>(closure), p, name);
   }
-  virtual void Trace(JS::Heap<JSObject*>* aPtr, const char* aName,
-                     void* aClosure) const MOZ_OVERRIDE
-  {
-    JS_CallHeapObjectTracer(static_cast<JSTracer*>(aClosure), aPtr, aName);
+  virtual void Trace(JS::Heap<JSObject *> *p, const char *name, void *closure) const MOZ_OVERRIDE {
+    JS_CallHeapObjectTracer(static_cast<JSTracer*>(closure), p, name);
   }
-  virtual void Trace(JS::TenuredHeap<JSObject*>* aPtr, const char* aName,
-                     void* aClosure) const MOZ_OVERRIDE
-  {
-    JS_CallTenuredObjectTracer(static_cast<JSTracer*>(aClosure), aPtr, aName);
+  virtual void Trace(JS::TenuredHeap<JSObject *> *p, const char *name, void *closure) const MOZ_OVERRIDE {
+    JS_CallTenuredObjectTracer(static_cast<JSTracer*>(closure), p, name);
   }
-  virtual void Trace(JS::Heap<JSString*>* aPtr, const char* aName,
-                     void* aClosure) const MOZ_OVERRIDE
-  {
-    JS_CallHeapStringTracer(static_cast<JSTracer*>(aClosure), aPtr, aName);
+  virtual void Trace(JS::Heap<JSString *> *p, const char *name, void *closure) const MOZ_OVERRIDE {
+    JS_CallHeapStringTracer(static_cast<JSTracer*>(closure), p, name);
   }
-  virtual void Trace(JS::Heap<JSScript*>* aPtr, const char* aName,
-                     void* aClosure) const MOZ_OVERRIDE
-  {
-    JS_CallHeapScriptTracer(static_cast<JSTracer*>(aClosure), aPtr, aName);
+  virtual void Trace(JS::Heap<JSScript *> *p, const char *name, void *closure) const MOZ_OVERRIDE {
+    JS_CallHeapScriptTracer(static_cast<JSTracer*>(closure), p, name);
   }
-  virtual void Trace(JS::Heap<JSFunction*>* aPtr, const char* aName,
-                     void* aClosure) const MOZ_OVERRIDE
-  {
-    JS_CallHeapFunctionTracer(static_cast<JSTracer*>(aClosure), aPtr, aName);
+  virtual void Trace(JS::Heap<JSFunction *> *p, const char *name, void *closure) const MOZ_OVERRIDE {
+    JS_CallHeapFunctionTracer(static_cast<JSTracer*>(closure), p, name);
   }
 };
 
@@ -830,14 +781,6 @@ TraceJSHolder(void* aHolder, nsScriptObjectTracer*& aTracer, void* aArg)
   aTracer->Trace(aHolder, JsGcTracer(), aArg);
 
   return PL_DHASH_NEXT;
-}
-
-void
-mozilla::TraceScriptHolder(nsISupports* aHolder, JSTracer* aTracer)
-{
-  nsXPCOMCycleCollectionParticipant* participant = nullptr;
-  CallQueryInterface(aHolder, &participant);
-  participant->Trace(aHolder, JsGcTracer(), aTracer);
 }
 
 void
@@ -944,17 +887,17 @@ CycleCollectedJSRuntime::SetPendingException(nsIException* aException)
 nsCycleCollectionParticipant*
 CycleCollectedJSRuntime::GCThingParticipant()
 {
-  return &mGCThingCycleCollectorGlobal;
+    return &mGCThingCycleCollectorGlobal;
 }
 
 nsCycleCollectionParticipant*
 CycleCollectedJSRuntime::ZoneParticipant()
 {
-  return &mJSZoneCycleCollectorGlobal;
+    return &mJSZoneCycleCollectorGlobal;
 }
 
 nsresult
-CycleCollectedJSRuntime::TraverseRoots(nsCycleCollectionNoteRootCallback& aCb)
+CycleCollectedJSRuntime::TraverseRoots(nsCycleCollectionNoteRootCallback &aCb)
 {
   TraverseNativeRoots(aCb);
 
@@ -1001,20 +944,18 @@ CycleCollectedJSRuntime::UsefulToMergeZones() const
 void
 CycleCollectedJSRuntime::FixWeakMappingGrayBits() const
 {
-  MOZ_ASSERT(!JS::IsIncrementalGCInProgress(mJSRuntime),
-             "Don't call FixWeakMappingGrayBits during a GC.");
   FixWeakMappingGrayBitsTracer fixer(mJSRuntime);
   fixer.FixAll();
 }
 
 bool
-CycleCollectedJSRuntime::AreGCGrayBitsValid() const
+CycleCollectedJSRuntime::NeedCollect() const
 {
-  return js::AreGCGrayBitsValid(mJSRuntime);
+  return !js::AreGCGrayBitsValid(mJSRuntime);
 }
 
 void
-CycleCollectedJSRuntime::GarbageCollect(uint32_t aReason) const
+CycleCollectedJSRuntime::Collect(uint32_t aReason) const
 {
   MOZ_ASSERT(aReason < JS::gcreason::NUM_REASONS);
   JS::gcreason::Reason gcreason = static_cast<JS::gcreason::Reason>(aReason);
@@ -1044,9 +985,9 @@ CycleCollectedJSRuntime::DeferredFinalize(nsISupports* aSupports)
 }
 
 void
-CycleCollectedJSRuntime::DumpJSHeap(FILE* aFile)
+CycleCollectedJSRuntime::DumpJSHeap(FILE* file)
 {
-  js::DumpHeapComplete(Runtime(), aFile, js::CollectNurseryBeforeDump);
+  js::DumpHeapComplete(Runtime(), file, js::CollectNurseryBeforeDump);
 }
 
 
@@ -1087,8 +1028,8 @@ IncrementalFinalizeRunnable::DeferredFinalizerEnumerator(DeferredFinalizeFunctio
 IncrementalFinalizeRunnable::IncrementalFinalizeRunnable(CycleCollectedJSRuntime* aRt,
                                                          nsTArray<nsISupports*>& aSupports,
                                                          DeferredFinalizerTable& aFinalizers)
-  : mRuntime(aRt)
-  , mFinalizeFunctionToRun(0)
+  : mRuntime(aRt),
+    mFinalizeFunctionToRun(0)
 {
   this->mSupports.SwapElements(aSupports);
   DeferredFinalizeFunctionHolder* function = mDeferredFinalizeFunctions.AppendElement();
@@ -1117,7 +1058,7 @@ IncrementalFinalizeRunnable::ReleaseNow(bool aLimited)
   TimeStamp started = TimeStamp::Now();
   bool timeout = false;
   do {
-    const DeferredFinalizeFunctionHolder& function =
+    const DeferredFinalizeFunctionHolder &function =
       mDeferredFinalizeFunctions[mFinalizeFunctionToRun];
     if (aLimited) {
       bool done = false;
@@ -1191,22 +1132,6 @@ CycleCollectedJSRuntime::FinalizeDeferredThings(DeferredFinalizeType aType)
   }
 }
 
-void 
-CycleCollectedJSRuntime::AnnotateAndSetOutOfMemory(OOMState *aStatePtr, OOMState aNewState)
-{
-  *aStatePtr = aNewState;
-#ifdef MOZ_CRASHREPORTER
-  CrashReporter::AnnotateCrashReport(aStatePtr == &mOutOfMemoryState
-                                     ? NS_LITERAL_CSTRING("JSOutOfMemory")
-                                     : NS_LITERAL_CSTRING("JSLargeAllocationFailure"),
-                                     aNewState == OOMState::Reporting
-                                     ? NS_LITERAL_CSTRING("Reporting")
-                                     : aNewState == OOMState::Reported
-                                     ? NS_LITERAL_CSTRING("Reported")
-                                     : NS_LITERAL_CSTRING("Recovered"));
-#endif
-}
-
 void
 CycleCollectedJSRuntime::OnGC(JSGCStatus aStatus)
 {
@@ -1214,16 +1139,8 @@ CycleCollectedJSRuntime::OnGC(JSGCStatus aStatus)
     case JSGC_BEGIN:
       nsCycleCollector_prepareForGarbageCollection();
       break;
-    case JSGC_END: {
-#ifdef MOZ_CRASHREPORTER
-      if (mOutOfMemoryState == OOMState::Reported) {
-        AnnotateAndSetOutOfMemory(&mOutOfMemoryState, OOMState::Recovered);
-      }
-      if (mLargeAllocationFailureState == OOMState::Reported) {
-        AnnotateAndSetOutOfMemory(&mLargeAllocationFailureState, OOMState::Recovered);
-      }
-#endif
-
+    case JSGC_END:
+    {
       /*
        * If the previous GC created a runnable to finalize objects
        * incrementally, and if it hasn't finished yet, finish it now. We
@@ -1245,20 +1162,4 @@ CycleCollectedJSRuntime::OnGC(JSGCStatus aStatus)
   }
 
   CustomGCCallback(aStatus);
-}
-
-void
-CycleCollectedJSRuntime::OnOutOfMemory()
-{
-  AnnotateAndSetOutOfMemory(&mOutOfMemoryState, OOMState::Reporting);
-  CustomOutOfMemoryCallback();
-  AnnotateAndSetOutOfMemory(&mOutOfMemoryState, OOMState::Reported);
-}
-
-void
-CycleCollectedJSRuntime::OnLargeAllocationFailure()
-{
-  AnnotateAndSetOutOfMemory(&mLargeAllocationFailureState, OOMState::Reporting);
-  CustomLargeAllocationFailureCallback();
-  AnnotateAndSetOutOfMemory(&mLargeAllocationFailureState, OOMState::Reported);
 }

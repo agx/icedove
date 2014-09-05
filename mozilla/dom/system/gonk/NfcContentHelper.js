@@ -118,13 +118,12 @@ NfcContentHelper.prototype = {
     if (sessionToken == null) {
       throw Components.Exception("No session token!",
                                   Cr.NS_ERROR_UNEXPECTED);
-      return false;
+      return;
     }
     // Report session to Nfc.js only.
-    let val = cpmm.sendSyncMessage("NFC:SetSessionToken", {
-      sessionToken: sessionToken
+    cpmm.sendAsyncMessage("NFC:SetSessionToken", {
+      sessionToken: sessionToken,
     });
-    return (val[0] === NFC.NFC_SUCCESS);
   },
 
   // NFCTag interface
@@ -384,17 +383,17 @@ NfcContentHelper.prototype = {
     Services.DOMRequest.fireSuccess(request, result);
   },
 
-  fireRequestError: function fireRequestError(requestId, errorMsg) {
+  fireRequestError: function fireRequestError(requestId, error) {
     let request = this.takeRequest(requestId);
     if (!request) {
       debug("not firing error for id: " + requestId +
-            ", errormsg: " + errorMsg);
+            ", error: " + JSON.stringify(error));
       return;
     }
 
     debug("fire request error, id: " + requestId +
-          ", errormsg: " + errorMsg);
-    Services.DOMRequest.fireError(request, errorMsg);
+          ", result: " + JSON.stringify(error));
+    Services.DOMRequest.fireError(request, error);
   },
 
   receiveMessage: function receiveMessage(message) {
@@ -408,17 +407,15 @@ NfcContentHelper.prototype = {
       case "NFC:GetDetailsNDEFResponse":
         this.handleGetDetailsNDEFResponse(result);
         break;
-      case "NFC:CheckP2PRegistrationResponse":
-        this.handleCheckP2PRegistrationResponse(result);
-        break;
       case "NFC:ConnectResponse": // Fall through.
       case "NFC:CloseResponse":
       case "NFC:WriteNDEFResponse":
       case "NFC:MakeReadOnlyNDEFResponse":
+      case "NFC:CheckP2PRegistrationResponse":
       case "NFC:NotifySendFileStatusResponse":
       case "NFC:ConfigResponse":
-        if (result.errorMsg) {
-          this.fireRequestError(atob(result.requestId), result.errorMsg);
+        if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
+          this.fireRequestError(atob(result.requestId), result.status);
         } else {
           this.fireRequestSuccess(atob(result.requestId), result);
         }
@@ -443,8 +440,8 @@ NfcContentHelper.prototype = {
     }
     delete this._requestMap[result.requestId];
 
-    if (result.errorMsg) {
-      this.fireRequestError(atob(result.requestId), result.errorMsg);
+    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
+      this.fireRequestError(atob(result.requestId), result.status);
       return;
     }
 
@@ -462,21 +459,14 @@ NfcContentHelper.prototype = {
   },
 
   handleGetDetailsNDEFResponse: function handleGetDetailsNDEFResponse(result) {
-    if (result.errorMsg) {
-      this.fireRequestError(atob(result.requestId), result.errorMsg);
+    if (result.status !== NFC.GECKO_NFC_ERROR_SUCCESS) {
+      this.fireRequestError(atob(result.requestId), result.status);
       return;
     }
 
     let requestId = atob(result.requestId);
     let result = new GetDetailsNDEFResponse(result);
     this.fireRequestSuccess(requestId, result);
-  },
-
-  handleCheckP2PRegistrationResponse: function handleCheckP2PRegistrationResponse(result) {
-    // Privilaged status API. Always fire success to avoid using exposed props.
-    // The receiver must check the boolean mapped status code to handle.
-    let requestId = atob(result.requestId);
-    this.fireRequestSuccess(requestId, !result.errorMsg);
   },
 };
 

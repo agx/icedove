@@ -20,7 +20,7 @@ namespace storage {
  *        The database we'll be registering the functions with.
  * @return the SQLite status code indicating success or failure.
  */
-int registerFunctions(sqlite3 *aDB);
+NS_HIDDEN_(int) registerFunctions(sqlite3 *aDB);
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Predefined Functions
@@ -36,7 +36,7 @@ int registerFunctions(sqlite3 *aDB);
  * @param aArgv
  *        An array of the arguments the functions is being called with.
  */
-void caseFunction(sqlite3_context *aCtx,
+NS_HIDDEN_(void) caseFunction(sqlite3_context *aCtx,
                               int aArgc,
                               sqlite3_value **aArgv);
 
@@ -51,7 +51,7 @@ void caseFunction(sqlite3_context *aCtx,
  * @param aArgv
  *        An array of the arguments the functions is being called with.
  */
-void likeFunction(sqlite3_context *aCtx,
+NS_HIDDEN_(void) likeFunction(sqlite3_context *aCtx,
                               int aArgc,
                               sqlite3_value **aArgv);
 
@@ -66,7 +66,7 @@ void likeFunction(sqlite3_context *aCtx,
  * @param aArgv
  *        An array of the arguments the functions is being called with.
  */
-void levenshteinDistanceFunction(sqlite3_context *aCtx,
+NS_HIDDEN_(void) levenshteinDistanceFunction(sqlite3_context *aCtx,
                                              int aArgc,
                                              sqlite3_value **aArgv);
 

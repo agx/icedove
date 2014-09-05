@@ -1,13 +1,6 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set ts=8 sts=2 et sw=2 tw=80: */
-/* This code is made available to you under your choice of the following sets
- * of licensing terms:
- */
-/* This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at http://mozilla.org/MPL/2.0/.
- */
-/* Copyright 2013 Mozilla Contributors
+/* Copyright 2013 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,11 +28,11 @@
 namespace mozilla { namespace pkix {
 
 SECStatus
-VerifySignedData(const CERTSignedData* sd, const SECItem& subjectPublicKeyInfo,
+VerifySignedData(const CERTSignedData* sd, const CERTCertificate* cert,
                  void* pkcs11PinArg)
 {
   if (!sd || !sd->data.data || !sd->signatureAlgorithm.algorithm.data ||
-      !sd->signature.data) {
+      !sd->signature.data || !cert) {
     PR_NOT_REACHED("invalid args to VerifySignedData");
     PR_SetError(SEC_ERROR_INVALID_ARGS, 0);
     return SECFailure;
@@ -55,13 +48,12 @@ VerifySignedData(const CERTSignedData* sd, const SECItem& subjectPublicKeyInfo,
   SECItem sig = sd->signature;
   DER_ConvertBitString(&sig);
 
-  ScopedPtr<CERTSubjectPublicKeyInfo, SECKEY_DestroySubjectPublicKeyInfo>
-    spki(SECKEY_DecodeDERSubjectPublicKeyInfo(&subjectPublicKeyInfo));
-  if (!spki) {
-    return SECFailure;
-  }
-  ScopedPtr<SECKEYPublicKey, SECKEY_DestroyPublicKey>
-    pubKey(SECKEY_ExtractPublicKey(spki.get()));
+  // Use SECKEY_ExtractPublicKey instead of CERT_ExtractPublicKey because
+  // CERT_ExtractPublicKey would try to do (EC)DSA parameter inheritance, using
+  // the classic (wrong) NSS path building logic. We intentionally do not
+  // support parameter inheritance.
+  ScopedSECKEYPublicKey
+    pubKey(SECKEY_ExtractPublicKey(&cert->subjectPublicKeyInfo));
   if (!pubKey) {
     return SECFailure;
   }

@@ -7,7 +7,7 @@
 
 //-----------------------------------------------------------------------------
 var BUGNUMBER = 477581;
-var summary = 'Do not assert: !regs.sp[-2].isPrimitive()';
+var summary = 'Do not assert: !JSVAL_IS_PRIMITIVE(regs.sp[-2])';
 var actual = '';
 var expect = '';
 

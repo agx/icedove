@@ -45,6 +45,10 @@ attachmentlist:focus > attachmentitem[selected="true"] .attachmentcell-nameselec
   color: HighlightText;
 }
 
+attachmentitem[selected="true"] .attachmentcell-icon {
+  filter: url("chrome://messenger/skin/imageFilters.svg#selected");
+}
+
 attachmentlist:focus > attachmentitem[selected="true"] .attachmentcell-icon {
   filter: url("chrome://messenger/skin/imageFilters.svg#selected-focus");
 }

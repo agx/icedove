@@ -6,4 +6,7 @@
 
 DIRS += ['components', 'atoms']
 
+if CONFIG['ENABLE_TESTS']:
+    DEFINES['ENABLE_TESTS'] = True
+
 JAR_MANIFESTS += ['jar.mn']

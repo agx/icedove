@@ -337,11 +337,7 @@ public final class BitmapUtils {
      * @return        the decoded bitmap, or null if the data URI is invalid
      */
     public static Bitmap getBitmapFromDataURI(String dataURI) {
-        if (dataURI == null) {
-            return null;
-        }
-
-        final String base64 = dataURI.substring(dataURI.indexOf(',') + 1);
+        String base64 = dataURI.substring(dataURI.indexOf(',') + 1);
         try {
             byte[] raw = Base64.decode(base64, Base64.DEFAULT);
             return BitmapUtils.decodeByteArray(raw);

@@ -16,15 +16,14 @@ class nsPageContentFrame : public ViewportFrame {
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  friend nsPageContentFrame* NS_NewPageContentFrame(nsIPresShell* aPresShell,
-                                                    nsStyleContext* aContext);
+  friend nsIFrame* NS_NewPageContentFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
   friend class nsPageFrame;
 
   // nsIFrame
-  virtual void Reflow(nsPresContext*      aPresContext,
-                      nsHTMLReflowMetrics& aDesiredSize,
-                      const nsHTMLReflowState& aMaxSize,
-                      nsReflowStatus&      aStatus) MOZ_OVERRIDE;
+  virtual nsresult  Reflow(nsPresContext*      aPresContext,
+                           nsHTMLReflowMetrics& aDesiredSize,
+                           const nsHTMLReflowState& aMaxSize,
+                           nsReflowStatus&      aStatus) MOZ_OVERRIDE;
 
   virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
   {

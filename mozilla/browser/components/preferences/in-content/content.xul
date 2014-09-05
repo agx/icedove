@@ -1,8 +1,6 @@
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-<!-- Content panel -->
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this file,
+   - You can obtain one at http://mozilla.org/MPL/2.0/.  -->
 
 <preferences id="contentPreferences">
 
@@ -16,11 +14,6 @@
               name="font.language.group"
               type="wstring"
               onchange="gContentPane._rebuildFonts();"/>
-
-  <!-- Languages -->
-  <preference id="browser.translation.detectLanguage"
-              name="browser.translation.detectLanguage"
-              type="bool"/>
 </preferences>
 
 <script type="application/javascript" 
@@ -33,11 +26,12 @@
       hidden="true"
       data-category="paneContent">
   <image class="header-icon"/>
-  <label class="header-name">&paneContent.title;</label>
+  <label class="header-name"
+         value="&paneContent.title;"/>
 </hbox>
 
 <groupbox id="miscGroup" data-category="paneContent" hidden="true">
-  <caption><label>&popups.label;</label></caption>
+  <caption label="&popups.label;"/>
 
   <grid id="contentGrid">
     <columns>
@@ -62,7 +56,7 @@
 
 <!-- Fonts and Colors -->
 <groupbox id="fontsGroup" data-category="paneContent" hidden="true">
-  <caption><label>&fontsAndColors.label;</label></caption>
+  <caption label="&fontsAndColors.label;"/>
 
   <grid id="fontsGrid">
     <columns>
@@ -123,7 +117,7 @@
 
 <!-- Languages -->
 <groupbox id="languagesGroup" data-category="paneContent" hidden="true">
-  <caption><label>&languages.label;</label></caption>
+  <caption label="&languages.label;"/>
 
   <hbox id="languagesBox" align="center">
     <description flex="1" control="chooseLanguage">&chooseLanguage.label;</description>
@@ -131,22 +125,5 @@
             label="&chooseButton.label;"
             accesskey="&chooseButton.accesskey;"
             oncommand="gContentPane.showLanguages();"/>
-  </hbox>
-
-  <hbox id="translationBox" hidden="true">
-    <hbox align="center" flex="1">
-      <checkbox id="translate" preference="browser.translation.detectLanguage"
-                label="&translateWebPages.label;." accesskey="&translateWebPages.accesskey;"
-                onsyncfrompreference="return gContentPane.updateButtons('translateButton',
-                                              'browser.translation.detectLanguage');"/>
-      <label id="translationAttributionBeforeLogo"/>
-      <separator orient="vertical" class="thin"/>
-      <image id="translationAttributionImage" aria-label="Microsoft Translator"
-             onclick="gContentPane.openTranslationProviderAttribution()"
-             src="chrome://browser/content/microsoft-translator-attribution.png"/>
-    </hbox>
-    <button id="translateButton" label="&translateExceptions.label;"
-            oncommand="gContentPane.showTranslationExceptions();"
-            accesskey="&translateExceptions.accesskey;"/>
   </hbox>
 </groupbox>

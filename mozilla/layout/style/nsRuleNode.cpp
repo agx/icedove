@@ -223,21 +223,9 @@ struct CalcLengthCalcOps : public css::BasicCoordCalcOps,
   }
 };
 
-static inline nscoord ScaleCoordRound(const nsCSSValue& aValue, float aFactor)
+static inline nscoord ScaleCoord(const nsCSSValue &aValue, float factor)
 {
-  return NSToCoordRoundWithClamp(aValue.GetFloatValue() * aFactor);
-}
-
-static inline nscoord ScaleViewportCoordTrunc(const nsCSSValue& aValue,
-                                              nscoord aViewportSize)
-{
-  // For units (like percentages and viewport units) where authors might
-  // repeatedly use a value and expect some multiple of the value to be
-  // smaller than a container, we need to use floor rather than round.
-  // We need to use division by 100.0 rather than multiplication by 0.1f
-  // to avoid introducing error.
-  return NSToCoordTruncClamped(aValue.GetFloatValue() *
-                               aViewportSize / 100.0f);
+  return NSToCoordRoundWithClamp(aValue.GetFloatValue() * factor);
 }
 
 already_AddRefed<nsFontMetrics>
@@ -363,22 +351,18 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
     // for an increased cost to dynamic changes to the viewport size
     // when viewport units are in use.
     case eCSSUnit_ViewportWidth: {
-      nscoord viewportWidth = CalcViewportUnitsScale(aPresContext).width;
-      return ScaleViewportCoordTrunc(aValue, viewportWidth);
+      return ScaleCoord(aValue, 0.01f * CalcViewportUnitsScale(aPresContext).width);
     }
     case eCSSUnit_ViewportHeight: {
-      nscoord viewportHeight = CalcViewportUnitsScale(aPresContext).height;
-      return ScaleViewportCoordTrunc(aValue, viewportHeight);
+      return ScaleCoord(aValue, 0.01f * CalcViewportUnitsScale(aPresContext).height);
     }
     case eCSSUnit_ViewportMin: {
       nsSize vuScale(CalcViewportUnitsScale(aPresContext));
-      nscoord viewportMin = min(vuScale.width, vuScale.height);
-      return ScaleViewportCoordTrunc(aValue, viewportMin);
+      return ScaleCoord(aValue, 0.01f * min(vuScale.width, vuScale.height));
     }
     case eCSSUnit_ViewportMax: {
       nsSize vuScale(CalcViewportUnitsScale(aPresContext));
-      nscoord viewportMax = max(vuScale.width, vuScale.height);
-      return ScaleViewportCoordTrunc(aValue, viewportMax);
+      return ScaleCoord(aValue, 0.01f * max(vuScale.width, vuScale.height));
     }
     // While we could deal with 'rem' units correctly by simply not
     // caching any data that uses them in the rule tree, it's valuable
@@ -431,7 +415,7 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
         rootFontSize = rootStyleFont->mFont.size;
       }
 
-      return ScaleCoordRound(aValue, float(rootFontSize));
+      return ScaleCoord(aValue, float(rootFontSize));
     }
     default:
       // Fall through to the code for units that can't be stored in the
@@ -452,13 +436,13 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
     case eCSSUnit_EM: {
       // CSS2.1 specifies that this unit scales to the computed font
       // size, not the em-width in the font metrics, despite the name.
-      return ScaleCoordRound(aValue, float(aFontSize));
+      return ScaleCoord(aValue, float(aFontSize));
     }
     case eCSSUnit_XHeight: {
       nsRefPtr<nsFontMetrics> fm =
         GetMetricsFor(aPresContext, aStyleContext, styleFont,
                       aFontSize, aUseUserFontSet);
-      return ScaleCoordRound(aValue, float(fm->XHeight()));
+      return ScaleCoord(aValue, float(fm->XHeight()));
     }
     case eCSSUnit_Char: {
       nsRefPtr<nsFontMetrics> fm =
@@ -467,8 +451,8 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
       gfxFloat zeroWidth = (fm->GetThebesFontGroup()->GetFontAt(0)
                             ->GetMetrics().zeroOrAveCharWidth);
 
-      return ScaleCoordRound(aValue, ceil(aPresContext->AppUnitsPerDevPixel() *
-                                          zeroWidth));
+      return ScaleCoord(aValue, ceil(aPresContext->AppUnitsPerDevPixel() *
+                                     zeroWidth));
     }
     default:
       NS_NOTREACHED("unexpected unit");
@@ -3295,11 +3279,7 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
     float devPerCSS =
       (float)nsPresContext::AppUnitsPerCSSPixel() /
       aPresContext->DeviceContext()->UnscaledAppUnitsPerDevPixel();
-    nsAutoString systemFontName;
-    if (LookAndFeel::GetFont(fontID, systemFontName, fontStyle, devPerCSS)) {
-      systemFontName.Trim("\"'");
-      systemFont.fontlist = FontFamilyList(systemFontName, eUnquotedName);
-      systemFont.fontlist.SetDefaultFontType(eFamily_none);
+    if (LookAndFeel::GetFont(fontID, systemFont.name, fontStyle, devPerCSS)) {
       systemFont.style = fontStyle.style;
       systemFont.systemFont = fontStyle.systemFont;
       systemFont.variant = NS_FONT_VARIANT_NORMAL;
@@ -3340,24 +3320,19 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
     }
   }
 
-  // font-family: font family list, enum, inherit
+  // font-family: string list, enum, inherit
   const nsCSSValue* familyValue = aRuleData->ValueForFontFamily();
   NS_ASSERTION(eCSSUnit_Enumerated != familyValue->GetUnit(),
                "system fonts should not be in mFamily anymore");
-  if (eCSSUnit_FontFamilyList == familyValue->GetUnit()) {
+  if (eCSSUnit_Families == familyValue->GetUnit()) {
     // set the correct font if we are using DocumentFonts OR we are overriding for XUL
     // MJA: bug 31816
     if (aGenericFontID == kGenericFont_NONE) {
-      uint32_t len = defaultVariableFont->fontlist.Length();
-      FontFamilyType generic = defaultVariableFont->fontlist.FirstGeneric();
-      NS_ASSERTION(len == 1 &&
-                   (generic == eFamily_serif || generic == eFamily_sans_serif),
-                   "default variable font must be a single serif or sans-serif");
-      if (len == 1 && generic != eFamily_none) {
-        aFont->mFont.fontlist.SetDefaultFontType(generic);
-      }
-    } else {
-      aFont->mFont.fontlist.SetDefaultFontType(eFamily_none);
+      // only bother appending fallback fonts if this isn't a fallback generic font itself
+      if (!aFont->mFont.name.IsEmpty())
+        aFont->mFont.name.Append((char16_t)',');
+      // defaultVariableFont.name should always be "serif" or "sans-serif".
+      aFont->mFont.name.Append(defaultVariableFont->name);
     }
     aFont->mFont.systemFont = false;
     // Technically this is redundant with the code below, but it's good
@@ -3366,19 +3341,19 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
     aFont->mGenericID = aGenericFontID;
   }
   else if (eCSSUnit_System_Font == familyValue->GetUnit()) {
-    aFont->mFont.fontlist = systemFont.fontlist;
+    aFont->mFont.name = systemFont.name;
     aFont->mFont.systemFont = true;
     aFont->mGenericID = kGenericFont_NONE;
   }
   else if (eCSSUnit_Inherit == familyValue->GetUnit() ||
            eCSSUnit_Unset == familyValue->GetUnit()) {
     aCanStoreInRuleTree = false;
-    aFont->mFont.fontlist = aParentFont->mFont.fontlist;
+    aFont->mFont.name = aParentFont->mFont.name;
     aFont->mFont.systemFont = aParentFont->mFont.systemFont;
     aFont->mGenericID = aParentFont->mGenericID;
   }
   else if (eCSSUnit_Initial == familyValue->GetUnit()) {
-    aFont->mFont.fontlist = defaultVariableFont->fontlist;
+    aFont->mFont.name = defaultVariableFont->name;
     aFont->mFont.systemFont = defaultVariableFont->systemFont;
     aFont->mGenericID = kGenericFont_NONE;
   }
@@ -3874,6 +3849,18 @@ nsRuleNode::SetGenericFont(nsPresContext* aPresContext,
   }
 }
 
+static bool ExtractGeneric(const nsString& aFamily, bool aGeneric,
+                             void *aData)
+{
+  nsAutoString *data = static_cast<nsAutoString*>(aData);
+
+  if (aGeneric) {
+    *data = aFamily;
+    return false; // stop enumeration
+  }
+  return true;
+}
+
 const void*
 nsRuleNode::ComputeFontData(void* aStartStruct,
                             const nsRuleData* aRuleData,
@@ -3912,55 +3899,32 @@ nsRuleNode::ComputeFontData(void* aStartStruct,
   // XXXldb What if we would have had a string if we hadn't been doing
   // the optimization with a non-null aStartStruct?
   const nsCSSValue* familyValue = aRuleData->ValueForFontFamily();
-  if (eCSSUnit_FontFamilyList == familyValue->GetUnit()) {
-    const FontFamilyList* fontlist = familyValue->GetFontFamilyListValue();
-    FontFamilyList& fl = font->mFont.fontlist;
-    fl = *fontlist;
-
-    // extract the first generic in the fontlist, if exists
-    FontFamilyType fontType = fontlist->FirstGeneric();
-
-    // if only a single generic, set the generic type
-    if (fontlist->Length() == 1) {
-      switch (fontType) {
-        case eFamily_serif:
-          generic = kGenericFont_serif;
-          break;
-        case eFamily_sans_serif:
-          generic = kGenericFont_sans_serif;
-          break;
-        case eFamily_monospace:
-          generic = kGenericFont_monospace;
-          break;
-        case eFamily_cursive:
-          generic = kGenericFont_cursive;
-          break;
-        case eFamily_fantasy:
-          generic = kGenericFont_fantasy;
-          break;
-        case eFamily_moz_fixed:
-          generic = kGenericFont_moz_fixed;
-          break;
-        default:
-          break;
-      }
-    }
+  if (eCSSUnit_Families == familyValue->GetUnit()) {
+    familyValue->GetStringValue(font->mFont.name);
+    // XXXldb Do we want to extract the generic for this if it's not only a
+    // generic?
+    nsFont::GetGenericID(font->mFont.name, &generic);
 
     // If we aren't allowed to use document fonts, then we are only entitled
     // to use the user's default variable-width font and fixed-width font
     if (!useDocumentFonts) {
-      switch (fontType) {
-        case eFamily_monospace:
-          fl = FontFamilyList(eFamily_monospace);
-          generic = kGenericFont_monospace;
-          break;
-        case eFamily_moz_fixed:
-          fl = FontFamilyList(eFamily_moz_fixed);
-          generic = kGenericFont_moz_fixed;
-        default:
-          fl.Clear();
+      // Extract the generic from the specified font family...
+      nsAutoString genericName;
+      if (!font->mFont.EnumerateFamilies(ExtractGeneric, &genericName)) {
+        // The specified font had a generic family.
+        font->mFont.name = genericName;
+        nsFont::GetGenericID(genericName, &generic);
+
+        // ... and only use it if it's -moz-fixed or monospace
+        if (generic != kGenericFont_moz_fixed &&
+            generic != kGenericFont_monospace) {
+          font->mFont.name.Truncate();
           generic = kGenericFont_NONE;
-          break;
+        }
+      } else {
+        // The specified font did not have a generic family.
+        font->mFont.name.Truncate();
+        generic = kGenericFont_NONE;
       }
     }
   }
@@ -6275,6 +6239,14 @@ nsRuleNode::ComputeBackgroundData(void* aStartStruct,
                     uint8_t(NS_STYLE_BG_CLIP_BORDER), parentBG->mClipCount,
                     bg->mClipCount, maxItemCount, rebuild, canStoreInRuleTree);
 
+  // background-inline-policy: enum, inherit, initial
+  SetDiscrete(*aRuleData->ValueForBackgroundInlinePolicy(),
+              bg->mBackgroundInlinePolicy,
+              canStoreInRuleTree,
+              SETDSC_ENUMERATED | SETDSC_UNSET_INITIAL,
+              parentBG->mBackgroundInlinePolicy,
+              NS_STYLE_BG_INLINE_POLICY_CONTINUOUS, 0, 0, 0, 0);
+
   // background-blend-mode: enum, inherit, initial [list]
   SetBackgroundList(aContext, *aRuleData->ValueForBackgroundBlendMode(),
                     bg->mLayers,
@@ -6472,13 +6444,6 @@ nsRuleNode::ComputeBorderData(void* aStartStruct,
                               const bool aCanStoreInRuleTree)
 {
   COMPUTE_START_RESET(Border, (mPresContext), border, parentBorder)
-
-  // box-decoration-break: enum, inherit, initial
-  SetDiscrete(*aRuleData->ValueForBoxDecorationBreak(),
-              border->mBoxDecorationBreak, canStoreInRuleTree,
-              SETDSC_ENUMERATED | SETDSC_UNSET_INITIAL,
-              parentBorder->mBoxDecorationBreak,
-              NS_STYLE_BOX_DECORATION_BREAK_SLICE, 0, 0, 0, 0);
 
   // box-shadow: none, list, inherit, initial
   const nsCSSValue* boxShadowValue = aRuleData->ValueForBoxShadow();
@@ -7541,7 +7506,7 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
       break;
     case eCSSUnit_Initial:
     case eCSSUnit_Unset:
-      pos->mGridAutoFlow = NS_STYLE_GRID_AUTO_FLOW_ROW;
+      pos->mGridAutoFlow = NS_STYLE_GRID_AUTO_FLOW_NONE;
       break;
     default:
       NS_ASSERTION(gridAutoFlow.GetUnit() == eCSSUnit_Enumerated,
@@ -7580,6 +7545,33 @@ nsRuleNode::ComputePositionData(void* aStartStruct,
                        &pos->mGridTemplateAreas,
                        parentPos->mGridTemplateAreas,
                        canStoreInRuleTree);
+
+  // grid-auto-position
+  const nsCSSValue& gridAutoPosition = *aRuleData->ValueForGridAutoPosition();
+  switch (gridAutoPosition.GetUnit()) {
+    case eCSSUnit_Null:
+      break;
+    case eCSSUnit_Inherit:
+      canStoreInRuleTree = false;
+      pos->mGridAutoPositionColumn = parentPos->mGridAutoPositionColumn;
+      pos->mGridAutoPositionRow = parentPos->mGridAutoPositionRow;
+      break;
+    case eCSSUnit_Initial:
+    case eCSSUnit_Unset:
+      // '1 / 1'
+      pos->mGridAutoPositionColumn.SetToInteger(1);
+      pos->mGridAutoPositionRow.SetToInteger(1);
+      break;
+    default:
+      SetGridLine(gridAutoPosition.GetPairValue().mXValue,
+                  pos->mGridAutoPositionColumn,
+                  parentPos->mGridAutoPositionColumn,
+                  canStoreInRuleTree);
+      SetGridLine(gridAutoPosition.GetPairValue().mYValue,
+                  pos->mGridAutoPositionRow,
+                  parentPos->mGridAutoPositionRow,
+                  canStoreInRuleTree);
+  }
 
   // grid-column-start
   SetGridLine(*aRuleData->ValueForGridColumnStart(),

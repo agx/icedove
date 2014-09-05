@@ -15,8 +15,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 namespace {
 
 const uint8_t kAudioPayloadType = 0;
@@ -369,7 +367,5 @@ TEST_F(InitialDelayManagerTest, BufferingAudio) {
   EXPECT_EQ(0, sync_stream.num_sync_packets);
   EXPECT_FALSE(manager_->buffering());
 }
-
-}  // namespace acm2
 
 }  // namespace webrtc

@@ -767,6 +767,8 @@ class DebugProgram(MachCommandBase):
         help='Do not set the JS_DISABLE_SLOW_SCRIPT_SIGNALS env variable; when not set, recoverable but misleading SIGSEGV instances may occur in Ion/Odin JIT code')
     def debug(self, params, remote, background, debugger, debugparams, slowscript):
         import which
+        use_lldb = False
+        use_gdb = False
         if debugger:
             try:
                 debugger = which.which(debugger)
@@ -777,9 +779,11 @@ class DebugProgram(MachCommandBase):
         else:
             try:
                 debugger = which.which('gdb')
+                use_gdb = True
             except Exception:
                 try:
                     debugger = which.which('lldb')
+                    use_lldb = True
                 except Exception as e:
                     print("You don't have gdb or lldb in your PATH")
                     print(e)
@@ -805,17 +809,10 @@ class DebugProgram(MachCommandBase):
             print(e)
             return 1
 
-        # args added to separate the debugger and process arguments.
-        args_separator = {
-            'gdb': '--args',
-            'ddd': '--args',
-            'cgdb': '--args',
-            'lldb': '--'
-        }
-
-        debugger_name = os.path.basename(debugger)
-        if debugger_name in args_separator:
-            args.append(args_separator[debugger_name])
+        if use_gdb:
+            args.append('--args')
+        elif use_lldb:
+            args.append('--')
         args.append(binpath)
 
         if not remote:

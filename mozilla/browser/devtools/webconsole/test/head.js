@@ -84,32 +84,6 @@ function loadTab(url) {
   return deferred.promise;
 }
 
-function loadBrowser(browser) {
-  let deferred = promise.defer();
-
-  browser.addEventListener("load", function onLoad() {
-    browser.removeEventListener("load", onLoad, true);
-    deferred.resolve(null)
-  }, true);
-
-  return deferred.promise;
-}
-
-function closeTab(tab) {
-  let deferred = promise.defer();
-
-  let container = gBrowser.tabContainer;
-
-  container.addEventListener("TabClose", function onTabClose() {
-    container.removeEventListener("TabClose", onTabClose, true);
-    deferred.resolve(null);
-  }, true);
-
-  gBrowser.removeTab(tab);
-
-  return deferred.promise;
-}
-
 function afterAllTabsLoaded(callback, win) {
   win = win || window;
 
@@ -1408,14 +1382,10 @@ function whenDelayedStartupFinished(aWindow, aCallback)
  *        - inspectorIcon: boolean, when true, the test runner expects the
  *        result widget to contain an inspectorIcon element (className
  *        open-inspector).
- *
- *        - expectedTab: string, optional, the full URL of the new tab which must
- *        open. If this is not provided, any new tabs that open will cause a test
- *        failure.
  */
 function checkOutputForInputs(hud, inputTests)
 {
-  let container = gBrowser.tabContainer;
+  let eventHandlers = new Set();
 
   function* runner()
   {
@@ -1423,7 +1393,10 @@ function checkOutputForInputs(hud, inputTests)
       info("checkInput(" + i + "): " + entry.input);
       yield checkInput(entry);
     }
-    container = null;
+
+    for (let fn of eventHandlers) {
+      hud.jsterm.off("variablesview-open", fn);
+    }
   }
 
   function* checkInput(entry)
@@ -1494,39 +1467,27 @@ function checkOutputForInputs(hud, inputTests)
     }
   }
 
-  function* checkObjectClick(entry, msg)
+  function checkObjectClick(entry, msg)
   {
     let body = msg.querySelector(".message-body a") ||
                msg.querySelector(".message-body");
     ok(body, "the message body");
 
-    let deferredVariablesView = promise.defer();
-    entry._onVariablesViewOpen = onVariablesViewOpen.bind(null, entry, deferredVariablesView);
-    hud.jsterm.on("variablesview-open", entry._onVariablesViewOpen);
+    let deferred = promise.defer();
 
-    let deferredTab = promise.defer();
-    entry._onTabOpen = onTabOpen.bind(null, entry, deferredTab);
-    container.addEventListener("TabOpen", entry._onTabOpen, true);
+    entry._onVariablesViewOpen = onVariablesViewOpen.bind(null, entry, deferred);
+    hud.jsterm.on("variablesview-open", entry._onVariablesViewOpen);
+    eventHandlers.add(entry._onVariablesViewOpen);
 
     body.scrollIntoView();
     EventUtils.synthesizeMouse(body, 2, 2, {}, hud.iframeWindow);
 
     if (entry.inspectable) {
       info("message body tagName '" + body.tagName +  "' className '" + body.className + "'");
-      yield deferredVariablesView.promise;
-    } else {
-      hud.jsterm.off("variablesview-open", entry._onVariablesView);
-      entry._onVariablesView = null;
+      return deferred.promise; // wait for the panel to open if we need to.
     }
 
-    if (entry.expectedTab) {
-      yield deferredTab.promise;
-    } else {
-      container.removeEventListener("TabOpen", entry._onTabOpen, true);
-      entry._onTabOpen = null;
-    }
-
-    yield promise.resolve(null);
+    return promise.resolve(null);
   }
 
   function checkLinkToInspector(entry, msg)
@@ -1552,7 +1513,7 @@ function checkOutputForInputs(hud, inputTests)
     });
   }
 
-  function onVariablesViewOpen(entry, {resolve, reject}, event, view, options)
+  function onVariablesViewOpen(entry, deferred, event, view, options)
   {
     let label = entry.variablesViewLabel || entry.output;
     if (typeof label == "string" && options.label != label) {
@@ -1563,25 +1524,12 @@ function checkOutputForInputs(hud, inputTests)
     }
 
     hud.jsterm.off("variablesview-open", entry._onVariablesViewOpen);
+    eventHandlers.delete(entry._onVariablesViewOpen);
     entry._onVariablesViewOpen = null;
+
     ok(entry.inspectable, "variables view was shown");
 
-    resolve(null);
-  }
-
-  function onTabOpen(entry, {resolve, reject}, event)
-  {
-    container.removeEventListener("TabOpen", entry._onTabOpen, true);
-    entry._onTabOpen = null;
-
-    let tab = event.target;
-    let browser = gBrowser.getBrowserForTab(tab);
-    loadBrowser(browser).then(() => {
-      let uri = content.location.href;
-      ok(entry.expectedTab && entry.expectedTab == uri,
-        "opened tab '" + uri +  "', expected tab '" + entry.expectedTab + "'");
-      return closeTab(tab);
-    }).then(resolve, reject);
+    deferred.resolve(null);
   }
 
   return Task.spawn(runner);

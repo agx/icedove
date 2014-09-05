@@ -139,7 +139,6 @@ DownloadLegacyTransfer.prototype = {
         if (Components.isSuccessCode(aStatus)) {
           download.saver.setSha256Hash(this._sha256Hash);
           download.saver.setSignatureInfo(this._signatureInfo);
-          download.saver.setRedirects(this._redirects);
         }
         download.saver.onTransferFinished(aRequest, aStatus);
       }).then(null, Cu.reportError);
@@ -261,11 +260,6 @@ DownloadLegacyTransfer.prototype = {
   setSignatureInfo: function (signatureInfo)
   {
     this._signatureInfo = signatureInfo;
-  },
-
-  setRedirects: function (redirects)
-  {
-    this._redirects = redirects;
   },
 
   //////////////////////////////////////////////////////////////////////////////

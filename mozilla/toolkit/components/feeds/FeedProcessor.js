@@ -463,15 +463,11 @@ Entry.prototype = {
 
     // Add media:content to enclosures
     if (bagHasKey(this.fields, "mediacontent"))
-      this._mediaToEnclosures("mediacontent");
-
-    // Add media:thumbnail to enclosures
-    if (bagHasKey(this.fields, "mediathumbnail"))
-      this._mediaToEnclosures("mediathumbnail");
+      this._mediacontentToEnclosures();
 
     // Add media:content in media:group to enclosures
     if (bagHasKey(this.fields, "mediagroup"))
-      this._mediaToEnclosures("mediagroup", "mediacontent");
+      this._mediagroupToEnclosures();
   },
 
   __enclosure_map: null,
@@ -543,20 +539,11 @@ Entry.prototype = {
     this._addToEnclosures(enc);
   },
 
-  _mediaToEnclosures: function Entry_mediaToEnclosures(mediaType, contentType) {
-    var content;
+  _mediacontentToEnclosures: function Entry_mediacontentToEnclosures() {
+    var mediacontent = this.fields.getPropertyAsInterface("mediacontent", Ci.nsIArray);
 
-    // If a contentType is specified, the mediaType is a simple propertybag,
-    // and the contentType is an array inside it.
-    if (contentType) {
-      var group = this.fields.getPropertyAsInterface(mediaType, Ci.nsIPropertyBag2);
-      content = group.getPropertyAsInterface(contentType, Ci.nsIArray);
-    } else {
-      content = this.fields.getPropertyAsInterface(mediaType, Ci.nsIArray);
-    }
-
-    for (var i = 0; i < content.length; ++i) {
-      var contentElement = content.queryElementAt(i, Ci.nsIWritablePropertyBag2);
+    for (var i = 0; i < mediacontent.length; ++i) {
+      var contentElement = mediacontent.queryElementAt(i, Ci.nsIWritablePropertyBag2);
 
       // media:content don't require url, but if it's not there, we should
       // skip it.
@@ -569,12 +556,33 @@ Entry.prototype = {
       enc.setPropertyAsAString("url", contentElement.getPropertyAsAString("url"));
       if (bagHasKey(contentElement, "type")) {
         enc.setPropertyAsAString("type", contentElement.getPropertyAsAString("type"));
-      } else if (mediaType == "mediathumbnail") {
-        // thumbnails won't have a type, but default to image types
-        enc.setPropertyAsAString("type", "image/*");
-        enc.setPropertyAsBool("thumbnail", true);
+      }
+      if (bagHasKey(contentElement, "fileSize")) {
+        enc.setPropertyAsAString("length", contentElement.getPropertyAsAString("fileSize"));
       }
 
+      this._addToEnclosures(enc);
+    }
+  },
+
+  _mediagroupToEnclosures: function Entry_mediagroupToEnclosures() {
+    var group = this.fields.getPropertyAsInterface("mediagroup", Ci.nsIPropertyBag2);
+
+    var content = group.getPropertyAsInterface("mediacontent", Ci.nsIArray);
+    for (var i = 0; i < content.length; ++i) {
+      var contentElement = content.queryElementAt(i, Ci.nsIWritablePropertyBag2);
+      // media:content don't require url, but if it's not there, we should
+      // skip it.
+      if (!bagHasKey(contentElement, "url"))
+        continue;
+
+      var enc = Cc[BAG_CONTRACTID].createInstance(Ci.nsIWritablePropertyBag2);
+
+      // copy media:content bits over to equivalent enclosure bits
+      enc.setPropertyAsAString("url", contentElement.getPropertyAsAString("url"));
+      if (bagHasKey(contentElement, "type")) {
+        enc.setPropertyAsAString("type", contentElement.getPropertyAsAString("type"));
+      }
       if (bagHasKey(contentElement, "fileSize")) {
         enc.setPropertyAsAString("length", contentElement.getPropertyAsAString("fileSize"));
       }
@@ -1129,7 +1137,6 @@ function FeedProcessor() {
       "enclosure": new ElementInfo("enclosure", null, null, false),
       "media:content": new ElementInfo("mediacontent", null, null, true),
       "media:group": new ElementInfo("mediagroup", null, null, false),
-      "media:thumbnail": new ElementInfo("mediathumbnail", null, null, true),
       "guid": new ElementInfo("guid", null, rssGuid, false)
     },
 
@@ -1142,8 +1149,7 @@ function FeedProcessor() {
     },
 
     "IN_MEDIAGROUP": {
-      "media:content": new ElementInfo("mediacontent", null, null, true),
-      "media:thumbnail": new ElementInfo("mediathumbnail", null, null, true)
+      "media:content": new ElementInfo("mediacontent", null, null, true)
     },
  
     /********* RSS1 **********/

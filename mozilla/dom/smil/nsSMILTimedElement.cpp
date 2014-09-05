@@ -253,7 +253,6 @@ nsSMILTimedElement::nsSMILTimedElement()
   mSeekState(SEEK_NOT_SEEKING),
   mDeferIntervalUpdates(false),
   mDoDeferredUpdate(false),
-  mIsDisabled(false),
   mDeleteCount(0),
   mUpdateIntervalRecursionDepth(0)
 {
@@ -522,9 +521,6 @@ nsSMILTimedElement::SetTimeClient(nsSMILAnimationFunction* aClient)
 void
 nsSMILTimedElement::SampleAt(nsSMILTime aContainerTime)
 {
-  if (mIsDisabled)
-    return;
-
   // Milestones are cleared before a sample
   mPrevRegisteredMilestone = sMaxMilestone;
 
@@ -534,9 +530,6 @@ nsSMILTimedElement::SampleAt(nsSMILTime aContainerTime)
 void
 nsSMILTimedElement::SampleEndAt(nsSMILTime aContainerTime)
 {
-  if (mIsDisabled)
-    return;
-
   // Milestones are cleared before a sample
   mPrevRegisteredMilestone = sMaxMilestone;
 
@@ -804,36 +797,34 @@ nsSMILTimedElement::Rewind()
                     mSeekState == SEEK_BACKWARD_FROM_ACTIVE,
                     "Rewind in the middle of a forwards seek?");
 
-  ClearTimingState(RemoveNonDynamic);
-  RebuildTimingState(RemoveNonDynamic);
+  // Putting us in the startup state will ensure we skip doing any interval
+  // updates
+  mElementState = STATE_STARTUP;
+  ClearIntervals();
 
+  UnsetBeginSpec(RemoveNonDynamic);
+  UnsetEndSpec(RemoveNonDynamic);
+
+  if (mClient) {
+    mClient->Inactivate(false);
+  }
+
+  if (mAnimationElement->HasAnimAttr(nsGkAtoms::begin)) {
+    nsAutoString attValue;
+    mAnimationElement->GetAnimAttr(nsGkAtoms::begin, attValue);
+    SetBeginSpec(attValue, mAnimationElement, RemoveNonDynamic);
+  }
+
+  if (mAnimationElement->HasAnimAttr(nsGkAtoms::end)) {
+    nsAutoString attValue;
+    mAnimationElement->GetAnimAttr(nsGkAtoms::end, attValue);
+    SetEndSpec(attValue, mAnimationElement, RemoveNonDynamic);
+  }
+
+  mPrevRegisteredMilestone = sMaxMilestone;
+  RegisterMilestone();
   NS_ABORT_IF_FALSE(!mCurrentInterval,
                     "Current interval is set at end of rewind");
-}
-
-namespace
-{
-  bool
-  RemoveAll(nsSMILInstanceTime* aInstanceTime)
-  {
-    return true;
-  }
-}
-
-bool
-nsSMILTimedElement::SetIsDisabled(bool aIsDisabled)
-{
-  if (mIsDisabled == aIsDisabled)
-    return false;
-
-  if (aIsDisabled) {
-    mIsDisabled = true;
-    ClearTimingState(RemoveAll);
-  } else {
-    RebuildTimingState(RemoveAll);
-    mIsDisabled = false;
-  }
-  return true;
 }
 
 namespace
@@ -1445,45 +1436,6 @@ nsSMILTimedElement::Reset()
 
   RemoveReset resetEnd(nullptr);
   RemoveInstanceTimes(mEndInstances, resetEnd);
-}
-
-void
-nsSMILTimedElement::ClearTimingState(RemovalTestFunction aRemove)
-{
-  mElementState = STATE_STARTUP;
-  ClearIntervals();
-
-  UnsetBeginSpec(aRemove);
-  UnsetEndSpec(aRemove);
-
-  if (mClient) {
-    mClient->Inactivate(false);
-  }
-}
-
-void
-nsSMILTimedElement::RebuildTimingState(RemovalTestFunction aRemove)
-{
-  MOZ_ASSERT(mAnimationElement,
-             "Attempting to enable a timed element not attached to an "
-             "animation element");
-  MOZ_ASSERT(mElementState == STATE_STARTUP,
-             "Rebuilding timing state from non-startup state");
-
-  if (mAnimationElement->HasAnimAttr(nsGkAtoms::begin)) {
-    nsAutoString attValue;
-    mAnimationElement->GetAnimAttr(nsGkAtoms::begin, attValue);
-    SetBeginSpec(attValue, mAnimationElement, aRemove);
-  }
-
-  if (mAnimationElement->HasAnimAttr(nsGkAtoms::end)) {
-    nsAutoString attValue;
-    mAnimationElement->GetAnimAttr(nsGkAtoms::end, attValue);
-    SetEndSpec(attValue, mAnimationElement, aRemove);
-  }
-
-  mPrevRegisteredMilestone = sMaxMilestone;
-  RegisterMilestone();
 }
 
 void
@@ -2360,7 +2312,7 @@ nsSMILTimedElement::FireTimeEventAsync(uint32_t aMsg, int32_t aDetail)
 
   nsCOMPtr<nsIRunnable> event =
     new AsyncTimeEventRunner(mAnimationElement, aMsg, aDetail);
-  NS_DispatchToMainThread(event);
+  NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
 }
 
 const nsSMILInstanceTime*

@@ -95,6 +95,7 @@ RotatedBuffer::DrawBufferQuadrant(gfx::DrawTarget* aTarget,
 
   gfx::Point quadrantTranslation(quadrantRect.x, quadrantRect.y);
 
+  MOZ_ASSERT(aOperator == CompositionOp::OP_OVER || aOperator == CompositionOp::OP_SOURCE);
   // direct2d is much slower when using OP_SOURCE so use OP_OVER and
   // (maybe) a clear instead. Normally we need to draw in a single operation
   // (to avoid flickering) but direct2d is ok since it defers rendering.
@@ -169,9 +170,7 @@ RotatedBuffer::DrawBufferWithRotation(gfx::DrawTarget *aTarget, ContextSource aS
                                       gfx::SourceSurface* aMask,
                                       const gfx::Matrix* aMaskTransform) const
 {
-  PROFILER_LABEL("RotatedBuffer", "DrawBufferWithRotation",
-    js::ProfileEntry::Category::GRAPHICS);
-
+  PROFILER_LABEL("RotatedBuffer", "DrawBufferWithRotation");
   // See above, in Azure Repeat should always be a safe, even faster choice
   // though! Particularly on D2D Repeat should be a lot faster, need to look
   // into that. TODO[Bas]
@@ -517,12 +516,10 @@ RotatedContentBuffer::BeginPaint(ThebesLayer* aLayer,
   if (result.mRegionToDraw.IsEmpty())
     return result;
 
-  if (HaveBuffer()) {
-    // Do not modify result.mRegionToDraw or result.mContentType after this call.
-    // Do not modify mBufferRect, mBufferRotation, or mDidSelfCopy,
-    // or call CreateBuffer before this call.
-    FinalizeFrame(result.mRegionToDraw);
-  }
+  // Do not modify result.mRegionToDraw or result.mContentType after this call.
+  // Do not modify mBufferRect, mBufferRotation, or mDidSelfCopy,
+  // or call CreateBuffer before this call.
+  FinalizeFrame(result.mRegionToDraw);
 
   nsIntRect drawBounds = result.mRegionToDraw.GetBounds();
   RefPtr<DrawTarget> destDTBuffer;
@@ -693,7 +690,7 @@ RotatedContentBuffer::BeginPaint(ThebesLayer* aLayer,
 }
 
 DrawTarget*
-RotatedContentBuffer::BorrowDrawTargetForPainting(PaintState& aPaintState,
+RotatedContentBuffer::BorrowDrawTargetForPainting(const PaintState& aPaintState,
                                                   DrawIterator* aIter /* = nullptr */)
 {
   if (aPaintState.mMode == SurfaceMode::SURFACE_NONE) {
@@ -705,16 +702,12 @@ RotatedContentBuffer::BorrowDrawTargetForPainting(PaintState& aPaintState,
   if (!result) {
     return nullptr;
   }
-  nsIntRegion* drawPtr = &aPaintState.mRegionToDraw;
+  const nsIntRegion* drawPtr = &aPaintState.mRegionToDraw;
   if (aIter) {
     // The iterators draw region currently only contains the bounds of the region,
     // this makes it the precise region.
     aIter->mDrawRegion.And(aIter->mDrawRegion, aPaintState.mRegionToDraw);
     drawPtr = &aIter->mDrawRegion;
-  }
-  if (result->GetType() == BackendType::DIRECT2D ||
-      result->GetType() == BackendType::DIRECT2D1_1) {
-    drawPtr->SimplifyOutwardByArea(100 * 100);
   }
 
   if (aPaintState.mMode == SurfaceMode::SURFACE_COMPONENT_ALPHA) {

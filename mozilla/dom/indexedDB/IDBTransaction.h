@@ -242,7 +242,7 @@ public:
   }
 
   DOMError*
-  GetError() const;
+  GetError(ErrorResult& aRv);
 
   already_AddRefed<IDBObjectStore>
   ObjectStore(const nsAString& aName, ErrorResult& aRv);

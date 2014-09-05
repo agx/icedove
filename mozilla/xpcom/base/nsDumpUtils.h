@@ -26,15 +26,16 @@
 #define LOG(...)
 #endif
 
+using namespace mozilla;
+
 #ifdef XP_UNIX // {
 
 /**
  * Abstract base class for something which watches an fd and takes action when
  * we can read from it without blocking.
  */
-class FdWatcher
-  : public MessageLoopForIO::Watcher
-  , public nsIObserver
+class FdWatcher : public MessageLoopForIO::Watcher
+                , public nsIObserver
 {
 protected:
   MessageLoopForIO::FileDescriptorWatcher mReadWatcher;
@@ -90,16 +91,15 @@ public:
     MOZ_ASSERT(!strcmp(aTopic, "xpcom-shutdown"));
 
     XRE_GetIOMessageLoop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(this, &FdWatcher::StopWatching));
+        FROM_HERE,
+        NewRunnableMethod(this, &FdWatcher::StopWatching));
 
     return NS_OK;
   }
 };
 
-typedef void (*FifoCallback)(const nsCString& aInputStr);
-struct FifoInfo
-{
+typedef void (* FifoCallback)(const nsCString& inputStr);
+struct FifoInfo {
   nsCString mCommand;
   FifoCallback mCallback;
 };
@@ -128,21 +128,19 @@ public:
 private:
   nsAutoCString mDirPath;
 
-  static mozilla::StaticRefPtr<FifoWatcher> sSingleton;
+  static StaticRefPtr<FifoWatcher> sSingleton;
 
   FifoWatcher(nsCString aPath)
     : mDirPath(aPath)
     , mFifoInfoLock("FifoWatcher.mFifoInfoLock")
-  {
-  }
+  {}
 
   mozilla::Mutex mFifoInfoLock; // protects mFifoInfo
   FifoInfoArray mFifoInfo;
 };
 
-typedef void (*PipeCallback)(const uint8_t aRecvSig);
-struct SignalInfo
-{
+typedef void (* PipeCallback)(const uint8_t recvSig);
+struct SignalInfo {
   uint8_t mSignal;
   PipeCallback mCallback;
 };
@@ -166,7 +164,7 @@ public:
   virtual void OnFileCanReadWithoutBlocking(int aFd);
 
 private:
-  static mozilla::StaticRefPtr<SignalPipeWatcher> sSingleton;
+  static StaticRefPtr<SignalPipeWatcher> sSingleton;
 
   SignalPipeWatcher()
     : mSignalInfoLock("SignalPipeWatcher.mSignalInfoLock")
@@ -192,8 +190,8 @@ public:
    * instead.
    */
   static nsresult OpenTempFile(const nsACString& aFilename,
-                               nsIFile** aFile,
-                               const nsACString& aFoldername = EmptyCString());
+                        nsIFile** aFile,
+                        const nsACString& aFoldername = EmptyCString());
 };
 
 #endif

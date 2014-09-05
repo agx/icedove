@@ -20,6 +20,9 @@
 
 #ifdef MOZ_WIDGET_GTK
 #include <gtk/gtk.h>
+#if (MOZ_WIDGET_GTK == 3)
+#include <gtk/gtkx.h>
+#endif
 #endif
 
 #include "nsIFile.h"
@@ -1093,7 +1096,7 @@ _getvalue(NPP aNPP,
             *(NPBool*)aValue = value ? true : false;
             return result;
         }
-#if defined(MOZ_WIDGET_GTK)
+#if (MOZ_WIDGET_GTK == 2)
         case NPNVxDisplay: {
             if (aNPP) {
                 return InstCast(aNPP)->NPN_GetValue(aVariable, aValue);

@@ -15,7 +15,6 @@
 
 #include "jspubtd.h"
 
-#include "js/HeapAPI.h"
 #include "js/TypeDecls.h"
 #include "js/Utility.h"
 
@@ -414,20 +413,20 @@ class MOZ_NONHEAP_CLASS Handle : public js::HandleBase<T>
     }
 
     /* Create a handle for a nullptr pointer. */
-    MOZ_IMPLICIT Handle(js::NullPtr) {
+    Handle(js::NullPtr) {
         static_assert(mozilla::IsPointer<T>::value,
                       "js::NullPtr overload not valid for non-pointer types");
         ptr = reinterpret_cast<const T *>(&js::NullPtr::constNullValue);
     }
 
     /* Create a handle for a nullptr pointer. */
-    MOZ_IMPLICIT Handle(JS::NullPtr) {
+    Handle(JS::NullPtr) {
         static_assert(mozilla::IsPointer<T>::value,
                       "JS::NullPtr overload not valid for non-pointer types");
         ptr = reinterpret_cast<const T *>(&JS::NullPtr::constNullValue);
     }
 
-    MOZ_IMPLICIT Handle(MutableHandle<T> handle) {
+    Handle(MutableHandle<T> handle) {
         ptr = handle.address();
     }
 
@@ -484,6 +483,9 @@ class MOZ_NONHEAP_CLASS Handle : public js::HandleBase<T>
     bool operator!=(const T &other) const { return *ptr != other; }
     bool operator==(const T &other) const { return *ptr == other; }
 
+    /* Change this handle to point to the same rooted location RHS does. */
+    void repoint(const Handle &rhs) { ptr = rhs.address(); }
+
   private:
     Handle() {}
 
@@ -509,8 +511,8 @@ template <typename T>
 class MOZ_STACK_CLASS MutableHandle : public js::MutableHandleBase<T>
 {
   public:
-    inline MOZ_IMPLICIT MutableHandle(Rooted<T> *root);
-    inline MOZ_IMPLICIT MutableHandle(PersistentRooted<T> *root);
+    inline MutableHandle(Rooted<T> *root);
+    inline MutableHandle(PersistentRooted<T> *root);
 
   private:
     // Disallow true nullptr and emulated nullptr (gcc 4.4/4.5, __null, appears
@@ -625,7 +627,7 @@ class InternalHandle<T*>
      * Make this private to prevent accidental misuse; this is only for
      * fromMarkedLocation().
      */
-    explicit InternalHandle(T *field)
+    InternalHandle(T *field)
       : holder(reinterpret_cast<void * const *>(&js::NullPtr::constNullValue)),
         offset(uintptr_t(field))
     {}
@@ -634,16 +636,10 @@ class InternalHandle<T*>
 };
 
 /*
- * By default, things should use the inheritance hierarchy to find their
+ * By default, pointers should use the inheritance hierarchy to find their
  * ThingRootKind. Some pointer types are explicitly set in jspubtd.h so that
  * Rooted<T> may be used without the class definition being available.
  */
-template <typename T>
-struct RootKind
-{
-    static ThingRootKind rootKind() { return T::rootKind(); }
-};
-
 template <typename T>
 struct RootKind<T *>
 {
@@ -654,6 +650,7 @@ template <typename T>
 struct GCMethods<T *>
 {
     static T *initial() { return nullptr; }
+    static ThingRootKind kind() { return RootKind<T *>::rootKind(); }
     static bool poisoned(T *v) { return JS::IsPoisonedPtr(v); }
     static bool needsPostBarrier(T *v) { return false; }
 #ifdef JSGC_GENERATIONAL
@@ -666,10 +663,9 @@ template <>
 struct GCMethods<JSObject *>
 {
     static JSObject *initial() { return nullptr; }
+    static ThingRootKind kind() { return RootKind<JSObject *>::rootKind(); }
     static bool poisoned(JSObject *v) { return JS::IsPoisonedPtr(v); }
-    static bool needsPostBarrier(JSObject *v) {
-        return v != nullptr && gc::IsInsideNursery(reinterpret_cast<gc::Cell *>(v));
-    }
+    static bool needsPostBarrier(JSObject *v) { return v; }
 #ifdef JSGC_GENERATIONAL
     static void postBarrier(JSObject **vp) {
         JS::HeapCellPostBarrier(reinterpret_cast<js::gc::Cell **>(vp));
@@ -684,10 +680,9 @@ template <>
 struct GCMethods<JSFunction *>
 {
     static JSFunction *initial() { return nullptr; }
+    static ThingRootKind kind() { return RootKind<JSObject *>::rootKind(); }
     static bool poisoned(JSFunction *v) { return JS::IsPoisonedPtr(v); }
-    static bool needsPostBarrier(JSFunction *v) {
-        return v != nullptr && gc::IsInsideNursery(reinterpret_cast<gc::Cell *>(v));
-    }
+    static bool needsPostBarrier(JSFunction *v) { return v; }
 #ifdef JSGC_GENERATIONAL
     static void postBarrier(JSFunction **vp) {
         JS::HeapCellPostBarrier(reinterpret_cast<js::gc::Cell **>(vp));
@@ -723,7 +718,7 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
     template <typename CX>
     void init(CX *cx) {
 #ifdef JSGC_TRACK_EXACT_ROOTS
-        js::ThingRootKind kind = js::RootKind<T>::rootKind();
+        js::ThingRootKind kind = js::GCMethods<T>::kind();
         this->stack = &cx->thingGCRooters[kind];
         this->prev = *stack;
         *stack = reinterpret_cast<Rooted<void*>*>(this);
@@ -733,8 +728,8 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
     }
 
   public:
-    explicit Rooted(JSContext *cx
-                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    Rooted(JSContext *cx
+           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(js::GCMethods<T>::initial())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -755,8 +750,8 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
         init(js::ContextFriendFields::get(cx));
     }
 
-    explicit Rooted(js::ContextFriendFields *cx
-                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    Rooted(js::ContextFriendFields *cx
+           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(js::GCMethods<T>::initial())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -771,8 +766,8 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
         init(cx);
     }
 
-    explicit Rooted(js::PerThreadDataFriendFields *pt
-                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    Rooted(js::PerThreadDataFriendFields *pt
+           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(js::GCMethods<T>::initial())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -787,8 +782,8 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
         init(pt);
     }
 
-    explicit Rooted(JSRuntime *rt
-                    MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    Rooted(JSRuntime *rt
+           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(js::GCMethods<T>::initial())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -814,7 +809,7 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
 #endif
 
 #ifdef JSGC_TRACK_EXACT_ROOTS
-    Rooted<T> *previous() { return reinterpret_cast<Rooted<T>*>(prev); }
+    Rooted<T> *previous() { return prev; }
 #endif
 
     /*
@@ -849,12 +844,7 @@ class MOZ_STACK_CLASS Rooted : public js::RootedBase<T>
 
   private:
 #ifdef JSGC_TRACK_EXACT_ROOTS
-    /*
-     * These need to be templated on void* to avoid aliasing issues between, for
-     * example, Rooted<JSObject> and Rooted<JSFunction>, which use the same
-     * stack head pointer for different classes.
-     */
-    Rooted<void *> **stack, *prev;
+    Rooted<void*> **stack, *prev;
 #endif
 
     /*
@@ -889,6 +879,61 @@ class RootedBase<JSObject*>
     template <class U>
     JS::Handle<U*> as() const;
 };
+
+
+/*
+ * RootedGeneric<T> allows a class to instantiate its own Rooted type by
+ * including the following two methods:
+ *
+ *    static inline js::ThingRootKind rootKind() { return js::THING_ROOT_CUSTOM; }
+ *    void trace(JSTracer *trc);
+ *
+ * The trace() method must trace all of the class's fields.
+ *
+ * Implementation:
+ *
+ * RootedGeneric<T> works by placing a pointer to its 'rooter' field into the
+ * usual list of rooters when it is instantiated. When marking, it backs up
+ * from this pointer to find a vtable containing a type-appropriate trace()
+ * method.
+ */
+template <typename GCType>
+class JS_PUBLIC_API(RootedGeneric)
+{
+  public:
+    JS::Rooted<GCType> rooter;
+
+    RootedGeneric(js::ContextFriendFields *cx)
+        : rooter(cx)
+    {
+    }
+
+    RootedGeneric(js::ContextFriendFields *cx, const GCType &initial)
+        : rooter(cx, initial)
+    {
+    }
+
+    virtual inline void trace(JSTracer *trc);
+
+    operator const GCType&() const { return rooter.get(); }
+    GCType operator->() const { return rooter.get(); }
+};
+
+template <typename GCType>
+inline void RootedGeneric<GCType>::trace(JSTracer *trc)
+{
+    rooter->trace(trc);
+}
+
+// We will instantiate RootedGeneric<void*> in RootMarking.cpp, and MSVC will
+// notice that void*s have no trace() method defined on them and complain (even
+// though it's never called.) MSVC's complaint is not unreasonable, so
+// specialize for void*.
+template <>
+inline void RootedGeneric<void*>::trace(JSTracer *trc)
+{
+    MOZ_ASSUME_UNREACHABLE("RootedGeneric<void*>::trace()");
+}
 
 /* Interface substitute for Rooted<T> which does not root the variable's memory. */
 template <typename T>
@@ -946,11 +991,11 @@ template <typename T>
 class FakeMutableHandle : public js::MutableHandleBase<T>
 {
   public:
-    MOZ_IMPLICIT FakeMutableHandle(T *t) {
+    FakeMutableHandle(T *t) {
         ptr = t;
     }
 
-    MOZ_IMPLICIT FakeMutableHandle(FakeRooted<T> *root) {
+    FakeMutableHandle(FakeRooted<T> *root) {
         ptr = root->address();
     }
 
@@ -1117,7 +1162,7 @@ class PersistentRooted : private mozilla::LinkedListElement<PersistentRooted<T> 
     }
 
   public:
-    explicit PersistentRooted(JSContext *cx) : ptr(js::GCMethods<T>::initial())
+    PersistentRooted(JSContext *cx) : ptr(js::GCMethods<T>::initial())
     {
         registerWithRuntime(js::GetRuntime(cx));
     }
@@ -1127,7 +1172,7 @@ class PersistentRooted : private mozilla::LinkedListElement<PersistentRooted<T> 
         registerWithRuntime(js::GetRuntime(cx));
     }
 
-    explicit PersistentRooted(JSRuntime *rt) : ptr(js::GCMethods<T>::initial())
+    PersistentRooted(JSRuntime *rt) : ptr(js::GCMethods<T>::initial())
     {
         registerWithRuntime(rt);
     }
@@ -1137,9 +1182,7 @@ class PersistentRooted : private mozilla::LinkedListElement<PersistentRooted<T> 
         registerWithRuntime(rt);
     }
 
-    PersistentRooted(PersistentRooted &rhs)
-      : mozilla::LinkedListElement<PersistentRooted<T> >(),
-        ptr(rhs.ptr)
+    PersistentRooted(PersistentRooted &rhs) : ptr(rhs.ptr)
     {
         /*
          * Copy construction takes advantage of the fact that the original
@@ -1191,7 +1234,7 @@ namespace js {
 class CompilerRootNode
 {
   protected:
-    explicit CompilerRootNode(js::gc::Cell *ptr) : next(nullptr), ptr_(ptr) {}
+    CompilerRootNode(js::gc::Cell *ptr) : next(nullptr), ptr_(ptr) {}
 
   public:
     void **address() { return (void **)&ptr_; }

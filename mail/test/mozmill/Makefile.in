@@ -60,7 +60,7 @@ mozmill-virtualenv:
 
 libs:: mozmill-virtualenv
 
-PKG_STAGE = $(DIST)/test-stage
+PKG_STAGE = $(DIST)/test-package-stage
 
 stage-package:
 	$(NSINSTALL) -D $(PKG_STAGE)/mozmill/

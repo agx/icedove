@@ -2,7 +2,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "domstubs.idl"
 #include "nsISupports.idl"
 
 interface nsIDOMMozCellBroadcastEtwsInfo;
@@ -11,7 +10,7 @@ interface nsIDOMMozCellBroadcastEtwsInfo;
  * MozCellBroadcastMessage encapsulates Cell Broadcast short message service
  * (CBS) messages.
  */
-[scriptable, uuid(701e74a9-5fc4-4e2d-a324-9b7693395159)]
+[scriptable, uuid(6abe65de-6729-41f7-906a-3f3a2dbe30ae)]
 interface nsIDOMMozCellBroadcastMessage : nsISupports
 {
   /**
@@ -54,7 +53,7 @@ interface nsIDOMMozCellBroadcastMessage : nsISupports
   /**
    * System time stamp at receival.
    */
-  readonly attribute DOMTimeStamp timestamp;
+  readonly attribute jsval timestamp; // jsval is for Date.
 
   /**
    * Additional ETWS-specific info.

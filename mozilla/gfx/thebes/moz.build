@@ -19,7 +19,6 @@ EXPORTS += [
     'gfxFailure.h',
     'gfxFont.h',
     'gfxFontConstants.h',
-    'gfxFontFamilyList.h',
     'gfxFontFeatures.h',
     'gfxFontInfoLoader.h',
     'gfxFontTest.h',

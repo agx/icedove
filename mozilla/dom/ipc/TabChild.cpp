@@ -111,7 +111,8 @@ typedef nsDataHashtable<nsUint64HashKey, TabChild*> TabChildMap;
 static TabChildMap* sTabChildren;
 
 TabChildBase::TabChildBase()
-  : mContentDocumentIsDisplayed(false)
+  : mOldViewportWidth(0.0f)
+  , mContentDocumentIsDisplayed(false)
   , mTabChildGlobal(nullptr)
   , mInnerSize(0, 0)
 {
@@ -132,9 +133,9 @@ TabChildBase::InitializeRootMetrics()
   // be keeping, as well as putting the scroll offset back to
   // the top-left of the page.
   mLastRootMetrics.mViewport = CSSRect(CSSPoint(), kDefaultViewportSize);
-  mLastRootMetrics.mCompositionBounds = ParentLayerRect(
-      ParentLayerPoint(),
-      ParentLayerSize(ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenToParentLayerForRoot)));
+  mLastRootMetrics.mCompositionBounds = ParentLayerIntRect(
+      ParentLayerIntPoint(),
+      ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenToParentLayerForRoot));
   mLastRootMetrics.SetZoom(mLastRootMetrics.CalculateIntrinsicScale());
   mLastRootMetrics.mDevPixelsPerCSSPixel = WebWidget()->GetDefaultScale();
   // We use ScreenToLayerScale(1) below in order to turn the
@@ -147,10 +148,16 @@ TabChildBase::InitializeRootMetrics()
   mLastRootMetrics.SetScrollOffset(CSSPoint(0, 0));
 }
 
+bool
+TabChildBase::HasValidInnerSize()
+{
+  return (mInnerSize.width != 0) && (mInnerSize.height != 0);
+}
+
 void
 TabChildBase::SetCSSViewport(const CSSSize& aSize)
 {
-  mOldViewportSize = aSize;
+  mOldViewportWidth = aSize.width;
 
   if (mContentDocumentIsDisplayed) {
     nsCOMPtr<nsIDOMWindowUtils> utils(GetDOMWindowUtils());
@@ -196,7 +203,7 @@ TabChildBase::HandlePossibleViewportChange()
   nsViewportInfo viewportInfo = nsContentUtils::GetViewportInfo(document, mInnerSize);
   uint32_t presShellId;
   mozilla::layers::FrameMetrics::ViewID viewId;
-  bool scrollIdentifiersValid = APZCCallbackHelper::GetOrCreateScrollIdentifiers(
+  bool scrollIdentifiersValid = APZCCallbackHelper::GetScrollIdentifiers(
         document->GetDocumentElement(), &presShellId, &viewId);
   if (scrollIdentifiersValid) {
     ZoomConstraints constraints(
@@ -220,10 +227,10 @@ TabChildBase::HandlePossibleViewportChange()
     return false;
   }
 
-  CSSSize oldBrowserSize = mOldViewportSize;
+  float oldBrowserWidth = mOldViewportWidth;
   mLastRootMetrics.mViewport.SizeTo(viewport);
-  if (oldBrowserSize == CSSSize()) {
-    oldBrowserSize = kDefaultViewportSize;
+  if (!oldBrowserWidth) {
+    oldBrowserWidth = kDefaultViewportSize.width;
   }
   SetCSSViewport(viewport);
 
@@ -240,18 +247,16 @@ TabChildBase::HandlePossibleViewportChange()
     return false;
   }
 
-  ScreenIntSize oldScreenSize = ViewAs<ScreenPixel>(
-      RoundedToInt(mLastRootMetrics.mCompositionBounds).Size(),
-      PixelCastJustification::ScreenToParentLayerForRoot);
-  if (oldScreenSize == ScreenIntSize()) {
-    oldScreenSize = mInnerSize;
+  float oldScreenWidth = mLastRootMetrics.mCompositionBounds.width;
+  if (!oldScreenWidth) {
+    oldScreenWidth = mInnerSize.width;
   }
 
   FrameMetrics metrics(mLastRootMetrics);
   metrics.mViewport = CSSRect(CSSPoint(), viewport);
-  metrics.mCompositionBounds = ParentLayerRect(
-      ParentLayerPoint(),
-      ParentLayerSize(ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenToParentLayerForRoot)));
+  metrics.mCompositionBounds = ParentLayerIntRect(
+      ParentLayerIntPoint(),
+      ViewAs<ParentLayerPixel>(mInnerSize, PixelCastJustification::ScreenToParentLayerForRoot));
   metrics.SetRootCompositionSize(
       ScreenSize(mInnerSize) * ScreenToLayoutDeviceScale(1.0f) / metrics.mDevPixelsPerCSSPixel);
 
@@ -267,9 +272,7 @@ TabChildBase::HandlePossibleViewportChange()
   // In all of these cases, we maintain how much actual content is visible
   // within the screen width. Note that "actual content" may be different with
   // respect to CSS pixels because of the CSS viewport size changing.
-  float oldIntrinsicScale =
-      std::max(oldScreenSize.width / oldBrowserSize.width,
-               oldScreenSize.height / oldBrowserSize.height);
+  float oldIntrinsicScale = oldScreenWidth / oldBrowserWidth;
   metrics.ZoomBy(metrics.CalculateIntrinsicScale().scale / oldIntrinsicScale);
 
   // Changing the zoom when we're not doing a first paint will get ignored
@@ -479,7 +482,7 @@ TabChildBase::DispatchSynthesizedMouseEvent(uint32_t aMsg, uint64_t aTime,
                                             nsIWidget* aWidget)
 {
   MOZ_ASSERT(aMsg == NS_MOUSE_MOVE || aMsg == NS_MOUSE_BUTTON_DOWN ||
-             aMsg == NS_MOUSE_BUTTON_UP || aMsg == NS_MOUSE_MOZLONGTAP);
+             aMsg == NS_MOUSE_BUTTON_UP);
 
   WidgetMouseEvent event(true, aMsg, nullptr,
                          WidgetMouseEvent::eReal, WidgetMouseEvent::eNormal);
@@ -691,11 +694,9 @@ TabChild::TabChild(ContentChild* aManager, const TabContext& aContext, uint32_t 
   , mOrientation(eScreenOrientation_PortraitPrimary)
   , mUpdateHitRegion(false)
   , mContextMenuHandled(false)
-  , mLongTapEventHandled(false)
   , mWaitingTouchListeners(false)
   , mIgnoreKeyPressEvent(false)
   , mActiveElementManager(new ActiveElementManager())
-  , mHasValidInnerSize(false)
 {
   if (!sActiveDurationMsSet) {
     Preferences::AddIntVarCache(&sActiveDurationMs,
@@ -731,8 +732,8 @@ TabChild::Observe(nsISupports *aSubject,
       nsCOMPtr<nsIDocument> doc(GetDocument());
       uint32_t presShellId;
       ViewID viewId;
-      if (APZCCallbackHelper::GetOrCreateScrollIdentifiers(doc->GetDocumentElement(),
-                                                           &presShellId, &viewId)) {
+      if (APZCCallbackHelper::GetScrollIdentifiers(doc->GetDocumentElement(),
+                                                    &presShellId, &viewId)) {
         CSSRect rect;
         sscanf(NS_ConvertUTF16toUTF8(aData).get(),
                "{\"x\":%f,\"y\":%f,\"w\":%f,\"h\":%f}",
@@ -1258,12 +1259,10 @@ TabChild::BrowserFrameProvideWindow(nsIDOMWindow* aOpener,
   context.openerChild() = this;
   context.isBrowserElement() = IsBrowserElement();
 
-  ContentChild* cc = static_cast<ContentChild*>(Manager());
   unused << Manager()->SendPBrowserConstructor(
       // We release this ref in DeallocPBrowserChild
       nsRefPtr<TabChild>(newChild).forget().take(),
-      IPCTabContext(context, mScrolling), /* chromeFlags */ 0,
-      cc->GetID(), cc->IsForApp(), cc->IsForBrowser());
+      IPCTabContext(context, mScrolling), /* chromeFlags */ 0);
 
   nsAutoCString spec;
   if (aURI) {
@@ -1287,12 +1286,6 @@ TabChild::BrowserFrameProvideWindow(nsIDOMWindow* aOpener,
   nsCOMPtr<nsIDOMWindow> win = do_GetInterface(newChild->WebNavigation());
   win.forget(aReturn);
   return NS_OK;
-}
-
-bool
-TabChild::HasValidInnerSize()
-{
-  return mHasValidInnerSize;
 }
 
 #ifdef DEBUG
@@ -1336,23 +1329,6 @@ TabChild::DestroyWindow()
         sTabChildren = nullptr;
       }
       mLayersId = 0;
-    }
-
-    for (uint32_t index = 0, count = mCachedFileDescriptorInfos.Length();
-         index < count;
-         index++) {
-        nsAutoPtr<CachedFileDescriptorInfo>& info =
-            mCachedFileDescriptorInfos[index];
-
-        MOZ_ASSERT(!info->mCallback);
-
-        if (info->mFileDescriptor.IsValid()) {
-            MOZ_ASSERT(!info->mCanceled);
-
-            nsRefPtr<CloseFileRunnable> runnable =
-                new CloseFileRunnable(info->mFileDescriptor);
-            runnable->Dispatch();
-        }
     }
 }
 
@@ -1461,7 +1437,7 @@ TabChild::RecvCacheFileDescriptor(const nsString& aPath,
 
     // First see if we already have a request for this path.
     const CachedFileDescriptorInfo search(aPath);
-    size_t index =
+    uint32_t index =
         mCachedFileDescriptorInfos.IndexOf(search, 0,
                                            search.PathOnlyComparator());
     if (index == mCachedFileDescriptorInfos.NoIndex) {
@@ -1513,7 +1489,7 @@ TabChild::GetCachedFileDescriptor(const nsAString& aPath,
     // First see if we've already received a cached file descriptor for this
     // path.
     const CachedFileDescriptorInfo search(aPath);
-    size_t index =
+    uint32_t index =
         mCachedFileDescriptorInfos.IndexOf(search, 0,
                                            search.PathOnlyComparator());
     if (index == mCachedFileDescriptorInfos.NoIndex) {
@@ -1569,7 +1545,7 @@ TabChild::CancelCachedFileDescriptorCallback(
     }
 
     const CachedFileDescriptorInfo search(aPath, aCallback);
-    size_t index =
+    uint32_t index =
         mCachedFileDescriptorInfos.IndexOf(search, 0,
                                            search.PathAndCallbackComparator());
     if (index == mCachedFileDescriptorInfos.NoIndex) {
@@ -1585,9 +1561,6 @@ TabChild::CancelCachedFileDescriptorCallback(
     MOZ_ASSERT(!info->mFileDescriptor.IsValid());
     MOZ_ASSERT(info->mCallback == aCallback);
     MOZ_ASSERT(!info->mCanceled);
-
-    // No need to hold the callback any longer.
-    info->mCallback = nullptr;
 
     // Set this flag so that we will close the file descriptor when it arrives.
     info->mCanceled = true;
@@ -1641,9 +1614,6 @@ TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size, const 
 
     bool initialSizing = !HasValidInnerSize()
                       && (size.width != 0 && size.height != 0);
-    if (initialSizing) {
-      mHasValidInnerSize = true;
-    }
 
     mOrientation = orientation;
     mInnerSize = ScreenIntSize::FromUnknownSize(
@@ -1740,17 +1710,7 @@ TabChild::RecvHandleLongTap(const CSSPoint& aPoint, const ScrollableLayerGuid& a
                          2, 1, 0, false,
                          nsIDOMMouseEvent::MOZ_SOURCE_TOUCH);
 
-  // If no one handle context menu, fire MOZLONGTAP event
-  if (!mContextMenuHandled) {
-    LayoutDevicePoint currentPoint =
-      APZCCallbackHelper::ApplyCallbackTransform(aPoint, aGuid) * mWidget->GetDefaultScale();
-    int time = 0;
-    nsEventStatus status =
-      DispatchSynthesizedMouseEvent(NS_MOUSE_MOZLONGTAP, time, currentPoint, mWidget);
-    mLongTapEventHandled = (status == nsEventStatus_eConsumeNoDefault);
-  }
-
-  SendContentReceivedTouch(aGuid, mContextMenuHandled || mLongTapEventHandled);
+  SendContentReceivedTouch(aGuid, mContextMenuHandled);
 
   return true;
 }
@@ -1760,11 +1720,6 @@ TabChild::RecvHandleLongTapUp(const CSSPoint& aPoint, const ScrollableLayerGuid&
 {
   if (mContextMenuHandled) {
     mContextMenuHandled = false;
-    return true;
-  }
-
-  if (mLongTapEventHandled) {
-    mLongTapEventHandled = false;
     return true;
   }
 
@@ -2021,14 +1976,13 @@ TabChild::RecvRealTouchEvent(const WidgetTouchEvent& aEvent,
   }
 
   if (aEvent.message == NS_TOUCH_START && localEvent.touches.Length() > 0) {
-    mActiveElementManager->SetTargetElement(localEvent.touches[0]->GetTarget());
+    mActiveElementManager->SetTargetElement(localEvent.touches[0]->Target());
   }
 
   nsCOMPtr<nsPIDOMWindow> outerWindow = do_GetInterface(WebNavigation());
-  nsCOMPtr<nsPIDOMWindow> innerWindow = outerWindow ? outerWindow->GetCurrentInnerWindow() : nullptr;
+  nsCOMPtr<nsPIDOMWindow> innerWindow = outerWindow->GetCurrentInnerWindow();
 
-  if (!innerWindow || (!innerWindow->HasTouchEventListeners() &&
-                       !innerWindow->MayHaveTouchCaret())) {
+  if (!innerWindow || !innerWindow->HasTouchEventListeners()) {
     SendContentReceivedTouch(aGuid, false);
     return true;
   }
@@ -2401,10 +2355,7 @@ TabChild::RecvSetIsDocShellActive(const bool& aIsActive)
 }
 
 PRenderFrameChild*
-TabChild::AllocPRenderFrameChild(ScrollingBehavior* aScrolling,
-                                 TextureFactoryIdentifier* aTextureFactoryIdentifier,
-                                 uint64_t* aLayersId,
-                                 bool* aSuccess)
+TabChild::AllocPRenderFrameChild()
 {
     return new RenderFrameChild();
 }
@@ -2463,14 +2414,12 @@ TabChild::InitRenderingState()
     uint64_t id;
     bool success;
     RenderFrameChild* remoteFrame =
-        static_cast<RenderFrameChild*>(SendPRenderFrameConstructor(
-                                         &mScrolling,
-                                         &mTextureFactoryIdentifier, &id,
-                                         &success));
+        static_cast<RenderFrameChild*>(SendPRenderFrameConstructor());
     if (!remoteFrame) {
         NS_WARNING("failed to construct RenderFrame");
         return false;
     }
+    SendInitRenderFrame(remoteFrame, &mScrolling, &mTextureFactoryIdentifier, &id, &success);
     if (!success) {
         NS_WARNING("failed to construct RenderFrame");
         PRenderFrameChild::Send__delete__(remoteFrame);
@@ -2521,7 +2470,6 @@ TabChild::InitRenderingState()
       if (!sTabChildren) {
         sTabChildren = new TabChildMap;
       }
-      MOZ_ASSERT(!sTabChildren->Get(id));
       sTabChildren->Put(id, this);
       mLayersId = id;
     }
@@ -2731,14 +2679,14 @@ TabChild::GetFrom(uint64_t aLayersId)
 }
 
 void
-TabChild::DidComposite(uint64_t aTransactionId)
+TabChild::DidComposite()
 {
   MOZ_ASSERT(mWidget);
   MOZ_ASSERT(mWidget->GetLayerManager());
   MOZ_ASSERT(mWidget->GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT);
 
   ClientLayerManager *manager = static_cast<ClientLayerManager*>(mWidget->GetLayerManager());
-  manager->DidComposite(aTransactionId);
+  manager->DidComposite();
 }
 
 NS_IMETHODIMP
@@ -2754,17 +2702,6 @@ TabChild::OnHideTooltip()
 {
     SendHideTooltip();
     return NS_OK;
-}
-
-bool
-TabChild::RecvUIResolutionChanged()
-{
-  static_cast<PuppetWidget*>(mWidget.get())->ClearBackingScaleCache();
-  nsCOMPtr<nsIDocument> document(GetDocument());
-  nsCOMPtr<nsIPresShell> presShell = document->GetShell();
-  nsRefPtr<nsPresContext> presContext = presShell->GetPresContext();
-  presContext->UIResolutionChanged();
-  return true;
 }
 
 TabChildGlobal::TabChildGlobal(TabChildBase* aTabChild)

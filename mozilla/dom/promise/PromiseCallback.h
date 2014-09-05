@@ -24,8 +24,7 @@ public:
   PromiseCallback();
   virtual ~PromiseCallback();
 
-  virtual void Call(JSContext* aCx,
-                    JS::Handle<JS::Value> aValue) = 0;
+  virtual void Call(JS::Handle<JS::Value> aValue) = 0;
 
   enum Task {
     Resolve,
@@ -48,8 +47,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(WrapperPromiseCallback,
                                                          PromiseCallback)
 
-  void Call(JSContext* aCx,
-            JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
+  void Call(JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
 
   WrapperPromiseCallback(Promise* aNextPromise, JS::Handle<JSObject*> aGlobal,
                          AnyCallback* aCallback);
@@ -70,8 +68,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(ResolvePromiseCallback,
                                                          PromiseCallback)
 
-  void Call(JSContext* aCx,
-            JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
+  void Call(JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
 
   ResolvePromiseCallback(Promise* aPromise, JS::Handle<JSObject*> aGlobal);
   ~ResolvePromiseCallback();
@@ -90,8 +87,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS_INHERITED(RejectPromiseCallback,
                                                          PromiseCallback)
 
-  void Call(JSContext* aCx,
-            JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
+  void Call(JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
 
   RejectPromiseCallback(Promise* aPromise, JS::Handle<JSObject*> aGlobal);
   ~RejectPromiseCallback();
@@ -109,8 +105,7 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(NativePromiseCallback,
                                            PromiseCallback)
 
-  void Call(JSContext* aCx,
-            JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
+  void Call(JS::Handle<JS::Value> aValue) MOZ_OVERRIDE;
 
   NativePromiseCallback(PromiseNativeHandler* aHandler,
                         Promise::PromiseState aState);

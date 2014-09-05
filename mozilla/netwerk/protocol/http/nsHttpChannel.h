@@ -424,6 +424,8 @@ private: // cache telemetry
     bool mDidReval;
 
 private:
+    nsIPrincipal *GetPrincipal();
+    nsCOMPtr<nsIPrincipal> mPrincipal;
     bool mForcePending;
 };
 

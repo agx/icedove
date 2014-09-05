@@ -75,15 +75,18 @@ function testNewWindow(aWindow) {
   let isLoaded = promise.defer();
 
   promise.all([isActive.promise, isLoaded.promise]).then(() => {
-    gClient.listTabs(aResponse => {
-      is(aResponse.selected, 2,
-        "The second tab is selected.");
+    gNewWindow.BrowserChromeTest.runWhenReady(() => {
+      gClient.listTabs(aResponse => {
+        is(aResponse.selected, 2,
+          "The second tab is selected.");
 
-      deferred.resolve();
+        deferred.resolve();
+      });
     });
   });
 
-  if (Services.focus.activeWindow != gNewWindow) {
+  let focusManager = Cc["@mozilla.org/focus-manager;1"].getService(Ci.nsIFocusManager);
+  if (focusManager.activeWindow != gNewWindow) {
     gNewWindow.addEventListener("activate", function onActivate(aEvent) {
       if (aEvent.target != gNewWindow) {
         return;
@@ -115,6 +118,10 @@ function testFocusFirst() {
   let deferred = promise.defer();
 
   once(window.content, "focus").then(() => {
+    let topWindow = Services.wm.getMostRecentWindow("navigator:browser");
+    is(top, getDOMWindow(window),
+      "The first window is on top.");
+
     gClient.listTabs(aResponse => {
       is(aResponse.selected, 1,
         "The first tab is selected after focusing on it.");

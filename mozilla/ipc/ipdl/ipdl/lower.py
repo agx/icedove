@@ -2814,7 +2814,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
 
             self.cls.addstmt(StmtDecl(MethodDecl(
                 _deallocMethod(managed, self.side).name,
-                params=[ Decl(actortype, 'aActor') ],
+                params=[ Decl(actortype, 'actor') ],
                 ret=Type.BOOL,
                 virtual=1, pure=1)))
 
@@ -2824,19 +2824,18 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             actortype = _cxxBareType(actor.asType(), actor.side)
             self.cls.addstmt(StmtDecl(MethodDecl(
                 _allocMethod(actor.ptype, actor.side).name,
-                params=[ Decl(Type('Transport', ptr=1), 'aTransport'),
-                         Decl(Type('ProcessId'), 'aOtherProcess') ],
+                params=[ Decl(Type('Transport', ptr=1), 'transport'),
+                         Decl(Type('ProcessId'), 'otherProcess') ],
                 ret=actortype,
                 virtual=1, pure=1)))
 
-        # ActorDestroy() method; default is no-op
+        # optional ActorDestroy() method; default is no-op
         self.cls.addstmts([
             Whitespace.NL,
             MethodDefn(MethodDecl(
                 _destroyMethod().name,
-                params=[ Decl(_DestroyReason.Type(), 'aWhy') ],
-                ret=Type.VOID,
-                virtual=1, pure=(self.side == 'parent'))),
+                params=[ Decl(_DestroyReason.Type(), 'why') ],
+                virtual=1)),
             Whitespace.NL
         ])
 
@@ -2844,7 +2843,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             # void ProcessingError(code); default to no-op
             processingerror = MethodDefn(
                 MethodDecl(p.processingErrorVar().name,
-                           params=[ Param(_Result.Type(), 'aCode') ],
+                           params=[ Param(_Result.Type(), 'code') ],
                            virtual=1))
 
             # bool ShouldContinueFromReplyTimeout(); default to |true|
@@ -3079,12 +3078,12 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
             if hasReply:
                 params.append(Decl(Type('Message', ref=1, ptr=1),
                                    replyvar.name))
-
+            
             method = MethodDefn(MethodDecl(name, virtual=True,
                                            params=params, ret=_Result.Type()))
 
             if not switch:
-              crash = StmtExpr(ExprCall(ExprVar('MOZ_ASSERT_UNREACHABLE'),
+              crash = StmtExpr(ExprCall(ExprVar('MOZ_ASSUME_UNREACHABLE'),
                                args=[ExprLiteral.String('message protocol not supported')]))
               method.addstmts([crash, StmtReturn(_Result.NotKnown)])
               return method
@@ -3162,7 +3161,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
         deallocshmemvar = ExprVar('DeallocShmems')
 
         # OnProcesingError(code)
-        codevar = ExprVar('aCode')
+        codevar = ExprVar('code')
         onprocessingerror = MethodDefn(
             MethodDecl('OnProcessingError',
                        params=[ Param(_Result.Type(), codevar.name) ]))
@@ -3259,7 +3258,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
 
         # OnChannelConnected()
         onconnected = MethodDefn(MethodDecl('OnChannelConnected',
-                                            params=[ Decl(Type.INT32, 'aPid') ]))
+                                            params=[ Decl(Type.INT32, 'pid') ]))
         if not ptype.isToplevel():
             onconnected.addstmt(
                 _runtimeAbort("'OnConnected' called on non-toplevel actor"))
@@ -5369,8 +5368,7 @@ class _GenerateProtocolActorCode(ipdl.ast.Visitor):
     def profilerLabel(self, tag, msgname):
         return StmtExpr(ExprCall(ExprVar('PROFILER_LABEL'),
                                  [ ExprLiteral.String('IPDL::' + self.protocol.name),
-                                   ExprLiteral.String(tag + msgname),
-                                   ExprVar('js::ProfileEntry::Category::OTHER') ]))
+                                   ExprLiteral.String(tag + msgname) ]))
 
     def saveActorId(self, md):
         idvar = ExprVar('__id')
@@ -5517,7 +5515,7 @@ class _GenerateSkeletonImpl(Visitor):
                                              ret=md.ret))
         if md.ret.ptr:
             impl.addstmt(StmtReturn(ExprLiteral.ZERO))
-        elif md.ret == Type.BOOL:
+        else:
             impl.addstmt(StmtReturn(ExprVar('false')))
 
         self.cls.addstmts([ StmtDecl(decl), Whitespace.NL ])

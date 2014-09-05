@@ -574,9 +574,6 @@ GDIFontFamily::FindStyleVariations(FontInfoData *aFontInfoData)
 gfxGDIFontList::gfxGDIFontList()
     : mFontSubstitutes(50)
 {
-#ifdef MOZ_BUNDLED_FONTS
-    ActivateBundledFonts();
-#endif
 }
 
 static void
@@ -839,35 +836,15 @@ gfxGDIFontList::MakePlatformFont(const gfxProxyFontEntry *aProxyEntry,
 }
 
 gfxFontFamily*
-gfxGDIFontList::FindFamily(const nsAString& aFamily)
-{
-    nsAutoString keyName(aFamily);
-    BuildKeyNameFromFontName(keyName);
-
-    gfxFontFamily *ff = mFontSubstitutes.GetWeak(keyName);
-    if (ff) {
-        return ff;
-    }
-
-    if (mNonExistingFonts.Contains(keyName)) {
-        return nullptr;
-    }
-
-    return gfxPlatformFontList::FindFamily(aFamily);
-}
-
-gfxFontFamily*
 gfxGDIFontList::GetDefaultFont(const gfxFontStyle* aStyle)
 {
-    gfxFontFamily *ff = nullptr;
-
     // this really shouldn't fail to find a font....
     HGDIOBJ hGDI = ::GetStockObject(DEFAULT_GUI_FONT);
     LOGFONTW logFont;
     if (hGDI && ::GetObjectW(hGDI, sizeof(logFont), &logFont)) {
-        ff = FindFamily(nsDependentString(logFont.lfFaceName));
-        if (ff) {
-            return ff;
+        nsAutoString resolvedName;
+        if (ResolveFontName(nsDependentString(logFont.lfFaceName), resolvedName)) {
+            return FindFamily(resolvedName);
         }
     }
 
@@ -877,10 +854,35 @@ gfxGDIFontList::GetDefaultFont(const gfxFontStyle* aStyle)
     BOOL status = ::SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, 
                                           sizeof(ncm), &ncm, 0);
     if (status) {
-        ff = FindFamily(nsDependentString(ncm.lfMessageFont.lfFaceName));
+        nsAutoString resolvedName;
+        if (ResolveFontName(nsDependentString(ncm.lfMessageFont.lfFaceName), resolvedName)) {
+            return FindFamily(resolvedName);
+        }
     }
 
-    return ff;
+    return nullptr;
+}
+
+
+bool 
+gfxGDIFontList::ResolveFontName(const nsAString& aFontName, nsAString& aResolvedFontName)
+{
+    nsAutoString keyName(aFontName);
+    BuildKeyNameFromFontName(keyName);
+
+    gfxFontFamily *ff = mFontSubstitutes.GetWeak(keyName);
+    if (ff) {
+        aResolvedFontName = ff->Name();
+        return true;
+    }
+
+    if (mNonExistingFonts.Contains(keyName))
+        return false;
+
+    if (gfxPlatformFontList::ResolveFontName(aFontName, aResolvedFontName))
+        return true;
+
+    return false;
 }
 
 void
@@ -1090,47 +1092,3 @@ gfxGDIFontList::CreateFontInfoData()
 
     return fi.forget();
 }
-
-#ifdef MOZ_BUNDLED_FONTS
-
-void
-gfxGDIFontList::ActivateBundledFonts()
-{
-    nsCOMPtr<nsIFile> localDir;
-    nsresult rv = NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(localDir));
-    if (NS_FAILED(rv)) {
-        return;
-    }
-    if (NS_FAILED(localDir->Append(NS_LITERAL_STRING("fonts")))) {
-        return;
-    }
-    bool isDir;
-    if (NS_FAILED(localDir->IsDirectory(&isDir)) || !isDir) {
-        return;
-    }
-
-    nsCOMPtr<nsISimpleEnumerator> e;
-    rv = localDir->GetDirectoryEntries(getter_AddRefs(e));
-    if (NS_FAILED(rv)) {
-        return;
-    }
-
-    bool hasMore;
-    while (NS_SUCCEEDED(e->HasMoreElements(&hasMore)) && hasMore) {
-        nsCOMPtr<nsISupports> entry;
-        if (NS_FAILED(e->GetNext(getter_AddRefs(entry)))) {
-            break;
-        }
-        nsCOMPtr<nsIFile> file = do_QueryInterface(entry);
-        if (!file) {
-            continue;
-        }
-        nsCString path;
-        if (NS_FAILED(file->GetNativePath(path))) {
-            continue;
-        }
-        AddFontResourceEx(path.get(), FR_PRIVATE, nullptr);
-    }
-}
-
-#endif

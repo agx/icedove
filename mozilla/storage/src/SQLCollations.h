@@ -26,7 +26,7 @@ namespace storage {
  *         The Service that owns the nsICollation used by our collations.
  * @return the SQLite status code indicating success or failure.
  */
-int registerCollations(sqlite3 *aDB, Service *aService);
+NS_HIDDEN_(int) registerCollations(sqlite3 *aDB, Service *aService);
 
 ////////////////////////////////////////////////////////////////////////////////
 //// Predefined Functions
@@ -51,7 +51,7 @@ int registerCollations(sqlite3 *aDB, Service *aService);
  *         If aStr1 > aStr2, returns a positive number.  If aStr1 == aStr2,
  *         returns 0.
  */
-int localeCollation8(void *aService,
+NS_HIDDEN_(int) localeCollation8(void *aService,
                                  int aLen1,
                                  const void *aStr1,
                                  int aLen2,
@@ -78,7 +78,7 @@ int localeCollation8(void *aService,
  *         If aStr1 > aStr2, returns a positive number.  If aStr1 == aStr2,
  *         returns 0.
  */
-int localeCollationCaseSensitive8(void *aService,
+NS_HIDDEN_(int) localeCollationCaseSensitive8(void *aService,
                                               int aLen1,
                                               const void *aStr1,
                                               int aLen2,
@@ -105,7 +105,7 @@ int localeCollationCaseSensitive8(void *aService,
  *         If aStr1 > aStr2, returns a positive number.  If aStr1 == aStr2,
  *         returns 0.
  */
-int localeCollationAccentSensitive8(void *aService,
+NS_HIDDEN_(int) localeCollationAccentSensitive8(void *aService,
                                                 int aLen1,
                                                 const void *aStr1,
                                                 int aLen2,
@@ -131,7 +131,7 @@ int localeCollationAccentSensitive8(void *aService,
  *         If aStr1 > aStr2, returns a positive number.  If aStr1 == aStr2,
  *         returns 0.
  */
-int localeCollationCaseAccentSensitive8(void *aService,
+NS_HIDDEN_(int) localeCollationCaseAccentSensitive8(void *aService,
                                                     int aLen1,
                                                     const void *aStr1,
                                                     int aLen2,
@@ -157,7 +157,7 @@ int localeCollationCaseAccentSensitive8(void *aService,
  *         If aStr1 > aStr2, returns a positive number.  If aStr1 == aStr2,
  *         returns 0.
  */
-int localeCollation16(void *aService,
+NS_HIDDEN_(int) localeCollation16(void *aService,
                                   int aLen1,
                                   const void *aStr1,
                                   int aLen2,
@@ -184,7 +184,7 @@ int localeCollation16(void *aService,
  *         If aStr1 > aStr2, returns a positive number.  If aStr1 == aStr2,
  *         returns 0.
  */
-int localeCollationCaseSensitive16(void *aService,
+NS_HIDDEN_(int) localeCollationCaseSensitive16(void *aService,
                                                int aLen1,
                                                const void *aStr1,
                                                int aLen2,
@@ -211,7 +211,7 @@ int localeCollationCaseSensitive16(void *aService,
  *         If aStr1 > aStr2, returns a positive number.  If aStr1 == aStr2,
  *         returns 0.
  */
-int localeCollationAccentSensitive16(void *aService,
+NS_HIDDEN_(int) localeCollationAccentSensitive16(void *aService,
                                                  int aLen1,
                                                  const void *aStr1,
                                                  int aLen2,
@@ -237,7 +237,7 @@ int localeCollationAccentSensitive16(void *aService,
  *         If aStr1 > aStr2, returns a positive number.  If aStr1 == aStr2,
  *         returns 0.
  */
-int localeCollationCaseAccentSensitive16(void *aService,
+NS_HIDDEN_(int) localeCollationCaseAccentSensitive16(void *aService,
                                                      int aLen1,
                                                      const void *aStr1,
                                                      int aLen2,

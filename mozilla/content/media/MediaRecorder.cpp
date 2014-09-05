@@ -631,7 +631,8 @@ MediaRecorder::RequestData(ErrorResult& aResult)
 
   NS_DispatchToMainThread(
     new CreateAndDispatchBlobEventRunnable(mSessions.LastElement()->GetEncodedData(),
-                                           this));
+                                           this),
+                                           NS_DISPATCH_NORMAL);
 }
 
 JSObject*

@@ -43,6 +43,11 @@ TEST_F(DISABLED_ON_MAC(ViEExtendedIntegrationTest),
 }
 
 TEST_F(DISABLED_ON_MAC(ViEExtendedIntegrationTest),
+       RunsEncryptionTestWithoutErrors) {
+  tests_->ViEEncryptionExtendedTest();
+}
+
+TEST_F(DISABLED_ON_MAC(ViEExtendedIntegrationTest),
        RunsImageProcessTestWithoutErrors) {
   tests_->ViEImageProcessExtendedTest();
 }

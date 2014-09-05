@@ -351,7 +351,7 @@ IDBCursor::ConvertDirection(mozilla::dom::IDBCursorDirection aDirection)
       return PREV_UNIQUE;
 
     default:
-      MOZ_CRASH("Unknown direction!");
+      MOZ_ASSUME_UNREACHABLE("Unknown direction!");
   }
 }
 
@@ -492,7 +492,7 @@ IDBCursor::ContinueInternal(const Key& aKey, int32_t aCount, ErrorResult& aRv)
       break;
 
     default:
-      MOZ_CRASH("Unknown cursor type!");
+      MOZ_ASSUME_UNREACHABLE("Unknown cursor type!");
   }
 
   nsresult rv = helper->DispatchToTransactionPool();
@@ -517,12 +517,12 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(IDBCursor)
   NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
-  NS_ASSERTION(tmp->mHaveCachedKey || tmp->mCachedKey.isUndefined(),
+  NS_ASSERTION(tmp->mHaveCachedKey || JSVAL_IS_VOID(tmp->mCachedKey),
                "Should have a cached key");
   NS_ASSERTION(tmp->mHaveCachedPrimaryKey ||
-               tmp->mCachedPrimaryKey.isUndefined(),
+               JSVAL_IS_VOID(tmp->mCachedPrimaryKey),
                "Should have a cached primary key");
-  NS_ASSERTION(tmp->mHaveCachedValue || tmp->mCachedValue.isUndefined(),
+  NS_ASSERTION(tmp->mHaveCachedValue || JSVAL_IS_VOID(tmp->mCachedValue),
                "Should have a cached value");
   NS_IMPL_CYCLE_COLLECTION_TRACE_JS_MEMBER_CALLBACK(mScriptOwner)
   NS_IMPL_CYCLE_COLLECTION_TRACE_JSVAL_MEMBER_CALLBACK(mCachedKey)
@@ -560,7 +560,7 @@ IDBCursor::WrapObject(JSContext* aCx)
       return IDBCursorBinding::Wrap(aCx, this);
 
     default:
-      MOZ_CRASH("Bad type!");
+      MOZ_ASSUME_UNREACHABLE("Bad type!");
   }
 }
 
@@ -583,7 +583,7 @@ IDBCursor::GetDirection() const
       return mozilla::dom::IDBCursorDirection::Prevunique;
 
     default:
-      MOZ_CRASH("Bad direction!");
+      MOZ_ASSUME_UNREACHABLE("Bad direction!");
   }
 }
 
@@ -606,7 +606,7 @@ IDBCursor::GetSource(OwningIDBObjectStoreOrIDBIndex& aSource) const
       break;
 
     default:
-      MOZ_ASSERT_UNREACHABLE("Bad type!");
+      MOZ_ASSUME_UNREACHABLE("Bad type!");
   }
 }
 
@@ -737,7 +737,7 @@ IDBCursor::Continue(JSContext* aCx,
         break;
 
       default:
-        MOZ_CRASH("Unknown direction type!");
+        MOZ_ASSUME_UNREACHABLE("Unknown direction type!");
     }
   }
 
@@ -996,8 +996,7 @@ CursorHelper::Dispatch(nsIEventTarget* aDatabaseThread)
 {
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
 
-  PROFILER_MAIN_THREAD_LABEL("CursorHelper", "Dispatch",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB", "CursorHelper::Dispatch");
 
   if (IndexedDatabaseManager::IsMainProcess()) {
     return AsyncConnectionHelper::Dispatch(aDatabaseThread);
@@ -1033,8 +1032,7 @@ ContinueHelper::DoDatabaseWork(mozIStorageConnection* aConnection)
   NS_ASSERTION(!NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("ContinueHelper", "DoDatabaseWork",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_LABEL("IndexedDB", "ContinueHelper::DoDatabaseWork");
 
   // We need to pick a query based on whether or not the cursor's mContinueToKey
   // is set. If it is unset then othing was passed to continue so we'll grab the
@@ -1116,8 +1114,8 @@ ContinueHelper::PackArgumentsForParentProcess(CursorRequestParams& aParams)
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(!IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_MAIN_THREAD_LABEL("ContinueHelper", "PackArgumentsForParentProcess",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "ContinueHelper::PackArgumentsForParentProcess");
 
   ContinueParams params;
 
@@ -1134,8 +1132,8 @@ ContinueHelper::SendResponseToChildProcess(nsresult aResultCode)
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_MAIN_THREAD_LABEL("ContinueHelper", "SendResponseToChildProcess",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB",
+                             "ContinueHelper::SendResponseToChildProcess");
 
   IndexedDBRequestParentBase* actor = mRequest->GetActorParent();
   NS_ASSERTION(actor, "How did we get this far without an actor?");

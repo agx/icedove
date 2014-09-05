@@ -9,7 +9,6 @@ EXPORTS += [
     'nsCrypto.h',
     'nsNSSShutDown.h',
     'nsRandomGenerator.h',
-    'NSSErrorsService.h',
     'ScopedNSSTypes.h',
 ]
 

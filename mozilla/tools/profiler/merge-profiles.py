@@ -66,8 +66,6 @@ def MergeProfiles(files):
         for sample in thread['samples']:
             if "time" in sample:
                 sample['time'] += delta
-        for marker in thread['markers']:
-            marker['time'] += delta
 
     result = dict()
     result['profileJSON'] = dict()

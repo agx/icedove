@@ -1,4 +1,4 @@
-enableSPSProfiling();
+enableSPSProfilingAssertions(false);
 function foo(obj,x,y,z) {
     if (!y)
 	assertEq(0, 1);

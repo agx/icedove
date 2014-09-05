@@ -71,6 +71,10 @@ public:
 
     nsresult UpdateFontList();
 
+    nsresult ResolveFontName(const nsAString& aFontName,
+                             gfxPlatform::FontResolverCallback aCallback,
+                             void *aClosure, bool& aAborted);
+
     nsresult GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName);
 
     const nsTArray< nsCountedRef<FcPattern> >&
@@ -305,13 +309,6 @@ protected:
     nsTArray<nsCString> mAliasForMultiFonts;
 
     FcConfig *mLastConfig;
-
-#ifdef MOZ_BUNDLED_FONTS
-    void      ActivateBundledFonts();
-
-    nsCString mBundledFontsPath;
-    bool      mBundledFontsInitialized;
-#endif
 };
 
 #endif /* GFX_FONTCONFIG_UTILS_H */

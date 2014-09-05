@@ -215,9 +215,11 @@ let SyncHandler = {
  */
 let SessionHistoryListener = {
   init: function () {
-    // The frame tree observer is needed to handle initial subframe loads.
-    // It will redundantly invalidate with the SHistoryListener in some cases
-    // but these invalidations are very cheap.
+    // The frame tree observer is needed to handle navigating away from
+    // an about page. Currently nsISHistoryListener does not have
+    // OnHistoryNewEntry() called for about pages because the history entry is
+    // modified to point at the new page. Once Bug 981900 lands the frame tree
+    // observer can be removed.
     gFrameTree.addObserver(this);
 
     // By adding the SHistoryListener immediately, we will unfortunately be

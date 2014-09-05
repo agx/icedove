@@ -12,20 +12,20 @@ NS_IMPL_ISUPPORTS(nsScriptableBase64Encoder, nsIScriptableBase64Encoder)
 
 /* ACString encodeToCString (in nsIInputStream stream, in unsigned long length); */
 NS_IMETHODIMP
-nsScriptableBase64Encoder::EncodeToCString(nsIInputStream* aStream,
+nsScriptableBase64Encoder::EncodeToCString(nsIInputStream *aStream,
                                            uint32_t aLength,
-                                           nsACString& aResult)
+                                           nsACString & _retval)
 {
-  Base64EncodeInputStream(aStream, aResult, aLength);
+  Base64EncodeInputStream(aStream, _retval, aLength);
   return NS_OK;
 }
 
 /* AString encodeToString (in nsIInputStream stream, in unsigned long length); */
 NS_IMETHODIMP
-nsScriptableBase64Encoder::EncodeToString(nsIInputStream* aStream,
+nsScriptableBase64Encoder::EncodeToString(nsIInputStream *aStream,
                                           uint32_t aLength,
-                                          nsAString& aResult)
+                                          nsAString & _retval)
 {
-  Base64EncodeInputStream(aStream, aResult, aLength);
+  Base64EncodeInputStream(aStream, _retval, aLength);
   return NS_OK;
 }

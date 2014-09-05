@@ -35,6 +35,11 @@ TEST_F(DISABLED_ON_MAC(ViEApiIntegrationTest), RunsCodecTestWithoutErrors) {
 }
 
 TEST_F(DISABLED_ON_MAC(ViEApiIntegrationTest),
+       RunsEncryptionTestWithoutErrors) {
+  tests_->ViEEncryptionAPITest();
+}
+
+TEST_F(DISABLED_ON_MAC(ViEApiIntegrationTest),
        RunsImageProcessTestWithoutErrors) {
   tests_->ViEImageProcessAPITest();
 }

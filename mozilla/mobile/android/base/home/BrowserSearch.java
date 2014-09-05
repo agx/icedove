@@ -5,7 +5,6 @@
 
 package org.mozilla.gecko.home;
 
-import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.PrefsHelper;
@@ -56,10 +55,7 @@ import android.widget.ListView;
 import android.widget.TextView;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.EnumSet;
-import java.util.List;
-import java.util.Locale;
 
 /**
  * Fragment that displays frecency search results in a ListView.
@@ -107,14 +103,8 @@ public class BrowserSearch extends HomeFragment
     // Client that performs search suggestion queries
     private volatile SuggestClient mSuggestClient;
 
-    // List of search engines from Gecko.
-    // Do not mutate this list.
-    // Access to this member must only occur from the UI thread.
-    private List<SearchEngine> mSearchEngines;
-
-    // Track the locale that was last in use when we filled mSearchEngines.
-    // Access to this member must only occur from the UI thread.
-    private Locale mLastLocale;
+    // List of search engines from gecko
+    private ArrayList<SearchEngine> mSearchEngines;
 
     // Whether search suggestions are enabled or not
     private boolean mSuggestionsEnabled;
@@ -236,11 +226,6 @@ public class BrowserSearch extends HomeFragment
     public void onResume() {
         super.onResume();
 
-        // Fetch engines if we need to.
-        if (mSearchEngines.isEmpty() || !Locale.getDefault().equals(mLastLocale)) {
-            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("SearchEngines:GetVisible", null));
-        }
-
         Telemetry.startUISession(TelemetryContract.Session.FRECENCY);
     }
 
@@ -265,8 +250,7 @@ public class BrowserSearch extends HomeFragment
     public void onDestroyView() {
         super.onDestroyView();
 
-        EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
-            "SearchEngines:Data");
+        unregisterEventListener("SearchEngines:Data");
 
         mList.setAdapter(null);
         mList = null;
@@ -337,8 +321,9 @@ public class BrowserSearch extends HomeFragment
         });
 
         registerForContextMenu(mList);
-        EventDispatcher.getInstance().registerGeckoThreadListener(this,
-            "SearchEngines:Data");
+        registerEventListener("SearchEngines:Data");
+
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("SearchEngines:GetVisible", null));
     }
 
     @Override
@@ -518,15 +503,11 @@ public class BrowserSearch extends HomeFragment
     }
 
     private void setSuggestions(ArrayList<String> suggestions) {
-        ThreadUtils.assertOnUiThread();
-
         mSearchEngines.get(0).setSuggestions(suggestions);
         mAdapter.notifyDataSetChanged();
     }
 
     private void setSearchEngines(JSONObject data) {
-        ThreadUtils.assertOnUiThread();
-
         // This method is called via a Runnable posted from the Gecko thread, so
         // it's possible the fragment and/or its view has been destroyed by the
         // time we get here. If so, just abort.
@@ -571,8 +552,7 @@ public class BrowserSearch extends HomeFragment
                 }
             }
 
-            mSearchEngines = Collections.unmodifiableList(searchEngines);
-            mLastLocale = Locale.getDefault();
+            mSearchEngines = searchEngines;
 
             if (mAdapter != null) {
                 mAdapter.notifyDataSetChanged();
@@ -725,6 +705,14 @@ public class BrowserSearch extends HomeFragment
 
     private int getSuggestEngineCount() {
         return (TextUtils.isEmpty(mSearchTerm) || mSuggestClient == null || !mSuggestionsEnabled) ? 0 : 1;
+    }
+
+    private void registerEventListener(String eventName) {
+        GeckoAppShell.registerEventListener(eventName, this);
+    }
+
+    private void unregisterEventListener(String eventName) {
+        GeckoAppShell.unregisterEventListener(eventName, this);
     }
 
     private void restartSearchLoader() {

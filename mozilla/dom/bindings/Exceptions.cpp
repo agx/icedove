@@ -18,6 +18,26 @@
 #include "WorkerPrivate.h"
 #include "nsContentUtils.h"
 
+namespace {
+
+// We can't use nsContentUtils::IsCallerChrome because it might not exist in
+// xpcshell.
+bool
+IsCallerChrome()
+{
+  nsCOMPtr<nsIScriptSecurityManager> secMan;
+  secMan = XPCWrapper::GetSecurityManager();
+
+  if (!secMan) {
+    return false;
+  }
+
+  bool isChrome;
+  return NS_SUCCEEDED(secMan->SubjectPrincipalIsSystem(&isChrome)) && isChrome;
+}
+
+} // anonymous namespace
+
 namespace mozilla {
 namespace dom {
 
@@ -60,7 +80,7 @@ ThrowExceptionObject(JSContext* aCx, Exception* aException)
   // (i.e., not chrome), rethrow the original value. This only applies to JS
   // implemented components so we only need to check for this on the main
   // thread.
-  if (NS_IsMainThread() && !nsContentUtils::IsCallerChrome() &&
+  if (NS_IsMainThread() && !IsCallerChrome() &&
       aException->StealJSVal(thrown.address())) {
     if (!JS_WrapValue(aCx, &thrown)) {
       return false;
@@ -153,8 +173,14 @@ GetCurrentJSStack()
   JSContext* cx = nullptr;
 
   if (NS_IsMainThread()) {
-    MOZ_ASSERT(nsContentUtils::XPConnect());
-    cx = nsContentUtils::GetCurrentJSContext();
+    // Note, in xpcshell nsContentUtils is never initialized, but we still need
+    // to report exceptions.
+    if (nsContentUtils::XPConnect()) {
+      cx = nsContentUtils::XPConnect()->GetCurrentJSContext();
+    } else {
+      nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID());
+      cx = xpc->GetCurrentJSContext();
+    }
   } else {
     cx = workers::GetCurrentThreadJSContext();
   }

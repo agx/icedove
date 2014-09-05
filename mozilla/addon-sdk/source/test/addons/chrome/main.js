@@ -7,8 +7,6 @@ const { Cu, Cc, Ci } = require('chrome');
 const Request = require('sdk/request').Request;
 const { WindowTracker } = require('sdk/deprecated/window-utils');
 const { close, open } = require('sdk/window/helpers');
-const { data } = require('sdk/self');
-const { Panel } = require('sdk/panel');
 
 const XUL_URL = 'chrome://test/content/new-window.xul'
 
@@ -65,28 +63,6 @@ exports.testChromeLocale = function(assert) {
   assert.equal(enStringBundle.GetStringFromName('test'),
                'Test',
                'locales en-US folder was copied correctly');
-}
-
-exports.testChromeInPanel = function(assert, done) {
-  let panel = Panel({
-    contentURL: 'chrome://test/content/panel.html',
-    contentScriptWhen: 'start',
-    contentScriptFile: data.url('panel.js')
-  });
-  panel.once('show', _ => {
-    assert.pass('panel shown');
-    panel.port.once('echo', _ => {
-      assert.pass('got echo');
-      panel.once('hide', _ => {
-        panel.destroy();
-        assert.pass('panel is destroyed');
-        done();
-      });
-      panel.hide();
-    });
-    panel.port.emit('echo');
-  });
-  panel.show();
 }
 
 require('sdk/test/runner').runTestsFromModule(module);

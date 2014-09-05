@@ -62,7 +62,8 @@ private:
 //-----------------------------------------------------------------------------
 
 nsHttpPipeline::nsHttpPipeline()
-    : mStatus(NS_OK)
+    : mConnection(nullptr)
+    , mStatus(NS_OK)
     , mRequestIsPartial(false)
     , mResponseIsPartial(false)
     , mClosed(false)
@@ -81,6 +82,8 @@ nsHttpPipeline::~nsHttpPipeline()
 {
     // make sure we aren't still holding onto any transactions!
     Close(NS_ERROR_ABORT);
+
+    NS_IF_RELEASE(mConnection);
 
     if (mPushBackBuf)
         free(mPushBackBuf);
@@ -405,15 +408,15 @@ nsHttpPipeline::SetConnection(nsAHttpConnection *conn)
     LOG(("nsHttpPipeline::SetConnection [this=%p conn=%x]\n", this, conn));
 
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
-    MOZ_ASSERT(!conn || !mConnection, "already have a connection");
+    MOZ_ASSERT(!mConnection, "already have a connection");
 
-    mConnection = conn;
+    NS_IF_ADDREF(mConnection = conn);
 }
 
 nsAHttpConnection *
 nsHttpPipeline::Connection()
 {
-    LOG(("nsHttpPipeline::Connection [this=%p conn=%x]\n", this, mConnection.get()));
+    LOG(("nsHttpPipeline::Connection [this=%p conn=%x]\n", this, mConnection));
 
     MOZ_ASSERT(PR_GetCurrentThread() == gSocketThread);
     return mConnection;
@@ -524,16 +527,6 @@ nsHttpPipeline::OnTransportStatus(nsITransport* transport,
             Request(i)->OnTransportStatus(transport, status, progress);
         break;
     }
-}
-
-nsHttpConnectionInfo *
-nsHttpPipeline::ConnectionInfo()
-{
-    nsAHttpTransaction *trans = Request(0) ? Request(0) : Response(0);
-    if (!trans) {
-        return nullptr;
-    }
-    return trans->ConnectionInfo();
 }
 
 bool

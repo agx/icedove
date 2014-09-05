@@ -5,8 +5,6 @@
 
 #include "gtest/gtest.h"
 
-#include "mozilla/gfx/2D.h"
-#include "mozilla/RefPtr.h"
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
 #include "nsString.h"
@@ -20,9 +18,6 @@
 
 #include "gfxFontTest.h"
 #include "mozilla/Attributes.h"
-
-using namespace mozilla;
-using namespace mozilla::gfx;
 
 class FrameTextRunCache;
 
@@ -83,12 +78,13 @@ MakeContext ()
 {
    const int size = 200;
 
-    RefPtr<DrawTarget> drawTarget = gfxPlatform::GetPlatform()->
-        CreateOffscreenContentDrawTarget(IntSize(size, size),
-                                         SurfaceFormat::B8G8R8X8);
-    nsRefPtr<gfxContext> ctx = new gfxContext(drawTarget);
+   nsRefPtr<gfxASurface> surface;
 
-    return ctx.forget();
+   surface = gfxPlatform::GetPlatform()->
+       CreateOffscreenSurface(IntSize(size, size),
+                              gfxASurface::ContentFromFormat(gfxImageFormat::RGB24));
+   nsRefPtr<gfxContext> ctx = new gfxContext(surface);
+   return ctx.forget();
 }
 
 TEST(Gfx, WordCache) {

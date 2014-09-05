@@ -37,7 +37,7 @@ public:
     virtual int writeToFile(FILE *fp);
     void blockPT(uint8_t pt);
     //int16_t payloadType();
-    virtual void parseHeader();
+    void parseHeader();
     void parseHeader(webrtc::WebRtcRTPHeader* rtp_header);
     const webrtc::WebRtcRTPHeader* RTPinfo() const;
     uint8_t * datagram() const;

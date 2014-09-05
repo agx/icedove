@@ -20,7 +20,6 @@
 #include <string>
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webrtc/common.h"
 #include "webrtc/common_types.h"
 #include "webrtc/engine_configurations.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
@@ -55,9 +54,9 @@ void APITest::Wait(uint32_t waitLengthMs) {
   }
 }
 
-APITest::APITest(const Config& config)
-    : _acmA(config.Get<AudioCodingModuleFactory>().Create(1)),
-      _acmB(config.Get<AudioCodingModuleFactory>().Create(2)),
+APITest::APITest()
+    : _acmA(AudioCodingModule::Create(1)),
+      _acmB(AudioCodingModule::Create(2)),
       _channel_A2B(NULL),
       _channel_B2A(NULL),
       _writeToFile(true),
@@ -239,12 +238,12 @@ int16_t APITest::SetUp() {
   //--- Set A-to-B channel
   _channel_A2B = new Channel(2);
   CHECK_ERROR_MT(_acmA->RegisterTransportCallback(_channel_A2B));
-  _channel_A2B->RegisterReceiverACM(_acmB.get());
+  _channel_A2B->RegisterReceiverACM(_acmB);
 
   //--- Set B-to-A channel
   _channel_B2A = new Channel(1);
   CHECK_ERROR_MT(_acmB->RegisterTransportCallback(_channel_B2A));
-  _channel_B2A->RegisterReceiverACM(_acmA.get());
+  _channel_B2A->RegisterReceiverACM(_acmA);
 
   //--- EVENT TIMERS
   // A
@@ -730,11 +729,11 @@ void APITest::TestDelay(char side) {
   estimDelayCB.SetArithMean(true);
 
   if (side == 'A') {
-    myACM = _acmA.get();
+    myACM = _acmA;
     myChannel = _channel_B2A;
     myMinDelay = &_minDelayA;
   } else {
-    myACM = _acmB.get();
+    myACM = _acmB;
     myChannel = _channel_A2B;
     myMinDelay = &_minDelayB;
   }
@@ -846,14 +845,14 @@ void APITest::TestRegisteration(char sendSide) {
 
   switch (sendSide) {
     case 'A': {
-      sendACM = _acmA.get();
-      receiveACM = _acmB.get();
+      sendACM = _acmA;
+      receiveACM = _acmB;
       thereIsDecoder = &_thereIsDecoderB;
       break;
     }
     case 'B': {
-      sendACM = _acmB.get();
-      receiveACM = _acmA.get();
+      sendACM = _acmB;
+      receiveACM = _acmA;
       thereIsDecoder = &_thereIsDecoderA;
       break;
     }
@@ -965,17 +964,17 @@ void APITest::TestPlayout(char receiveSide) {
   AudioPlayoutMode* playoutMode = NULL;
   switch (receiveSide) {
     case 'A': {
-      receiveACM = _acmA.get();
+      receiveACM = _acmA;
       playoutMode = &_playoutModeA;
       break;
     }
     case 'B': {
-      receiveACM = _acmB.get();
+      receiveACM = _acmB;
       playoutMode = &_playoutModeB;
       break;
     }
     default:
-      receiveACM = _acmA.get();
+      receiveACM = _acmA;
   }
 
   int32_t receiveFreqHz = receiveACM->ReceiveFrequency();
@@ -1019,6 +1018,7 @@ void APITest::TestPlayout(char receiveSide) {
   }
 }
 
+// set/get receiver VAD status & mode.
 void APITest::TestSendVAD(char side) {
   if (_randomTest) {
     return;
@@ -1044,14 +1044,14 @@ void APITest::TestSendVAD(char side) {
     dtx = &_sendDTXA;
     mode = &_sendVADModeA;
     myChannel = _channel_A2B;
-    myACM = _acmA.get();
+    myACM = _acmA;
   } else {
     AudioCodingModule::Codec(_codecCntrB, &myCodec);
     vad = &_sendVADB;
     dtx = &_sendDTXB;
     mode = &_sendVADModeB;
     myChannel = _channel_B2A;
-    myACM = _acmB.get();
+    myACM = _acmB;
   }
 
   CheckVADStatus(side);
@@ -1137,7 +1137,7 @@ void APITest::ChangeCodec(char side) {
     fprintf(stdout, "Reset Encoder Side A \n");
   }
   if (side == 'A') {
-    myACM = _acmA.get();
+    myACM = _acmA;
     codecCntr = &_codecCntrA;
     {
       WriteLockScoped wl(_apiTestRWLock);
@@ -1148,7 +1148,7 @@ void APITest::ChangeCodec(char side) {
     mode = &_sendVADModeA;
     myChannel = _channel_A2B;
   } else {
-    myACM = _acmB.get();
+    myACM = _acmB;
     codecCntr = &_codecCntrB;
     {
       WriteLockScoped wl(_apiTestRWLock);

@@ -38,16 +38,6 @@ AudioData::EnsureAudioBuffer()
   }
 }
 
-size_t
-AudioData::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
-{
-  size_t size = aMallocSizeOf(this) + aMallocSizeOf(mAudioData);
-  if (mAudioBuffer) {
-    size += mAudioBuffer->SizeOfIncludingThis(aMallocSizeOf);
-  }
-  return size;
-}
-
 static bool
 ValidatePlane(const VideoData::YCbCrBuffer::Plane& aPlane)
 {
@@ -159,22 +149,6 @@ VideoData* VideoData::ShallowCopyUpdateTimestamp(VideoData* aOther,
 }
 
 /* static */
-VideoData* VideoData::ShallowCopyUpdateTimestampAndDuration(VideoData* aOther,
-                                                            int64_t aTimestamp,
-                                                            int64_t aDuration)
-{
-  NS_ENSURE_TRUE(aOther, nullptr);
-  VideoData* v = new VideoData(aOther->mOffset,
-                               aTimestamp,
-                               aDuration,
-                               aOther->mKeyframe,
-                               aOther->mTimecode,
-                               aOther->mDisplay);
-  v->mImage = aOther->mImage;
-  return v;
-}
-
-/* static */
 void VideoData::SetVideoDataToImage(PlanarYCbCrImage* aVideoImage,
                                     VideoInfo& aInfo,
                                     const YCbCrBuffer &aBuffer,
@@ -246,8 +220,7 @@ VideoData* VideoData::Create(VideoInfo& aInfo,
 
   // The following situations could be triggered by invalid input
   if (aPicture.width <= 0 || aPicture.height <= 0) {
-    // In debug mode, makes the error more noticeable
-    MOZ_ASSERT(false, "Empty picture rect");
+    NS_WARNING("Empty picture rect");
     return nullptr;
   }
   if (!ValidatePlane(aBuffer.mPlanes[0]) || !ValidatePlane(aBuffer.mPlanes[1]) ||

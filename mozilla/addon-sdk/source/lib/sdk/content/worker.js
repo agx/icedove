@@ -20,7 +20,6 @@ const events = require('../system/events');
 const { getInnerId } = require("../window/utils");
 const { WorkerSandbox } = require('./sandbox');
 const { getTabForWindow } = require('../tabs/helpers');
-const { isPrivate } = require('../private-browsing/utils');
 
 // A weak map of workers to hold private attributes that
 // should not be exposed
@@ -38,7 +37,7 @@ const ERR_FROZEN = "The page is currently hidden and can no longer be used " +
 /**
  * Message-passing facility for communication between code running
  * in the content and add-on process.
- * @see https://developer.mozilla.org/en-US/Add-ons/SDK/Low-Level_APIs/content_worker
+ * @see https://addons.mozilla.org/en-US/developers/docs/sdk/latest/modules/sdk/content/worker.html
  */
 const Worker = Class({
   implements: [EventTarget],
@@ -186,8 +185,6 @@ detach.define(Worker, function (worker, reason) {
   }
   model.inited = false;
 });
-
-isPrivate.define(Worker, ({ tab }) => isPrivate(tab));
 
 /**
  * Tells content worker to unload itself and

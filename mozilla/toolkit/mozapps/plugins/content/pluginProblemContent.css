@@ -53,6 +53,7 @@ html|applet:not([height]), html|applet[height=""] {
   word-spacing: initial;
   letter-spacing: initial;
   line-height: initial;
+  position: relative;
 }
 
 /* Initialize the overlay with visibility:hidden to prevent flickering if

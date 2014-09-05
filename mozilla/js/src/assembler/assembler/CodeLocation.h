@@ -71,7 +71,7 @@ protected:
     {
     }
 
-    explicit CodeLocationCommon(MacroAssemblerCodePtr location)
+    CodeLocationCommon(MacroAssemblerCodePtr location)
         : MacroAssemblerCodePtr(location)
     {
     }

@@ -21,7 +21,6 @@
 #include <linux/android_alarm.h>
 #include <math.h>
 #include <regex.h>
-#include <sched.h>
 #include <stdio.h>
 #include <sys/klog.h>
 #include <sys/syscall.h>
@@ -39,7 +38,6 @@
 #include "hardware_legacy/vibrator.h"
 #include "hardware_legacy/power.h"
 #include "libdisplay/GonkDisplay.h"
-#include "utils/threads.h"
 
 #include "base/message_loop.h"
 
@@ -66,7 +64,6 @@
 #include "nsXULAppAPI.h"
 #include "OrientationObserver.h"
 #include "UeventPoller.h"
-#include "nsIWritablePropertyBag2.h"
 #include <algorithm>
 
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk", args)
@@ -105,7 +102,6 @@
 
 using namespace mozilla;
 using namespace mozilla::hal;
-using namespace mozilla::dom;
 
 namespace mozilla {
 namespace hal_impl {
@@ -292,25 +288,6 @@ public:
     hal_impl::SetLight(hal::eHalLightID_Battery, aConfig);
 
     hal::NotifyBatteryChange(info);
-
-    {
-      // bug 975667
-      // Gecko gonk hal is required to emit battery charging/level notification via nsIObserverService.
-      // This is useful for XPCOM components that are not statically linked to Gecko and cannot call
-      // hal::EnableBatteryNotifications
-      nsCOMPtr<nsIObserverService> obsService = mozilla::services::GetObserverService();
-      nsCOMPtr<nsIWritablePropertyBag2> propbag =
-        do_CreateInstance("@mozilla.org/hash-property-bag;1");
-      if (obsService && propbag) {
-        propbag->SetPropertyAsBool(NS_LITERAL_STRING("charging"),
-                                   info.charging());
-        propbag->SetPropertyAsDouble(NS_LITERAL_STRING("level"),
-                                   info.level());
-
-        obsService->NotifyObservers(propbag, "gonkhal-battery-notifier", nullptr);
-      }
-    }
-
     return NS_OK;
   }
 };
@@ -541,53 +518,21 @@ GetScreenEnabled()
 }
 
 void
-SetScreenEnabled(bool aEnabled)
+SetScreenEnabled(bool enabled)
 {
-  GetGonkDisplay()->SetEnabled(aEnabled);
-  sScreenEnabled = aEnabled;
-}
-
-bool
-GetKeyLightEnabled()
-{
-  hal::LightConfiguration config;
-  hal_impl::GetLight(hal::eHalLightID_Buttons, &config);
-  return (config.color() != 0x00000000);
-}
-
-void
-SetKeyLightEnabled(bool aEnabled)
-{
-  hal::LightConfiguration config;
-  config.mode() = hal::eHalLightMode_User;
-  config.flash() = hal::eHalLightFlash_None;
-  config.flashOnMS() = config.flashOffMS() = 0;
-  config.color() = 0x00000000;
-
-  if (aEnabled) {
-    // Convert the value in [0, 1] to an int between 0 and 255 and then convert
-    // it to a color. Note that the high byte is FF, corresponding to the alpha
-    // channel.
-    double brightness = GetScreenBrightness();
-    uint32_t val = static_cast<int>(round(brightness * 255.0));
-    uint32_t color = (0xff<<24) + (val<<16) + (val<<8) + val;
-
-    config.color() = color;
-  }
-
-  hal_impl::SetLight(hal::eHalLightID_Buttons, config);
-  hal_impl::SetLight(hal::eHalLightID_Keyboard, config);
+  GetGonkDisplay()->SetEnabled(enabled);
+  sScreenEnabled = enabled;
 }
 
 double
 GetScreenBrightness()
 {
-  hal::LightConfiguration config;
+  hal::LightConfiguration aConfig;
   hal::LightType light = hal::eHalLightID_Backlight;
 
-  hal_impl::GetLight(light, &config);
+  hal::GetLight(light, &aConfig);
   // backlight is brightness only, so using one of the RGB elements as value.
-  int brightness = config.color() & 0xFF;
+  int brightness = aConfig.color() & 0xFF;
   return brightness / 255.0;
 }
 
@@ -604,19 +549,16 @@ SetScreenBrightness(double brightness)
 
   // Convert the value in [0, 1] to an int between 0 and 255 and convert to a color
   // note that the high byte is FF, corresponding to the alpha channel.
-  uint32_t val = static_cast<int>(round(brightness * 255.0));
+  int val = static_cast<int>(round(brightness * 255));
   uint32_t color = (0xff<<24) + (val<<16) + (val<<8) + val;
 
-  hal::LightConfiguration config;
-  config.mode() = hal::eHalLightMode_User;
-  config.flash() = hal::eHalLightFlash_None;
-  config.flashOnMS() = config.flashOffMS() = 0;
-  config.color() = color;
-  hal_impl::SetLight(hal::eHalLightID_Backlight, config);
-  if (GetKeyLightEnabled()) {
-    hal_impl::SetLight(hal::eHalLightID_Buttons, config);
-    hal_impl::SetLight(hal::eHalLightID_Keyboard, config);
-  }
+  hal::LightConfiguration aConfig;
+  aConfig.mode() = hal::eHalLightMode_User;
+  aConfig.flash() = hal::eHalLightFlash_None;
+  aConfig.flashOnMS() = aConfig.flashOffMS() = 0;
+  aConfig.color() = color;
+  hal::SetLight(hal::eHalLightID_Backlight, aConfig);
+  hal::SetLight(hal::eHalLightID_Buttons, aConfig);
 }
 
 static Monitor* sInternalLockCpuMonitor = nullptr;
@@ -1166,17 +1108,8 @@ OomVictimLogger::Observe(
   const char* const regexes_raw[] = {
     ".*select.*to kill.*",
     ".*send sigkill to.*",
-    ".*lowmem_shrink.*",
-    ".*[Oo]ut of [Mm]emory.*",
-    ".*[Kk]ill [Pp]rocess.*",
-    ".*[Kk]illed [Pp]rocess.*",
-    ".*oom-killer.*",
-    // The regexes below are for the output of dump_task from oom_kill.c
-    // 1st - title 2nd - body lines (8 ints and a string)
-    // oom_adj and oom_score_adj can be negative
-    "\\[ pid \\]   uid  tgid total_vm      rss cpu oom_adj oom_score_adj name",
-    "\\[.*[0-9][0-9]*\\][ ]*[0-9][0-9]*[ ]*[0-9][0-9]*[ ]*[0-9][0-9]*[ ]*[0-9][0-9]*[ ]*[0-9][0-9]*[ ]*.[0-9][0-9]*[ ]*.[0-9][0-9]*.*"
-  };
+    ".*lowmem_shrink.*, return",
+    ".*lowmem_shrink.*, ofree.*"};
   const size_t regex_count = ArrayLength(regexes_raw);
 
   // Compile our regex just in time
@@ -1424,14 +1357,6 @@ SetNiceForPid(int aPid, int aNice)
 
     int tid = static_cast<int>(tidlong);
 
-    // Do not set the priority of threads running with a real-time policy
-    // as part of the bulk process adjustment.  These threads need to run
-    // at their specified priority in order to meet timing guarantees.
-    int schedPolicy = sched_getscheduler(tid);
-    if (schedPolicy == SCHED_FIFO || schedPolicy == SCHED_RR) {
-      continue;
-    }
-
     errno = 0;
     // Get and set the task's new priority.
     int origtaskpriority = getpriority(PRIO_PROCESS, tid);
@@ -1444,15 +1369,6 @@ SetNiceForPid(int aPid, int aNice)
 
     int newtaskpriority =
       std::max(origtaskpriority - origProcPriority + aNice, aNice);
-
-    // Do not reduce priority of threads already running at priorities greater
-    // than normal.  These threads are likely special service threads that need
-    // elevated priorities to process audio, display composition, etc.
-    if (newtaskpriority > origtaskpriority &&
-        origtaskpriority < ANDROID_PRIORITY_NORMAL) {
-      continue;
-    }
-
     rv = setpriority(PRIO_PROCESS, tid, newtaskpriority);
 
     if (rv) {
@@ -1547,136 +1463,8 @@ SetProcessPriority(int aPid,
   }
 }
 
-static bool
-IsValidRealTimePriority(int aValue, int aSchedulePolicy)
-{
-  return (aValue >= sched_get_priority_min(aSchedulePolicy)) &&
-         (aValue <= sched_get_priority_max(aSchedulePolicy));
-}
-
-static void
-SetThreadNiceValue(pid_t aTid, ThreadPriority aThreadPriority, int aValue)
-{
-  MOZ_ASSERT(aThreadPriority < NUM_THREAD_PRIORITY);
-  MOZ_ASSERT(aThreadPriority >= 0);
-
-  LOG("Setting thread %d to priority level %s; nice level %d",
-      aTid, ThreadPriorityToString(aThreadPriority), aValue);
-  int rv = setpriority(PRIO_PROCESS, aTid, aValue);
-
-  if (rv) {
-    LOG("Failed to set thread %d to priority level %s; error %s",
-        aTid, ThreadPriorityToString(aThreadPriority), strerror(errno));
-  }
-}
-
-static void
-SetRealTimeThreadPriority(pid_t aTid,
-                          ThreadPriority aThreadPriority,
-                          int aValue)
-{
-  int policy = SCHED_FIFO;
-
-  MOZ_ASSERT(aThreadPriority < NUM_THREAD_PRIORITY);
-  MOZ_ASSERT(aThreadPriority >= 0);
-  MOZ_ASSERT(IsValidRealTimePriority(aValue, policy), "Invalid real time priority");
-
-  // Setting real time priorities requires using sched_setscheduler
-  LOG("Setting thread %d to priority level %s; Real Time priority %d, Schedule FIFO",
-      aTid, ThreadPriorityToString(aThreadPriority), aValue);
-  sched_param schedParam;
-  schedParam.sched_priority = aValue;
-  int rv = sched_setscheduler(aTid, policy, &schedParam);
-
-  if (rv) {
-    LOG("Failed to set thread %d to real time priority level %s; error %s",
-        aTid, ThreadPriorityToString(aThreadPriority), strerror(errno));
-  }
-}
-
-static void
-SetThreadPriority(pid_t aTid, hal::ThreadPriority aThreadPriority)
-{
-  // See bug 999115, we can only read preferences on the main thread otherwise
-  // we create a race condition in HAL
-  MOZ_ASSERT(NS_IsMainThread(), "Can only set thread priorities on main thread");
-  MOZ_ASSERT(aThreadPriority >= 0);
-
-  const char* threadPriorityStr;
-  switch (aThreadPriority) {
-    case THREAD_PRIORITY_COMPOSITOR:
-      threadPriorityStr = ThreadPriorityToString(aThreadPriority);
-      break;
-    default:
-      LOG("Unrecognized thread priority %d; Doing nothing", aThreadPriority);
-      return;
-  }
-
-  int realTimePriority = Preferences::GetInt(
-    nsPrintfCString("hal.gonk.%s.rt_priority", threadPriorityStr).get());
-
-  if (IsValidRealTimePriority(realTimePriority, SCHED_FIFO)) {
-    SetRealTimeThreadPriority(aTid, aThreadPriority, realTimePriority);
-    return;
-  }
-
-  int niceValue = Preferences::GetInt(
-    nsPrintfCString("hal.gonk.%s.nice", threadPriorityStr).get());
-
-  SetThreadNiceValue(aTid, aThreadPriority, niceValue);
-}
-
-namespace {
-
-/**
- * This class sets the priority of threads given the kernel thread's id and a
- * value taken from hal::ThreadPriority.
- *
- * This runnable must always be dispatched to the main thread otherwise it will fail.
- * We have to run this from the main thread since preferences can only be read on
- * main thread.
- */
-class SetThreadPriorityRunnable : public nsRunnable
-{
-public:
-  SetThreadPriorityRunnable(pid_t aThreadId, hal::ThreadPriority aThreadPriority)
-    : mThreadId(aThreadId)
-    , mThreadPriority(aThreadPriority)
-  { }
-
-  NS_IMETHOD Run()
-  {
-    NS_ASSERTION(NS_IsMainThread(), "Can only set thread priorities on main thread");
-    hal_impl::SetThreadPriority(mThreadId, mThreadPriority);
-    return NS_OK;
-  }
-
-private:
-  pid_t mThreadId;
-  hal::ThreadPriority mThreadPriority;
-};
-
-} // anonymous namespace
-
 void
-SetCurrentThreadPriority(ThreadPriority aThreadPriority)
-{
-  switch (aThreadPriority) {
-    case THREAD_PRIORITY_COMPOSITOR: {
-      pid_t threadId = gettid();
-      nsCOMPtr<nsIRunnable> runnable =
-        new SetThreadPriorityRunnable(threadId, aThreadPriority);
-      NS_DispatchToMainThread(runnable);
-      break;
-    }
-    default:
-      LOG("Unrecognized thread priority %d; Doing nothing", aThreadPriority);
-      return;
-  }
-}
-
-void
-FactoryReset(FactoryResetReason& aReason)
+FactoryReset()
 {
   nsCOMPtr<nsIRecoveryService> recoveryService =
     do_GetService("@mozilla.org/recovery-service;1");
@@ -1685,11 +1473,7 @@ FactoryReset(FactoryResetReason& aReason)
     return;
   }
 
-  if (aReason == FactoryResetReason::Wipe) {
-    recoveryService->FactoryReset("wipe");
-  } else {
-    recoveryService->FactoryReset("normal");
-  }
+  recoveryService->FactoryReset();
 }
 
 } // hal_impl

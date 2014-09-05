@@ -14,7 +14,6 @@ namespace JS { class Value; }
 namespace js {
 
 extern const JSFunctionSpec object_methods[];
-extern const JSPropertySpec object_properties[];
 extern const JSFunctionSpec object_static_methods[];
 
 // Object constructor native. Exposed only so the JIT can know its address.

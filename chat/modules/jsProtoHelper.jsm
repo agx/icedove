@@ -524,7 +524,7 @@ const GenericConvChatPrototype = {
   classDescription: "generic ConvChat object",
 
   _init: function(aAccount, aName, aNick) {
-    this._participants = new Map();
+    this._participants = {};
     this.nick = aNick;
     GenericConversationPrototype._init.call(this, aAccount, aName);
   },
@@ -586,20 +586,10 @@ const GenericConvChatPrototype = {
       this.notifyObservers(null, "update-conv-chatleft");
   },
 
-  _joining: false,
-  get joining() this._joining,
-  set joining(aJoining) {
-    if (aJoining == this._joining)
-      return;
-
-    this._joining = aJoining;
-    this.notifyObservers(null, "update-conv-chatjoining");
-  },
-
   getParticipants: function() {
-    // Convert the values of the Map into a nsSimpleEnumerator.
     return new nsSimpleEnumerator(
-      [participant for (participant of this._participants.values())]
+      Object.keys(this._participants)
+            .map(function(key) this._participants[key], this)
     );
   },
   getNormalizedChatBuddyName: function(aChatBuddyName) aChatBuddyName,

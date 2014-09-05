@@ -37,6 +37,8 @@ PersistenceTypeToText(PersistenceType aPersistenceType, nsACString& aText)
     default:
       MOZ_CRASH("Bad persistence type value!");
   }
+
+  MOZ_ASSUME_UNREACHABLE("Should never get here!");
 }
 
 inline PersistenceType
@@ -50,12 +52,12 @@ PersistenceTypeFromText(const nsACString& aText)
     return PERSISTENCE_TYPE_TEMPORARY;
   }
 
-  MOZ_CRASH("Should never get here!");
+  MOZ_ASSUME_UNREACHABLE("Should never get here!");
 }
 
 inline nsresult
 NullablePersistenceTypeFromText(const nsACString& aText,
-                                Nullable<PersistenceType>* aPersistenceType)
+                                Nullable<PersistenceType> *aPersistenceType)
 {
   if (aText.IsVoid()) {
     *aPersistenceType = Nullable<PersistenceType>();
@@ -72,7 +74,7 @@ NullablePersistenceTypeFromText(const nsACString& aText,
     return NS_OK;
   }
 
-  return NS_ERROR_FAILURE;
+  return NS_ERROR_UNEXPECTED;
 }
 
 inline mozilla::dom::StorageType

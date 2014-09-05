@@ -13,11 +13,8 @@ function CreateScriptableConverter()
 
 function checkDecode(converter, charset, inText, expectedText)
 {
-  let manager = Cc['@mozilla.org/charset-converter-manager;1']
-                  .getService(Ci.nsICharsetConverterManager);
-
   try {
-    converter.charset = manager.getCharsetAlias(charset);
+    converter.charset = charset;
   } catch(e) {
     converter.charset = "iso-8859-1";
   }
@@ -33,11 +30,8 @@ function checkDecode(converter, charset, inText, expectedText)
 
 function checkEncode(converter, charset, inText, expectedText)
 {
-  let manager = Cc['@mozilla.org/charset-converter-manager;1']
-                  .getService(Ci.nsICharsetConverterManager);
-
   try {
-    converter.charset = manager.getCharsetAlias(charset);
+    converter.charset = charset;
   } catch(e) {
     converter.charset = "iso-8859-1";
   }

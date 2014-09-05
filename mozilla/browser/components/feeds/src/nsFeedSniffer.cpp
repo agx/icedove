@@ -208,7 +208,7 @@ nsFeedSniffer::GetMIMETypeFromContent(nsIRequest* request,
   // Check that this is a GET request, since you can't subscribe to a POST...
   nsAutoCString method;
   channel->GetRequestMethod(method);
-  if (!method.EqualsLiteral("GET")) {
+  if (!method.Equals("GET")) {
     sniffedType.Truncate();
     return NS_OK;
   }

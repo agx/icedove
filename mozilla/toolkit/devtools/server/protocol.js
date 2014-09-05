@@ -4,6 +4,7 @@
 
 "use strict";
 
+let {Cu} = require("chrome");
 let Services = require("Services");
 let promise = require("devtools/toolkit/deprecated-sync-thenables");
 let {Class} = require("sdk/core/heritage");
@@ -579,8 +580,7 @@ let Request = Class({
   write: function(fnArgs, ctx) {
     let str = JSON.stringify(this.template, (key, value) => {
       if (value instanceof Arg) {
-        return value.write(value.index in fnArgs ? fnArgs[value.index] : undefined,
-                           ctx, key);
+        return value.write(fnArgs[value.index], ctx, key);
       }
       return value;
     });
@@ -1086,8 +1086,7 @@ let Front = Class({
    */
   onPacket: function(packet) {
     // Pick off event packets
-    let type = packet.type || undefined;
-    if (this._clientSpec.events && this._clientSpec.events.has(type)) {
+    if (this._clientSpec.events && this._clientSpec.events.has(packet.type)) {
       let event = this._clientSpec.events.get(packet.type);
       let args = event.request.read(packet, this);
       if (event.pre) {
@@ -1324,14 +1323,13 @@ exports.dumpProtocolSpec = function() {
   for (let [name, type] of registeredTypes) {
     // Force lazy instantiation if needed.
     type = types.getType(name);
-    let category = type.category || undefined;
-    if (category === "dict") {
+    if (type.category === "dict") {
       ret.types[name] = {
         category: "dict",
         typeName: name,
         specializations: type.specializations
       }
-    } else if (category === "actor") {
+    } else if (type.category === "actor") {
       ret.types[name] = exports.dumpActorSpec(type);
     }
   }

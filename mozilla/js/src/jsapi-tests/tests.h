@@ -23,7 +23,7 @@ class JSAPITestString {
     js::Vector<char, 0, js::SystemAllocPolicy> chars;
   public:
     JSAPITestString() {}
-    explicit JSAPITestString(const char *s) { *this += s; }
+    JSAPITestString(const char *s) { *this += s; }
     JSAPITestString(const JSAPITestString &s) { *this += s; }
 
     const char *begin() const { return chars.begin(); }
@@ -203,7 +203,7 @@ class JSAPITest
 #define CHECK(expr) \
     do { \
         if (!(expr)) \
-            return fail(JSAPITestString("CHECK failed: " #expr), __FILE__, __LINE__); \
+            return fail("CHECK failed: " #expr, __FILE__, __LINE__); \
     } while (false)
 
     bool fail(JSAPITestString msg = JSAPITestString(), const char *filename = "-", int lineno = 0) {
@@ -281,7 +281,7 @@ class JSAPITest
     }
 
     virtual JSRuntime * createRuntime() {
-        JSRuntime *rt = JS_NewRuntime(8L * 1024 * 1024);
+        JSRuntime *rt = JS_NewRuntime(8L * 1024 * 1024, JS_USE_HELPER_THREADS);
         if (!rt)
             return nullptr;
         setNativeStackQuota(rt);
@@ -408,7 +408,7 @@ class TempFile {
 class TestJSPrincipals : public JSPrincipals
 {
   public:
-    explicit TestJSPrincipals(int rc = 0)
+    TestJSPrincipals(int rc = 0)
       : JSPrincipals()
     {
         refcount = rc;

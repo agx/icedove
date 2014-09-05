@@ -11,7 +11,6 @@
 #include "CacheFileChunk.h"
 #include "CacheFileUtils.h"
 #include "nsILoadContextInfo.h"
-#include "nsICacheEntry.h" // for nsICacheEntryMetaDataVisitor
 #include "../cache/nsCacheUtils.h"
 #include "nsIFile.h"
 #include "mozilla/Telemetry.h"
@@ -185,17 +184,11 @@ CacheFileMetadata::ReadMetadata(CacheFileMetadataListener *aListener)
     return NS_OK;
   }
 
-  // Set offset so that we read at least kMinMetadataRead if the file is big
-  // enough.
-  int64_t offset;
-  if (size < kMinMetadataRead) {
-    offset = 0;
-  } else {
-    offset = size - kMinMetadataRead;
-  }
+  // round offset to 4k blocks
+  int64_t offset = (size / kAlignSize) * kAlignSize;
 
-  // round offset to kAlignSize blocks
-  offset = (offset / kAlignSize) * kAlignSize;
+  if (size - offset < kMinMetadataRead && offset > kAlignSize)
+    offset -= kAlignSize;
 
   mBufSize = size - offset;
   mBuf = static_cast<char *>(moz_xmalloc(mBufSize));
@@ -272,7 +265,7 @@ CacheFileMetadata::WriteMetadata(uint32_t aOffset,
     // result from some reason fails during shutdown, we would unnecessarily leak
     // both this object and the buffer.
     writeBuffer = static_cast<char *>(moz_xmalloc(p - mWriteBuf));
-    memcpy(writeBuffer, mWriteBuf, p - mWriteBuf);
+    memcpy(mWriteBuf, writeBuffer, p - mWriteBuf);
   }
 
   rv = CacheFileIOManager::Write(mHandle, aOffset, writeBuffer, p - mWriteBuf,
@@ -311,10 +304,7 @@ CacheFileMetadata::SyncReadMetadata(nsIFile *aFile)
 
   int64_t fileSize;
   rv = aFile->GetFileSize(&fileSize);
-  if (NS_FAILED(rv)) {
-    // Don't bloat the console
-    return rv;
-  }
+  NS_ENSURE_SUCCESS(rv, rv);
 
   PRFileDesc *fd;
   rv = aFile->OpenNSPRFileDesc(PR_RDONLY, 0600, &fd);
@@ -439,28 +429,6 @@ CacheFileMetadata::SetElement(const char *aKey, const char *aValue)
   // Update value
   memcpy(pos, aValue, valueSize);
   mElementsSize = newSize;
-
-  return NS_OK;
-}
-
-nsresult
-CacheFileMetadata::Visit(nsICacheEntryMetaDataVisitor *aVisitor)
-{
-  const char *data = mBuf;
-  const char *limit = mBuf + mElementsSize;
-
-  while (data < limit) {
-    // Point to the value part
-    const char *value = data + strlen(data) + 1;
-    MOZ_ASSERT(value < limit, "Metadata elements corrupted");
-
-    aVisitor->OnMetaDataElement(data, value);
-
-    // Skip value part
-    data = value + strlen(value) + 1;
-  }
-
-  MOZ_ASSERT(data == limit, "Metadata elements corrupted");
 
   return NS_OK;
 }

@@ -226,16 +226,7 @@ parent:
      */
     sync GetWidgetNativeData() returns (WindowsHandle value);
 
-    /**
-     * Set the native cursor.
-     * @param value
-     *   The widget cursor to set.
-     * @param force
-     *   Invalidate any locally cached cursor settings and force an
-     *   update.
-     */
-    SetCursor(uint32_t value, bool force);
-
+    SetCursor(uint32_t value);
     SetBackgroundColor(nscolor color);
 
     /**
@@ -278,7 +269,9 @@ parent:
      * Create a layout frame (encapsulating a remote layer tree) for
      * the page that is currently loaded in the <browser>.
      */
-    sync PRenderFrame()
+    sync PRenderFrame();
+
+    sync InitRenderFrame(PRenderFrame aFrame)
         returns (ScrollingBehavior scrolling,
                  TextureFactoryIdentifier textureFactoryIdentifier, uint64_t layersId,
                  bool success);
@@ -511,12 +504,6 @@ child:
      * Tell the child to update its docShell's active state.
      */
     SetIsDocShellActive(bool aIsActive);
-
-    /**
-     * Tell the child that the UI resolution changed for the containing
-     * window.
-     */
-    UIResolutionChanged();
 
 /*
  * FIXME: write protocol!

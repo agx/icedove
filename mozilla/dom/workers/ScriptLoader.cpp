@@ -282,7 +282,7 @@ private:
         NS_NewRunnableMethod(this, &ScriptLoaderRunnable::CancelMainThread);
       NS_ASSERTION(runnable, "This should never fail!");
 
-      if (NS_FAILED(NS_DispatchToMainThread(runnable))) {
+      if (NS_FAILED(NS_DispatchToMainThread(runnable, NS_DISPATCH_NORMAL))) {
         JS_ReportError(aCx, "Failed to cancel script loader!");
         return false;
       }
@@ -815,7 +815,7 @@ LoadAllScripts(JSContext* aCx, WorkerPrivate* aWorkerPrivate,
     return false;
   }
 
-  if (NS_FAILED(NS_DispatchToMainThread(loader))) {
+  if (NS_FAILED(NS_DispatchToMainThread(loader, NS_DISPATCH_NORMAL))) {
     NS_ERROR("Failed to dispatch!");
 
     aWorkerPrivate->RemoveFeature(aCx, loader);
@@ -868,7 +868,7 @@ ChannelFromScriptURLWorkerThread(JSContext* aCx,
     new ChannelGetterRunnable(aParent, syncLoop.EventTarget(), aScriptURL,
                               aChannel);
 
-  if (NS_FAILED(NS_DispatchToMainThread(getter))) {
+  if (NS_FAILED(NS_DispatchToMainThread(getter, NS_DISPATCH_NORMAL))) {
     NS_ERROR("Failed to dispatch!");
     return NS_ERROR_FAILURE;
   }

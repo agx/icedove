@@ -189,8 +189,7 @@ NS_IMETHODIMP
 AsyncConnectionHelper::Run()
 {
   if (NS_IsMainThread()) {
-    PROFILER_MAIN_THREAD_LABEL("AsyncConnectionHelper", "Run",
-      js::ProfileEntry::Category::STORAGE);
+    PROFILER_MAIN_THREAD_LABEL("IndexedDB", "AsyncConnectionHelper::Run");
 
     if (mTransaction &&
         mTransaction->IsAborted()) {
@@ -272,8 +271,7 @@ AsyncConnectionHelper::Run()
 
   NS_ASSERTION(IndexedDatabaseManager::IsMainProcess(), "Wrong process!");
 
-  PROFILER_LABEL("AsyncConnectionHelper", "Run",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_LABEL("IndexedDB", "AsyncConnectionHelper::Run");
 
   IDB_PROFILER_MARK_IF(mRequest,
                        "IndexedDB Request %llu: Beginning database work",
@@ -362,7 +360,7 @@ AsyncConnectionHelper::Run()
                        "IDBRequest[%llu] DT Done", mRequest->GetSerialNumber(),
                        mResultCode);
 
-  return NS_DispatchToMainThread(this);
+  return NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL);
 }
 
 NS_IMETHODIMP
@@ -454,8 +452,7 @@ AsyncConnectionHelper::OnSuccess()
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(mRequest, "Null request!");
 
-  PROFILER_MAIN_THREAD_LABEL("AsyncConnectionHelper", "OnSuccess",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB", "AsyncConnectionHelper::OnSuccess");
 
   nsRefPtr<nsIDOMEvent> event = CreateSuccessEvent(mRequest);
   if (!event) {
@@ -491,8 +488,7 @@ AsyncConnectionHelper::OnError()
   NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
   NS_ASSERTION(mRequest, "Null request!");
 
-  PROFILER_MAIN_THREAD_LABEL("AsyncConnectionHelper", "OnError",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_MAIN_THREAD_LABEL("IndexedDB", "AsyncConnectionHelper::OnError");
 
   // Make an error event and fire it at the target.
   nsRefPtr<nsIDOMEvent> event =

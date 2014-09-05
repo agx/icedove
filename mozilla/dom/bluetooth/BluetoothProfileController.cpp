@@ -5,12 +5,11 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "BluetoothProfileController.h"
+#include "BluetoothReplyRunnable.h"
 
 #include "BluetoothA2dpManager.h"
 #include "BluetoothHfpManager.h"
 #include "BluetoothHidManager.h"
-#include "BluetoothReplyRunnable.h"
-#include "BluetoothService.h"
 #include "BluetoothUtils.h"
 
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
@@ -70,6 +69,7 @@ BluetoothProfileController::BluetoothProfileController(
   mTimer = do_CreateInstance(NS_TIMER_CONTRACTID);
   MOZ_ASSERT(mTimer);
 
+  mCheckProfileStatusCallback = new CheckProfileStatusCallback(this);
   mProfiles.Clear();
 
   /**
@@ -218,11 +218,6 @@ BluetoothProfileController::StartSession()
   MOZ_ASSERT(mProfilesIndex == -1);
   MOZ_ASSERT(mTimer);
 
-  if (!IsBtServiceAvailable()) {
-    EndSession();
-    return;
-  }
-
   if (mProfiles.Length() < 1) {
     BT_LOGR("No queued profile.");
     EndSession();
@@ -230,8 +225,8 @@ BluetoothProfileController::StartSession()
   }
 
   if (mTimer) {
-    mTimer->InitWithCallback(new CheckProfileStatusCallback(this),
-                             CONNECTION_TIMEOUT_MS, nsITimer::TYPE_ONE_SHOT);
+    mTimer->InitWithCallback(mCheckProfileStatusCallback, CONNECTION_TIMEOUT_MS,
+                             nsITimer::TYPE_ONE_SHOT);
   }
 
   BT_LOGR("%s", mConnect ? "connecting" : "disconnecting");
@@ -245,12 +240,6 @@ BluetoothProfileController::EndSession()
   MOZ_ASSERT(mRunnable && mCallback);
 
   BT_LOGR("mSuccess %d", mSuccess);
-
-  // Don't have to check profile status and retrigger session after connection
-  // timeout, since session is end.
-  if (mTimer) {
-    mTimer->Cancel();
-  }
 
   // The action has completed, so the DOM request should be replied then invoke
   // the callback.
@@ -277,11 +266,6 @@ BluetoothProfileController::Next()
 
   mCurrentProfileFinished = false;
 
-  if (!IsBtServiceAvailable()) {
-    EndSession();
-    return;
-  }
-
   if (++mProfilesIndex >= (int)mProfiles.Length()) {
     EndSession();
     return;
@@ -294,13 +278,6 @@ BluetoothProfileController::Next()
   } else {
     mProfiles[mProfilesIndex]->Disconnect(this);
   }
-}
-
-bool
-BluetoothProfileController::IsBtServiceAvailable() const
-{
-  BluetoothService* bs = BluetoothService::Get();
-  return (bs && bs->IsEnabled() && !bs->IsToggling());
 }
 
 void
@@ -332,11 +309,6 @@ BluetoothProfileController::GiveupAndContinue()
 
   BT_LOGR_PROFILE(mProfiles[mProfilesIndex], ERR_OPERATION_TIMEOUT);
   mProfiles[mProfilesIndex]->Reset();
-
-  if (IsBtServiceAvailable()) {
-    Next();
-  } else {
-    EndSession();
-  }
+  Next();
 }
 

@@ -22,6 +22,12 @@ public:
     CLIENT_STATE_RESOURCE_ASSIGNED,
     CLIENT_STATE_SHUTDOWN
   };
+  // Enumeration for the resource types
+  enum ResourceType {
+    HW_VIDEO_DECODER,
+    HW_AUDIO_DECODER,
+    HW_CAMERA
+  };
 
   struct EventListener : public virtual RefBase {
     // Notifies a change of media resource request status.

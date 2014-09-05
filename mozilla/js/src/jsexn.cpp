@@ -192,7 +192,7 @@ struct SuppressErrorsGuard
     JSErrorReporter prevReporter;
     JS::AutoSaveExceptionState prevState;
 
-    explicit SuppressErrorsGuard(JSContext *cx)
+    SuppressErrorsGuard(JSContext *cx)
       : cx(cx),
         prevReporter(JS_SetErrorReporter(cx, nullptr)),
         prevState(cx)
@@ -706,8 +706,8 @@ IsDuckTypedErrorObject(JSContext *cx, HandleObject exnObject, const char **filen
 
     const char *filename_str = *filename_strp;
     if (!JS_HasProperty(cx, exnObject, filename_str, &found) || !found) {
-        /* Now try "fileName", in case this quacks like an Error */
-        filename_str = js_fileName_str;
+        /* DOMException duck quacks "filename" (all lowercase) */
+        filename_str = "filename";
         if (!JS_HasProperty(cx, exnObject, filename_str, &found) || !found)
             return false;
     }
@@ -755,10 +755,10 @@ js_ReportUncaughtException(JSContext *cx)
      * to protect all of these values.
      */
     RootedObject exnObject(cx);
-    if (exn.isPrimitive()) {
+    if (JSVAL_IS_PRIMITIVE(exn)) {
         exnObject = nullptr;
     } else {
-        exnObject = exn.toObjectOrNull();
+        exnObject = JSVAL_TO_OBJECT(exn);
     }
 
     JS_ClearPendingException(cx);
@@ -778,13 +778,8 @@ js_ReportUncaughtException(JSContext *cx)
 
     // If js_ErrorFromException didn't get us a JSErrorReport, then the object
     // was not an ErrorObject, security-wrapped or otherwise. However, it might
-    // still quack like one. Give duck-typing a chance.  We start by looking for
-    // "filename" (all lowercase), since that's where DOMExceptions store their
-    // filename.  Then we check "fileName", which is where Errors store it.  We
-    // have to do it in that order, because DOMExceptions have Error.prototype
-    // on their proto chain, and hence also have a "fileName" property, but its
-    // value is "".
-    const char *filename_str = "filename";
+    // still quack like one. Give duck-typing a chance.
+    const char *filename_str = js_fileName_str;
     JSAutoByteString filename;
     if (!reportp && exnObject && IsDuckTypedErrorObject(cx, exnObject, &filename_str))
     {

@@ -14,11 +14,7 @@ import org.mozilla.gecko.mozglue.WebRTCJNITarget;
 
 @WebRTCJNITarget
 public class CaptureCapabilityAndroid {
-    public String name;
-    public int width[];
-    public int height[];
-    public int minMilliFPS;
-    public int maxMilliFPS;
-    public boolean frontFacing;
-    public int orientation;
+    public int width  = 0;
+    public int height = 0;
+    public int maxFPS = 0;
 }

@@ -93,7 +93,7 @@ class nsPropertyTable
    * table changes too). If |aTransfer| is false the property will just be
    * deleted instead.
    */
-  nsresult SetProperty(nsPropertyOwner     aObject,
+  NS_HIDDEN_(nsresult) SetProperty(nsPropertyOwner     aObject,
                                    nsIAtom            *aPropertyName,
                                    void               *aPropertyValue,
                                    NSPropertyDtorFunc  aDtor,
@@ -109,7 +109,7 @@ class nsPropertyTable
    * Delete the property |aPropertyName| in the global category for object
    * |aObject|. The property's destructor function will be called.
    */
-  nsresult DeleteProperty(nsPropertyOwner aObject,
+  NS_HIDDEN_(nsresult) DeleteProperty(nsPropertyOwner aObject,
                                       nsIAtom    *aPropertyName);
 
   /**
@@ -128,7 +128,7 @@ class nsPropertyTable
    * Deletes all of the properties for object |aObject|, calling the
    * destructor function for each property.
    */
-  void DeleteAllPropertiesFor(nsPropertyOwner aObject);
+  NS_HIDDEN_(void) DeleteAllPropertiesFor(nsPropertyOwner aObject);
 
   /**
    * Transfers all properties for object |aObject| that were set with the
@@ -137,7 +137,7 @@ class nsPropertyTable
    * If transfering a property fails, this deletes all the properties for
    * object |aObject|.
    */
-  nsresult
+  NS_HIDDEN_(nsresult)
     TransferOrDeleteAllPropertiesFor(nsPropertyOwner aObject,
                                      nsPropertyTable *aOtherTable);
 
@@ -146,7 +146,7 @@ class nsPropertyTable
    * For every property |aCallback| will be called with as arguments |aObject|,
    * the property name, the property value and |aData|.
    */
-  void Enumerate(nsPropertyOwner aObject,
+  NS_HIDDEN_(void) Enumerate(nsPropertyOwner aObject,
                              NSPropertyFunc aCallback, void *aData);
 
   /**
@@ -154,13 +154,13 @@ class nsPropertyTable
    * For every property |aCallback| will be called with arguments the owner,
    * the property name, the property value and |aData|.
    */
-  void EnumerateAll(NSPropertyFunc aCallback, void *aData);
+  NS_HIDDEN_(void) EnumerateAll(NSPropertyFunc aCallback, void *aData);
 
   /**
    * Deletes all of the properties for all objects in the property
    * table, calling the destructor function for each property.
    */
-  void DeleteAllProperties();
+  NS_HIDDEN_(void) DeleteAllProperties();
 
   nsPropertyTable() : mPropertyList(nullptr) {}  
   ~nsPropertyTable() {
@@ -178,16 +178,15 @@ class nsPropertyTable
   class PropertyList;
 
   size_t SizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
-  size_t SizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf) const;
 
  private:
-  void DestroyPropertyList();
-  PropertyList* GetPropertyListFor(nsIAtom *aPropertyName) const;
-  void* GetPropertyInternal(nsPropertyOwner aObject,
+  NS_HIDDEN_(void) DestroyPropertyList();
+  NS_HIDDEN_(PropertyList*) GetPropertyListFor(nsIAtom *aPropertyName) const;
+  NS_HIDDEN_(void*) GetPropertyInternal(nsPropertyOwner aObject,
                                         nsIAtom    *aPropertyName,
                                         bool        aRemove,
                                         nsresult   *aStatus);
-  nsresult SetPropertyInternal(nsPropertyOwner     aObject,
+  NS_HIDDEN_(nsresult) SetPropertyInternal(nsPropertyOwner     aObject,
                                            nsIAtom            *aPropertyName,
                                            void               *aPropertyValue,
                                            NSPropertyDtorFunc  aDtor,

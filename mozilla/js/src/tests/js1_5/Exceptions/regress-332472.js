@@ -7,7 +7,7 @@
 var BUGNUMBER = 332472;
 var summary = 'new RegExp() ignores string boundaries when throwing exceptions';
 var actual = '';
-var expect = true;
+var expect = 'SyntaxError: invalid quantifier';
 
 printBugNumber(BUGNUMBER);
 printStatus (summary);
@@ -19,7 +19,7 @@ try {
 }
 catch(ex) {
   printStatus(ex);
-  actual = ex instanceof SyntaxError;
+  actual = ex + '';
 }
  
 reportCompare(expect, actual, summary);

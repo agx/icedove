@@ -363,7 +363,6 @@ nsAppStartup::Quit(uint32_t aMode)
           windowEnumerator->GetNext(getter_AddRefs(window));
           nsCOMPtr<nsPIDOMWindow> domWindow(do_QueryInterface(window));
           if (domWindow) {
-            MOZ_ASSERT(domWindow->IsOuterWindow());
             if (!domWindow->CanClose())
               return NS_OK;
           }
@@ -505,10 +504,8 @@ nsAppStartup::CloseAllWindows()
 
     nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(isupports);
     NS_ASSERTION(window, "not an nsPIDOMWindow");
-    if (window) {
-      MOZ_ASSERT(window->IsOuterWindow());
+    if (window)
       window->ForceClose();
-    }
   }
 }
 
@@ -612,7 +609,7 @@ nsAppStartup::CreateChromeWindow(nsIWebBrowserChrome *aParent,
                                  nsIWebBrowserChrome **_retval)
 {
   bool cancel;
-  return CreateChromeWindow2(aParent, aChromeFlags, 0, 0, nullptr, &cancel, _retval);
+  return CreateChromeWindow2(aParent, aChromeFlags, 0, 0, &cancel, _retval);
 }
 
 
@@ -625,7 +622,6 @@ nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
                                   uint32_t aChromeFlags,
                                   uint32_t aContextFlags,
                                   nsIURI *aURI,
-                                  nsITabParent *aOpeningTab,
                                   bool *aCancel,
                                   nsIWebBrowserChrome **_retval)
 {
@@ -645,7 +641,7 @@ nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
     NS_ASSERTION(xulParent, "window created using non-XUL parent. that's unexpected, but may work.");
 
     if (xulParent)
-      xulParent->CreateNewWindow(aChromeFlags, aOpeningTab, getter_AddRefs(newWindow));
+      xulParent->CreateNewWindow(aChromeFlags, getter_AddRefs(newWindow));
     // And if it fails, don't try again without a parent. It could fail
     // intentionally (bug 115969).
   } else { // try using basic methods:
@@ -658,11 +654,10 @@ nsAppStartup::CreateChromeWindow2(nsIWebBrowserChrome *aParent,
     nsCOMPtr<nsIAppShellService> appShell(do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
     if (!appShell)
       return NS_ERROR_FAILURE;
-
+    
     appShell->CreateTopLevelWindow(0, 0, aChromeFlags,
                                    nsIAppShellService::SIZE_TO_CONTENT,
                                    nsIAppShellService::SIZE_TO_CONTENT,
-                                   aOpeningTab,
                                    getter_AddRefs(newWindow));
   }
 

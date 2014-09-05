@@ -53,12 +53,14 @@ public class ShapedButton extends ThemedImageButton
     }
 
     @Override
-    protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
-        super.onSizeChanged(width, height, oldWidth, oldHeight);
+    public void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
 
         if (mSide == CurveTowards.NONE)
             return;
 
+        final int width = getMeasuredWidth();
+        final int height = getMeasuredHeight();
         final int curve = (int) (height * 1.125f);
 
         mPath.reset();

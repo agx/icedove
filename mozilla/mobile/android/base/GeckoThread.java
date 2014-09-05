@@ -73,7 +73,7 @@ public class GeckoThread extends Thread implements GeckoEventListener {
         mAction = action;
         mUri = uri;
         setName("Gecko");
-        EventDispatcher.getInstance().registerGeckoThreadListener(this, "Gecko:Ready");
+        GeckoAppShell.getEventDispatcher().registerEventListener("Gecko:Ready", this);
     }
 
     public static boolean isCreated() {
@@ -118,7 +118,7 @@ public class GeckoThread extends Thread implements GeckoEventListener {
 
         Configuration config = res.getConfiguration();
         config.locale = locale;
-        res.updateConfiguration(config, null);
+        res.updateConfiguration(config, res.getDisplayMetrics());
 
         return resourcePath;
     }
@@ -169,10 +169,8 @@ public class GeckoThread extends Thread implements GeckoEventListener {
         String args = addCustomProfileArg(mArgs);
         String type = getTypeFromAction(mAction);
 
-        if (!AppConstants.MOZILLA_OFFICIAL) {
-            Log.i(LOGTAG, "RunGecko - args = " + args);
-        }
         // and then fire us up
+        Log.i(LOGTAG, "RunGecko - args = " + args);
         GeckoAppShell.runGecko(path, args, mUri, type);
     }
 
@@ -181,7 +179,7 @@ public class GeckoThread extends Thread implements GeckoEventListener {
     @Override
     public void handleMessage(String event, JSONObject message) {
         if ("Gecko:Ready".equals(event)) {
-            EventDispatcher.getInstance().unregisterGeckoThreadListener(this, event);
+            GeckoAppShell.getEventDispatcher().unregisterEventListener(event, this);
             setLaunchState(LaunchState.GeckoRunning);
             GeckoAppShell.sendPendingEventsToGecko();
         }

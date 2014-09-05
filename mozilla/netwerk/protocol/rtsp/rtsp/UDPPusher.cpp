@@ -24,12 +24,7 @@
 #include <media/stagefright/foundation/AMessage.h>
 #include <utils/ByteOrder.h>
 
-#include "mozilla/NullPtr.h"
-#include "prnetdb.h"
-#include "prerr.h"
-#include "NetworkActivityMonitor.h"
-
-using namespace mozilla::net;
+#include <sys/socket.h>
 
 namespace android {
 
@@ -39,30 +34,25 @@ UDPPusher::UDPPusher(const char *filename, unsigned port)
       mFirstTimeUs(0) {
     CHECK(mFile != NULL);
 
-    mSocket = PR_OpenUDPSocket(PR_AF_INET);
-    if (!mSocket) {
-        TRESPASS();
-    }
+    mSocket = socket(AF_INET, SOCK_DGRAM, 0);
 
-    NetworkActivityMonitor::AttachIOLayer(mSocket);
+    struct sockaddr_in addr;
+    memset(addr.sin_zero, 0, sizeof(addr.sin_zero));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = 0;
 
-    PRNetAddr addr;
-    addr.inet.family = PR_AF_INET;
-    addr.inet.ip = PR_htonl(PR_INADDR_ANY);
-    addr.inet.port = PR_htons(0);
+    CHECK_EQ(0, bind(mSocket, (const struct sockaddr *)&addr, sizeof(addr)));
 
-    CHECK_EQ(PR_SUCCESS, PR_Bind(mSocket, &addr));
-
-    mRemoteAddr.inet.family = PR_AF_INET;
-    mRemoteAddr.inet.ip = PR_htonl(PR_INADDR_ANY);
-    mRemoteAddr.inet.port = PR_htons(port);
+    memset(mRemoteAddr.sin_zero, 0, sizeof(mRemoteAddr.sin_zero));
+    mRemoteAddr.sin_family = AF_INET;
+    mRemoteAddr.sin_addr.s_addr = INADDR_ANY;
+    mRemoteAddr.sin_port = htons(port);
 }
 
 UDPPusher::~UDPPusher() {
-    if (mSocket) {
-        PR_Close(mSocket);
-        mSocket = nullptr;
-    }
+    close(mSocket);
+    mSocket = -1;
 
     fclose(mFile);
     mFile = NULL;
@@ -94,9 +84,9 @@ bool UDPPusher::onPush() {
         return false;
     }
 
-    ssize_t n = PR_SendTo(
+    ssize_t n = sendto(
             mSocket, buffer->data(), buffer->size(), 0,
-            &mRemoteAddr, PR_INTERVAL_NO_WAIT);
+            (const struct sockaddr *)&mRemoteAddr, sizeof(mRemoteAddr));
 
     CHECK_EQ(n, (ssize_t)buffer->size());
 
@@ -139,9 +129,10 @@ void UDPPusher::onMessageReceived(const sp<AMessage> &msg) {
                 struct sockaddr_in tmp = mRemoteAddr;
                 tmp.sin_port = htons(ntohs(mRemoteAddr.sin_port) | 1);
 
-                ssize_t n = PR_SendTo(
+                ssize_t n = sendto(
                         mSocket, buffer->data(), buffer->size(), 0,
-                        &tmp, PR_INTERVAL_NO_WAIT);
+                        (const struct sockaddr *)&tmp,
+                        sizeof(tmp));
 
                 CHECK_EQ(n, (ssize_t)buffer->size());
             }

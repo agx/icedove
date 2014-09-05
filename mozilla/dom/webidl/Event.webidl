@@ -40,7 +40,7 @@ interface Event {
   [Unforgeable, Pure]
   readonly attribute boolean isTrusted;
   [Pure]
-  readonly attribute DOMHighResTimeStamp timeStamp;
+  readonly attribute DOMTimeStamp timeStamp;
 
   [Throws]
   void initEvent(DOMString type, boolean bubbles, boolean cancelable);

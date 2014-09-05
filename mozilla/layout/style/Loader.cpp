@@ -47,7 +47,7 @@
 #include "nsGkAtoms.h"
 #include "nsIThreadInternal.h"
 #include "nsCrossSiteListenerProxy.h"
-#include "nsINetworkPredictor.h"
+#include "nsINetworkSeer.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/URL.h"
 
@@ -1202,7 +1202,7 @@ Loader::CreateSheet(nsIURI* aURI,
       // the inline sheet picks up the right base.
       NS_ASSERTION(aLinkingContent, "Inline stylesheet without linking content?");
       baseURI = aLinkingContent->GetBaseURI();
-      sheetURI = aLinkingContent->OwnerDoc()->GetDocumentURI();
+      sheetURI = aLinkingContent->GetDocument()->GetDocumentURI();
       originalURI = nullptr;
     } else {
       baseURI = aURI;
@@ -1423,9 +1423,9 @@ Loader::LoadSheet(SheetLoadData* aLoadData, StyleSheetState aSheetState)
     }
 
     if (mDocument) {
-      mozilla::net::PredictorLearn(aLoadData->mURI, mDocument->GetDocumentURI(),
-                                   nsINetworkPredictor::LEARN_LOAD_SUBRESOURCE,
-                                   mDocument);
+      mozilla::net::SeerLearn(aLoadData->mURI, mDocument->GetDocumentURI(),
+                              nsINetworkSeer::LEARN_LOAD_SUBRESOURCE,
+                              mDocument);
     }
 
     // Just load it
@@ -1612,9 +1612,8 @@ Loader::LoadSheet(SheetLoadData* aLoadData, StyleSheetState aSheetState)
   }
 
   if (mDocument) {
-    mozilla::net::PredictorLearn(aLoadData->mURI, mDocument->GetDocumentURI(),
-                                 nsINetworkPredictor::LEARN_LOAD_SUBRESOURCE,
-                                 mDocument);
+    mozilla::net::SeerLearn(aLoadData->mURI, mDocument->GetDocumentURI(),
+                            nsINetworkSeer::LEARN_LOAD_SUBRESOURCE, mDocument);
   }
 
   rv = channel->AsyncOpen(channelListener, nullptr);

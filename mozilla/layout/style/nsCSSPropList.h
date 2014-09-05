@@ -274,6 +274,10 @@
 // 'text-shadow' (see above) and 'box-shadow' (which is like the
 // border properties).
 
+// We include '-moz-background-inline-policy' (css3-background's
+// 'background-break') in both as a background property, although this
+// is somewhat questionable.
+
 CSS_PROP_DISPLAY(
     -moz-appearance,
     appearance,
@@ -531,6 +535,18 @@ CSS_PROP_BACKGROUND(
     "",
     VARIANT_IMAGE, // used by list parsing
     nullptr,
+    CSS_PROP_NO_OFFSET,
+    eStyleAnimType_None)
+CSS_PROP_BACKGROUND(
+    -moz-background-inline-policy,
+    _moz_background_inline_policy,
+    CSS_PROP_DOMPROP_PREFIXED(BackgroundInlinePolicy),
+    CSS_PROPERTY_PARSE_VALUE |
+        CSS_PROPERTY_APPLIES_TO_FIRST_LETTER_AND_FIRST_LINE |
+        CSS_PROPERTY_APPLIES_TO_PLACEHOLDER,
+    "",
+    VARIANT_HK,
+    kBackgroundInlinePolicyKTable,
     CSS_PROP_NO_OFFSET,
     eStyleAnimType_None)
 CSS_PROP_BACKGROUND(
@@ -1350,16 +1366,6 @@ CSS_PROP_POSITION(
     offsetof(nsStylePosition, mOffset),
     eStyleAnimType_Sides_Bottom)
 CSS_PROP_BORDER(
-    box-decoration-break,
-    box_decoration_break,
-    BoxDecorationBreak,
-    CSS_PROPERTY_PARSE_VALUE,
-    "layout.css.box-decoration-break.enabled",
-    VARIANT_HK,
-    kBoxDecorationBreakKTable,
-    CSS_PROP_NO_OFFSET,
-    eStyleAnimType_None)
-CSS_PROP_BORDER(
     box-shadow,
     box_shadow,
     BoxShadow,
@@ -1689,7 +1695,7 @@ CSS_PROP_POSITION(
     VARIANT_HN,
     nullptr,
     offsetof(nsStylePosition, mFlexGrow),
-    eStyleAnimType_float)
+    eStyleAnimType_float) // float, except animations to/from 0 shouldn't work
 CSS_PROP_POSITION(
     flex-shrink,
     flex_shrink,
@@ -1703,7 +1709,7 @@ CSS_PROP_POSITION(
     VARIANT_HN,
     nullptr,
     offsetof(nsStylePosition, mFlexShrink),
-    eStyleAnimType_float)
+    eStyleAnimType_float) // float, except animations to/from 0 shouldn't work
 CSS_PROP_POSITION(
     flex-wrap,
     flex_wrap,
@@ -2032,6 +2038,16 @@ CSS_PROP_POSITION(
     "layout.css.grid.enabled",
     0,
     kGridTrackBreadthKTable,
+    CSS_PROP_NO_OFFSET,
+    eStyleAnimType_None)
+CSS_PROP_POSITION(
+    grid-auto-position,
+    grid_auto_position,
+    GridAutoPosition,
+    CSS_PROPERTY_PARSE_FUNCTION,
+    "layout.css.grid.enabled",
+    0,
+    nullptr,
     CSS_PROP_NO_OFFSET,
     eStyleAnimType_None)
 CSS_PROP_POSITION(

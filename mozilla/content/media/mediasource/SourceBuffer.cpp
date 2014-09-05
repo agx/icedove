@@ -67,12 +67,6 @@ SubBufferDecoder::GetResource() const
 }
 
 void
-SubBufferDecoder::NotifyDecodedFrames(uint32_t aParsed, uint32_t aDecoded)
-{
-  return mParentDecoder->NotifyDecodedFrames(aParsed, aDecoded);
-}
-
-void
 SubBufferDecoder::SetMediaDuration(int64_t aDuration)
 {
   mMediaDuration = aDuration;
@@ -132,8 +126,6 @@ public:
   {
     return false;
   }
-
-  static ContainerParser* CreateForMIMEType(const nsACString& aType);
 };
 
 class WebMContainerParser : public ContainerParser {
@@ -157,17 +149,6 @@ public:
     return false;
   }
 };
-
-/*static*/ ContainerParser*
-ContainerParser::CreateForMIMEType(const nsACString& aType)
-{
-  if (aType.LowerCaseEqualsLiteral("video/webm") || aType.LowerCaseEqualsLiteral("audio/webm")) {
-    return new WebMContainerParser();
-  }
-
-  // XXX: Plug in parsers for MPEG4, etc. here.
-  return new ContainerParser();
-}
 
 namespace dom {
 
@@ -211,10 +192,20 @@ SourceBuffer::GetBuffered(ErrorResult& aRv)
     return nullptr;
   }
   nsRefPtr<TimeRanges> ranges = new TimeRanges();
-  if (mDecoder) {
-    mDecoder->GetBuffered(ranges);
+  for (uint32_t i = 0; i < mDecoders.Length(); ++i) {
+    nsRefPtr<TimeRanges> r = new TimeRanges();
+    mDecoders[i]->GetBuffered(r);
+    if (r->Length() > 0) {
+      MSE_DEBUG("%p GetBuffered decoder=%u Length=%u Start=%f End=%f", this, i, r->Length(),
+                r->GetStartTime(), r->GetEndTime());
+      ranges->Add(r->GetStartTime(), r->GetEndTime());
+    } else {
+      MSE_DEBUG("%p GetBuffered decoder=%u Length=%u", this, i, r->Length());
+    }
   }
   ranges->Normalize();
+  MSE_DEBUG("%p GetBuffered Length=%u Start=%f End=%f", this, ranges->Length(),
+            ranges->GetStartTime(), ranges->GetEndTime());
   return ranges.forget();
 }
 
@@ -283,8 +274,11 @@ SourceBuffer::Abort(ErrorResult& aRv)
   mAppendWindowStart = 0;
   mAppendWindowEnd = PositiveInfinity<double>();
 
-  MSE_DEBUG("%p Abort: Discarding decoder.", this);
-  DiscardDecoder();
+  MSE_DEBUG("%p Abort: Discarding decoders.", this);
+  if (mCurrentDecoder) {
+    mCurrentDecoder->GetResource()->Ended();
+    mCurrentDecoder = nullptr;
+  }
 }
 
 void
@@ -310,15 +304,16 @@ void
 SourceBuffer::Detach()
 {
   Ended();
-  DiscardDecoder();
+  mDecoders.Clear();
+  mCurrentDecoder = nullptr;
   mMediaSource = nullptr;
 }
 
 void
 SourceBuffer::Ended()
 {
-  if (mDecoder) {
-    mDecoder->GetResource()->Ended();
+  for (uint32_t i = 0; i < mDecoders.Length(); ++i) {
+    mDecoders[i]->GetResource()->Ended();
   }
 }
 
@@ -331,12 +326,14 @@ SourceBuffer::SourceBuffer(MediaSource* aMediaSource, const nsACString& aType)
   , mTimestampOffset(0)
   , mAppendMode(SourceBufferAppendMode::Segments)
   , mUpdating(false)
-  , mDecoderInitialized(false)
 {
   MOZ_ASSERT(aMediaSource);
-  mParser = ContainerParser::CreateForMIMEType(aType);
-  MSE_DEBUG("%p SourceBuffer: Creating initial decoder.", this);
-  InitNewDecoder();
+  if (mType.EqualsIgnoreCase("video/webm") || mType.EqualsIgnoreCase("audio/webm")) {
+    mParser = new WebMContainerParser();
+  } else {
+    // XXX: Plug in parsers for MPEG4, etc. here.
+    mParser = new ContainerParser();
+  }
 }
 
 already_AddRefed<SourceBuffer>
@@ -348,7 +345,9 @@ SourceBuffer::Create(MediaSource* aMediaSource, const nsACString& aType)
 
 SourceBuffer::~SourceBuffer()
 {
-  DiscardDecoder();
+  for (uint32_t i = 0; i < mDecoders.Length(); ++i) {
+    mDecoders[i]->GetResource()->Ended();
+  }
 }
 
 MediaSource*
@@ -381,25 +380,17 @@ SourceBuffer::QueueAsyncSimpleEvent(const char* aName)
 bool
 SourceBuffer::InitNewDecoder()
 {
-  MOZ_ASSERT(!mDecoder);
   MediaSourceDecoder* parentDecoder = mMediaSource->GetDecoder();
   nsRefPtr<SubBufferDecoder> decoder = parentDecoder->CreateSubDecoder(mType);
   if (!decoder) {
     return false;
   }
-  mDecoder = decoder;
-  mDecoderInitialized = false;
+  mDecoders.AppendElement(decoder);
+  // XXX: At this point, we really want to push through any remaining
+  // processing for the old decoder and discard it, rather than hanging on
+  // to all of them in mDecoders.
+  mCurrentDecoder = decoder;
   return true;
-}
-
-void
-SourceBuffer::DiscardDecoder()
-{
-  if (mDecoder) {
-    mDecoder->GetResource()->Ended();
-  }
-  mDecoder = nullptr;
-  mDecoderInitialized = false;
 }
 
 void
@@ -443,34 +434,21 @@ SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aR
   // TODO: Test buffer full flag.
   StartUpdating();
   // TODO: Run buffer append algorithm asynchronously (would call StopUpdating()).
-  if (mParser->IsInitSegmentPresent(aData, aLength)) {
-    MSE_DEBUG("%p AppendBuffer: New initialization segment.", this);
-    if (mDecoderInitialized) {
-      // Existing decoder has been used, time for a new one.
-      DiscardDecoder();
+  if (mParser->IsInitSegmentPresent(aData, aLength) || !mCurrentDecoder) {
+    MSE_DEBUG("%p AppendBuffer: New initialization segment, switching decoders.", this);
+    if (mCurrentDecoder) {
+      mCurrentDecoder->GetResource()->Ended();
     }
-
-    // If we've got a decoder here, it's not initialized, so we can use it
-    // rather than creating a new one.
-    if (!mDecoder && !InitNewDecoder()) {
+    if (!InitNewDecoder()) {
       aRv.Throw(NS_ERROR_FAILURE); // XXX: Review error handling.
       return;
     }
-    MSE_DEBUG("%p AppendBuffer: Decoder marked as initialized.", this);
-    mDecoderInitialized = true;
-  } else if (!mDecoderInitialized) {
-    MSE_DEBUG("%p AppendBuffer: Non-initialization segment appended during initialization.");
-    Optional<MediaSourceEndOfStreamError> decodeError(MediaSourceEndOfStreamError::Decode);
-    ErrorResult dummy;
-    mMediaSource->EndOfStream(decodeError, dummy);
-    aRv.Throw(NS_ERROR_FAILURE);
-    return;
   }
   // XXX: For future reference: NDA call must run on the main thread.
-  mDecoder->NotifyDataArrived(reinterpret_cast<const char*>(aData),
-                              aLength,
-                              mDecoder->GetResource()->GetLength());
-  mDecoder->GetResource()->AppendData(aData, aLength);
+  mCurrentDecoder->NotifyDataArrived(reinterpret_cast<const char*>(aData),
+                                     aLength,
+                                     mCurrentDecoder->GetResource()->GetLength());
+  mCurrentDecoder->GetResource()->AppendData(aData, aLength);
 
   // Eviction uses a byte threshold. If the buffer is greater than the
   // number of bytes then data is evicted. The time range for this
@@ -478,7 +456,7 @@ SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aR
   // evict data before that range across all SourceBuffer's it knows
   // about.
   const int evict_threshold = 1000000;
-  bool evicted = mDecoder->GetResource()->EvictData(evict_threshold);
+  bool evicted = mCurrentDecoder->GetResource()->EvictData(evict_threshold);
   if (evicted) {
     double start = 0.0;
     double end = 0.0;
@@ -493,8 +471,6 @@ SourceBuffer::AppendData(const uint8_t* aData, uint32_t aLength, ErrorResult& aR
   // Schedule the state machine thread to ensure playback starts
   // if required when data is appended.
   mMediaSource->GetDecoder()->ScheduleStateMachineThread();
-
-  mMediaSource->NotifyGotData();
 }
 
 void
@@ -513,15 +489,14 @@ SourceBuffer::GetBufferedStartEndTime(double* aStart, double* aEnd)
 void
 SourceBuffer::Evict(double aStart, double aEnd)
 {
-  if (!mDecoder) {
-    return;
-  }
-  // Need to map time to byte offset then evict
-  int64_t end = mDecoder->ConvertToByteOffset(aEnd);
-  if (end > 0) {
-    mDecoder->GetResource()->EvictBefore(end);
-  } else {
-    NS_WARNING("SourceBuffer::Evict failed");
+  for (uint32_t i = 0; i < mDecoders.Length(); ++i) {
+    // Need to map time to byte offset then evict
+    int64_t end = mDecoders[i]->ConvertToByteOffset(aEnd);
+    if (end <= 0) {
+      NS_WARNING("SourceBuffer::Evict failed");
+      continue;
+    }
+    mDecoders[i]->GetResource()->EvictBefore(end);
   }
 }
 

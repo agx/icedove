@@ -38,13 +38,11 @@ private:
                 uint32_t aServiceId,
                 JS::Handle<JSString*> aNumber,
                 const nsAString& aMessage,
-                JS::MutableHandle<JS::Value> aRequest);
+                JS::Value* aRequest);
 
   nsresult DispatchTrustedSmsEventToSelf(const char* aTopic,
                                          const nsAString& aEventName,
                                          nsISupports* aMsg);
-
-  nsresult DispatchTrustedDeletedEventToSelf(nsISupports* aDeletedInfo);
 
   /**
    * Helper to get message ID from SMS/MMS Message object

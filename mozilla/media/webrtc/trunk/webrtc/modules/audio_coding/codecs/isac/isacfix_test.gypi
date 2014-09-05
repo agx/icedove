@@ -19,7 +19,6 @@
       'include_dirs': [
         './fix/test',
         './fix/interface',
-        '<(webrtc_root)',
       ],
       'sources': [
         './fix/test/kenny.cc',

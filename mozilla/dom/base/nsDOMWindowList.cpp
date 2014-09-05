@@ -91,7 +91,7 @@ nsDOMWindowList::IndexedGetter(uint32_t aIndex, bool& aFound)
     return nullptr;
   }
 
-  nsCOMPtr<nsIDOMWindow> window = item->GetWindow();
+  nsCOMPtr<nsIDOMWindow> window = do_GetInterface(item);
   MOZ_ASSERT(window);
 
   aFound = true;

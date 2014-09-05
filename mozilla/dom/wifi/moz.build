@@ -7,10 +7,8 @@
 XPIDL_SOURCES += [
     'nsIDOMMozWifiConnectionInfoEvent.idl',
     'nsIDOMMozWifiP2pStatusChangeEvent.idl',
-    'nsIDOMMozWifiStationInfoEvent.idl',
     'nsIDOMMozWifiStatusChangeEvent.idl',
     'nsIWifi.idl',
-    'nsIWifiCertService.idl',
     'nsIWifiService.idl',
 ]
 
@@ -35,8 +33,6 @@ EXTRA_JS_MODULES += [
 
 if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gonk':
     SOURCES = [
-        'WifiCertService.cpp',
-        'WifiHotspotUtils.cpp',
         'WifiProxyService.cpp',
         'WifiUtils.cpp',
     ]

@@ -985,8 +985,6 @@ HTMLTextAreaElement::SetRangeText(const nsAString& aReplacement,
       }
     }
     break;
-    default:
-      MOZ_CRASH("Unknown mode!");
   }
 
   Optional<nsAString> direction;

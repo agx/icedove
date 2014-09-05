@@ -418,8 +418,7 @@ def run_app(harness_root_dir, manifest_rdf, harness_options,
             is_running_tests=False,
             overload_modules=False,
             bundle_sdk=True,
-            pkgdir="",
-            enable_e10s=False):
+            pkgdir=""):
     if binary:
         binary = os.path.expanduser(binary)
 
@@ -430,9 +429,6 @@ def run_app(harness_root_dir, manifest_rdf, harness_options,
 
     cmdargs = []
     preferences = dict(DEFAULT_COMMON_PREFS)
-
-    if enable_e10s:
-        preferences['browser.tabs.remote.autostart'] = True
 
     # For now, only allow running on Mobile with --force-mobile argument
     if app_type in ["fennec", "fennec-on-device"] and not enable_mobile:
@@ -715,7 +711,7 @@ def run_app(harness_root_dir, manifest_rdf, harness_options,
 
     done = False
     result = None
-    test_name = "Jetpack startup"
+    test_name = "unknown"
 
     def Timeout(message, test_name, parseable):
         if parseable:
@@ -757,11 +753,6 @@ def run_app(harness_root_dir, manifest_rdf, harness_options,
         raise
     else:
         runner.wait(10)
-        # double kill - hack for bugs 942111, 1006043..
-        try:
-            runner.stop()
-        except:
-            pass
     finally:
         outf.close()
         if profile:

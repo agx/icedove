@@ -14,7 +14,6 @@ namespace mozilla {
 namespace dom {
 
 class IccListener;
-class Icc;
 
 class IccManager MOZ_FINAL : public DOMEventTargetHelper
 {
@@ -43,7 +42,7 @@ public:
   void
   GetIccIds(nsTArray<nsString>& aIccIds);
 
-  Icc*
+  already_AddRefed<nsISupports>
   GetIccById(const nsAString& aIccId) const;
 
   nsPIDOMWindow*

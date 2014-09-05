@@ -37,8 +37,13 @@ public:
     *
     * @return           the frame that was created
     */
-  friend nsTableColGroupFrame* NS_NewTableColGroupFrame(nsIPresShell* aPresShell,
-                                                        nsStyleContext* aContext);
+  friend nsIFrame* NS_NewTableColGroupFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+
+  /** Initialize the colgroup frame with a set of children.
+    * @see nsIFrame::SetInitialChildList
+    */
+  virtual nsresult SetInitialChildList(ChildListID     aListID,
+                                       nsFrameList&    aChildList) MOZ_OVERRIDE;
 
   /**
    * ColGroups never paint anything, nor receive events.
@@ -75,15 +80,15 @@ public:
   /** @see nsIFrame::DidSetStyleContext */
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
 
-  virtual void SetInitialChildList(ChildListID     aListID,
-                                   nsFrameList&    aChildList) MOZ_OVERRIDE;
-  virtual void AppendFrames(ChildListID     aListID,
-                            nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  virtual void InsertFrames(ChildListID     aListID,
-                            nsIFrame*       aPrevFrame,
-                            nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  virtual void RemoveFrame(ChildListID     aListID,
-                           nsIFrame*       aOldFrame) MOZ_OVERRIDE;
+  /** @see nsIFrame::AppendFrames, InsertFrames, RemoveFrame
+    */
+  virtual nsresult AppendFrames(ChildListID     aListID,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult InsertFrames(ChildListID     aListID,
+                                nsIFrame*       aPrevFrame,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult RemoveFrame(ChildListID     aListID,
+                               nsIFrame*       aOldFrame) MOZ_OVERRIDE;
 
   /** remove the column aChild from the column group, if requested renumber
     * the subsequent columns in this column group and all following column
@@ -101,10 +106,10 @@ public:
     * don't play directly in the rendering game.  They do however
     * maintain important state that effects table and cell layout.
     */
-  virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
-                      nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*          aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   /**
    * Get the "type" of the frame

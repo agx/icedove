@@ -28,17 +28,16 @@ static void		*dss_max;
 
 /******************************************************************************/
 
+#ifndef JEMALLOC_HAVE_SBRK
 static void *
-chunk_dss_sbrk(intptr_t increment)
+sbrk(intptr_t increment)
 {
 
-#ifdef JEMALLOC_HAVE_SBRK
-	return (sbrk(increment));
-#else
 	not_implemented();
+
 	return (NULL);
-#endif
 }
+#endif
 
 dss_prec_t
 chunk_dss_prec_get(void)
@@ -94,7 +93,7 @@ chunk_alloc_dss(size_t size, size_t alignment, bool *zero)
 		 */
 		do {
 			/* Get the current end of the DSS. */
-			dss_max = chunk_dss_sbrk(0);
+			dss_max = sbrk(0);
 			/*
 			 * Calculate how much padding is necessary to
 			 * chunk-align the end of the DSS.
@@ -118,7 +117,7 @@ chunk_alloc_dss(size_t size, size_t alignment, bool *zero)
 				return (NULL);
 			}
 			incr = gap_size + cpad_size + size;
-			dss_prev = chunk_dss_sbrk(incr);
+			dss_prev = sbrk(incr);
 			if (dss_prev == dss_max) {
 				/* Success. */
 				dss_max = dss_next;
@@ -164,7 +163,7 @@ chunk_dss_boot(void)
 
 	if (malloc_mutex_init(&dss_mtx))
 		return (true);
-	dss_base = chunk_dss_sbrk(0);
+	dss_base = sbrk(0);
 	dss_prev = dss_base;
 	dss_max = dss_base;
 

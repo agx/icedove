@@ -39,9 +39,6 @@
 #include "transportlayerice.h"
 #include "runnable_utils.h"
 #include "libyuv/convert.h"
-#ifdef MOZILLA_INTERNAL_API
-#include "mozilla/PeerIdentity.h"
-#endif
 #include "mozilla/gfx/Point.h"
 #include "mozilla/gfx/Types.h"
 
@@ -653,32 +650,8 @@ nsresult MediaPipelineTransmit::Init() {
     listener_->direct_connect_ = true;
   }
 
-#ifndef MOZILLA_INTERNAL_API
-  // this enables the unit tests that can't fiddle with principals and the like
-  listener_->SetEnabled(true);
-#endif
-
   return MediaPipeline::Init();
 }
-
-#ifdef MOZILLA_INTERNAL_API
-void MediaPipelineTransmit::UpdateSinkIdentity_m(nsIPrincipal* principal,
-                                                 const PeerIdentity* sinkIdentity) {
-  ASSERT_ON_THREAD(main_thread_);
-  bool enableStream = principal->Subsumes(domstream_->GetPrincipal());
-  if (!enableStream) {
-    // first try didn't work, but there's a chance that this is still available
-    // if our stream is bound to a peerIdentity, and the peer connection (our
-    // sink) is bound to the same identity, then we can enable the stream
-    PeerIdentity* streamIdentity = domstream_->GetPeerIdentity();
-    if (sinkIdentity && streamIdentity) {
-      enableStream = (*sinkIdentity == *streamIdentity);
-    }
-  }
-
-  listener_->SetEnabled(enableStream);
-}
-#endif
 
 nsresult MediaPipelineTransmit::TransportReady_s(TransportInfo &info) {
   ASSERT_ON_THREAD(sts_thread_);
@@ -688,6 +661,7 @@ nsresult MediaPipelineTransmit::TransportReady_s(TransportInfo &info) {
   // Should not be set for a transmitter
   MOZ_ASSERT(!possible_bundle_rtp_);
   if (&info == &rtp_) {
+    // TODO(ekr@rtfm.com): Move onto MSG thread.
     listener_->SetActive(true);
   }
 
@@ -961,7 +935,6 @@ NewData(MediaStreamGraph* graph, TrackID tid,
       // Ignore data in case we have a muxed stream
       return;
     }
-
     AudioSegment* audio = const_cast<AudioSegment *>(
         static_cast<const AudioSegment *>(&media));
 
@@ -977,7 +950,6 @@ NewData(MediaStreamGraph* graph, TrackID tid,
       // Ignore data in case we have a muxed stream
       return;
     }
-
     VideoSegment* video = const_cast<VideoSegment *>(
         static_cast<const VideoSegment *>(&media));
 
@@ -1000,7 +972,7 @@ void MediaPipelineTransmit::PipelineListener::ProcessAudioChunk(
   // TODO(ekr@rtfm.com): Do more than one channel
   nsAutoArrayPtr<int16_t> samples(new int16_t[chunk.mDuration]);
 
-  if (enabled_ && chunk.mBuffer) {
+  if (chunk.mBuffer) {
     switch (chunk.mBufferFormat) {
       case AUDIO_FORMAT_FLOAT32:
         {
@@ -1109,7 +1081,7 @@ void MediaPipelineTransmit::PipelineListener::ProcessVideoChunk(
     return;
   }
 
-  if (!enabled_ || chunk.mFrame.GetForceBlack()) {
+  if (chunk.mFrame.GetForceBlack()) {
     uint32_t yPlaneLen = size.width*size.height;
     uint32_t cbcrPlaneLen = yPlaneLen/2;
     uint32_t length = yPlaneLen + cbcrPlaneLen;

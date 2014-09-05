@@ -91,8 +91,10 @@ function setDefaultItemValues(aItem, aCalendar=null, aStartDate=null, aEndDate=n
         }
 
         // Free/busy status is only valid for events, must not be set for tasks.
-        aItem.setProperty("TRANSP", cal.getEventDefaultTransparency(aForceAllday));
-
+        let transp = cal.getEventDefaultTransparency(aForceAllday);
+        if (transp && cal.isEvent(aItem)) {
+            aItem.setProperty("TRANSP", transp);
+        }
     } else if (cal.isToDo(aItem)) {
         let now = cal.now();
         let initDate = initialDate ? initialDate.clone() : now;

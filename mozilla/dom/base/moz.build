@@ -13,7 +13,6 @@ XPIDL_SOURCES += [
     'nsIEntropyCollector.idl',
     'nsIScriptChannel.idl',
     'nsISiteSpecificUserAgent.idl',
-    'nsISlowScriptDebug.idl',
 ]
 
 XPIDL_MODULE = 'dom'
@@ -33,6 +32,7 @@ EXPORTS += [
     'nsIGlobalObject.h',
     'nsIJSNativeInitializer.h',
     'nsIScriptContext.h',
+    'nsIScriptExternalNameSet.h',
     'nsIScriptGlobalObject.h',
     'nsIScriptNameSpaceManager.h',
     'nsIScriptObjectPrincipal.h',
@@ -64,7 +64,6 @@ EXPORTS.mozilla.dom += [
     'ScreenOrientation.h',
     'ScriptSettings.h',
     'StructuredCloneTags.h',
-    'SubtleCrypto.h',
     'URL.h',
     'URLSearchParams.h',
 ]
@@ -105,7 +104,6 @@ UNIFIED_SOURCES += [
     'PerformanceEntry.cpp',
     'PerformanceResourceTiming.cpp',
     'ScriptSettings.cpp',
-    'SubtleCrypto.cpp',
     'URL.cpp',
     'URLSearchParams.cpp',
     'WindowNamedPropertiesHandler.cpp',
@@ -130,8 +128,6 @@ EXTRA_COMPONENTS += [
     'ConsoleAPIStorage.js',
     'SiteSpecificUserAgent.js',
     'SiteSpecificUserAgent.manifest',
-    'SlowScriptDebug.js',
-    'SlowScriptDebug.manifest',
 ]
 
 EXTRA_JS_MODULES += [

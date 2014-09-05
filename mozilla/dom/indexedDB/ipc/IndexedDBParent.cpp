@@ -412,7 +412,7 @@ IndexedDBDatabaseParent::HandleRequestEvent(nsIDOMEvent* aEvent,
   mOpenRequest->GetResult(cx, &result, error);
   ENSURE_SUCCESS(error, error.ErrorCode());
 
-  MOZ_ASSERT(!result.isPrimitive());
+  MOZ_ASSERT(!JSVAL_IS_PRIMITIVE(result));
 
   IDBDatabase *database;
   rv = UNWRAP_OBJECT(IDBDatabase, &result.toObject(), database);
@@ -2218,12 +2218,6 @@ IndexedDBDeleteDatabaseRequestParent::HandleEvent(nsIDOMEvent* aEvent)
   }
 
   return NS_OK;
-}
-
-void
-IndexedDBDeleteDatabaseRequestParent::ActorDestroy(ActorDestroyReason aWhy)
-{
-  // Implement me! Bug 1005149
 }
 
 nsresult

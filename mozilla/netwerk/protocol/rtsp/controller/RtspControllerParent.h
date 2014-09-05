@@ -10,6 +10,7 @@
 #include "mozilla/net/PRtspControllerParent.h"
 #include "mozilla/net/NeckoParent.h"
 #include "nsIStreamingProtocolController.h"
+#include "nsIInterfaceRequestor.h"
 #include "nsILoadContext.h"
 #include "nsIURI.h"
 #include "nsCOMPtr.h"
@@ -21,10 +22,12 @@ namespace mozilla {
 namespace net {
 
 class RtspControllerParent : public PRtspControllerParent
+                           , public nsIInterfaceRequestor
                            , public nsIStreamingProtocolListener
 {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
+  NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSISTREAMINGPROTOCOLLISTENER
 
   RtspControllerParent();
@@ -37,7 +40,6 @@ class RtspControllerParent : public PRtspControllerParent
   bool RecvSuspend();
   bool RecvSeek(const uint64_t& offset);
   bool RecvStop();
-  bool RecvPlaybackEnded();
 
  private:
   bool mIPCOpen;

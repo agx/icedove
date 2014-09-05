@@ -374,22 +374,10 @@ bool GetScreenEnabled()
   RETURN_PROXY_IF_SANDBOXED(GetScreenEnabled(), false);
 }
 
-void SetScreenEnabled(bool aEnabled)
+void SetScreenEnabled(bool enabled)
 {
   AssertMainThread();
-  PROXY_IF_SANDBOXED(SetScreenEnabled(aEnabled));
-}
-
-bool GetKeyLightEnabled()
-{
-  AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(GetKeyLightEnabled(), false);
-}
-
-void SetKeyLightEnabled(bool aEnabled)
-{
-  AssertMainThread();
-  PROXY_IF_SANDBOXED(SetKeyLightEnabled(aEnabled));
+  PROXY_IF_SANDBOXED(SetScreenEnabled(enabled));
 }
 
 bool GetCpuSleepAllowed()
@@ -402,10 +390,10 @@ bool GetCpuSleepAllowed()
   RETURN_PROXY_IF_SANDBOXED(GetCpuSleepAllowed(), true);
 }
 
-void SetCpuSleepAllowed(bool aAllowed)
+void SetCpuSleepAllowed(bool allowed)
 {
   AssertMainThread();
-  PROXY_IF_SANDBOXED(SetCpuSleepAllowed(aAllowed));
+  PROXY_IF_SANDBOXED(SetCpuSleepAllowed(allowed));
 }
 
 double GetScreenBrightness()
@@ -414,10 +402,10 @@ double GetScreenBrightness()
   RETURN_PROXY_IF_SANDBOXED(GetScreenBrightness(), 0);
 }
 
-void SetScreenBrightness(double aBrightness)
+void SetScreenBrightness(double brightness)
 {
   AssertMainThread();
-  PROXY_IF_SANDBOXED(SetScreenBrightness(clamped(aBrightness, 0.0, 1.0)));
+  PROXY_IF_SANDBOXED(SetScreenBrightness(clamped(brightness, 0.0, 1.0)));
 }
 
 bool SetLight(LightType light, const LightConfiguration& aConfig)
@@ -764,7 +752,6 @@ SwitchState GetCurrentSwitchState(SwitchDevice aDevice)
 
 void NotifySwitchStateFromInputDevice(SwitchDevice aDevice, SwitchState aState)
 {
-  AssertMainThread();
   PROXY_IF_SANDBOXED(NotifySwitchStateFromInputDevice(aDevice, aState));
 }
 
@@ -884,12 +871,6 @@ SetProcessPriority(int aPid,
                                         aBackgroundLRU));
 }
 
-void
-SetCurrentThreadPriority(hal::ThreadPriority aThreadPriority)
-{
-  PROXY_IF_SANDBOXED(SetCurrentThreadPriority(aThreadPriority));
-}
-
 // From HalTypes.h.
 const char*
 ProcessPriorityToString(ProcessPriority aPriority)
@@ -916,18 +897,6 @@ ProcessPriorityToString(ProcessPriority aPriority)
   default:
     MOZ_ASSERT(false);
     return "???";
-  }
-}
-
-const char *
-ThreadPriorityToString(ThreadPriority aPriority)
-{
-  switch (aPriority) {
-    case THREAD_PRIORITY_COMPOSITOR:
-      return "COMPOSITOR";
-    default:
-      MOZ_ASSERT(false);
-      return "???";
   }
 }
 
@@ -1217,10 +1186,10 @@ GetFMBandSettings(FMRadioCountry aCountry) {
     return settings;
 }
 
-void FactoryReset(mozilla::dom::FactoryResetReason& aReason)
+void FactoryReset()
 {
   AssertMainThread();
-  PROXY_IF_SANDBOXED(FactoryReset(aReason));
+  PROXY_IF_SANDBOXED(FactoryReset());
 }
 
 void
@@ -1245,11 +1214,6 @@ GetTotalSystemMemory()
   return hal_impl::GetTotalSystemMemory();
 }
 
-uint32_t
-GetTotalSystemMemoryLevel()
-{
-  return hal_impl::GetTotalSystemMemoryLevel();
-}
 
 } // namespace hal
 } // namespace mozilla

@@ -17,12 +17,10 @@
       ],
       'include_dirs': [
         '../interface',
-        '<(webrtc_root)'
       ],
       'direct_dependent_settings': {
         'include_dirs': [
           '../interface',
-          '<(webrtc_root)',
         ],
       },
       'sources': [
@@ -74,7 +72,7 @@
             'WEBRTC_LINUX',
           ],
         }],
-        ['(target_arch=="arm" and arm_version==7) or target_arch=="armv7"', {
+        ['(target_arch=="arm" and armv7==1) or target_arch=="armv7"', {
           'dependencies': [ 'isac_neon', ],
           'sources': [
             'lattice_armv7.S',
@@ -89,7 +87,7 @@
     },
   ],
   'conditions': [
-    ['(target_arch=="arm" and arm_version==7) or target_arch=="armv7"', {
+    ['(target_arch=="arm" and armv7==1) or target_arch=="armv7"', {
       'targets': [
         {
           'target_name': 'isac_neon',
@@ -97,9 +95,6 @@
           'includes': ['../../../../../../build/arm_neon.gypi',],
           'dependencies': [
             '<(webrtc_root)/common_audio/common_audio.gyp:common_audio',
-          ],
-          'include_dirs': [
-            '<(webrtc_root)',
           ],
           'sources': [
             'entropy_coding_neon.c',

@@ -8,6 +8,7 @@
 #ifndef nsMediaFeatures_h_
 #define nsMediaFeatures_h_
 
+#include "nsError.h"
 #include "nsCSSProps.h"
 
 class nsIAtom;

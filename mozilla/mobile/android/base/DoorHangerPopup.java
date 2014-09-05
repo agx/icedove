@@ -40,16 +40,14 @@ public class DoorHangerPopup extends ArrowPopup
 
         mDoorHangers = new HashSet<DoorHanger>();
 
-        EventDispatcher.getInstance().registerGeckoThreadListener(this,
-            "Doorhanger:Add",
-            "Doorhanger:Remove");
+        registerEventListener("Doorhanger:Add");
+        registerEventListener("Doorhanger:Remove");
         Tabs.registerOnTabsChangedListener(this);
     }
 
     void destroy() {
-        EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
-            "Doorhanger:Add",
-            "Doorhanger:Remove");
+        unregisterEventListener("Doorhanger:Add");
+        unregisterEventListener("Doorhanger:Remove");
         Tabs.unregisterOnTabsChangedListener(this);
     }
 
@@ -336,6 +334,14 @@ public class DoorHangerPopup extends ArrowPopup
         if (lastVisibleDoorHanger != null) {
             lastVisibleDoorHanger.hideDivider();
         }
+    }
+
+    private void registerEventListener(String event) {
+        GeckoAppShell.getEventDispatcher().registerEventListener(event, this);
+    }
+
+    private void unregisterEventListener(String event) {
+        GeckoAppShell.getEventDispatcher().unregisterEventListener(event, this);
     }
 
     @Override

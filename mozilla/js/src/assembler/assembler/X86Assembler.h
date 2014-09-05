@@ -395,7 +395,7 @@ public:
         {
         }
 
-        explicit JmpSrc(int offset)
+        JmpSrc(int offset)
             : m_offset(offset)
         {
         }
@@ -426,7 +426,7 @@ public:
         void used() { m_used = true; }
         bool isValid() const { return m_offset != -1; }
 
-        explicit JmpDst(int offset)
+        JmpDst(int offset)
             : m_offset(offset)
             , m_used(false)
         {
@@ -707,21 +707,6 @@ public:
         spew("andq       %s0x%x(%s), %s",
              PRETTY_PRINT_OFFSET(offset), nameIReg(8,base), nameIReg(8,dst));
         m_formatter.oneByteOp64(OP_AND_GvEv, dst, base, offset);
-    }
-
-    void andq_mr(int offset, RegisterID base, RegisterID index, int scale, RegisterID dst)
-    {
-        spew("andq       %s0x%x(%s,%s,%d), %s",
-             PRETTY_PRINT_OFFSET(offset), nameIReg(8,base), nameIReg(8,index), 1<<scale,
-             nameIReg(8,dst));
-        m_formatter.oneByteOp64(OP_AND_GvEv, dst, base, index, scale, offset);
-    }
-
-    void andq_mr(const void *addr, RegisterID dst)
-    {
-        spew("andq       %p, %s",
-             addr, nameIReg(8,dst));
-        m_formatter.oneByteOp64(OP_AND_GvEv, dst, addr);
     }
 
     void orq_mr(int offset, RegisterID base, RegisterID dst)
@@ -1507,14 +1492,6 @@ public:
         m_formatter.immediate32(imm);
     }
 
-    void testl_i32m(int imm, const void *addr)
-    {
-        spew("testl      $0x%x, %p",
-             imm, addr);
-        m_formatter.oneByteOp(OP_GROUP3_EvIz, GROUP3_OP_TEST, addr);
-        m_formatter.immediate32(imm);
-    }
-
     void testb_im(int imm, int offset, RegisterID base)
     {
         FIXME_INSN_PRINTING;
@@ -1979,7 +1956,7 @@ public:
 
     JmpSrc movl_ripr(RegisterID dst)
     {
-        spew("movl       ?(%%rip), %s",
+        spew("movl       \?(%%rip), %s",
              nameIReg(dst));
         m_formatter.oneByteRipOp(OP_MOV_GvEv, (RegisterID)dst, 0);
         return JmpSrc(m_formatter.size());
@@ -1987,7 +1964,7 @@ public:
 
     JmpSrc movl_rrip(RegisterID src)
     {
-        spew("movl       %s, ?(%%rip)",
+        spew("movl       %s, \?(%%rip)",
              nameIReg(src));
         m_formatter.oneByteRipOp(OP_MOV_EvGv, (RegisterID)src, 0);
         return JmpSrc(m_formatter.size());
@@ -1995,7 +1972,7 @@ public:
 
     JmpSrc movq_ripr(RegisterID dst)
     {
-        spew("movl       ?(%%rip), %s",
+        spew("movl       \?(%%rip), %s",
              nameIReg(dst));
         m_formatter.oneByteRipOp64(OP_MOV_GvEv, dst, 0);
         return JmpSrc(m_formatter.size());
@@ -2207,7 +2184,7 @@ public:
 
     JmpSrc leaq_rip(RegisterID dst)
     {
-        spew("leaq       ?(%%rip), %s",
+        spew("leaq       \?(%%rip), %s",
              nameIReg(dst));
         m_formatter.oneByteRipOp64(OP_LEA, dst, 0);
         return JmpSrc(m_formatter.size());
@@ -2804,7 +2781,7 @@ public:
 #else
     JmpSrc movsd_ripr(XMMRegisterID dst)
     {
-        spew("movsd      ?(%%rip), %s",
+        spew("movsd      \?(%%rip), %s",
              nameFPReg(dst));
         m_formatter.prefix(PRE_SSE_F2);
         m_formatter.twoByteRipOp(OP2_MOVSD_VsdWsd, (RegisterID)dst, 0);
@@ -2812,7 +2789,7 @@ public:
     }
     JmpSrc movss_ripr(XMMRegisterID dst)
     {
-        spew("movss      ?(%%rip), %s",
+        spew("movss      \?(%%rip), %s",
              nameFPReg(dst));
         m_formatter.prefix(PRE_SSE_F3);
         m_formatter.twoByteRipOp(OP2_MOVSD_VsdWsd, (RegisterID)dst, 0);
@@ -2820,7 +2797,7 @@ public:
     }
     JmpSrc movsd_rrip(XMMRegisterID src)
     {
-        spew("movsd      %s, ?(%%rip)",
+        spew("movsd      %s, \?(%%rip)",
              nameFPReg(src));
         m_formatter.prefix(PRE_SSE_F2);
         m_formatter.twoByteRipOp(OP2_MOVSD_WsdVsd, (RegisterID)src, 0);

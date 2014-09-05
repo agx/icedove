@@ -19,8 +19,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 ACMResampler::ACMResampler()
     : resampler_crit_sect_(CriticalSectionWrapper::CreateCriticalSection()) {
 }
@@ -64,7 +62,5 @@ int ACMResampler::Resample10Msec(const int16_t* in_audio,
 
   return out_len / num_audio_channels;
 }
-
-}  // namespace acm2
 
 }  // namespace webrtc

@@ -305,6 +305,13 @@ nsDeleteDir::RemoveOldTrashes(nsIFile *cacheDir)
 
   nsresult rv;
 
+  static bool firstRun = true;
+
+  if (!firstRun)
+    return NS_OK;
+
+  firstRun = false;
+
   nsCOMPtr<nsIFile> trash;
   rv = GetTrashDir(cacheDir, &trash);
   if (NS_FAILED(rv))

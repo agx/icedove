@@ -4,7 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsFrameList.h"
-#include "nsContainerFrame.h"
+#include "nsIFrame.h"
 #include "nsLayoutUtils.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
@@ -136,7 +136,7 @@ nsFrameList::DestroyFrame(nsIFrame* aFrame)
 }
 
 nsFrameList::Slice
-nsFrameList::InsertFrames(nsContainerFrame* aParent, nsIFrame* aPrevSibling,
+nsFrameList::InsertFrames(nsIFrame* aParent, nsIFrame* aPrevSibling,
                           nsFrameList& aFrameList)
 {
   NS_PRECONDITION(aFrameList.NotEmpty(), "Unexpected empty list");
@@ -309,7 +309,7 @@ nsFrameList::GetLength() const
 }
 
 void
-nsFrameList::ApplySetParent(nsContainerFrame* aParent) const
+nsFrameList::ApplySetParent(nsIFrame* aParent) const
 {
   NS_ASSERTION(aParent, "null ptr");
 

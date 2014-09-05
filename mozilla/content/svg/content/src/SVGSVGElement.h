@@ -21,6 +21,7 @@ nsresult NS_NewSVGSVGElement(nsIContent **aResult,
                              already_AddRefed<nsINodeInfo>&& aNodeInfo,
                              mozilla::dom::FromParser aFromParser);
 
+class nsIDOMSVGNumber;
 class nsSMILTimeContainer;
 class nsSVGOuterSVGFrame;
 class nsSVGInnerSVGFrame;
@@ -30,7 +31,6 @@ namespace mozilla {
 class AutoSVGRenderingState;
 class DOMSVGAnimatedPreserveAspectRatio;
 class DOMSVGLength;
-class DOMSVGNumber;
 class EventChainPreVisitor;
 class SVGFragmentIdentifier;
 
@@ -239,7 +239,7 @@ public:
   float GetCurrentTime();
   void SetCurrentTime(float seconds);
   void DeselectAll();
-  already_AddRefed<DOMSVGNumber> CreateSVGNumber();
+  already_AddRefed<nsIDOMSVGNumber> CreateSVGNumber();
   already_AddRefed<DOMSVGLength> CreateSVGLength();
   already_AddRefed<SVGAngle> CreateSVGAngle();
   already_AddRefed<nsISVGPoint> CreateSVGPoint();

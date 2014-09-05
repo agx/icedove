@@ -119,7 +119,7 @@ public:
       fd = file;
     }
     nsCString buf(zip);
-    buf.Append(' ');
+    buf.Append(" ");
     buf.Append(entry);
     buf.Append('\n');
     PR_Write(fd, buf.get(), buf.Length());
@@ -763,9 +763,9 @@ nsZipHandle* nsZipArchive::GetFD()
 }
 
 //---------------------------------------------
-// nsZipArchive::GetDataOffset
+// nsZipArchive::GetData
 //---------------------------------------------
-uint32_t nsZipArchive::GetDataOffset(nsZipItem* aItem)
+const uint8_t* nsZipArchive::GetData(nsZipItem* aItem)
 {
   PR_ASSERT (aItem);
 MOZ_WIN_MEM_TRY_BEGIN
@@ -775,12 +775,12 @@ MOZ_WIN_MEM_TRY_BEGIN
   const uint8_t* data = mFd->mFileData;
   uint32_t offset = aItem->LocalOffset();
   if (offset + ZIPLOCAL_SIZE > len)
-    return 0;
+    return nullptr;
 
   // -- check signature before using the structure, in case the zip file is corrupt
   ZipLocal* Local = (ZipLocal*)(data + offset);
   if ((xtolong(Local->signature) != LOCALSIG))
-    return 0;
+    return nullptr;
 
   //-- NOTE: extralen is different in central header and local header
   //--       for archives created using the Unix "zip" utility. To set
@@ -789,24 +789,11 @@ MOZ_WIN_MEM_TRY_BEGIN
             xtoint(Local->filename_len) +
             xtoint(Local->extrafield_len);
 
-  return offset;
-MOZ_WIN_MEM_TRY_CATCH(return 0)
-}
-
-//---------------------------------------------
-// nsZipArchive::GetData
-//---------------------------------------------
-const uint8_t* nsZipArchive::GetData(nsZipItem* aItem)
-{
-  PR_ASSERT (aItem);
-MOZ_WIN_MEM_TRY_BEGIN
-  uint32_t offset = GetDataOffset(aItem);
-
   // -- check if there is enough source data in the file
-  if (!offset || offset + aItem->Size() > mFd->mLen)
+  if (offset + aItem->Size() > len)
     return nullptr;
 
-  return mFd->mFileData + offset;
+  return data + offset;
 MOZ_WIN_MEM_TRY_CATCH(return nullptr)
 }
 

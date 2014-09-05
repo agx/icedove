@@ -19,8 +19,6 @@
 
 namespace webrtc {
 namespace RTCPUtility {
-    uint32_t MidNtp(uint32_t ntp_sec, uint32_t ntp_frac);
-
     // CNAME
     struct RTCPCnameInformation
     {
@@ -75,19 +73,6 @@ namespace RTCPUtility {
     {
         // RFC 3611
         uint32_t OriginatorSSRC;
-    };
-    struct RTCPPacketXRReceiverReferenceTimeItem
-    {
-        // RFC 3611 4.4
-        uint32_t NTPMostSignificant;
-        uint32_t NTPLeastSignificant;
-    };
-    struct RTCPPacketXRDLRRReportBlockItem
-    {
-        // RFC 3611 4.5
-        uint32_t SSRC;
-        uint32_t LastRR;
-        uint32_t DelayLastRR;
     };
     struct RTCPPacketXRVOIPMetricItem
     {
@@ -243,8 +228,6 @@ namespace RTCPUtility {
         RTCPPacketPSFBFIRItem     FIRItem;
 
         RTCPPacketXR               XR;
-        RTCPPacketXRReceiverReferenceTimeItem XRReceiverReferenceTimeItem;
-        RTCPPacketXRDLRRReportBlockItem XRDLRRReportBlockItem;
         RTCPPacketXRVOIPMetricItem XRVOIPMetricItem;
 
         RTCPPacketAPP             APP;
@@ -291,10 +274,6 @@ namespace RTCPUtility {
         kRtcpRtpfbSrReqCode,
 
         // RFC 3611
-        kRtcpXrHeaderCode,
-        kRtcpXrReceiverReferenceTimeCode,
-        kRtcpXrDlrrReportBlockCode,
-        kRtcpXrDlrrReportBlockItemCode,
         kRtcpXrVoipMetricCode,
 
         kRtcpAppCode,
@@ -333,13 +312,6 @@ namespace RTCPUtility {
         PT_RTPFB = 205,
         PT_PSFB  = 206,
         PT_XR    = 207
-    };
-
-    // Extended report blocks, RFC 3611.
-    enum RtcpXrBlockType {
-      kBtReceiverReferenceTime = 4,
-      kBtDlrr = 5,
-      kBtVoipMetric = 7
     };
 
     bool RTCPParseCommonHeader( const uint8_t* ptrDataBegin,
@@ -381,7 +353,6 @@ namespace RTCPUtility {
             State_PSFB_AppItem,    // Application specific FCI item
             State_PSFB_REMBItem,   // Application specific REMB item
             State_XRItem,
-            State_XR_DLLRItem,
             State_AppItem
         };
 
@@ -400,8 +371,6 @@ namespace RTCPUtility {
         void IteratePsfbAppItem();
         void IteratePsfbREMBItem();
         void IterateAppItem();
-        void IterateXrItem();
-        void IterateXrDlrrItem();
 
         void Validate();
         void EndCurrentBlock();
@@ -420,13 +389,9 @@ namespace RTCPUtility {
         bool ParseIJ();
         bool ParseIJItem();
 
-        bool ParseXr();
-        bool ParseXrItem();
-        bool ParseXrReceiverReferenceTimeItem(int block_length_4bytes);
-        bool ParseXrDlrr(int block_length_4bytes);
-        bool ParseXrDlrrItem();
-        bool ParseXrVoipMetricItem(int block_length_4bytes);
-        bool ParseXrUnsupportedBlockType(int block_length_4bytes);
+        bool ParseXR();
+        bool ParseXRItem();
+        bool ParseXRVOIPMetricItem();
 
         bool ParseFBCommon(const RTCPCommonHeader& header);
         bool ParseNACKItem();

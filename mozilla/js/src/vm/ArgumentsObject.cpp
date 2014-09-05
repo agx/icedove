@@ -67,7 +67,7 @@ struct CopyFrameArgs
 {
     AbstractFramePtr frame_;
 
-    explicit CopyFrameArgs(AbstractFramePtr frame)
+    CopyFrameArgs(AbstractFramePtr frame)
       : frame_(frame)
     { }
 
@@ -129,7 +129,7 @@ struct CopyScriptFrameIterArgs
 {
     ScriptFrameIter &iter_;
 
-    explicit CopyScriptFrameIterArgs(ScriptFrameIter &iter)
+    CopyScriptFrameIterArgs(ScriptFrameIter &iter)
       : iter_(iter)
     { }
 
@@ -173,7 +173,7 @@ ArgumentsObject::create(JSContext *cx, HandleScript script, HandleFunction calle
     bool strict = callee->strict();
     const Class *clasp = strict ? &StrictArgumentsObject::class_ : &NormalArgumentsObject::class_;
 
-    RootedTypeObject type(cx, cx->getNewType(clasp, TaggedProto(proto.get())));
+    RootedTypeObject type(cx, cx->getNewType(clasp, proto.get()));
     if (!type)
         return nullptr;
 

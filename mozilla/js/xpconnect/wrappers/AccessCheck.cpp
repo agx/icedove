@@ -73,15 +73,31 @@ AccessCheck::wrapperSubsumes(JSObject *wrapper)
 bool
 AccessCheck::isChrome(JSCompartment *compartment)
 {
+    nsIScriptSecurityManager *ssm = XPCWrapper::GetSecurityManager();
+    if (!ssm) {
+        return false;
+    }
+
     bool privileged;
     nsIPrincipal *principal = GetCompartmentPrincipal(compartment);
-    return NS_SUCCEEDED(nsXPConnect::SecurityManager()->IsSystemPrincipal(principal, &privileged)) && privileged;
+    return NS_SUCCEEDED(ssm->IsSystemPrincipal(principal, &privileged)) && privileged;
 }
 
 bool
 AccessCheck::isChrome(JSObject *obj)
 {
     return isChrome(js::GetObjectCompartment(obj));
+}
+
+bool
+AccessCheck::callerIsChrome()
+{
+    nsIScriptSecurityManager *ssm = XPCWrapper::GetSecurityManager();
+    if (!ssm)
+        return false;
+    bool subjectIsSystem;
+    nsresult rv = ssm->SubjectPrincipalIsSystem(&subjectIsSystem);
+    return NS_SUCCEEDED(rv) && subjectIsSystem;
 }
 
 nsIPrincipal *
@@ -148,9 +164,7 @@ IsFrameId(JSContext *cx, JSObject *objArg, jsid idArg)
     if (JSID_IS_INT(id)) {
         col->Item(JSID_TO_INT(id), getter_AddRefs(domwin));
     } else if (JSID_IS_STRING(id)) {
-        nsDependentJSString idAsString;
-        idAsString.infallibleInit(id);
-        col->NamedItem(idAsString, getter_AddRefs(domwin));
+        col->NamedItem(nsDependentJSString(id), getter_AddRefs(domwin));
     }
 
     return domwin != nullptr;
@@ -166,6 +180,9 @@ bool
 AccessCheck::isCrossOriginAccessPermitted(JSContext *cx, JSObject *wrapperArg, jsid idArg,
                                           Wrapper::Action act)
 {
+    if (!XPCWrapper::GetSecurityManager())
+        return true;
+
     if (act == Wrapper::CALL)
         return false;
 

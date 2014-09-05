@@ -72,14 +72,9 @@ ShadowRoot::ShadowRoot(nsIContent* aContent,
     mInsertionPointChanged(false)
 {
   SetHost(aContent);
-
-  // Nodes in a shadow tree should never store a value
-  // in the subtree root pointer, nodes in the shadow tree
-  // track the subtree root using GetContainingShadow().
-  ClearSubtreeRootPointer();
-
   SetFlags(NODE_IS_IN_SHADOW_TREE);
-
+  // ShadowRoot isn't really in the document but it behaves like it is.
+  SetInDocument();
   DOMSlots()->mBindingParent = aContent;
   DOMSlots()->mContainingShadow = this;
 
@@ -97,11 +92,7 @@ ShadowRoot::~ShadowRoot()
     mPoolHost->RemoveMutationObserver(this);
   }
 
-  UnsetFlags(NODE_IS_IN_SHADOW_TREE);
-
-  // nsINode destructor expects mSubtreeRoot == this.
-  SetSubtreeRootPointer(this);
-
+  ClearInDocument();
   SetHost(nullptr);
 }
 
@@ -124,14 +115,14 @@ ShadowRoot::FromNode(nsINode* aNode)
 }
 
 void
-ShadowRoot::StyleSheetChanged()
+ShadowRoot::Restyle()
 {
   mProtoBinding->FlushSkinSheets();
 
   nsIPresShell* shell = OwnerDoc()->GetShell();
   if (shell) {
     OwnerDoc()->BeginUpdate(UPDATE_STYLE);
-    shell->RecordShadowStyleChange(this);
+    shell->RestyleShadowRoot(this);
     OwnerDoc()->EndUpdate(UPDATE_STYLE);
   }
 }
@@ -147,34 +138,40 @@ ShadowRoot::InsertSheet(nsCSSStyleSheet* aSheet,
 
   linkingElement->SetStyleSheet(aSheet); // This sets the ownerNode on the sheet
 
+  nsTArray<nsRefPtr<nsCSSStyleSheet> >* sheets =
+    mProtoBinding->GetOrCreateStyleSheets();
+  MOZ_ASSERT(sheets, "Style sheets array should never be null.");
+
   // Find the correct position to insert into the style sheet list (must
   // be in tree order).
-  for (size_t i = 0; i <= mProtoBinding->SheetCount(); i++) {
-    if (i == mProtoBinding->SheetCount()) {
-      mProtoBinding->AppendStyleSheet(aSheet);
+  for (uint32_t i = 0; i <= sheets->Length(); i++) {
+    if (i == sheets->Length()) {
+      sheets->AppendElement(aSheet);
       break;
     }
 
-    nsINode* sheetOwnerNode = mProtoBinding->StyleSheetAt(i)->GetOwnerNode();
+    nsINode* sheetOwnerNode = sheets->ElementAt(i)->GetOwnerNode();
     if (nsContentUtils::PositionIsBefore(aLinkingContent, sheetOwnerNode)) {
-      mProtoBinding->InsertStyleSheetAt(i, aSheet);
+      sheets->InsertElementAt(i, aSheet);
       break;
     }
   }
 
-  if (aSheet->IsApplicable()) {
-    StyleSheetChanged();
-  }
+  Restyle();
 }
 
 void
 ShadowRoot::RemoveSheet(nsCSSStyleSheet* aSheet)
 {
-  mProtoBinding->RemoveStyleSheet(aSheet);
+  nsTArray<nsRefPtr<nsCSSStyleSheet> >* sheets =
+    mProtoBinding->GetOrCreateStyleSheets();
+  MOZ_ASSERT(sheets, "Style sheets array should never be null.");
 
-  if (aSheet->IsApplicable()) {
-    StyleSheetChanged();
-  }
+  DebugOnly<bool> found = sheets->RemoveElement(aSheet);
+  MOZ_ASSERT(found, "Trying to remove a sheet from a ShadowRoot "
+                    "that does not exist.");
+
+  Restyle();
 }
 
 Element*
@@ -260,22 +257,6 @@ ShadowRoot::SetYoungerShadow(ShadowRoot* aYoungerShadow)
 }
 
 void
-ShadowRoot::RemoveDestInsertionPoint(nsIContent* aInsertionPoint,
-                                     nsTArray<nsIContent*>& aDestInsertionPoints)
-{
-  // Remove the insertion point from the destination insertion points.
-  // Also remove all succeeding insertion points because it is no longer
-  // possible for the content to be distributed into deeper node trees.
-  int32_t index = aDestInsertionPoints.IndexOf(aInsertionPoint);
-
-  // It's possible that we already removed the insertion point while processing
-  // other insertion point removals.
-  if (index >= 0) {
-    aDestInsertionPoints.SetLength(index);
-  }
-}
-
-void
 ShadowRoot::DistributeSingleNode(nsIContent* aContent)
 {
   // Find the insertion point to which the content belongs.
@@ -314,7 +295,7 @@ ShadowRoot::DistributeSingleNode(nsIContent* aContent)
       // is found or when the current matched node is reached.
       if (childIterator.Seek(aContent, matchedNodes[i])) {
         // aContent was found before the current matched node.
-        insertionPoint->InsertMatchedNode(i, aContent);
+        matchedNodes.InsertElementAt(i, aContent);
         isIndexFound = true;
         break;
       }
@@ -325,7 +306,7 @@ ShadowRoot::DistributeSingleNode(nsIContent* aContent)
       // thus it must be at the end.
       MOZ_ASSERT(childIterator.Seek(aContent),
                  "Trying to match a node that is not a candidate to be matched");
-      insertionPoint->AppendMatchedNode(aContent);
+      matchedNodes.AppendElement(aContent);
     }
 
     // Handle the case where the parent of the insertion point is a ShadowRoot
@@ -373,7 +354,7 @@ ShadowRoot::RemoveDistributedNode(nsIContent* aContent)
         return;
       }
 
-      mInsertionPoints[i]->RemoveMatchedNode(aContent);
+      mInsertionPoints[i]->MatchedNodes().RemoveElement(aContent);
 
       // Handle the case where the parent of the insertion point is a ShadowRoot
       // that is projected into the younger ShadowRoot's shadow insertion point.
@@ -431,7 +412,8 @@ ShadowRoot::DistributeAllNodes()
     // Assign matching nodes from node pool.
     for (uint32_t j = 0; j < nodePool.Length(); j++) {
       if (mInsertionPoints[i]->Match(nodePool[j])) {
-        mInsertionPoints[i]->AppendMatchedNode(nodePool[j]);
+        mInsertionPoints[i]->MatchedNodes().AppendElement(nodePool[j]);
+        nodePool[j]->SetXBLInsertionParent(mInsertionPoints[i]);
         nodePool.RemoveElementAt(j--);
       }
     }
@@ -443,7 +425,7 @@ ShadowRoot::DistributeAllNodes()
                                 "mInsertionPoints array is to be a descendant of a"
                                 "ShadowRoot, in which case, it should have a parent");
 
-    // If the parent of the insertion point has a ShadowRoot, the nodes distributed
+    // If the parent of the insertion point has as ShadowRoot, the nodes distributed
     // to the insertion point must be reprojected to the insertion points of the
     // parent's ShadowRoot.
     ShadowRoot* parentShadow = insertionParent->GetShadowRoot();
@@ -497,7 +479,7 @@ ShadowRoot::SetApplyAuthorStyles(bool aApplyAuthorStyles)
   nsIPresShell* shell = OwnerDoc()->GetShell();
   if (shell) {
     OwnerDoc()->BeginUpdate(UPDATE_STYLE);
-    shell->RecordShadowStyleChange(this);
+    shell->RestyleShadowRoot(this);
     OwnerDoc()->EndUpdate(UPDATE_STYLE);
   }
 }
@@ -580,16 +562,16 @@ ShadowRoot::IsPooledNode(nsIContent* aContent, nsIContent* aContainer,
     return false;
   }
 
-  if (aContainer == aHost) {
-    // Any other child nodes of the host will end up in the pool.
-    return true;
-  }
-
   if (aContainer->IsHTML(nsGkAtoms::content)) {
     // Fallback content will end up in pool if its parent is a child of the host.
     HTMLContentElement* content = static_cast<HTMLContentElement*>(aContainer);
     return content->IsInsertionPoint() && content->MatchedNodes().IsEmpty() &&
            aContainer->GetParentNode() == aHost;
+  }
+
+  if (aContainer == aHost) {
+    // Any other child nodes of the host will end up in the pool.
+    return true;
   }
 
   return false;
@@ -627,18 +609,9 @@ ShadowRoot::ContentAppended(nsIDocument* aDocument,
   // may need to be added to an insertion point.
   nsIContent* currentChild = aFirstNewContent;
   while (currentChild) {
-    // Add insertion point to destination insertion points of fallback content.
-    if (nsContentUtils::IsContentInsertionPoint(aContainer)) {
-      HTMLContentElement* content = static_cast<HTMLContentElement*>(aContainer);
-      if (content->MatchedNodes().IsEmpty()) {
-        currentChild->DestInsertionPoints().AppendElement(aContainer);
-      }
-    }
-
     if (IsPooledNode(currentChild, aContainer, mPoolHost)) {
       DistributeSingleNode(currentChild);
     }
-
     currentChild = currentChild->GetNextSibling();
   }
 }
@@ -658,14 +631,6 @@ ShadowRoot::ContentInserted(nsIDocument* aDocument,
   // Watch for new nodes added to the pool because the node
   // may need to be added to an insertion point.
   if (IsPooledNode(aChild, aContainer, mPoolHost)) {
-    // Add insertion point to destination insertion points of fallback content.
-    if (nsContentUtils::IsContentInsertionPoint(aContainer)) {
-      HTMLContentElement* content = static_cast<HTMLContentElement*>(aContainer);
-      if (content->MatchedNodes().IsEmpty()) {
-        aChild->DestInsertionPoints().AppendElement(aContainer);
-      }
-    }
-
     DistributeSingleNode(aChild);
   }
 }
@@ -681,15 +646,6 @@ ShadowRoot::ContentRemoved(nsIDocument* aDocument,
     DistributeAllNodes();
     mInsertionPointChanged = false;
     return;
-  }
-
-  // Clear destination insertion points for removed
-  // fallback content.
-  if (nsContentUtils::IsContentInsertionPoint(aContainer)) {
-    HTMLContentElement* content = static_cast<HTMLContentElement*>(aContainer);
-    if (content->MatchedNodes().IsEmpty()) {
-      aChild->DestInsertionPoints().Clear();
-    }
   }
 
   // Watch for node that is removed from the pool because
@@ -722,18 +678,28 @@ ShadowRootStyleSheetList::~ShadowRootStyleSheetList()
 nsCSSStyleSheet*
 ShadowRootStyleSheetList::IndexedGetter(uint32_t aIndex, bool& aFound)
 {
-  aFound = aIndex < mShadowRoot->mProtoBinding->SheetCount();
+  nsTArray<nsRefPtr<nsCSSStyleSheet>>* sheets =
+    mShadowRoot->mProtoBinding->GetStyleSheets();
 
-  if (!aFound) {
+  if (!sheets) {
+    aFound = false;
     return nullptr;
   }
 
-  return mShadowRoot->mProtoBinding->StyleSheetAt(aIndex);
+  aFound = aIndex < sheets->Length();
+  return sheets->SafeElementAt(aIndex);
 }
 
 uint32_t
 ShadowRootStyleSheetList::Length()
 {
-  return mShadowRoot->mProtoBinding->SheetCount();
+  nsTArray<nsRefPtr<nsCSSStyleSheet> >* sheets =
+    mShadowRoot->mProtoBinding->GetStyleSheets();
+
+  if (!sheets) {
+    return 0;
+  }
+
+  return sheets->Length();
 }
 

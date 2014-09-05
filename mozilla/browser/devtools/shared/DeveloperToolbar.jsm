@@ -265,9 +265,6 @@ const NOTIFICATIONS = {
  */
 DeveloperToolbar.prototype.NOTIFICATIONS = NOTIFICATIONS;
 
-/**
- * target is dynamic because the selectedTab changes
- */
 Object.defineProperty(DeveloperToolbar.prototype, "target", {
   get: function() {
     return TargetFactory.forTab(this._chromeWindow.getBrowser().selectedTab);
@@ -953,11 +950,7 @@ OutputPanel.prototype._update = function() {
 
   if (this.displayedOutput.data != null) {
     let context = this._devtoolbar.display.requisition.conversionContext;
-    this.displayedOutput.convert('dom', context).then(node => {
-      if (node == null) {
-        return;
-      }
-
+    this.displayedOutput.convert('dom', context).then((node) => {
       while (this._div.hasChildNodes()) {
         this._div.removeChild(this._div.firstChild);
       }

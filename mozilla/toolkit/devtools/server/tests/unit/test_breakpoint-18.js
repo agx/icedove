@@ -9,23 +9,13 @@
 var gDebuggee;
 var gClient;
 var gThreadClient;
-var gCallback;
 
 function run_test()
 {
-  run_test_with_server(DebuggerServer, function () {
-    run_test_with_server(WorkerDebuggerServer, do_test_finished);
-  });
-  do_test_pending();
-};
-
-function run_test_with_server(aServer, aCallback)
-{
-  gCallback = aCallback;
-  initTestDebuggerServer(aServer);
-  gDebuggee = addTestGlobal("test-breakpoints", aServer);
+  initTestDebuggerServer();
+  gDebuggee = addTestGlobal("test-breakpoints");
   gDebuggee.console = { log: x => void x };
-  gClient = new DebuggerClient(aServer.connectPipe());
+  gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect(function () {
     attachTestTabAndResume(gClient,
                            "test-breakpoints",
@@ -34,6 +24,7 @@ function run_test_with_server(aServer, aCallback)
       setUpCode();
     });
   });
+  do_test_pending();
 }
 
 const URL = "test.js";
@@ -78,5 +69,5 @@ function testDbgStatement(event, { why }) {
   // Not break on another offset from the same line (that isn't an entry point
   // to the line)
   do_check_neq(why.type, "breakpoint");
-  gClient.close(gCallback);
+  finishClient(gClient);
 }

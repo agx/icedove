@@ -657,9 +657,7 @@ nsNavBookmarks::InsertBookmark(int64_t aFolder,
 NS_IMETHODIMP
 nsNavBookmarks::RemoveItem(int64_t aItemId)
 {
-  PROFILER_LABEL("nsNavBookmarks", "RemoveItem",
-    js::ProfileEntry::Category::OTHER);
-
+  PROFILER_LABEL("bookmarks", "RemoveItem");
   NS_ENSURE_ARG(!IsRoot(aItemId));
 
   BookmarkData bookmark;
@@ -1155,9 +1153,7 @@ nsNavBookmarks::GetDescendantChildren(int64_t aFolderId,
 NS_IMETHODIMP
 nsNavBookmarks::RemoveFolderChildren(int64_t aFolderId)
 {
-  PROFILER_LABEL("nsNavBookmarks", "RemoveFolderChilder",
-    js::ProfileEntry::Category::OTHER);
-
+  PROFILER_LABEL("bookmarks", "RemoveFolderChilder");
   NS_ENSURE_ARG_MIN(aFolderId, 1);
   NS_ENSURE_ARG(aFolderId != mRoot);
 
@@ -1178,7 +1174,7 @@ nsNavBookmarks::RemoveFolderChildren(int64_t aFolderId)
     BookmarkData& child = folderChildrenArray[i];
 
     if (child.type == TYPE_FOLDER) {
-      foldersToRemove.Append(',');
+      foldersToRemove.AppendLiteral(",");
       foldersToRemove.AppendInt(child.id);
     }
 
@@ -2665,9 +2661,7 @@ nsNavBookmarks::EnsureKeywordsHash() {
 NS_IMETHODIMP
 nsNavBookmarks::RunInBatchMode(nsINavHistoryBatchCallback* aCallback,
                                nsISupports* aUserData) {
-  PROFILER_LABEL("nsNavBookmarks", "RunInBatchMode",
-    js::ProfileEntry::Category::OTHER);
-
+  PROFILER_LABEL("bookmarks", "RunInBatchMode");
   NS_ENSURE_ARG(aCallback);
 
   mBatching = true;

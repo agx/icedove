@@ -39,22 +39,13 @@ log.addAppender(new Log.ConsoleAppender(new Log.BasicFormatter()));
 XPCOMUtils.defineLazyModuleGetter(this, "FxAccountsManager",
                                   "resource://gre/modules/FxAccountsManager.jsm",
                                   "FxAccountsManager");
-Cu.import("resource://gre/modules/FxAccountsCommon.js");
 #else
 log.warn("The FxAccountsManager is only functional in B2G at this time.");
 var FxAccountsManager = null;
-var ONVERIFIED_NOTIFICATION = null;
-var ONLOGIN_NOTIFICATION = null;
-var ONLOGOUT_NOTIFICATION = null;
 #endif
 
 function FxAccountsService() {
   Services.obs.addObserver(this, "quit-application-granted", false);
-  if (ONVERIFIED_NOTIFICATION) {
-    Services.obs.addObserver(this, ONVERIFIED_NOTIFICATION, false);
-    Services.obs.addObserver(this, ONLOGIN_NOTIFICATION, false);
-    Services.obs.addObserver(this, ONLOGOUT_NOTIFICATION, false);
-  }
 
   // Maintain interface parity with Identity.jsm and MinimalIdentity.jsm
   this.RP = this;
@@ -70,48 +61,17 @@ FxAccountsService.prototype = {
 
   observe: function observe(aSubject, aTopic, aData) {
     switch (aTopic) {
-      case null:
-        // Guard against matching null ON*_NOTIFICATION
-        break;
-      case ONVERIFIED_NOTIFICATION:
-        log.debug("Received " + ONVERIFIED_NOTIFICATION + "; firing request()s");
-        for (let [rpId,] of this._rpFlows) {
-          this.request(rpId);
-        }
-        break;
-      case ONLOGIN_NOTIFICATION:
-        log.debug("Received " + ONLOGIN_NOTIFICATION + "; doLogin()s fired");
-        for (let [rpId,] of this._rpFlows) {
-          this.request(rpId);
-        }
-        break;
-      case ONLOGOUT_NOTIFICATION:
-        log.debug("Received " + ONLOGOUT_NOTIFICATION + "; doLogout()s fired");
-        for (let [rpId,] of this._rpFlows) {
-          this.doLogout(rpId);
-        }
-        break;
       case "quit-application-granted":
         Services.obs.removeObserver(this, "quit-application-granted");
-        if (ONVERIFIED_NOTIFICATION) {
-          Services.obs.removeObserver(this, ONVERIFIED_NOTIFICATION);
-          Services.obs.removeObserver(this, ONLOGIN_NOTIFICATION);
-          Services.obs.removeObserver(this, ONLOGOUT_NOTIFICATION);
-        }
         break;
     }
-  },
-
-  cleanupRPRequest: function(aRp) {
-    aRp.pendingRequest = false;
-    this._rpFlows.set(aRp.id, aRp);
   },
 
   /**
    * Register a listener for a given windowID as a result of a call to
    * navigator.id.watch().
    *
-   * @param aRPCaller
+   * @param aCaller
    *        (Object)  an object that represents the caller document, and
    *                  is expected to have properties:
    *                  - id (unique, e.g. uuid)
@@ -133,9 +93,7 @@ FxAccountsService.prototype = {
     // Log the user in, if possible, and then call ready().
     let runnable = {
       run: () => {
-        this.fxAccountsManager.getAssertion(aRpCaller.audience,
-                                            aRpCaller.principal,
-                                            { silent:true }).then(
+        this.fxAccountsManager.getAssertion(aRpCaller.audience, {silent:true}).then(
           data => {
             if (data) {
               this.doLogin(aRpCaller.id, data);
@@ -168,10 +126,10 @@ FxAccountsService.prototype = {
    * navigator.id.request().
    *
    * @param aRPId
-   *        (integer) the id of the doc object obtained in .watch()
+   *        (integer)  the id of the doc object obtained in .watch()
    *
    * @param aOptions
-   *        (Object) options including privacyPolicy, termsOfService
+   *        (Object)  options including privacyPolicy, termsOfService
    */
   request: function request(aRPId, aOptions) {
     aOptions = aOptions || {};
@@ -181,47 +139,19 @@ FxAccountsService.prototype = {
       return;
     }
 
-    // We check if we already have a pending request for this RP and in that
-    // case we just bail out. We don't want duplicated onlogin or oncancel
-    // events.
-    if (rp.pendingRequest) {
-      log.debug("request() already called");
-      return;
-    }
-
-    // Otherwise, we set the RP flow with the pending request flag.
-    rp.pendingRequest = true;
-    this._rpFlows.set(rp.id, rp);
-
     let options = makeMessageObject(rp);
     objectCopy(aOptions, options);
 
     log.debug("get assertion for " + rp.audience);
 
-    this.fxAccountsManager.getAssertion(rp.audience, rp.principal, options)
-    .then(
+    this.fxAccountsManager.getAssertion(rp.audience, options).then(
       data => {
         log.debug("got assertion for " + rp.audience + ": " + data);
         this.doLogin(aRPId, data);
       },
       error => {
-        log.debug("get assertion failed: " + JSON.stringify(error));
-        // Cancellation is passed through an error channel; here we reroute.
-        if ((error.error && (error.error.details == "DIALOG_CLOSED_BY_USER")) ||
-            (error.details == "DIALOG_CLOSED_BY_USER")) {
-          return this.doCancel(aRPId);
-        }
+        log.error("get assertion failed: " + JSON.stringify(error));
         this.doError(aRPId, error);
-      }
-    )
-    .then(
-      () => {
-        this.cleanupRPRequest(rp);
-      }
-    )
-    .catch(
-      () => {
-        this.cleanupRPRequest(rp);
       }
     );
   },
@@ -268,7 +198,7 @@ FxAccountsService.prototype = {
   doLogin: function doLogin(aRpCallerId, aAssertion) {
     let rp = this._rpFlows.get(aRpCallerId);
     if (!rp) {
-      log.warn("doLogin found no rp to go with callerId " + aRpCallerId);
+      log.warn("doLogin found no rp to go with callerId " + aRpCallerId + "\n");
       return;
     }
 
@@ -278,7 +208,7 @@ FxAccountsService.prototype = {
   doLogout: function doLogout(aRpCallerId) {
     let rp = this._rpFlows.get(aRpCallerId);
     if (!rp) {
-      log.warn("doLogout found no rp to go with callerId " + aRpCallerId);
+      log.warn("doLogout found no rp to go with callerId " + aRpCallerId + "\n");
       return;
     }
 
@@ -288,7 +218,7 @@ FxAccountsService.prototype = {
   doReady: function doReady(aRpCallerId) {
     let rp = this._rpFlows.get(aRpCallerId);
     if (!rp) {
-      log.warn("doReady found no rp to go with callerId " + aRpCallerId);
+      log.warn("doReady found no rp to go with callerId " + aRpCallerId + "\n");
       return;
     }
 
@@ -298,7 +228,7 @@ FxAccountsService.prototype = {
   doCancel: function doCancel(aRpCallerId) {
     let rp = this._rpFlows.get(aRpCallerId);
     if (!rp) {
-      log.warn("doCancel found no rp to go with callerId " + aRpCallerId);
+      log.warn("doCancel found no rp to go with callerId " + aRpCallerId + "\n");
       return;
     }
 
@@ -308,7 +238,7 @@ FxAccountsService.prototype = {
   doError: function doError(aRpCallerId, aError) {
     let rp = this._rpFlows.get(aRpCallerId);
     if (!rp) {
-      log.warn("doError found no rp to go with callerId " + aRpCallerId);
+      log.warn("doCancel found no rp to go with callerId " + aRpCallerId + "\n");
       return;
     }
 

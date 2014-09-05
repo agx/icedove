@@ -19,7 +19,7 @@ struct CopyValueToRematerializedFrame
 {
     Value *slots;
 
-    explicit CopyValueToRematerializedFrame(Value *slots)
+    CopyValueToRematerializedFrame(Value *slots)
       : slots(slots)
     { }
 
@@ -28,8 +28,7 @@ struct CopyValueToRematerializedFrame
     }
 };
 
-RematerializedFrame::RematerializedFrame(ThreadSafeContext *cx, uint8_t *top,
-                                         InlineFrameIterator &iter)
+RematerializedFrame::RematerializedFrame(JSContext *cx, uint8_t *top, InlineFrameIterator &iter)
   : prevUpToDate_(false),
     top_(top),
     frameNo_(iter.frameNo()),
@@ -42,7 +41,7 @@ RematerializedFrame::RematerializedFrame(ThreadSafeContext *cx, uint8_t *top,
 }
 
 /* static */ RematerializedFrame *
-RematerializedFrame::New(ThreadSafeContext *cx, uint8_t *top, InlineFrameIterator &iter)
+RematerializedFrame::New(JSContext *cx, uint8_t *top, InlineFrameIterator &iter)
 {
     unsigned numFormals = iter.isFunctionFrame() ? iter.callee()->nargs() : 0;
     size_t numBytes = sizeof(RematerializedFrame) +

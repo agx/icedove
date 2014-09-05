@@ -19,8 +19,6 @@ struct iLBC_decinst_t_;
 
 namespace webrtc {
 
-namespace acm2 {
-
 class ACMILBC : public ACMGenericCodec {
  public:
   explicit ACMILBC(int16_t codec_id);
@@ -44,8 +42,6 @@ class ACMILBC : public ACMGenericCodec {
 
   iLBC_encinst_t_* encoder_inst_ptr_;
 };
-
-}  // namespace acm2
 
 }  // namespace webrtc
 

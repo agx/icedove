@@ -18,7 +18,6 @@
 
 #define A_H263_ASSEMBLER_H_
 
-#include "mozilla/Types.h"
 #include "ARTPAssembler.h"
 
 #include <utils/List.h>
@@ -27,7 +26,7 @@
 
 namespace android {
 
-struct MOZ_EXPORT AMessage;
+struct AMessage;
 
 struct AH263Assembler : public ARTPAssembler {
     AH263Assembler(const sp<AMessage> &notify);

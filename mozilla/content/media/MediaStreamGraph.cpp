@@ -48,12 +48,6 @@ PRLogModuleInfo* gMediaStreamGraphLog;
 #endif
 
 /**
- * We make the initial mCurrentTime nonzero so that zero times can have
- * special meaning if necessary.
- */
-static const int32_t INITIAL_CURRENT_TIME = 1;
-
-/**
  * The singleton graph instance.
  */
 static MediaStreamGraphImpl* gGraph;
@@ -361,8 +355,8 @@ MediaStreamGraphImpl::UpdateCurrentTime()
   if (mRealtime) {
     TimeStamp now = TimeStamp::Now();
     prevCurrentTime = mCurrentTime;
-    nextCurrentTime = INITIAL_CURRENT_TIME +
-      SecondsToMediaTime((now - mInitialTimeStamp).ToSeconds());
+    nextCurrentTime =
+      SecondsToMediaTime((now - mCurrentTimeStamp).ToSeconds()) + mCurrentTime;
 
     mCurrentTimeStamp = now;
     STREAM_LOG(PR_LOG_DEBUG+1, ("Updating current time to %f (real %f, mStateComputedTime %f)",
@@ -379,11 +373,6 @@ MediaStreamGraphImpl::UpdateCurrentTime()
 
   if (mStateComputedTime < nextCurrentTime) {
     STREAM_LOG(PR_LOG_WARNING, ("Media graph global underrun detected"));
-    if (mRealtime) {
-      // Adjust mInitialTimeStamp to remove the missed time.
-      mInitialTimeStamp += TimeDuration::
-        FromSeconds(MediaTimeToSeconds(nextCurrentTime - mStateComputedTime));
-    }
     nextCurrentTime = mStateComputedTime;
   }
 
@@ -405,7 +394,7 @@ MediaStreamGraphImpl::UpdateCurrentTime()
     GraphTime blockedTime = 0;
     GraphTime t = prevCurrentTime;
     // include |nextCurrentTime| to ensure NotifyBlockingChanged() is called
-    // before NotifyEvent(this, EVENT_FINISHED) when |nextCurrentTime == stream end time|
+    // before NotifyFinished() when |nextCurrentTime == stream end time|
     while (t <= nextCurrentTime) {
       GraphTime end;
       bool blocked = stream->mBlocked.GetAt(t, &end);
@@ -468,7 +457,7 @@ MediaStreamGraphImpl::UpdateCurrentTime()
       SetStreamOrderDirty();
       for (uint32_t j = 0; j < stream->mListeners.Length(); ++j) {
         MediaStreamListener* l = stream->mListeners[j];
-        l->NotifyEvent(this, MediaStreamListener::EVENT_FINISHED);
+        l->NotifyFinished(this);
       }
     }
   }
@@ -1067,7 +1056,7 @@ MediaStreamGraphImpl::PlayVideo(MediaStream* aStream)
 
     nsCOMPtr<nsIRunnable> event =
       NS_NewRunnableMethod(output, &VideoFrameContainer::Invalidate);
-    NS_DispatchToMainThread(event);
+    NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
   }
   if (!aStream->mNotifiedFinished) {
     aStream->mLastPlayedVideoFrame = *frame;
@@ -1949,7 +1938,7 @@ MediaStream::RemoveAllListenersImpl()
 {
   for (int32_t i = mListeners.Length() - 1; i >= 0; --i) {
     nsRefPtr<MediaStreamListener> listener = mListeners[i].forget();
-    listener->NotifyEvent(GraphImpl(), MediaStreamListener::EVENT_REMOVED);
+    listener->NotifyRemoved(GraphImpl());
   }
   mListeners.Clear();
 }
@@ -2128,7 +2117,7 @@ MediaStream::AddListenerImpl(already_AddRefed<MediaStreamListener> aListener)
   listener->NotifyBlockingChanged(GraphImpl(),
     mNotifiedBlocked ? MediaStreamListener::BLOCKED : MediaStreamListener::UNBLOCKED);
   if (mNotifiedFinished) {
-    listener->NotifyEvent(GraphImpl(), MediaStreamListener::EVENT_FINISHED);
+    listener->NotifyFinished(GraphImpl());
   }
   if (mNotifiedHasCurrentData) {
     listener->NotifyHasCurrentData(GraphImpl());
@@ -2157,7 +2146,7 @@ MediaStream::RemoveListenerImpl(MediaStreamListener* aListener)
   // wouldn't need this if we could do it in the opposite order
   nsRefPtr<MediaStreamListener> listener(aListener);
   mListeners.RemoveElement(aListener);
-  listener->NotifyEvent(GraphImpl(), MediaStreamListener::EVENT_REMOVED);
+  listener->NotifyRemoved(GraphImpl());
 }
 
 void
@@ -2306,13 +2295,11 @@ SourceMediaStream::ResampleAudioToGraphSampleRate(TrackData* aTrackData, MediaSe
     return;
   }
   AudioSegment* segment = static_cast<AudioSegment*>(aSegment);
-  int channels = segment->ChannelCount();
+  if (!aTrackData->mResampler) {
+    int channels = segment->ChannelCount();
 
-  // If this segment is just silence, we delay instanciating the resampler.
-  if (channels) {
-    if (aTrackData->mResampler) {
-      MOZ_ASSERT(aTrackData->mResamplerChannelCount == segment->ChannelCount());
-    } else {
+    // If this segment is just silence, we delay instanciating the resampler.
+    if (channels) {
       SpeexResamplerState* state = speex_resampler_init(channels,
                                                         aTrackData->mInputRate,
                                                         GraphImpl()->AudioSampleRate(),
@@ -2322,12 +2309,9 @@ SourceMediaStream::ResampleAudioToGraphSampleRate(TrackData* aTrackData, MediaSe
         return;
       }
       aTrackData->mResampler.own(state);
-#ifdef DEBUG
-      aTrackData->mResamplerChannelCount = channels;
-#endif
     }
   }
-  segment->ResampleChunks(aTrackData->mResampler, aTrackData->mInputRate, GraphImpl()->AudioSampleRate());
+  segment->ResampleChunks(aTrackData->mResampler);
 }
 
 bool
@@ -2382,37 +2366,15 @@ SourceMediaStream::NotifyDirectConsumers(TrackData *aTrack,
 void
 SourceMediaStream::AddDirectListener(MediaStreamDirectListener* aListener)
 {
-  bool wasEmpty;
-  {
-    MutexAutoLock lock(mMutex);
-    wasEmpty = mDirectListeners.IsEmpty();
-    mDirectListeners.AppendElement(aListener);
-  }
-
-  if (wasEmpty) {
-    for (uint32_t j = 0; j < mListeners.Length(); ++j) {
-      MediaStreamListener* l = mListeners[j];
-      l->NotifyEvent(GraphImpl(), MediaStreamListener::EVENT_HAS_DIRECT_LISTENERS);
-    }
-  }
+  MutexAutoLock lock(mMutex);
+  mDirectListeners.AppendElement(aListener);
 }
 
 void
 SourceMediaStream::RemoveDirectListener(MediaStreamDirectListener* aListener)
 {
-  bool isEmpty;
-  {
-    MutexAutoLock lock(mMutex);
-    mDirectListeners.RemoveElement(aListener);
-    isEmpty = mDirectListeners.IsEmpty();
-  }
-
-  if (isEmpty) {
-    for (uint32_t j = 0; j < mListeners.Length(); ++j) {
-      MediaStreamListener* l = mListeners[j];
-      l->NotifyEvent(GraphImpl(), MediaStreamListener::EVENT_HAS_NO_DIRECT_LISTENERS);
-    }
-  }
+  MutexAutoLock lock(mMutex);
+  mDirectListeners.RemoveElement(aListener);
 }
 
 bool
@@ -2492,7 +2454,7 @@ SourceMediaStream::EndAllTrackAndFinish()
     data->mCommands |= TRACK_END;
   }
   FinishWithLockHeld();
-  // we will call NotifyEvent() to let GetUserMedia know
+  // we will call NotifyFinished() to let GetUserMedia know
 }
 
 TrackTicks
@@ -2560,7 +2522,7 @@ MediaInputPort::GetNextInputInterval(GraphTime aTime)
   for (;;) {
     if (!mDest->mBlocked.GetAt(t, &end))
       break;
-    if (end >= GRAPH_TIME_MAX)
+    if (end == GRAPH_TIME_MAX)
       return result;
     t = end;
   }
@@ -2687,6 +2649,12 @@ ProcessedMediaStream::DestroyImpl()
   // MediaStreamGraphImpl::RemoveStream() will also call
   // SetStreamOrderDirty(), for other reasons.
 }
+
+/**
+ * We make the initial mCurrentTime nonzero so that zero times can have
+ * special meaning if necessary.
+ */
+static const int32_t INITIAL_CURRENT_TIME = 1;
 
 MediaStreamGraphImpl::MediaStreamGraphImpl(bool aRealtime, TrackRate aSampleRate)
   : mCurrentTime(INITIAL_CURRENT_TIME)
@@ -2830,15 +2798,9 @@ MediaStreamGraphImpl::CollectReports(nsIHandleReportCallback* aHandleReport,
       EnsureImmediateWakeUpLocked(monitorLock);
     }
 
-    if (mLifecycleState >= LIFECYCLE_WAITING_FOR_THREAD_SHUTDOWN) {
-      // Shutting down, nothing to report.
-      return NS_OK;
-    }
-
-    // Wait for up to one second for the report to complete.
+    // Wait for the report to complete.
     nsresult rv;
-    const PRIntervalTime kMaxWait = PR_SecondsToInterval(1);
-    while ((rv = memoryReportLock.Wait(kMaxWait)) != NS_OK) {
+    while ((rv = memoryReportLock.Wait()) != NS_OK) {
       if (PR_GetError() != PR_PENDING_INTERRUPT_ERROR) {
         return rv;
       }

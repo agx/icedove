@@ -18,15 +18,15 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSISHELLSERVICE
 
-  nsresult Init();
+  nsresult Init() NS_HIDDEN;
 
 private:
   ~nsGNOMEShellService() {}
 
-  bool KeyMatchesAppName(const char *aKeyValue) const;
-  bool CheckHandlerMatchesAppName(const nsACString& handler) const;
+  NS_HIDDEN_(bool) KeyMatchesAppName(const char *aKeyValue) const;
+  NS_HIDDEN_(bool) CheckHandlerMatchesAppName(const nsACString& handler) const;
 
-  bool GetAppPathFromLauncher();
+  NS_HIDDEN_(bool) GetAppPathFromLauncher();
   bool mCheckedThisSession;
   bool mUseLocaleFilenames;
   nsCString    mAppPath;

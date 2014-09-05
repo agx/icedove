@@ -32,7 +32,6 @@ UNIFIED_SOURCES += [
     'testFreshGlobalEvalRedefinition.cpp',
     'testFuncCallback.cpp',
     'testFunctionProperties.cpp',
-    'testGCAllocator.cpp',
     'testGCExactRooting.cpp',
     'testGCFinalizeCallback.cpp',
     'testGCHeapPostBarriers.cpp',
@@ -75,7 +74,6 @@ UNIFIED_SOURCES += [
     'testTypedArrays.cpp',
     'testUncaughtError.cpp',
     'testUTF8.cpp',
-    'testWeakMap.cpp',
     'testXDR.cpp',
 ]
 

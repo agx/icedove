@@ -88,7 +88,7 @@ template <> inline RefCounted<LibHandle, AtomicRefCount>::~RefCounted()
  * Abstract class for loaded libraries. Libraries may be loaded through the
  * system linker or this linker, both cases will be derived from this class.
  */
-class LibHandle: public mozilla::external::AtomicRefCounted<LibHandle>
+class LibHandle: public mozilla::AtomicRefCounted<LibHandle>
 {
 public:
   MOZ_DECLARE_REFCOUNTED_TYPENAME(LibHandle)
@@ -140,7 +140,7 @@ public:
   void AddDirectRef()
   {
     ++directRefCnt;
-    mozilla::external::AtomicRefCounted<LibHandle>::AddRef();
+    mozilla::AtomicRefCounted<LibHandle>::AddRef();
   }
 
   /**
@@ -152,10 +152,10 @@ public:
     bool ret = false;
     if (directRefCnt) {
       MOZ_ASSERT(directRefCnt <=
-                 mozilla::external::AtomicRefCounted<LibHandle>::refCount());
+                 mozilla::AtomicRefCounted<LibHandle>::refCount());
       if (--directRefCnt)
         ret = true;
-      mozilla::external::AtomicRefCounted<LibHandle>::Release();
+      mozilla::AtomicRefCounted<LibHandle>::Release();
     }
     return ret;
   }
@@ -312,8 +312,6 @@ class SEGVHandler
 {
 public:
   bool hasRegisteredHandler() {
-    if (! initialized)
-      FinishInitialization();
     return registeredHandler;
   }
 
@@ -328,12 +326,6 @@ protected:
 private:
   static int __wrap_sigaction(int signum, const struct sigaction *act,
                               struct sigaction *oldact);
-
-  /**
-   * The constructor doesn't do all initialization, and the tail is done
-   * at a later time.
-   */
-  void FinishInitialization();
 
   /**
    * SIGSEGV handler registered with __wrap_signal or __wrap_sigaction.
@@ -367,7 +359,6 @@ private:
    */
   MappedPtr stackPtr;
 
-  bool initialized;
   bool registeredHandler;
   bool signalHandlingBroken;
   bool signalHandlingSlow;

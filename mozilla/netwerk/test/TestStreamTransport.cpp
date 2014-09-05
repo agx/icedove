@@ -297,7 +297,7 @@ main(int argc, char* argv[])
         if (NS_FAILED(rv)) return rv;
 
         nsAutoCString newName(leafName);
-        newName.AppendLiteral(".1");
+        newName.Append(NS_LITERAL_CSTRING(".1"));
         rv = destFile->SetNativeLeafName(newName);
         if (NS_FAILED(rv)) return rv;
 
@@ -305,7 +305,7 @@ main(int argc, char* argv[])
         NS_ASSERTION(NS_SUCCEEDED(rv), "RunTest failed");
 
         newName = leafName;
-        newName.AppendLiteral(".2");
+        newName.Append(NS_LITERAL_CSTRING(".2"));
         rv = destFile->SetNativeLeafName(newName);
         if (NS_FAILED(rv)) return rv;
 

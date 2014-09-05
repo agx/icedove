@@ -150,7 +150,7 @@ MobileMessageThread::GetParticipants(JSContext* aCx,
 {
   JS::Rooted<JSObject*> obj(aCx);
 
-  nsresult rv = nsTArrayToJSArray(aCx, mData.participants(), &obj);
+  nsresult rv = nsTArrayToJSArray(aCx, mData.participants(), obj.address());
   NS_ENSURE_SUCCESS(rv, rv);
 
   aParticipants.setObject(*obj);

@@ -12,13 +12,11 @@ const { getThumbnailURIForWindow } = require("../content/thumbnail");
 const { getFaviconURIForLocation } = require("../io/data");
 const { activateTab, getOwnerWindow, getBrowserForTab, getTabTitle, setTabTitle,
         getTabURL, setTabURL, getTabContentType, getTabId } = require('./utils');
-const { isPrivate } = require('../private-browsing/utils');
-const { isWindowPrivate } = require('../window/utils');
+const { getOwnerWindow: getPBOwnerWindow } = require('../private-browsing/window/utils');
 const viewNS = require('../core/namespace').ns();
 const { deprecateUsage } = require('../util/deprecate');
 const { getURL } = require('../url/utils');
 const { viewFor } = require('../view/core');
-const { observer } = require('./observer');
 
 // Array of the inner instances of all the wrapped tabs.
 const TABS = [];
@@ -66,8 +64,8 @@ const TabTrait = Trait.compose(EventEmitter, {
       this.pin();
 
     viewNS(this._public).tab = this._tab;
+    getPBOwnerWindow.implement(this._public, getChromeTab);
     viewFor.implement(this._public, getTabView);
-    isPrivate.implement(this._public, tab => isWindowPrivate(getChromeTab(tab)));
 
     // Add tabs to getURL method
     getURL.implement(this._public, (function (obj) this._public.url).bind(this));
@@ -258,12 +256,8 @@ const TabTrait = Trait.compose(EventEmitter, {
         callback();
       return;
     }
-    if (callback) {
-      if (this.window.tabs.activeTab && (this.window.tabs.activeTab.id == this.id))
-        observer.once('select', callback);
-      else
-        this.once(EVENTS.close.name, callback);
-    }
+    if (callback)
+      this.once(EVENTS.close.name, callback);
     this._window.gBrowser.removeTab(this._tab);
   },
   /**

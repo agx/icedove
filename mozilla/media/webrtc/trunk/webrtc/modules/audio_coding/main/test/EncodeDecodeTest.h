@@ -13,17 +13,15 @@
 
 #include <stdio.h>
 
-#include "webrtc/modules/audio_coding/main/interface/audio_coding_module.h"
-#include "webrtc/modules/audio_coding/main/test/ACMTest.h"
-#include "webrtc/modules/audio_coding/main/test/PCMFile.h"
-#include "webrtc/modules/audio_coding/main/test/RTPFile.h"
-#include "webrtc/typedefs.h"
+#include "ACMTest.h"
+#include "audio_coding_module.h"
+#include "RTPFile.h"
+#include "PCMFile.h"
+#include "typedefs.h"
 
 namespace webrtc {
 
 #define MAX_INCOMING_PAYLOAD 8096
-
-class Config;
 
 // TestPacketization callback which writes the encoded payloads to file
 class TestPacketization : public AudioPacketizationCallback {
@@ -92,8 +90,8 @@ class Receiver {
 
 class EncodeDecodeTest : public ACMTest {
  public:
-  explicit EncodeDecodeTest(const Config& config);
-  EncodeDecodeTest(int testMode, const Config& config);
+  EncodeDecodeTest();
+  EncodeDecodeTest(int testMode);
   virtual void Perform();
 
   uint16_t _playoutFreq;
@@ -102,8 +100,6 @@ class EncodeDecodeTest : public ACMTest {
  private:
   void EncodeToFile(int fileType, int codeId, int* codePars, int testMode);
 
-  const Config& config_;
-
  protected:
   Sender _sender;
   Receiver _receiver;
@@ -111,4 +107,4 @@ class EncodeDecodeTest : public ACMTest {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_ENCODEDECODETEST_H_
+#endif

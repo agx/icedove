@@ -9,7 +9,6 @@
 // access the dictionary resources.
 
 #include "hnjalloc.h"
-#undef FILE // Undo the damage done in hnjalloc.h
 #include "nsNetUtil.h"
 
 #define BUFSIZE 1024

@@ -173,14 +173,17 @@ nsXBLResourceLoader::StyleSheetLoaded(nsCSSStyleSheet* aSheet,
     return NS_OK;
   }
    
-  mResources->AppendStyleSheet(aSheet);
+  mResources->mStyleSheetList.AppendElement(aSheet);
 
   if (!mInLoadResourcesFunc)
     mPendingSheets--;
   
   if (mPendingSheets == 0) {
     // All stylesheets are loaded.  
-    mResources->GatherRuleProcessor();
+    mResources->mRuleProcessor =
+      new nsCSSRuleProcessor(mResources->mStyleSheetList, 
+                             nsStyleSet::eDocSheet,
+                             nullptr);
 
     // XXX Check for mPendingScripts when scripts also come online.
     if (!mInLoadResourcesFunc)

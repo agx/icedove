@@ -144,7 +144,7 @@ Service::CollectReports(nsIHandleReportCallback *aHandleReport,
 
       nsCString pathHead("explicit/storage/sqlite/");
       pathHead.Append(conn->getFilename());
-      pathHead.Append('/');
+      pathHead.AppendLiteral("/");
 
       SQLiteMutexAutoLock lockedScope(conn->sharedDBMutex);
 

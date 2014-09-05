@@ -12,7 +12,7 @@
 #define WEBRTC_MODULES_RTP_RTCP_SOURCE_H264_H264_INFORMATION_H_
 
 #include "VideoCodecInformation.h"
-#include "webrtc/typedefs.h"
+#include "typedefs.h"
 
 namespace webrtc {
 enum

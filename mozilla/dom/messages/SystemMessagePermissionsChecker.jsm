@@ -56,9 +56,6 @@ this.SystemMessagePermissionsTable = {
     "bluetooth": []
   },
   "connection": { },
-  "captive-portal": {
-    "wifi-manage": []
-  },
   "dummy-system-message": { }, // for system message testing framework
   "headset-button": { },
   "icc-stkcommand": {

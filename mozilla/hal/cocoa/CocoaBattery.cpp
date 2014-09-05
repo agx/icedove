@@ -38,7 +38,6 @@ class MacPowerInformationService
 public:
   static MacPowerInformationService* GetInstance();
   static void Shutdown();
-  static bool IsShuttingDown();
 
   void BeginListening();
   void StopListening();
@@ -61,7 +60,6 @@ private:
   friend void GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo);
 
   static MacPowerInformationService* sInstance;
-  static bool sShuttingDown;
 
   static void* sIOKitFramework;
   static IOPSGetTimeRemainingEstimateFunc sIOPSGetTimeRemainingEstimate;
@@ -79,17 +77,13 @@ IOPSGetTimeRemainingEstimateFunc MacPowerInformationService::sIOPSGetTimeRemaini
 void
 EnableBatteryNotifications()
 {
-  if (!MacPowerInformationService::IsShuttingDown()) {
-    MacPowerInformationService::GetInstance()->BeginListening();
-  }
+  MacPowerInformationService::GetInstance()->BeginListening();
 }
 
 void
 DisableBatteryNotifications()
 {
-  if (!MacPowerInformationService::IsShuttingDown()) {
-    MacPowerInformationService::GetInstance()->StopListening();
-  }
+  MacPowerInformationService::GetInstance()->StopListening();
 }
 
 void
@@ -101,8 +95,6 @@ GetCurrentBatteryInformation(hal::BatteryInformation* aBatteryInfo)
   aBatteryInfo->charging() = powerService->mCharging;
   aBatteryInfo->remainingTime() = powerService->mRemainingTime;
 }
-
-bool MacPowerInformationService::sShuttingDown = false;
 
 /*
  * Following is the implementation of MacPowerInformationService.
@@ -145,16 +137,9 @@ MacPowerInformationService::GetInstance()
   return sInstance;
 }
 
-bool
-MacPowerInformationService::IsShuttingDown()
-{
-  return sShuttingDown;
-}
-
 void
 MacPowerInformationService::Shutdown()
 {
-  sShuttingDown = true;
   delete sInstance;
   sInstance = nullptr;
 }

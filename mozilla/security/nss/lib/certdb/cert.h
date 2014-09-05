@@ -1562,12 +1562,6 @@ extern CERTGeneralName *
 CERT_NewGeneralName(PLArenaPool *arena, CERTGeneralNameType type);
 
 /*
- * Lookup a CERTGeneralNameType constant by its human readable string.
- */
-extern CERTGeneralNameType
-CERT_GetGeneralNameTypeFromString(const char *string);
-
-/*
  * PKIX extension encoding routines
  */
 extern SECStatus

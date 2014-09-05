@@ -29,7 +29,6 @@
 #ifdef MOZ_X11
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#include "gfxXlibSurface.h"
 #endif //MOZ_X11
 
 #include "nsXULAppAPI.h"
@@ -225,11 +224,7 @@ nsWindow::createQWidget(MozQWidget* parent,
 
     widget->setObjectName(QString(windowName));
     if (mWindowType == eWindowType_invisible) {
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 1, 0))
         widget->setVisibility(QWindow::Hidden);
-#else
-        widget->hide();
-#endif
     }
     if (mWindowType == eWindowType_dialog) {
         widget->setModality(Qt::WindowModal);
@@ -807,39 +802,13 @@ nsWindow::GetGLFrameBufferFormat()
     return LOCAL_GL_NONE;
 }
 
-TemporaryRef<DrawTarget>
-nsWindow::StartRemoteDrawing()
-{
-    if (!mWidget) {
-        return nullptr;
-    }
-
-#ifdef MOZ_X11
-    Display* dpy = gfxQtPlatform::GetXDisplay(mWidget);
-    Screen* screen = DefaultScreenOfDisplay(dpy);
-    Visual* defaultVisual = DefaultVisualOfScreen(screen);
-    gfxASurface* surf = new gfxXlibSurface(dpy, mWidget->winId(), defaultVisual,
-                                           gfxIntSize(mWidget->width(),
-                                                      mWidget->height()));
-
-    IntSize size(surf->GetSize().width, surf->GetSize().height);
-    if (size.width <= 0 || size.height <= 0) {
-        return nullptr;
-    }
-
-    return gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(surf, size);
-#else
-    return nullptr;
-#endif
-}
-
 NS_IMETHODIMP
 nsWindow::SetCursor(nsCursor aCursor)
 {
-    if (mCursor == aCursor && !mUpdateCursor) {
+    if (mCursor == aCursor) {
         return NS_OK;
     }
-    mUpdateCursor = false;
+
     mCursor = aCursor;
     if (mWidget) {
         mWidget->SetCursor(mCursor);
@@ -936,47 +905,6 @@ nsWindow::mouseMoveEvent(QMouseEvent* aEvent)
     return nsEventStatus_eIgnore;
 }
 
-static void
-InitMouseEvent(WidgetMouseEvent& aMouseEvent, QMouseEvent* aEvent,
-               int aClickCount)
-{
-    aMouseEvent.refPoint.x = nscoord(aEvent->pos().x());
-    aMouseEvent.refPoint.y = nscoord(aEvent->pos().y());
-
-    aMouseEvent.InitBasicModifiers(aEvent->modifiers() & Qt::ControlModifier,
-                                   aEvent->modifiers() & Qt::AltModifier,
-                                   aEvent->modifiers() & Qt::ShiftModifier,
-                                   aEvent->modifiers() & Qt::MetaModifier);
-    aMouseEvent.clickCount = aClickCount;
-
-    switch (aEvent->button()) {
-    case Qt::LeftButton:
-        aMouseEvent.button = WidgetMouseEvent::eLeftButton;
-        break;
-    case Qt::RightButton:
-        aMouseEvent.button = WidgetMouseEvent::eRightButton;
-        break;
-    case Qt::MiddleButton:
-        aMouseEvent.button = WidgetMouseEvent::eMiddleButton;
-        break;
-    default:
-        break;
-    }
-}
-
-static bool
-IsAcceptedButton(Qt::MouseButton button)
-{
-    switch (button) {
-    case Qt::LeftButton:
-    case Qt::RightButton:
-    case Qt::MiddleButton:
-        return true;
-    default:
-        return false;
-    }
-}
-
 nsEventStatus
 nsWindow::mousePressEvent(QMouseEvent* aEvent)
 {
@@ -990,28 +918,37 @@ nsWindow::mousePressEvent(QMouseEvent* aEvent)
     if (mWidget)
         pos = mWidget->mapToGlobal(pos);
 
-    if (CheckForRollup(pos.x(), pos.y(), false))
+    if (CheckForRollup( pos.x(), pos.y(), false))
         return nsEventStatus_eIgnore;
 
-    if (!IsAcceptedButton(aEvent->button())) {
-        if (aEvent->button() == Qt::BackButton)
-            return DispatchCommandEvent(nsGkAtoms::Back);
-        if (aEvent->button() == Qt::ForwardButton)
-            return DispatchCommandEvent(nsGkAtoms::Forward);
-        return nsEventStatus_eIgnore;
+    uint16_t      domButton;
+    switch (aEvent->button()) {
+    case Qt::MidButton:
+        domButton = WidgetMouseEvent::eMiddleButton;
+        break;
+    case Qt::RightButton:
+        domButton = WidgetMouseEvent::eRightButton;
+        break;
+    default:
+        domButton = WidgetMouseEvent::eLeftButton;
+        break;
     }
 
     WidgetMouseEvent event(true, NS_MOUSE_BUTTON_DOWN, this,
                            WidgetMouseEvent::eReal);
-    InitMouseEvent(event, aEvent, 1);
+    event.button = domButton;
+    InitButtonEvent(event, aEvent, 1);
+
+    LOG(("%s [%p] button: %d\n", __PRETTY_FUNCTION__, (void*)this, domButton));
+
     nsEventStatus status = DispatchEvent(&event);
 
-    // Right click on linux should also pop up a context menu.
-    if (event.button == WidgetMouseEvent::eRightButton &&
+    // right menu click on linux should also pop up a context menu
+    if (domButton == WidgetMouseEvent::eRightButton &&
         MOZ_LIKELY(!mIsDestroyed)) {
         WidgetMouseEvent contextMenuEvent(true, NS_CONTEXTMENU, this,
                                           WidgetMouseEvent::eReal);
-        InitMouseEvent(contextMenuEvent, aEvent, 1);
+        InitButtonEvent(contextMenuEvent, aEvent, 1);
         DispatchEvent(&contextMenuEvent, status);
     }
 
@@ -1024,27 +961,55 @@ nsWindow::mouseReleaseEvent(QMouseEvent* aEvent)
     // The user has done something.
     UserActivity();
 
-    if (!IsAcceptedButton(aEvent->button()))
-        return nsEventStatus_eIgnore;
+    uint16_t domButton;
+
+    switch (aEvent->button()) {
+    case Qt::MidButton:
+        domButton = WidgetMouseEvent::eMiddleButton;
+        break;
+    case Qt::RightButton:
+        domButton = WidgetMouseEvent::eRightButton;
+        break;
+    default:
+        domButton = WidgetMouseEvent::eLeftButton;
+        break;
+    }
+
+    LOG(("%s [%p] button: %d\n", __PRETTY_FUNCTION__, (void*)this, domButton));
 
     WidgetMouseEvent event(true, NS_MOUSE_BUTTON_UP, this,
                            WidgetMouseEvent::eReal);
-    InitMouseEvent(event, aEvent, 1);
-    return DispatchEvent(&event);
+    event.button = domButton;
+    InitButtonEvent(event, aEvent, 1);
+
+    nsEventStatus status = DispatchEvent(&event);
+
+    return status;
 }
 
 nsEventStatus
 nsWindow::mouseDoubleClickEvent(QMouseEvent* aEvent)
 {
-    // The user has done something.
-    UserActivity();
+    uint32_t eventType;
 
-    if (!IsAcceptedButton(aEvent->button()))
-        return nsEventStatus_eIgnore;
+    switch (aEvent->button()) {
+    case Qt::MidButton:
+        eventType = WidgetMouseEvent::eMiddleButton;
+        break;
+    case Qt::RightButton:
+        eventType = WidgetMouseEvent::eRightButton;
+        break;
+    default:
+        eventType = WidgetMouseEvent::eLeftButton;
+        break;
+    }
 
     WidgetMouseEvent event(true, NS_MOUSE_DOUBLECLICK, this,
                            WidgetMouseEvent::eReal);
-    InitMouseEvent(event, aEvent, 2);
+    event.button = eventType;
+
+    InitButtonEvent(event, aEvent, 2);
+    //pressed
     return DispatchEvent(&event);
 }
 
@@ -1089,9 +1054,6 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
     if (aEvent->key() == Qt::Key_AltGr) {
         sAltGrModifier = true;
     }
-
-    CodeNameIndex codeNameIndex =
-        ScanCodeToDOMCodeNameIndex(aEvent->nativeScanCode());
 
 #ifdef MOZ_X11
     // before we dispatch a key, check if it's the context menu key.
@@ -1188,7 +1150,6 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
 
         downEvent.keyCode = domKeyCode;
         downEvent.mKeyNameIndex = keyNameIndex;
-        downEvent.mCodeNameIndex = codeNameIndex;
 
         nsEventStatus status = DispatchEvent(&downEvent);
 
@@ -1393,7 +1354,6 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
 
     event.keyCode = domCharCode ? 0 : domKeyCode;
     event.mKeyNameIndex = keyNameIndex;
-    event.mCodeNameIndex = codeNameIndex;
     // send the key press event
     return DispatchEvent(&event);
 #else
@@ -1433,7 +1393,6 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
 
         downEvent.keyCode = domKeyCode;
         downEvent.mKeyNameIndex = keyNameIndex;
-        downEvent.mCodeNameIndex = codeNameIndex;
 
         nsEventStatus status = DispatchEvent(&downEvent);
 
@@ -1450,7 +1409,6 @@ nsWindow::keyPressEvent(QKeyEvent* aEvent)
 
     event.keyCode = domCharCode ? 0 : domKeyCode;
     event.mKeyNameIndex = keyNameIndex;
-    event.mCodeNameIndex = codeNameIndex;
 
     // send the key press event
     return DispatchEvent(&event);
@@ -1508,8 +1466,6 @@ nsWindow::keyReleaseEvent(QKeyEvent* aEvent)
         (aEvent->text().length() && aEvent->text()[0].isPrint()) ?
             KEY_NAME_INDEX_PrintableKey :
             QtKeyCodeToDOMKeyNameIndex(aEvent->key());
-    event.mCodeNameIndex =
-        ScanCodeToDOMCodeNameIndex(aEvent->nativeScanCode());
 
     // unset the key down flag
     ClearKeyDownFlag(event.keyCode);
@@ -1584,6 +1540,21 @@ nsWindow::tabletEvent(QTabletEvent* aEvent)
 }
 
 //  Helpers
+
+void
+nsWindow::InitButtonEvent(WidgetMouseEvent& aMoveEvent,
+                          QMouseEvent* aEvent,
+                          int aClickCount)
+{
+    aMoveEvent.refPoint.x = nscoord(aEvent->pos().x());
+    aMoveEvent.refPoint.y = nscoord(aEvent->pos().y());
+
+    aMoveEvent.InitBasicModifiers(aEvent->modifiers() & Qt::ControlModifier,
+                                  aEvent->modifiers() & Qt::AltModifier,
+                                  aEvent->modifiers() & Qt::ShiftModifier,
+                                  aEvent->modifiers() & Qt::MetaModifier);
+    aMoveEvent.clickCount      = aClickCount;
+}
 
 nsEventStatus
 nsWindow::DispatchEvent(WidgetGUIEvent* aEvent)
@@ -1998,7 +1969,7 @@ GetBrandName(nsXPIDLString& brandName)
     }
 
     if (brandName.IsEmpty()) {
-        brandName.AssignLiteral(MOZ_UTF16("Mozilla"));
+        brandName.Assign(NS_LITERAL_STRING("Mozilla"));
     }
 }
 

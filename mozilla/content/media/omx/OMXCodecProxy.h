@@ -8,7 +8,7 @@
 
 
 #include <android/native_window.h>
-#include <media/IOMX.h>
+#include <IOMX.h>
 #include <stagefright/MediaBuffer.h>
 #include <stagefright/MediaSource.h>
 #include <utils/threads.h>

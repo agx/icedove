@@ -43,8 +43,6 @@ const RECREATE =        1 << 10;
 const NOTWANTED =       1 << 11;
 // Tell the cache to wait for the entry to be completely written first
 const COMPLETE =        1 << 12;
-// Don't write meta/data and don't set valid in the callback, consumer will do it manually
-const DONTFILL =        1 << 13;
 
 var log_c2 = true;
 function LOG_C2(o, m)
@@ -53,7 +51,7 @@ function LOG_C2(o, m)
   if (!m)
     dump("TEST-INFO | CACHE2: " + o + "\n");
   else
-    dump("TEST-INFO | CACHE2: callback #" + o.order + "(" + (o.workingData ? o.workingData.substr(0, 10) : "---") + ") " + m + "\n");
+    dump("TEST-INFO | CACHE2: callback #" + o.order + "(" + (o.workingData || "---") + ") " + m + "\n");
 }
 
 function pumpReadStream(inputStream, goon)
@@ -181,11 +179,6 @@ OpenCallback.prototype =
         catch (ex) {}
       }
 
-      if (this.behavior & DONTFILL) {
-        do_check_false(this.behavior & WAITFORWRITE);
-        return;
-      }
-
       var self = this;
       do_execute_soon(function() { // emulate network latency
         entry.setMetaDataElement("meto", self.workingMetadata);
@@ -296,9 +289,9 @@ VisitCallback.prototype =
     if (!this.entries)
       this.notify();
   },
-  onCacheEntryInfo: function(aURI, aIdEnhance, aDataSize, aFetchCount, aLastModifiedTime, aExpirationTime)
+  onCacheEntryInfo: function(entry)
   {
-    var key = (aIdEnhance ? (aIdEnhance + ":") : "") + aURI.asciiSpec;
+    var key = entry.key;
     LOG_C2(this, "onCacheEntryInfo: key=" + key);
 
     do_check_true(!!this.entries);

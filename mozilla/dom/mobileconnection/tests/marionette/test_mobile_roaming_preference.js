@@ -2,56 +2,97 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 MARIONETTE_TIMEOUT = 60000;
-MARIONETTE_HEAD_JS = "head.js";
 
-const TEST_DATA = [
-  // TODO: Bug 896394 - B2G RIL: Add marionette test cases for CDMA roaming
-  //                    preference.
-  // Currently emulator run as GSM mode by default. So we expect to get a
-  // 'RequestNotSupported' error here.
-  {
-    mode: "home",
-    expectedErrorMessage: "RequestNotSupported"
-  }, {
-    mode: "affiliated",
-    expectedErrorMessage: "RequestNotSupported"
-  }, {
-    mode: "any",
-    expectedErrorMessage: "RequestNotSupported"
-  },
-  // Test passing an invalid mode. We expect to get an exception here.
-  {
-    mode: "InvalidMode",
-    expectGotException: true
-  }, {
-    mode: null,
-    expectGotException: true
+SpecialPowers.addPermission("mobileconnection", true, document);
+
+let connection = navigator.mozMobileConnections[0];
+ok(connection instanceof MozMobileConnection,
+   "connection is instanceof " + connection.constructor);
+
+function failedToSetRoamingPreference(mode, expectedErrorMessage, callback) {
+  let request = connection.setRoamingPreference(mode);
+
+  ok(request instanceof DOMRequest,
+     "request instanceof " + request.constructor);
+
+  request.onsuccess = function onsuccess() {
+    ok(false, "Should not be here !!");
+
+    callback();
   }
-];
 
-function testSetRoamingPreference(aMode, aExpectedErrorMsg, aExpectGotException) {
-  log("Test setting roaming preference mode to " + aMode);
+  request.onerror = function onerror() {
+    is(request.error.name, expectedErrorMessage);
 
-  try {
-    return setRoamingPreference(aMode)
-      .then(function resolve() {
-        ok(!aExpectedErrorMsg, "setRoamingPreference success");
-      }, function reject(aError) {
-        is(aError.name, aExpectedErrorMsg, "failed to setRoamingPreference");
-      });
-  } catch (e) {
-    ok(aExpectGotException, "caught an exception: " + e);
+    callback();
   }
 }
 
-// Start tests
-startTestCommon(function() {
-  let promise = Promise.resolve();
-  for (let i = 0; i < TEST_DATA.length; i++) {
-    let data = TEST_DATA[i];
-    promise = promise.then(() => testSetRoamingPreference(data.mode,
-                                                          data.expectedErrorMessage,
-                                                          data.expectGotException));
+function testSetRoamingPreferenceWithNullValue() {
+  log("test setRoamingPreference(null)");
+
+  failedToSetRoamingPreference(null, "InvalidParameter", runNextTest);
+}
+
+function testSetRoamingPreferenceWithInvalidValue() {
+  log("test setRoamingPreference(\"InvalidValue\")");
+
+  failedToSetRoamingPreference("InvalidValue", "InvalidParameter", runNextTest);
+}
+
+function testSetRoamingPreferenceToHome() {
+  log("test setRoamingPreference(\"home\")");
+
+  // TODO: Bug 896394.
+  // Currently emulator run as GSM mode by default. So we expect to get a
+  // 'RequestNotSupported' error here.
+  failedToSetRoamingPreference("home", "RequestNotSupported", runNextTest);
+}
+
+function testGetRoamingPreference() {
+  log("test getRoamingPreference()");
+
+  // TODO: Bug 896394.
+  // Currently emulator run as GSM mode by default. So we expect to get a
+  // 'RequestNotSupported' error here.
+  let request = connection.getRoamingPreference();
+
+  ok(request instanceof DOMRequest,
+     "request instanceof " + request.constructor);
+
+  request.onsuccess = function onsuccess() {
+    ok(false, "Should not be here !!");
+
+    runNextTest();
   }
-  return promise;
-});
+
+  request.onerror = function onerror() {
+    is(request.error.name, "RequestNotSupported");
+
+    runNextTest();
+  }
+}
+
+let tests = [
+  testSetRoamingPreferenceWithNullValue,
+  testSetRoamingPreferenceWithInvalidValue,
+  testSetRoamingPreferenceToHome,
+  testGetRoamingPreference
+];
+
+function runNextTest() {
+  let test = tests.shift();
+  if (!test) {
+    cleanUp();
+    return;
+  }
+
+  test();
+}
+
+function cleanUp() {
+  SpecialPowers.removePermission("mobileconnection", document);
+  finish();
+}
+
+runNextTest();

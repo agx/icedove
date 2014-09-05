@@ -36,13 +36,13 @@ public:
     int32_t InitPlayout();
     int32_t InitRecording();
 
-    virtual int32_t SetRecordingSampleRate(uint32_t fsHz);
-    virtual int32_t SetPlayoutSampleRate(uint32_t fsHz);
+    int32_t SetRecordingSampleRate(uint32_t fsHz);
+    int32_t SetPlayoutSampleRate(uint32_t fsHz);
     int32_t RecordingSampleRate() const;
     int32_t PlayoutSampleRate() const;
 
-    virtual int32_t SetRecordingChannels(uint8_t channels);
-    virtual int32_t SetPlayoutChannels(uint8_t channels);
+    int32_t SetRecordingChannels(uint8_t channels);
+    int32_t SetPlayoutChannels(uint8_t channels);
     uint8_t RecordingChannels() const;
     uint8_t PlayoutChannels() const;
     int32_t SetRecordingChannel(
@@ -50,13 +50,12 @@ public:
     int32_t RecordingChannel(
         AudioDeviceModule::ChannelType& channel) const;
 
-    virtual int32_t SetRecordedBuffer(const void* audioBuffer,
-                                      uint32_t nSamples);
+    int32_t SetRecordedBuffer(const void* audioBuffer, uint32_t nSamples);
     int32_t SetCurrentMicLevel(uint32_t level);
-    virtual void SetVQEData(int playDelayMS,
-                            int recDelayMS,
-                            int clockDrift);
-    virtual int32_t DeliverRecordedData();
+    void SetVQEData(int playDelayMS,
+                    int recDelayMS,
+                    int clockDrift);
+    int32_t DeliverRecordedData();
     uint32_t NewMicLevel() const;
 
     virtual int32_t RequestPlayoutData(uint32_t nSamples);

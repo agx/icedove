@@ -19,7 +19,7 @@
 
 using namespace mozilla;
 
-nsContainerFrame*
+nsIFrame*
 NS_NewHTMLButtonControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsHTMLButtonControlFrame(aContext);
@@ -44,9 +44,10 @@ nsHTMLButtonControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
 }
 
 void
-nsHTMLButtonControlFrame::Init(nsIContent*       aContent,
-                               nsContainerFrame* aParent,
-                               nsIFrame*         aPrevInFlow)
+nsHTMLButtonControlFrame::Init(
+              nsIContent*      aContent,
+              nsIFrame*        aParent,
+              nsIFrame*        aPrevInFlow)
 {
   nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
   mRenderer.SetFrame(this, PresContext());
@@ -161,7 +162,7 @@ nsHTMLButtonControlFrame::GetPrefWidth(nsRenderingContext* aRenderingContext)
   return result;
 }
 
-void
+nsresult 
 nsHTMLButtonControlFrame::Reflow(nsPresContext* aPresContext,
                                nsHTMLReflowMetrics& aDesiredSize,
                                const nsHTMLReflowState& aReflowState,
@@ -204,6 +205,7 @@ nsHTMLButtonControlFrame::Reflow(nsPresContext* aPresContext,
                                  aReflowState, aStatus);
 
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  return NS_OK;
 }
 
 // Helper-function that lets us clone the button's reflow state, but with its
@@ -373,26 +375,27 @@ nsHTMLButtonControlFrame::SetAdditionalStyleContext(int32_t aIndex,
   mRenderer.SetStyleContext(aIndex, aStyleContext);
 }
 
-#ifdef DEBUG
-void
+nsresult 
 nsHTMLButtonControlFrame::AppendFrames(ChildListID     aListID,
                                        nsFrameList&    aFrameList)
 {
-  MOZ_CRASH("unsupported operation");
+  NS_NOTREACHED("unsupported operation");
+  return NS_ERROR_UNEXPECTED;
 }
 
-void
+nsresult
 nsHTMLButtonControlFrame::InsertFrames(ChildListID     aListID,
                                        nsIFrame*       aPrevFrame,
                                        nsFrameList&    aFrameList)
 {
-  MOZ_CRASH("unsupported operation");
+  NS_NOTREACHED("unsupported operation");
+  return NS_ERROR_UNEXPECTED;
 }
 
-void
+nsresult
 nsHTMLButtonControlFrame::RemoveFrame(ChildListID     aListID,
                                       nsIFrame*       aOldFrame)
 {
-  MOZ_CRASH("unsupported operation");
+  NS_NOTREACHED("unsupported operation");
+  return NS_ERROR_UNEXPECTED;
 }
-#endif

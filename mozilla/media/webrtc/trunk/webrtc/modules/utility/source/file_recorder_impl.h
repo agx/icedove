@@ -15,8 +15,6 @@
 #ifndef WEBRTC_MODULES_UTILITY_SOURCE_FILE_RECORDER_IMPL_H_
 #define WEBRTC_MODULES_UTILITY_SOURCE_FILE_RECORDER_IMPL_H_
 
-#include <list>
-
 #include "webrtc/common_audio/resampler/include/resampler.h"
 #include "webrtc/common_types.h"
 #include "webrtc/engine_configurations.h"
@@ -41,8 +39,6 @@ namespace webrtc {
 enum { MAX_AUDIO_BUFFER_IN_SAMPLES = 60*32};
 enum { MAX_AUDIO_BUFFER_IN_BYTES = MAX_AUDIO_BUFFER_IN_SAMPLES*2};
 enum { kMaxAudioBufferQueueLength = 100 };
-
-class CriticalSectionWrapper;
 
 class FileRecorderImpl : public FileRecorder
 {
@@ -107,31 +103,6 @@ private:
 
 
 #ifdef WEBRTC_MODULE_UTILITY_VIDEO
-class AudioFrameFileInfo
-{
-    public:
-       AudioFrameFileInfo(const int8_t* audioData,
-                     const uint16_t audioSize,
-                     const uint16_t audioMS,
-                     const TickTime& playoutTS)
-           : _audioData(), _audioSize(audioSize), _audioMS(audioMS),
-             _playoutTS(playoutTS)
-       {
-           if(audioSize > MAX_AUDIO_BUFFER_IN_BYTES)
-           {
-               assert(false);
-               _audioSize = 0;
-               return;
-           }
-           memcpy(_audioData, audioData, audioSize);
-       };
-    // TODO (hellner): either turn into a struct or provide get/set functions.
-    int8_t   _audioData[MAX_AUDIO_BUFFER_IN_BYTES];
-    uint16_t _audioSize;
-    uint16_t _audioMS;
-    TickTime _playoutTS;
-};
-
 class AviRecorder : public FileRecorderImpl
 {
 public:
@@ -155,7 +126,6 @@ protected:
         uint16_t millisecondsOfData,
         const TickTime* playoutTS);
 private:
-    typedef std::list<AudioFrameFileInfo*> AudioInfoList;
     static bool Run(ThreadObj threadObj);
     bool Process();
 
@@ -171,7 +141,7 @@ private:
     VideoCodec _videoCodecInst;
     bool _videoOnly;
 
-    AudioInfoList _audioFramesToWrite;
+    ListWrapper _audioFramesToWrite;
     bool _firstAudioFrameReceived;
 
     VideoFramesQueue* _videoFramesQueue;

@@ -58,7 +58,11 @@ struct ICONENTRY {
 // Match stock icons with names
 static SHSTOCKICONID GetStockIconIDForName(const nsACString &aStockName)
 {
-  return aStockName.EqualsLiteral("uac-shield") ? SIID_SHIELD : SIID_INVALID;
+  // UAC shield icon
+  if (aStockName == NS_LITERAL_CSTRING("uac-shield"))
+    return SIID_SHIELD;
+
+  return SIID_INVALID;
 }
 
 // nsIconChannel methods

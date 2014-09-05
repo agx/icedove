@@ -8,9 +8,6 @@
 
 #include "mozilla/DebugOnly.h"
 
-#if defined XP_MACOSX
-#include <libkern/OSByteOrder.h>
-#endif
 #include <string.h>
 
 #include "jsapi.h"
@@ -27,14 +24,6 @@ using namespace js;
 # else
 #  define TRACE_LOG_DIR "/tmp/"
 # endif
-#endif
-
-#if defined XP_MACOSX
-#define htobe32(x) OSSwapHostToBigInt32(x)
-#define be32toh(x) OSSwapBigToHostInt32(x)
-
-#define htobe64(x) OSSwapHostToBigInt64(x)
-#define be64toh(x) OSSwapBigToHostInt64(x)
 #endif
 
 #if defined(__i386__)
@@ -390,11 +379,11 @@ TraceLogger::createTextId(JSScript *script)
 
     int written;
     if (textId > 0) {
-        written = fprintf(dictFile, ",\n\"script %s:%u:%u\"", script->filename(),
-                          (unsigned)script->lineno(), (unsigned)script->column());
+        written = fprintf(dictFile, ",\n\"script %s:%d:%d\"", script->filename(),
+                          script->lineno(), script->column());
     } else {
-        written = fprintf(dictFile, "\"script %s:%u:%u\"", script->filename(),
-                          (unsigned)script->lineno(), (unsigned)script->column());
+        written = fprintf(dictFile, "\"script %s:%d:%d\"", script->filename(),
+                          script->lineno(), script->column());
     }
 
     if (written < 0)
@@ -582,15 +571,13 @@ TraceLogger::startEvent(uint32_t id)
         return;
     }
 
-    if (!tree.hasSpaceForAdd()){
+    if (!tree.ensureSpaceBeforeAdd()) {
         uint64_t start = rdtsc() - traceLoggers.startupTime;
-        if (!tree.ensureSpaceBeforeAdd()) {
-            if (!flush()) {
-                fprintf(stderr, "TraceLogging: Couldn't write the data to disk.\n");
-                enabled = false;
-                failed = true;
-                return;
-            }
+        if (!flush()) {
+            fprintf(stderr, "TraceLogging: Couldn't write the data to disk.\n");
+            enabled = false;
+            failed = true;
+            return;
         }
 
         // Log the time it took to flush the events as being from the
@@ -825,14 +812,9 @@ TraceLogging::lazyInit()
         enabledTextIds[TraceLogger::ParserCompileFunction] = true;
         enabledTextIds[TraceLogger::ParserCompileLazy] = true;
         enabledTextIds[TraceLogger::ParserCompileScript] = true;
-#ifdef JS_YARR
         enabledTextIds[TraceLogger::YarrCompile] = true;
         enabledTextIds[TraceLogger::YarrInterpret] = true;
         enabledTextIds[TraceLogger::YarrJIT] = true;
-#else
-        enabledTextIds[TraceLogger::IrregexpCompile] = true;
-        enabledTextIds[TraceLogger::IrregexpExecute] = true;
-#endif
     }
 
     if (ContainsFlag(env, "IonCompiler") || strlen(env) == 0) {
@@ -853,9 +835,6 @@ TraceLogging::lazyInit()
         enabledTextIds[TraceLogger::EliminateDeadCode] = true;
         enabledTextIds[TraceLogger::EdgeCaseAnalysis] = true;
         enabledTextIds[TraceLogger::EliminateRedundantChecks] = true;
-        enabledTextIds[TraceLogger::GenerateLIR] = true;
-        enabledTextIds[TraceLogger::RegisterAllocation] = true;
-        enabledTextIds[TraceLogger::GenerateCode] = true;
     }
 
     const char *options = getenv("TLOPTIONS");

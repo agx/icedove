@@ -137,6 +137,10 @@ function defineLazyRegExp(obj, name, pattern) {
 function NetworkManager() {
   this.networkInterfaces = {};
   Services.obs.addObserver(this, TOPIC_INTERFACE_STATE_CHANGED, true);
+#ifdef MOZ_B2G_RIL
+  Services.obs.addObserver(this, TOPIC_INTERFACE_REGISTERED, true);
+  Services.obs.addObserver(this, TOPIC_INTERFACE_UNREGISTERED, true);
+#endif
   Services.obs.addObserver(this, TOPIC_XPCOM_SHUTDOWN, false);
   Services.obs.addObserver(this, TOPIC_MOZSETTINGS_CHANGED, false);
 
@@ -214,8 +218,7 @@ NetworkManager.prototype = {
     switch (topic) {
       case TOPIC_INTERFACE_STATE_CHANGED:
         let network = subject.QueryInterface(Ci.nsINetworkInterface);
-        debug("Network " + network.type + "/" + network.name +
-              " changed state to " + network.state);
+        debug("Network " + network.name + " changed state to " + network.state);
         switch (network.state) {
           case Ci.nsINetworkInterface.NETWORK_STATE_CONNECTED:
 #ifdef MOZ_B2G_RIL
@@ -224,6 +227,8 @@ NetworkManager.prototype = {
               gNetworkService.removeHostRoutes(network.name);
               gNetworkService.addHostRoute(network);
             }
+            // Add extra host route. For example, mms proxy or mmsc.
+            this.setExtraHostRoute(network);
             // Dun type is a special case where we add the default route to a
             // secondary table.
             if (network.type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_DUN) {
@@ -235,12 +240,6 @@ NetworkManager.prototype = {
             gNetworkService.removeDefaultRoute(network);
             this.setAndConfigureActive();
 #ifdef MOZ_B2G_RIL
-            // Resolve and add extra host route. For example, mms proxy or mmsc.
-            // IMPORTANT: The offline state of DNSService will be set implicitly in
-            //            setAndConfigureActive() by modifying Services.io.offline.
-            //            Always setExtraHostRoute() after setAndConfigureActive().
-            this.setExtraHostRoute(network);
-
             // Update data connection when Wifi connected/disconnected
             if (network.type == Ci.nsINetworkInterface.NETWORK_TYPE_WIFI) {
               for (let i = 0; i < this.mRil.numRadioInterfaces; i++) {
@@ -298,6 +297,27 @@ NetworkManager.prototype = {
                                      this.convertConnectionType(network));
 #endif
         break;
+#ifdef MOZ_B2G_RIL
+      case TOPIC_INTERFACE_REGISTERED:
+        let regNetwork = subject.QueryInterface(Ci.nsINetworkInterface);
+        // Add extra host route. For example, mms proxy or mmsc.
+        this.setExtraHostRoute(regNetwork);
+        // Dun type is a special case where we add the default route to a
+        // secondary table.
+        if (regNetwork.type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_DUN) {
+          this.setSecondaryDefaultRoute(regNetwork);
+        }
+        break;
+      case TOPIC_INTERFACE_UNREGISTERED:
+        let unregNetwork = subject.QueryInterface(Ci.nsINetworkInterface);
+        // Remove extra host route. For example, mms proxy or mmsc.
+        this.removeExtraHostRoute(unregNetwork);
+        // Remove secondary default route for dun.
+        if (unregNetwork.type == Ci.nsINetworkInterface.NETWORK_TYPE_MOBILE_DUN) {
+          this.removeSecondaryDefaultRoute(unregNetwork);
+        }
+        break;
+#endif
       case TOPIC_MOZSETTINGS_CHANGED:
         let setting = JSON.parse(data);
         this.handle(setting.key, setting.value);
@@ -310,6 +330,10 @@ NetworkManager.prototype = {
       case TOPIC_XPCOM_SHUTDOWN:
         Services.obs.removeObserver(this, TOPIC_XPCOM_SHUTDOWN);
         Services.obs.removeObserver(this, TOPIC_MOZSETTINGS_CHANGED);
+#ifdef MOZ_B2G_RIL
+        Services.obs.removeObserver(this, TOPIC_INTERFACE_REGISTERED);
+        Services.obs.removeObserver(this, TOPIC_INTERFACE_UNREGISTERED);
+#endif
         Services.obs.removeObserver(this, TOPIC_INTERFACE_STATE_CHANGED);
 #ifdef MOZ_B2G_RIL
         this.dunConnectTimer.cancel();
@@ -360,19 +384,6 @@ NetworkManager.prototype = {
     }
   },
 
-  getNetworkId: function(network) {
-    let id = "device";
-    if (this.isNetworkTypeMobile(network.type)) {
-      if (!(network instanceof Ci.nsIRilNetworkInterface)) {
-        throw Components.Exception("Mobile network not an nsIRilNetworkInterface",
-                                   Cr.NS_ERROR_INVALID_ARG);
-      }
-      id = "ril" + network.serviceId;
-    }
-
-    return id + "-" + network.type;
-  },
-
   // nsINetworkManager
 
   registerNetworkInterface: function(network) {
@@ -380,15 +391,23 @@ NetworkManager.prototype = {
       throw Components.Exception("Argument must be nsINetworkInterface.",
                                  Cr.NS_ERROR_INVALID_ARG);
     }
-    let networkId = this.getNetworkId(network);
-    if (networkId in this.networkInterfaces) {
-      throw Components.Exception("Network with that type already registered!",
+    if (network.name in this.networkInterfaces) {
+      throw Components.Exception("Network with that name already registered!",
                                  Cr.NS_ERROR_INVALID_ARG);
     }
-    this.networkInterfaces[networkId] = network;
-
+    this.networkInterfaces[network.name] = network;
+#ifdef MOZ_B2G_RIL
+    // Add host route for data calls
+    if (this.isNetworkTypeMobile(network.type)) {
+      gNetworkService.addHostRoute(network);
+    }
+#endif
+    // Remove pre-created default route and let setAndConfigureActive()
+    // to set default route only on preferred network
+    gNetworkService.removeDefaultRoute(network);
+    this.setAndConfigureActive();
     Services.obs.notifyObservers(network, TOPIC_INTERFACE_REGISTERED, null);
-    debug("Network '" + networkId + "' registered.");
+    debug("Network '" + network.name + "' registered.");
   },
 
   unregisterNetworkInterface: function(network) {
@@ -396,15 +415,20 @@ NetworkManager.prototype = {
       throw Components.Exception("Argument must be nsINetworkInterface.",
                                  Cr.NS_ERROR_INVALID_ARG);
     }
-    let networkId = this.getNetworkId(network);
-    if (!(networkId in this.networkInterfaces)) {
-      throw Components.Exception("No network with that type registered.",
+    if (!(network.name in this.networkInterfaces)) {
+      throw Components.Exception("No network with that name registered.",
                                  Cr.NS_ERROR_INVALID_ARG);
     }
-    delete this.networkInterfaces[networkId];
-
+    delete this.networkInterfaces[network.name];
+#ifdef MOZ_B2G_RIL
+    // Remove host route for data calls
+    if (this.isNetworkTypeMobile(network.type)) {
+      gNetworkService.removeHostRoute(network);
+    }
+#endif
+    this.setAndConfigureActive();
     Services.obs.notifyObservers(network, TOPIC_INTERFACE_UNREGISTERED, null);
-    debug("Network '" + networkId + "' unregistered.");
+    debug("Network '" + network.name + "' unregistered.");
   },
 
   _manageOfflineStatus: true,
@@ -462,7 +486,8 @@ NetworkManager.prototype = {
 
       network = network.QueryInterface(Ci.nsIRilNetworkInterface);
 
-      debug("Adding mmsproxy and/or mmsc route for " + network.name);
+      debug("Network '" + network.name + "' registered, " +
+            "adding mmsproxy and/or mmsc route");
 
       let hostToResolve = network.mmsProxy;
       // Workaround an xpconnect issue with undefined string objects.
@@ -490,7 +515,8 @@ NetworkManager.prototype = {
 
       network = network.QueryInterface(Ci.nsIRilNetworkInterface);
 
-      debug("Removing mmsproxy and/or mmsc route for " + network.name);
+      debug("Network '" + network.name + "' unregistered, " +
+            "removing mmsproxy and/or mmsc route");
 
       let hostToResolve = network.mmsProxy;
       // Workaround an xpconnect issue with undefined string objects.
@@ -658,9 +684,7 @@ NetworkManager.prototype = {
           retval.push(hostnameIps.getNextAddrAsString());
           debug("Found IP at: " + JSON.stringify(retval));
         }
-      } catch (e) {
-        debug("Failed to resolve '" + hostname + "', exception: " + e);
-      }
+      } catch (e) {}
     }
 
     return retval;

@@ -87,23 +87,25 @@ int32_t ProcessThreadImpl::Stop()
     return 0;
 }
 
-int32_t ProcessThreadImpl::RegisterModule(Module* module)
+int32_t ProcessThreadImpl::RegisterModule(const Module* module)
 {
     CriticalSectionScoped lock(_critSectModules);
 
     // Only allow module to be registered once.
-    for (ModuleList::iterator iter = _modules.begin();
-         iter != _modules.end(); ++iter) {
-        if(module == *iter)
+    ListItem* item = _modules.First();
+    for(uint32_t i = 0; i < _modules.GetSize() && item; i++)
+    {
+        if(module == item->GetItem())
         {
             return -1;
         }
+        item = _modules.Next(item);
     }
 
-    _modules.push_front(module);
+    _modules.PushFront(module);
     WEBRTC_TRACE(kTraceInfo, kTraceUtility, -1,
                  "number of registered modules has increased to %d",
-                 _modules.size());
+                 _modules.GetSize());
     // Wake the thread calling ProcessThreadImpl::Process() to update the
     // waiting time. The waiting time for the just registered module may be
     // shorter than all other registered modules.
@@ -114,16 +116,19 @@ int32_t ProcessThreadImpl::RegisterModule(Module* module)
 int32_t ProcessThreadImpl::DeRegisterModule(const Module* module)
 {
     CriticalSectionScoped lock(_critSectModules);
-    for (ModuleList::iterator iter = _modules.begin();
-         iter != _modules.end(); ++iter) {
-        if(module == *iter)
+
+    ListItem* item = _modules.First();
+    for(uint32_t i = 0; i < _modules.GetSize() && item; i++)
+    {
+        if(module == item->GetItem())
         {
-            _modules.erase(iter);
+            int res = _modules.Erase(item);
             WEBRTC_TRACE(kTraceInfo, kTraceUtility, -1,
                          "number of registered modules has decreased to %d",
-                         _modules.size());
-            return 0;
+                         _modules.GetSize());
+            return res;
         }
+        item = _modules.Next(item);
     }
     return -1;
 }
@@ -140,13 +145,16 @@ bool ProcessThreadImpl::Process()
     int32_t minTimeToNext = 100;
     {
         CriticalSectionScoped lock(_critSectModules);
-        for (ModuleList::iterator iter = _modules.begin();
-             iter != _modules.end(); ++iter) {
-          int32_t timeToNext = (*iter)->TimeUntilNextProcess();
+        ListItem* item = _modules.First();
+        for(uint32_t i = 0; i < _modules.GetSize() && item; i++)
+        {
+            int32_t timeToNext =
+                static_cast<Module*>(item->GetItem())->TimeUntilNextProcess();
             if(minTimeToNext > timeToNext)
             {
                 minTimeToNext = timeToNext;
             }
+            item = _modules.Next(item);
         }
     }
 
@@ -164,13 +172,16 @@ bool ProcessThreadImpl::Process()
     }
     {
         CriticalSectionScoped lock(_critSectModules);
-        for (ModuleList::iterator iter = _modules.begin();
-             iter != _modules.end(); ++iter) {
-          int32_t timeToNext = (*iter)->TimeUntilNextProcess();
+        ListItem* item = _modules.First();
+        for(uint32_t i = 0; i < _modules.GetSize() && item; i++)
+        {
+            int32_t timeToNext =
+                static_cast<Module*>(item->GetItem())->TimeUntilNextProcess();
             if(timeToNext < 1)
             {
-                (*iter)->Process();
+                static_cast<Module*>(item->GetItem())->Process();
             }
+            item = _modules.Next(item);
         }
     }
     return true;

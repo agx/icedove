@@ -39,7 +39,6 @@
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
 #include "mozilla/MiscEvents.h"
-#include "gfxPrefs.h"
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
@@ -78,7 +77,7 @@ UINT sDefaultBrowserMsgId = RegisterWindowMessageW(L"DefaultBrowserClosing");
 } }
 
 // WM_GETOBJECT id pulled from uia headers
-#define MOZOBJID_UIAROOT -25
+#define UiaRootObjectId -25
 
 namespace mozilla {
 namespace widget {
@@ -893,7 +892,7 @@ MetroWidget::WindowProcedure(HWND aWnd, UINT aMsg, WPARAM aWParam, LPARAM aLPara
       // UiaReturnRawElementProvider passing the return result from FrameworkView
       // OnAutomationProviderRequested as the hwnd (me scratches head) which results in
       // GetLastError always being set to invalid handle (6) after CallWindowProc returns.
-      if (dwObjId == MOZOBJID_UIAROOT && gProviderRoot) {
+      if (dwObjId == UiaRootObjectId && gProviderRoot) {
         ComPtr<IRawElementProviderSimple> simple;
         gProviderRoot.As(&simple);
         if (simple) {
@@ -1021,7 +1020,9 @@ MetroWidget::ShouldUseBasicManager()
 bool
 MetroWidget::ShouldUseAPZC()
 {
-  return gfxPrefs::AsyncPanZoomEnabled();
+  const char* kPrefName = "layers.async-pan-zoom.enabled";
+  return ShouldUseOffMainThreadCompositing() &&
+         Preferences::GetBool(kPrefName, false);
 }
 
 void

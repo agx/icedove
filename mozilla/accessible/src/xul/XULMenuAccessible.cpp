@@ -233,7 +233,31 @@ XULMenuitemAccessible::KeyboardShortcut() const
   if (modifiersStr.Find("control") != -1)
     modifierMask |= KeyBinding::kControl;
   if (modifiersStr.Find("accel") != -1) {
-    modifierMask |= KeyBinding::AccelModifier();
+    // Get the accelerator key value from prefs, overriding the default.
+    switch (Preferences::GetInt("ui.key.accelKey", 0)) {
+      case nsIDOMKeyEvent::DOM_VK_META:
+        modifierMask |= KeyBinding::kMeta;
+        break;
+
+      case nsIDOMKeyEvent::DOM_VK_WIN:
+        modifierMask |= KeyBinding::kOS;
+        break;
+
+      case nsIDOMKeyEvent::DOM_VK_ALT:
+        modifierMask |= KeyBinding::kAlt;
+        break;
+
+      case nsIDOMKeyEvent::DOM_VK_CONTROL:
+        modifierMask |= KeyBinding::kControl;
+        break;
+
+      default:
+#ifdef XP_MACOSX
+        modifierMask |= KeyBinding::kMeta;
+#else
+        modifierMask |= KeyBinding::kControl;
+#endif
+    }
   }
 
   return KeyBinding(key, modifierMask);

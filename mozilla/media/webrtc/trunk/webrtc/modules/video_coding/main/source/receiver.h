@@ -75,7 +75,6 @@ class VCMReceiver {
   bool DualDecoderCaughtUp(VCMEncodedFrame* dual_frame,
                            VCMReceiver& dual_receiver) const;
   VCMReceiverState State() const;
-  VideoReceiveState ReceiveState() const;
 
   // Receiver video delay.
   int SetMinReceiverDelay(int desired_delay_ms);
@@ -92,8 +91,7 @@ class VCMReceiver {
  private:
   void CopyJitterBufferStateFromReceiver(const VCMReceiver& receiver);
   void UpdateState(VCMReceiverState new_state);
-  void UpdateReceiveState(const VCMEncodedFrame& frame);
-  void UpdateDualState(const VCMEncodedFrame& frame);
+  void UpdateState(const VCMEncodedFrame& frame);
   static int32_t GenerateReceiverId();
 
   CriticalSectionWrapper* crit_sect_;
@@ -105,7 +103,6 @@ class VCMReceiver {
   VCMTiming* timing_;
   scoped_ptr<EventWrapper> render_wait_event_;
   VCMReceiverState state_;
-  VideoReceiveState receiveState_;
   int max_video_delay_ms_;
 
   static int32_t receiver_id_counter_;

@@ -49,17 +49,17 @@ private:
 
   // Returns true if the predicted rotation is ready to be advertised as a
   // proposed rotation.
-  bool IsPredictedRotationAcceptable(int64_t now);
+  bool IsPredictedRotationAcceptable(long now);
 
   void ClearPredictedRotation();
-  void UpdatePredictedRotation(int64_t now, int rotation);
+  void UpdatePredictedRotation(long now, int rotation);
   bool IsAccelerating(float magnitude);
   void ClearTiltHistory();
-  void AddTiltHistoryEntry(int64_t now, float tilt);
-  bool IsFlat(int64_t now);
-  bool IsSwinging(int64_t now, float tilt);
+  void AddTiltHistoryEntry(long now, float tilt);
+  bool IsFlat(long now);
+  bool IsSwinging(long now, float tilt);
   int NextTiltHistoryIndex(int index);
-  float RemainingMS(int64_t now, int64_t until);
+  float RemainingMS(long now, long until);
 
   // The tilt angle range in degrees for each orientation. Beyond these tilt
   // angles, we don't even consider transitioning into the specified orientation.
@@ -74,7 +74,7 @@ private:
   static const int tiltTolerance[][4];
 
   // Timestamp and value of the last accelerometer sample.
-  int64_t mLastFilteredTimestampNanos;
+  long mLastFilteredTimestampNanos;
   float mLastFilteredX, mLastFilteredY, mLastFilteredZ;
 
   // The last proposed rotation, -1 if unknown.
@@ -84,23 +84,23 @@ private:
   int mPredictedRotation;
 
   // Timestamp of when the predicted rotation most recently changed.
-  int64_t mPredictedRotationTimestampNanos;
+  long mPredictedRotationTimestampNanos;
 
   // Timestamp when the device last appeared to be flat for sure (the flat delay
   // elapsed).
-  int64_t mFlatTimestampNanos;
+  long mFlatTimestampNanos;
 
   // Timestamp when the device last appeared to be swinging.
-  int64_t mSwingTimestampNanos;
+  long mSwingTimestampNanos;
 
   // Timestamp when the device last appeared to be undergoing external
   // acceleration.
-  int64_t mAccelerationTimestampNanos;
+  long mAccelerationTimestampNanos;
 
   struct {
     struct {
       float tiltAngle;
-      int64_t timestampNanos;
+      long timestampNanos;
     } history[TILT_HISTORY_SIZE];
     int index;
   } mTiltHistory;

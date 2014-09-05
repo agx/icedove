@@ -4,7 +4,8 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-TEST_DIRS += ['tests']
+if CONFIG['MOZ_WIDGET_TOOLKIT'] != 'cocoa':
+    TEST_DIRS += ['tests']
 
 EXPORTS += [
     'nsICachedFileDescriptorListener.h',
@@ -78,7 +79,6 @@ IPDL_SOURCES += [
     'PContentPermission.ipdlh',
     'PContentPermissionRequest.ipdl',
     'PCrashReporter.ipdl',
-    'PCycleCollectWithLogs.ipdl',
     'PDocumentRenderer.ipdl',
     'PFileDescriptorSet.ipdl',
     'PFilePicker.ipdl',
@@ -130,6 +130,7 @@ for var in ('MOZ_PERMISSIONS', 'MOZ_CHILD_PERMISSIONS'):
         DEFINES[var] = True
 
 if CONFIG['ENABLE_TESTS']:
+    DEFINES['ENABLE_TESTS'] = 1
     LOCAL_INCLUDES += [
       'ipc/glue',
     ]

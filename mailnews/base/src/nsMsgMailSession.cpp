@@ -64,9 +64,9 @@ NS_IMETHODIMP nsMsgMailSession::AddFolderListener(nsIFolderListener *aListener,
   NS_ENSURE_ARG_POINTER(aListener);
 
   // we don't care about the notification flags for equivalence purposes
-  size_t index = mListeners.IndexOf(aListener);
-  NS_ASSERTION(index == size_t(-1), "tried to add duplicate listener");
-  if (index == size_t(-1))
+  int32_t index = mListeners.IndexOf(aListener);
+  NS_ASSERTION(index == -1, "tried to add duplicate listener");
+  if (index == -1)
   {
     folderListener newListener(aListener, aNotifyFlags);
     mListeners.AppendElement(newListener);
@@ -79,7 +79,11 @@ NS_IMETHODIMP nsMsgMailSession::RemoveFolderListener(nsIFolderListener *aListene
 {
   NS_ENSURE_ARG_POINTER(aListener);
 
-  mListeners.RemoveElement(aListener);
+  int32_t index = mListeners.IndexOf(aListener);
+  NS_ASSERTION(index != -1, "removing non-existent listener");
+  if (index != -1)
+    mListeners.RemoveElementAt(index);
+
   return NS_OK;
 }
 
@@ -174,9 +178,9 @@ nsMsgMailSession::AddUserFeedbackListener(nsIMsgUserFeedbackListener *aListener)
 {
   NS_ENSURE_ARG_POINTER(aListener);
 
-  size_t index = mFeedbackListeners.IndexOf(aListener);
-  NS_ASSERTION(index == size_t(-1), "tried to add duplicate listener");
-  if (index == size_t(-1))
+  int32_t index = mFeedbackListeners.IndexOf(aListener);
+  NS_ASSERTION(index == -1, "tried to add duplicate listener");
+  if (index == -1)
     mFeedbackListeners.AppendElement(aListener);
 
   return NS_OK;
@@ -187,7 +191,11 @@ nsMsgMailSession::RemoveUserFeedbackListener(nsIMsgUserFeedbackListener *aListen
 {
   NS_ENSURE_ARG_POINTER(aListener);
 
-  mFeedbackListeners.RemoveElement(aListener);
+  int32_t index = mFeedbackListeners.IndexOf(aListener);
+  NS_ASSERTION(index != -1, "removing non-existent listener");
+  if (index != -1)
+    mFeedbackListeners.RemoveElementAt(index);
+
   return NS_OK;
 }
 

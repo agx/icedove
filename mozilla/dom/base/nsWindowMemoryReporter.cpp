@@ -688,7 +688,7 @@ nsWindowMemoryReporter::AsyncCheckForGhostWindows()
   int32_t timeSinceLastCheck = (TimeStamp::NowLoRes() - mLastCheckForGhostWindows).ToSeconds();
   int32_t timerDelay = (kTimeBetweenChecks - std::min(timeSinceLastCheck, kTimeBetweenChecks)) * PR_MSEC_PER_SEC;
 
-  mCheckTimer = do_CreateInstance("@mozilla.org/timer;1");
+  CallCreateInstance<nsITimer>("@mozilla.org/timer;1", getter_AddRefs(mCheckTimer));
 
   if (mCheckTimer) {
     mCheckTimer->InitWithFuncCallback(CheckTimerFired, nullptr,

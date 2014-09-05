@@ -21,8 +21,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "Task",
   "resource://gre/modules/Task.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
   "resource://gre/modules/TelemetryStopwatch.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "Deprecated",
-  "resource://gre/modules/Deprecated.jsm");
 
 // A text encoder to UTF8, used whenever we commit the
 // engine metadata to disk.
@@ -143,7 +141,6 @@ const EMPTY_DOC = "<?xml version=\"1.0\"?>\n" +
                   "/>";
 
 const BROWSER_SEARCH_PREF = "browser.search.";
-const LOCALE_PREF = "general.useragent.locale";
 
 const USER_DEFINED = "{searchTerms}";
 
@@ -297,6 +294,71 @@ function limitURILength(str, len) {
     return str.slice(0, len) + "...";
   return str;
 }
+
+/**
+ * Utilities for dealing with promises and Task.jsm
+ */
+const TaskUtils = {
+  /**
+   * Add logging to a promise.
+   *
+   * @param {Promise} promise
+   * @return {Promise} A promise behaving as |promise|, but with additional
+   * logging in case of uncaught error.
+   */
+  captureErrors: function captureErrors(promise) {
+    return promise.then(
+      null,
+      function onError(reason) {
+        LOG("Uncaught asynchronous error: " + reason + " at\n" + reason.stack);
+        throw reason;
+      }
+    );
+  },
+  /**
+   * Spawn a new Task from a generator.
+   *
+   * This function behaves as |Task.spawn|, with the exception that it
+   * adds logging in case of uncaught error. For more information, see
+   * the documentation of |Task.jsm|.
+   *
+   * @param {generator} gen Some generator.
+   * @return {Promise} A promise built from |gen|, with the same semantics
+   * as |Task.spawn(gen)|.
+   */
+  spawn: function spawn(gen) {
+    return this.captureErrors(Task.spawn(gen));
+  },
+  /**
+   * Execute a mozIStorage statement asynchronously, wrapping the
+   * result in a promise.
+   *
+   * @param {mozIStorageStaement} statement A statement to be executed
+   * asynchronously. The semantics are the same as these of |statement.execute|.
+   * @param {function*} onResult A callback, called for each successive result.
+   *
+   * @return {Promise} A promise, resolved successfully if |statement.execute|
+   * succeeds, rejected if it fails.
+   */
+  executeStatement: function executeStatement(statement, onResult) {
+    let deferred = Promise.defer();
+    onResult = onResult || function() {};
+    statement.executeAsync({
+      handleResult: onResult,
+      handleError: function handleError(aError) {
+        deferred.reject(aError);
+      },
+      handleCompletion: function handleCompletion(aReason) {
+        statement.finalize();
+        // Note that, in case of error, deferred.reject(aError)
+        // has already been called by this point, so the call to
+        // |deferred.resolve| is simply ignored.
+        deferred.resolve(aReason);
+      }
+    });
+    return deferred.promise;
+  }
+};
 
 /**
  * Ensures an assertion is met before continuing. Should be used to indicate
@@ -591,12 +653,13 @@ function sherlockBytesToLines(aBytes, aCharsetCode) {
  * exists in nsHttpHandler.cpp when building the UA string.
  */
 function getLocale() {
-  let locale = getLocalizedPref(LOCALE_PREF);
+  const localePref = "general.useragent.locale";
+  var locale = getLocalizedPref(localePref);
   if (locale)
     return locale;
 
-  // Not localized.
-  return Services.prefs.getCharPref(LOCALE_PREF);
+  // Not localized
+  return Services.prefs.getCharPref(localePref);
 }
 
 /**
@@ -859,7 +922,33 @@ EngineURL.prototype = {
     this.mozparams[aObj.name] = aObj;
   },
 
+  reevalMozParams: function(engine) {
+    for (let param of this.params) {
+      let mozparam = this.mozparams[param.name];
+      if (mozparam && mozparam.positionDependent) {
+        // the condition is a string in the form of "topN", extract N as int
+        let positionStr = mozparam.condition.slice("top".length);
+        let position = parseInt(positionStr, 10);
+        let engines;
+        try {
+          // This will throw if we're not initialized yet (which shouldn't happen), just 
+          // ignore and move on with the false Value (checking isInitialized also throws)
+          // XXX
+          engines = Services.search.getVisibleEngines({});
+        } catch (ex) {
+          LOG("reevalMozParams called before search service initialization!?");
+          break;
+        }
+        let index = engines.map((e) => e.wrappedJSObject).indexOf(engine.wrappedJSObject);
+        let isTopN = index > -1 && (index + 1) <= position;
+        param.value = isTopN ? mozparam.trueValue : mozparam.falseValue;
+      }
+    }
+  },
+
   getSubmission: function SRCH_EURL_getSubmission(aSearchTerms, aEngine, aPurpose) {
+    this.reevalMozParams(aEngine);
+
     var url = ParamSubstitution(this.template, aSearchTerms, aEngine);
     // Default to an empty string if the purpose is not provided so that default purpose params
     // (purpose="") work consistently rather than having to define "null" and "" purposes.
@@ -1162,7 +1251,7 @@ Engine.prototype = {
    * data succeeds, rejected if it fails.
    */
   _asyncInitFromFile: function SRCH_ENG__asyncInitFromFile() {
-    return Task.spawn(function() {
+    return TaskUtils.spawn(function() {
       if (!this._file || !(yield OS.File.exists(this._file.path)))
         FAIL("File must exist before calling initFromFile!", Cr.NS_ERROR_UNEXPECTED);
 
@@ -1211,7 +1300,7 @@ Engine.prototype = {
    * succeeds.
    */
   _asyncInitFromURI: function SRCH_ENG__asyncInitFromURI() {
-    return Task.spawn(function() {
+    return TaskUtils.spawn(function() {
       LOG("_asyncInitFromURI: Loading engine from: \"" + this._uri.spec + "\".");
       yield this._retrieveSearchXMLData(this._uri.spec);
       // Now that the data is loaded, initialize the engine object
@@ -1761,9 +1850,15 @@ Engine.prototype = {
             } catch (e) { }
             break;
           default:
-            let engineLoc = this._location;
-            let paramName = param.getAttribute("name");
-            LOG("_parseURL: MozParam (" + paramName + ") has an unknown condition: " + condition + ". Found parsing engine: " + engineLoc);
+            if (condition && condition.startsWith("top")) {
+              url.addParam(param.getAttribute("name"), param.getAttribute("falseValue"));
+              let mozparam = {"name": param.getAttribute("name"),
+                              "falseValue": param.getAttribute("falseValue"),
+                              "trueValue": param.getAttribute("trueValue"),
+                              "condition": condition,
+                              "positionDependent": true};
+              url._addMozParam(mozparam);
+            }
           break;
         }
       }
@@ -2814,7 +2909,8 @@ SearchService.prototype = {
       "Search service falling back to synchronous initialization. " +
       "This is generally the consequence of an add-on using a deprecated " +
       "search service API.";
-    Deprecated.warning(warning, "https://developer.mozilla.org/en-US/docs/XPCOM_Interface_Reference/nsIBrowserSearchService#async_warning");
+    // Bug 785487 - Disable warning until our own callers are fixed.
+    //Deprecated.warning(warning, "https://developer.mozilla.org/en-US/docs/XPCOM_Interface_Reference/nsIBrowserSearchService#async_warning");
     LOG(warning);
 
     engineMetadataService.syncInit();
@@ -2843,7 +2939,6 @@ SearchService.prototype = {
     this._initObservers.resolve(this._initRV);
 
     Services.obs.notifyObservers(null, SEARCH_SERVICE_TOPIC, "init-complete");
-    Services.telemetry.getHistogramById("SEARCH_SERVICE_INIT_SYNC").add(true);
 
     LOG("_syncInit end");
   },
@@ -2855,7 +2950,7 @@ SearchService.prototype = {
    * succeeds.
    */
   _asyncInit: function SRCH_SVC__asyncInit() {
-    return Task.spawn(function() {
+    return TaskUtils.spawn(function() {
       LOG("_asyncInit start");
       try {
         yield checkForSyncCompletion(this._asyncLoadEngines());
@@ -2867,8 +2962,6 @@ SearchService.prototype = {
       gInitialized = true;
       this._initObservers.resolve(this._initRV);
       Services.obs.notifyObservers(null, SEARCH_SERVICE_TOPIC, "init-complete");
-      Services.telemetry.getHistogramById("SEARCH_SERVICE_INIT_SYNC").add(false);
-
       LOG("_asyncInit: Completed _asyncInit");
     }.bind(this));
   },
@@ -3054,7 +3147,7 @@ SearchService.prototype = {
    * succeeds.
    */
   _asyncLoadEngines: function SRCH_SVC__asyncLoadEngines() {
-    return Task.spawn(function() {
+    return TaskUtils.spawn(function() {
       LOG("_asyncLoadEngines: start");
       // See if we have a cache file so we don't have to parse a bunch of XML.
       let cache = {};
@@ -3094,7 +3187,7 @@ SearchService.prototype = {
 
       let toLoad = chromeFiles.concat(loadDirs);
       function hasModifiedDir(aList) {
-        return Task.spawn(function() {
+        return TaskUtils.spawn(function() {
           let modifiedDir = false;
 
           for (let dir of aList) {
@@ -3156,27 +3249,6 @@ SearchService.prototype = {
     }.bind(this));
   },
 
-  _asyncReInit: function () {
-    // Start by clearing the initialized state, so we don't abort early.
-    gInitialized = false;
-
-    // Clear the engines, too, so we don't stick with the stale ones.
-    this._engines = {};
-    this.__sortedEngines = null;
-
-    // Typically we'll re-init as a result of a pref observer,
-    // so signal to 'callers' that we're done. 
-    return this._asyncLoadEngines()
-               .then(() => {
-                       Services.obs.notifyObservers(null, SEARCH_SERVICE_TOPIC, "reinit-complete");
-                       gInitialized = true;
-                     },
-                     (err) => {
-                       LOG("Reinit failed: " + err);
-                       Services.obs.notifyObservers(null, SEARCH_SERVICE_TOPIC, "reinit-failed");
-                     });
-  },
-
   _readCacheFile: function SRCH_SVC__readCacheFile(aFile) {
     let stream = Cc["@mozilla.org/network/file-input-stream;1"].
                  createInstance(Ci.nsIFileInputStream);
@@ -3202,7 +3274,7 @@ SearchService.prototype = {
    * succeeds.
    */
   _asyncReadCacheFile: function SRCH_SVC__asyncReadCacheFile(aPath) {
-    return Task.spawn(function() {
+    return TaskUtils.spawn(function() {
       let json;
       try {
         let bytes = yield OS.File.read(aPath);
@@ -3366,7 +3438,7 @@ SearchService.prototype = {
     // Check whether aDir is the user profile dir
     let isInProfile = aDir.equals(getDir(NS_APP_USER_SEARCH_DIR));
     let iterator = new OS.File.DirectoryIterator(aDir.path);
-    return Task.spawn(function() {
+    return TaskUtils.spawn(function() {
       let osfiles = yield iterator.nextBatch();
       iterator.close();
 
@@ -3426,7 +3498,7 @@ SearchService.prototype = {
    * succeeds.
    */
   _asyncLoadFromChromeURLs: function SRCH_SVC__asyncLoadFromChromeURLs(aURLs) {
-    return Task.spawn(function() {
+    return TaskUtils.spawn(function() {
       let engines = [];
       for (let url of aURLs) {
         try {
@@ -3510,7 +3582,7 @@ SearchService.prototype = {
    * succeeds.
    */
   _asyncFindJAREngines: function SRCH_SVC__asyncFindJAREngines() {
-    return Task.spawn(function() {
+    return TaskUtils.spawn(function() {
       LOG("_asyncFindJAREngines: looking for engines in JARs")
 
       let rootURIPref = "";
@@ -3715,7 +3787,7 @@ SearchService.prototype = {
     if (!this._initStarted) {
       TelemetryStopwatch.start("SEARCH_SERVICE_INIT_MS");
       this._initStarted = true;
-      Task.spawn(function task() {
+      TaskUtils.spawn(function task() {
         try {
           yield checkForSyncCompletion(engineMetadataService.init());
           // Complete initialization by calling asynchronous initializer.
@@ -3732,7 +3804,7 @@ SearchService.prototype = {
       });
     }
     if (observer) {
-      this._initObservers.promise.then(
+      TaskUtils.captureErrors(this._initObservers.promise.then(
         function onSuccess() {
           observer.onInitComplete(self._initRV);
         },
@@ -3740,7 +3812,7 @@ SearchService.prototype = {
           Components.utils.reportError("Internal error while initializing SearchService: " + aReason);
           observer.onInitComplete(Components.results.NS_ERROR_UNEXPECTED);
         }
-      );
+      ));
     }
   },
 
@@ -4137,23 +4209,11 @@ SearchService.prototype = {
         break;
 
       case "nsPref:changed":
-#ifdef MOZ_FENNEC
-        if (aVerb == LOCALE_PREF) {
-          // Locale changed. Re-init. We rely on observers, because we can't
-          // return this promise to anyone.
-          this._asyncReInit();
-          break;
-        }
-#endif
-
         let currPref = BROWSER_SEARCH_PREF + "selectedEngine";
+        let defPref = BROWSER_SEARCH_PREF + "defaultenginename";
         if (aVerb == currPref && !this._changingCurrentEngine) {
           this._setEngineByPref("currentEngine", currPref);
-          break;
-        }
-
-        let defPref = BROWSER_SEARCH_PREF + "defaultenginename";
-        if (aVerb == defPref && !this._changingDefaultEngine) {
+        } else if (aVerb == defPref && !this._changingDefaultEngine) {
           this._setEngineByPref("defaultEngine", defPref);
         }
         break;
@@ -4205,48 +4265,14 @@ SearchService.prototype = {
     Services.prefs.addObserver(BROWSER_SEARCH_PREF + "defaultenginename", this, false);
     Services.prefs.addObserver(BROWSER_SEARCH_PREF + "selectedEngine", this, false);
 
-#ifdef MOZ_FENNEC
-    Services.prefs.addObserver(LOCALE_PREF, this, false);
-#endif
-
-    // The current stage of shutdown. Used to help analyze crash
-    // signatures in case of shutdown timeout.
-    let shutdownState = {
-      step: "Not started",
-      latestError: {
-        message: undefined,
-        stack: undefined
-      }
-    };
-    OS.File.profileBeforeChange.addBlocker(
+    AsyncShutdown.profileBeforeChange.addBlocker(
       "Search service: shutting down",
-      () => Task.spawn(function* () {
+      () => Task.spawn(function () {
         if (this._batchTask) {
-          shutdownState.step = "Finalizing batched task";
-          try {
-            yield this._batchTask.finalize();
-            shutdownState.step = "Batched task finalized";
-          } catch (ex) {
-            shutdownState.step = "Batched task failed to finalize";
-
-            shutdownState.latestError.message = "" + ex;
-            if (ex && typeof ex == "object") {
-              shutdownState.latestError.stack = ex.stack || undefined;
-            }
-
-            // Ensure that error is reported and that it causes tests
-            // to fail.
-            Promise.reject(ex);
-          }
+          yield this._batchTask.finalize().then(null, Cu.reportError);
         }
-
-        shutdownState.step = "Finalizing engine metadata service";
         yield engineMetadataService.finalize();
-        shutdownState.step = "Engine metadata service finalized";
-
-      }.bind(this)),
-
-      () => shutdownState
+      }.bind(this))
     );
   },
 
@@ -4255,10 +4281,6 @@ SearchService.prototype = {
     Services.obs.removeObserver(this, QUIT_APPLICATION_TOPIC);
     Services.prefs.removeObserver(BROWSER_SEARCH_PREF + "defaultenginename", this);
     Services.prefs.removeObserver(BROWSER_SEARCH_PREF + "selectedEngine", this);
-
-#ifdef MOZ_FENNEC
-    Services.prefs.removeObserver(LOCALE_PREF, this);
-#endif
   },
 
   QueryInterface: function SRCH_SVC_QI(aIID) {
@@ -4310,7 +4332,7 @@ var engineMetadataService = {
     if (!this._initializer) {
       // Launch asynchronous initialization
       let initializer = this._initializer = Promise.defer();
-      Task.spawn((function task_init() {
+      TaskUtils.spawn((function task_init() {
         LOG("metadata init: starting");
         switch (this._initState) {
           case engineMetadataService._InitStates.NOT_STARTED:
@@ -4351,7 +4373,7 @@ var engineMetadataService = {
         }
       );
     }
-    return this._initializer.promise;
+    return TaskUtils.captureErrors(this._initializer.promise);
   },
 
   /**
@@ -4509,7 +4531,8 @@ var engineMetadataService = {
             LOG("metadata writeCommit: done");
           }
         );
-        return promise;
+        // Use our error logging instead of the default one.
+        return TaskUtils.captureErrors(promise).then(null, () => {});
       }
       this._lazyWriter = new DeferredTask(writeCommit, LAZY_SERIALIZE_DELAY);
     }

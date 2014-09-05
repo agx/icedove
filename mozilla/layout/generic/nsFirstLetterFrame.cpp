@@ -21,7 +21,7 @@
 using namespace mozilla;
 using namespace mozilla::layout;
 
-nsFirstLetterFrame*
+nsIFrame*
 NS_NewFirstLetterFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsFirstLetterFrame(aContext);
@@ -56,9 +56,9 @@ nsFirstLetterFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 }
 
 void
-nsFirstLetterFrame::Init(nsIContent*       aContent,
-                         nsContainerFrame* aParent,
-                         nsIFrame*         aPrevInFlow)
+nsFirstLetterFrame::Init(nsIContent*      aContent,
+                         nsIFrame*        aParent,
+                         nsIFrame*        aPrevInFlow)
 {
   nsRefPtr<nsStyleContext> newSC;
   if (aPrevInFlow) {
@@ -76,7 +76,7 @@ nsFirstLetterFrame::Init(nsIContent*       aContent,
   nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
 }
 
-void
+nsresult
 nsFirstLetterFrame::SetInitialChildList(ChildListID  aListID,
                                         nsFrameList& aChildList)
 {
@@ -89,6 +89,7 @@ nsFirstLetterFrame::SetInitialChildList(ChildListID  aListID,
   }
 
   mFrames.SetFrames(aChildList);
+  return NS_OK;
 }
 
 nsresult
@@ -153,7 +154,7 @@ nsFirstLetterFrame::ComputeSize(nsRenderingContext *aRenderingContext,
       aCBSize, aAvailableWidth, aMargin, aBorder, aPadding, aFlags);
 }
 
-void
+nsresult
 nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
                            nsHTMLReflowMetrics&     aMetrics,
                            const nsHTMLReflowState& aReflowState,
@@ -244,7 +245,8 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
       nsIFrame* kidNextInFlow = kid->GetNextInFlow();
       if (kidNextInFlow) {
         // Remove all of the childs next-in-flows
-        kidNextInFlow->GetParent()->DeleteNextInFlowChild(kidNextInFlow, true);
+        static_cast<nsContainerFrame*>(kidNextInFlow->GetParent())
+          ->DeleteNextInFlowChild(kidNextInFlow, true);
       }
     }
     else {
@@ -254,7 +256,7 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
         nsIFrame* nextInFlow;
         rv = CreateNextInFlow(kid, nextInFlow);
         if (NS_FAILED(rv)) {
-          return;
+          return rv;
         }
     
         // And then push it to our overflow list
@@ -267,8 +269,8 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
         // created for us) we need to put the continuation with the rest of the
         // text that the first letter frame was made out of.
         nsIFrame* continuation;
-        CreateContinuationForFloatingParent(aPresContext, kid,
-                                            &continuation, true);
+        rv = CreateContinuationForFloatingParent(aPresContext, kid,
+                                                 &continuation, true);
       }
     }
   }
@@ -276,6 +278,7 @@ nsFirstLetterFrame::Reflow(nsPresContext*          aPresContext,
   FinishAndStoreOverflow(&aMetrics);
 
   NS_FRAME_SET_TRUNCATION(aReflowStatus, aReflowState, aMetrics);
+  return rv;
 }
 
 /* virtual */ bool
@@ -296,11 +299,12 @@ nsFirstLetterFrame::CreateContinuationForFloatingParent(nsPresContext* aPresCont
   NS_PRECONDITION(aContinuation, "bad args");
 
   *aContinuation = nullptr;
+  nsresult rv = NS_OK;
 
   nsIPresShell* presShell = aPresContext->PresShell();
   nsPlaceholderFrame* placeholderFrame =
     presShell->FrameManager()->GetPlaceholderFrameFor(this);
-  nsContainerFrame* parent = placeholderFrame->GetParent();
+  nsIFrame* parent = placeholderFrame->GetParent();
 
   nsIFrame* continuation = presShell->FrameConstructor()->
     CreateContinuingFrame(aPresContext, aChild, parent, aIsFluid);
@@ -321,10 +325,10 @@ nsFirstLetterFrame::CreateContinuationForFloatingParent(nsPresContext* aPresCont
   // except we have to insert it in a different place and we don't want a
   // reflow command to try to be issued.
   nsFrameList temp(continuation, continuation);
-  parent->InsertFrames(kNoReflowPrincipalList, placeholderFrame, temp);
+  rv = parent->InsertFrames(kNoReflowPrincipalList, placeholderFrame, temp);
 
   *aContinuation = continuation;
-  return NS_OK;
+  return rv;
 }
 
 void

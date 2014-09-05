@@ -184,8 +184,6 @@ class ReftestRunner(MozbuildObject):
 
             options.desktop = True
             options.app = self.get_binary_path()
-            if options.oop:
-                options.browser_arg = '-oop'
             if not options.app.endswith('-bin'):
                 options.app = '%s-bin' % options.app
             if not os.path.isfile(options.app):
@@ -205,11 +203,6 @@ class ReftestRunner(MozbuildObject):
         options.httpdPath = os.path.join(self.topsrcdir, 'netwerk', 'test', 'httpserver')
         options.xrePath = xre_path
         options.ignoreWindowSize = True
-
-        # Don't enable oop for crashtest until they run oop in automation
-        if suite == 'reftest':
-            options.oop = True
-
         return reftest.run_remote_reftests(parser, options, args)
 
     def run_desktop_test(self, test_file=None, filter=None, suite=None,
@@ -330,6 +323,11 @@ def B2GCommand(func):
         help='directory to store logcat dump files')
     func = logcatdir(func)
 
+    geckopath = CommandArgument('--gecko-path', default=None,
+        help='the path to a gecko distribution that should \
+              be installed on the emulator prior to test')
+    func = geckopath(func)
+
     sdcard = CommandArgument('--sdcard', default="10MB",
         help='Define size of sdcard: 1MB, 50MB...etc')
     func = sdcard(func)
@@ -337,6 +335,10 @@ def B2GCommand(func):
     emulator_res = CommandArgument('--emulator-res', default='800x1000',
         help='Emulator resolution of the format \'<width>x<height>\'')
     func = emulator_res(func)
+
+    emulator = CommandArgument('--emulator', default='arm',
+        help='Architecture of emulator to use: x86 or arm')
+    func = emulator(func)
 
     marionette = CommandArgument('--marionette', default=None,
         help='host:port to use when connecting to Marionette')
@@ -349,10 +351,6 @@ def B2GCommand(func):
     thisChunk = CommandArgument('--this-chunk', dest='thisChunk',
         help = 'Which chunk to run between 1 and --total-chunks.')
     func = thisChunk(func)
-
-    oop = CommandArgument('--enable-oop', action='store_true', dest='oop',
-        help = 'Run tests in out-of-process mode.')
-    func = oop(func)
 
     path = CommandArgument('test_file', default=None, nargs='?',
         metavar='TEST',
@@ -398,7 +396,7 @@ class MachCommands(MachCommandBase):
 # they should be modified to work with all devices.
 def is_emulator(cls):
     """Emulator needs to be configured."""
-    return cls.device_name.startswith('emulator')
+    return cls.device_name.find('emulator') == 0
 
 
 @CommandProvider
@@ -431,13 +429,6 @@ class B2GCommands(MachCommandBase):
         return self._run_reftest(test_file, suite='crashtest', **kwargs)
 
     def _run_reftest(self, test_file=None, suite=None, **kwargs):
-        if self.device_name:
-            if self.device_name.startswith('emulator'):
-                emulator = 'arm'
-                if 'x86' in self.device_name:
-                    emulator = 'x86'
-                kwargs['emulator'] = emulator
-
         reftest = self._spawn(ReftestRunner)
         return reftest.run_b2g_test(self.b2g_home, self.xre_path,
             test_file, suite=suite, **kwargs)

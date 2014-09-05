@@ -7,7 +7,6 @@
 #include "nsMsgFolderCacheElement.h"
 #include "prmem.h"
 #include "nsISupportsObsolete.h"
-#include "nsMsgUtils.h"
 
 nsMsgFolderCacheElement::nsMsgFolderCacheElement()
 {
@@ -67,15 +66,18 @@ NS_IMETHODIMP nsMsgFolderCacheElement::GetInt32Property(const char *propertyName
   if (resultStr.IsEmpty())
     return NS_ERROR_FAILURE;
 
-  // This must be an inverse function to nsCString.AppentInt(),
-  // which uses snprintf("%x") internally, so that the wrapped negative numbers
-  // are decoded properly.
-  if (PR_sscanf(resultStr.get(), "%x", aResult) != 1)
+  int32_t result = 0;
+  for (uint32_t index = 0; index < resultStr.Length(); index++)
   {
-    NS_WARNING("Unexpected failure to decode hex string.");
-    return NS_ERROR_FAILURE;
+    char C = resultStr.CharAt(index);
+    int8_t unhex = ((C >= '0' && C <= '9') ? C - '0' :
+    ((C >= 'A' && C <= 'F') ? C - 'A' + 10 :
+     ((C >= 'a' && C <= 'f') ? C - 'a' + 10 : -1)));
+    if (unhex < 0)
+      break;
+    result = (result << 4) | unhex;
   }
-
+  *aResult = result;
   return NS_OK;
 }
 
@@ -113,9 +115,6 @@ NS_IMETHODIMP nsMsgFolderCacheElement::SetInt32Property(const char *propertyName
 {
   NS_ENSURE_ARG_POINTER(propertyName);
   NS_ENSURE_TRUE(m_mdbRow, NS_ERROR_FAILURE);
-
-  // This also supports encoding negative numbers into hex
-  // by integer wrapping them (e.g. -1 -> "ffffffff").
   nsAutoCString propertyStr;
   propertyStr.AppendInt(propertyValue, 16);
   return SetStringProperty(propertyName, propertyStr);

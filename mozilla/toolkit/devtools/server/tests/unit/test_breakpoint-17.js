@@ -9,26 +9,19 @@
 var gDebuggee;
 var gClient;
 var gThreadClient;
-var gCallback;
 
 function run_test()
 {
-  run_test_with_server(DebuggerServer, do_test_finished);
-  do_test_pending();
-};
-
-function run_test_with_server(aServer, aCallback)
-{
-  gCallback = aCallback;
-  initTestDebuggerServer(aServer);
-  gDebuggee = addTestGlobal("test-breakpoints", aServer);
-  gClient = new DebuggerClient(aServer.connectPipe());
+  initTestDebuggerServer();
+  gDebuggee = addTestGlobal("test-breakpoints");
+  gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect(function() {
     attachTestTabAndResume(gClient, "test-breakpoints", function(aResponse, aTabClient, aThreadClient) {
       gThreadClient = aThreadClient;
       test_breakpoints_columns();
     });
   });
+  do_test_pending();
 }
 
 const URL = "http://example.com/benderbendingrodriguez.js";
@@ -111,7 +104,7 @@ function test_remove_one(aFirst, aSecond) {
         do_check_true(hitSecond,
                       "We should still hit `second`, but not `first`.");
 
-        gClient.close(gCallback);
+        finishClient(gClient);
         return;
       }
 

@@ -8,7 +8,6 @@ import org.mozilla.gecko.db.PerProfileDatabases.DatabaseHelperFactory;
 
 import android.content.Context;
 import android.database.sqlite.SQLiteOpenHelper;
-import android.os.Build;
 
 /**
  * Abstract class containing methods needed to make a SQLite-based content
@@ -41,11 +40,7 @@ public abstract class PerProfileDatabaseProvider<T extends SQLiteOpenHelper> ext
                 getContext(), getDatabaseName(), new DatabaseHelperFactory<T>() {
                     @Override
                     public T makeDatabaseHelper(Context context, String databasePath) {
-                        final T helper = createDatabaseHelper(context, databasePath);
-                        if (Build.VERSION.SDK_INT >= 16) {
-                            helper.setWriteAheadLoggingEnabled(true);
-                        }
-                        return helper;
+                        return createDatabaseHelper(context, databasePath);
                     }
                 });
         }

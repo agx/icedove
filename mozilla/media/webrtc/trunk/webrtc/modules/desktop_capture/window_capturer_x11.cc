@@ -18,14 +18,11 @@
 #include <algorithm>
 #include <cassert>
 
-#include "webrtc/modules/desktop_capture/desktop_capture_options.h"
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
-#include "webrtc/modules/desktop_capture/x11/shared_x_display.h"
 #include "webrtc/modules/desktop_capture/x11/x_error_trap.h"
 #include "webrtc/modules/desktop_capture/x11/x_server_pixel_buffer.h"
 #include "webrtc/system_wrappers/interface/logging.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
-#include "webrtc/system_wrappers/interface/scoped_refptr.h"
 
 namespace webrtc {
 
@@ -86,7 +83,7 @@ class XWindowProperty {
 
 class WindowCapturerLinux : public WindowCapturer {
  public:
-  WindowCapturerLinux(const DesktopCaptureOptions& options);
+  WindowCapturerLinux();
   virtual ~WindowCapturerLinux();
 
   // WindowCapturer interface.
@@ -98,8 +95,6 @@ class WindowCapturerLinux : public WindowCapturer {
   virtual void Capture(const DesktopRegion& region) OVERRIDE;
 
  private:
-  Display* display() { return x_display_->display(); }
-
   // Iterates through |window| hierarchy to find first visible window, i.e. one
   // that has WM_STATE property set to NormalState.
   // See http://tronche.com/gui/x/icccm/sec-4.html#s-4.1.3.1 .
@@ -113,7 +108,7 @@ class WindowCapturerLinux : public WindowCapturer {
 
   Callback* callback_;
 
-  scoped_refptr<SharedXDisplay> x_display_;
+  Display* display_;
 
   Atom wm_state_atom_;
   Atom window_type_atom_;
@@ -126,20 +121,26 @@ class WindowCapturerLinux : public WindowCapturer {
   DISALLOW_COPY_AND_ASSIGN(WindowCapturerLinux);
 };
 
-WindowCapturerLinux::WindowCapturerLinux(const DesktopCaptureOptions& options)
+WindowCapturerLinux::WindowCapturerLinux()
     : callback_(NULL),
-      x_display_(options.x_display()),
+      display_(NULL),
       has_composite_extension_(false),
       selected_window_(0) {
+  display_ = XOpenDisplay(NULL);
+  if (!display_) {
+    LOG(LS_ERROR) << "Failed to open display.";
+    return;
+  }
+
   // Create Atoms so we don't need to do it every time they are used.
-  wm_state_atom_ = XInternAtom(display(), "WM_STATE", True);
-  window_type_atom_ = XInternAtom(display(), "_NET_WM_WINDOW_TYPE", True);
+  wm_state_atom_ = XInternAtom(display_, "WM_STATE", True);
+  window_type_atom_ = XInternAtom(display_, "_NET_WM_WINDOW_TYPE", True);
   normal_window_type_atom_ = XInternAtom(
-      display(), "_NET_WM_WINDOW_TYPE_NORMAL", True);
+      display_, "_NET_WM_WINDOW_TYPE_NORMAL", True);
 
   int event_base, error_base, major_version, minor_version;
-  if (XCompositeQueryExtension(display(), &event_base, &error_base) &&
-      XCompositeQueryVersion(display(), &major_version, &minor_version) &&
+  if (XCompositeQueryExtension(display_, &event_base, &error_base) &&
+      XCompositeQueryVersion(display_, &major_version, &minor_version) &&
       // XCompositeNameWindowPixmap() requires version 0.2
       (major_version > 0 || minor_version >= 2)) {
     has_composite_extension_ = true;
@@ -148,20 +149,26 @@ WindowCapturerLinux::WindowCapturerLinux(const DesktopCaptureOptions& options)
   }
 }
 
-WindowCapturerLinux::~WindowCapturerLinux() {}
+WindowCapturerLinux::~WindowCapturerLinux() {
+  if (display_)
+    XCloseDisplay(display_);
+}
 
 bool WindowCapturerLinux::GetWindowList(WindowList* windows) {
+  if (!display_)
+    return false;
+
   WindowList result;
 
-  XErrorTrap error_trap(display());
+  XErrorTrap error_trap(display_);
 
-  int num_screens = XScreenCount(display());
+  int num_screens = XScreenCount(display_);
   for (int screen = 0; screen < num_screens; ++screen) {
-    ::Window root_window = XRootWindow(display(), screen);
+    ::Window root_window = XRootWindow(display_, screen);
     ::Window parent;
     ::Window *children;
     unsigned int num_children;
-    int status = XQueryTree(display(), root_window, &root_window, &parent,
+    int status = XQueryTree(display_, root_window, &root_window, &parent,
                             &children, &num_children);
     if (status == 0) {
       LOG(LS_ERROR) << "Failed to query for child windows for screen "
@@ -191,7 +198,7 @@ bool WindowCapturerLinux::GetWindowList(WindowList* windows) {
 }
 
 bool WindowCapturerLinux::SelectWindow(WindowId id) {
-  if (!x_server_pixel_buffer_.Init(display(), id))
+  if (!x_server_pixel_buffer_.Init(display_, id))
     return false;
 
   selected_window_ = id;
@@ -203,7 +210,7 @@ bool WindowCapturerLinux::SelectWindow(WindowId id) {
 
   // Redirect drawing to an offscreen buffer (ie, turn on compositing). X11
   // remembers who has requested this and will turn it off for us when we exit.
-  XCompositeRedirectWindow(display(), id, CompositeRedirectAutomatic);
+  XCompositeRedirectWindow(display_, id, CompositeRedirectAutomatic);
 
   return true;
 }
@@ -237,7 +244,7 @@ void WindowCapturerLinux::Capture(const DesktopRegion& region) {
 
 ::Window WindowCapturerLinux::GetApplicationWindow(::Window window) {
   // Get WM_STATE property of the window.
-  XWindowProperty<uint32_t> window_state(display(), window, wm_state_atom_);
+  XWindowProperty<uint32_t> window_state(display_, window, wm_state_atom_);
 
   // WM_STATE is considered to be set to WithdrawnState when it missing.
   int32_t state = window_state.is_valid() ?
@@ -255,7 +262,7 @@ void WindowCapturerLinux::Capture(const DesktopRegion& region) {
   ::Window root, parent;
   ::Window *children;
   unsigned int num_children;
-  if (!XQueryTree(display(), window, &root, &parent, &children,
+  if (!XQueryTree(display_, window, &root, &parent, &children,
                   &num_children)) {
     LOG(LS_ERROR) << "Failed to query for child windows although window"
                   << "does not have a valid WM_STATE.";
@@ -282,7 +289,7 @@ bool WindowCapturerLinux::IsDesktopElement(::Window window) {
   // says this hint *should* be present on all windows, and we use the existence
   // of _NET_WM_WINDOW_TYPE_NORMAL in the property to indicate a window is not
   // a desktop element (that is, only "normal" windows should be shareable).
-  XWindowProperty<uint32_t> window_type(display(), window, window_type_atom_);
+  XWindowProperty<uint32_t> window_type(display_, window, window_type_atom_);
   if (window_type.is_valid() && window_type.size() > 0) {
     uint32_t* end = window_type.data() + window_type.size();
     bool is_normal = (end != std::find(
@@ -292,7 +299,7 @@ bool WindowCapturerLinux::IsDesktopElement(::Window window) {
 
   // Fall back on using the hint.
   XClassHint class_hint;
-  Status status = XGetClassHint(display(), window, &class_hint);
+  Status status = XGetClassHint(display_, window, &class_hint);
   bool result = false;
   if (status == 0) {
     // No hints, assume this is a normal application window.
@@ -314,11 +321,11 @@ bool WindowCapturerLinux::GetWindowTitle(::Window window, std::string* title) {
   XTextProperty window_name;
   window_name.value = NULL;
   if (window) {
-    status = XGetWMName(display(), window, &window_name);
+    status = XGetWMName(display_, window, &window_name);
     if (status && window_name.value && window_name.nitems) {
       int cnt;
       char **list = NULL;
-      status = Xutf8TextPropertyToTextList(display(), &window_name, &list,
+      status = Xutf8TextPropertyToTextList(display_, &window_name, &list,
                                            &cnt);
       if (status >= Success && cnt && *list) {
         if (cnt > 1) {
@@ -340,10 +347,8 @@ bool WindowCapturerLinux::GetWindowTitle(::Window window, std::string* title) {
 }  // namespace
 
 // static
-WindowCapturer* WindowCapturer::Create(const DesktopCaptureOptions& options) {
-  if (!options.x_display())
-    return NULL;
-  return new WindowCapturerLinux(options);
+WindowCapturer* WindowCapturer::Create() {
+  return new WindowCapturerLinux();
 }
 
 }  // namespace webrtc

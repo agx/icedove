@@ -42,19 +42,16 @@ class ShutdownObserver : public LinkedListElement<ShutdownObserver>
 {
 public:
   virtual void Shutdown() = 0;
-  virtual ~ShutdownObserver()
-  {
-  }
+  virtual ~ShutdownObserver() {}
 };
 
 template<class SmartPtr>
 class PointerClearer : public ShutdownObserver
 {
 public:
-  PointerClearer(SmartPtr* aPtr)
+  PointerClearer(SmartPtr *aPtr)
     : mPtr(aPtr)
-  {
-  }
+  {}
 
   virtual void Shutdown()
   {
@@ -64,17 +61,16 @@ public:
   }
 
 private:
-  SmartPtr* mPtr;
+  SmartPtr *mPtr;
 };
 
 extern bool sHasShutDown;
-extern StaticAutoPtr<LinkedList<ShutdownObserver>> sShutdownObservers;
+extern StaticAutoPtr<LinkedList<ShutdownObserver> > sShutdownObservers;
 
 } // namespace ClearOnShutdown_Internal
 
 template<class SmartPtr>
-inline void
-ClearOnShutdown(SmartPtr* aPtr)
+inline void ClearOnShutdown(SmartPtr *aPtr)
 {
   using namespace ClearOnShutdown_Internal;
 
@@ -89,15 +85,15 @@ ClearOnShutdown(SmartPtr* aPtr)
 
 // Called when XPCOM is shutting down, after all shutdown notifications have
 // been sent and after all threads' event loops have been purged.
-inline void
-KillClearOnShutdown()
+inline void KillClearOnShutdown()
 {
   using namespace ClearOnShutdown_Internal;
 
   MOZ_ASSERT(NS_IsMainThread());
 
   if (sShutdownObservers) {
-    while (ShutdownObserver* observer = sShutdownObservers->popFirst()) {
+    ShutdownObserver *observer;
+    while ((observer = sShutdownObservers->popFirst())) {
       observer->Shutdown();
       delete observer;
     }

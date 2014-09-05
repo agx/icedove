@@ -123,7 +123,7 @@ public:
      * The Image may contain several textures for different regions (tiles).
      * These functions iterate over each sub texture image tile.
      */
-    virtual void BeginBigImageIteration() {
+    virtual void BeginTileIteration() {
     }
 
     virtual bool NextTile() {
@@ -133,12 +133,12 @@ public:
     // Function prototype for a tile iteration callback. Returning false will
     // cause iteration to be interrupted (i.e. the corresponding NextTile call
     // will return false).
-    typedef bool (* BigImageIterationCallback)(TextureImage* aImage,
+    typedef bool (* TileIterationCallback)(TextureImage* aImage,
                                            int aTileNumber,
                                            void* aCallbackData);
 
     // Sets a callback to be called every time NextTile is called.
-    virtual void SetIterationCallback(BigImageIterationCallback aCallback,
+    virtual void SetIterationCallback(TileIterationCallback aCallback,
                                       void* aCallbackData) {
     }
 
@@ -335,9 +335,9 @@ public:
     virtual void EndUpdate();
     virtual void Resize(const gfx::IntSize& aSize);
     virtual uint32_t GetTileCount();
-    virtual void BeginBigImageIteration();
+    virtual void BeginTileIteration();
     virtual bool NextTile();
-    virtual void SetIterationCallback(BigImageIterationCallback aCallback,
+    virtual void SetIterationCallback(TileIterationCallback aCallback,
                                       void* aCallbackData);
     virtual gfx::IntRect GetTileRect();
     virtual GLuint GetTextureID() {
@@ -351,7 +351,7 @@ protected:
     virtual gfx::IntRect GetSrcTileRect();
 
     unsigned int mCurrentImage;
-    BigImageIterationCallback mIterationCallback;
+    TileIterationCallback mIterationCallback;
     void* mIterationCallbackData;
     nsTArray< nsRefPtr<TextureImage> > mImages;
     bool mInUpdate;

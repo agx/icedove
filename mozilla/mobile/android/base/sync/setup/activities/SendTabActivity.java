@@ -28,6 +28,7 @@ import org.mozilla.gecko.sync.repositories.android.ClientsDatabaseAccessor;
 import org.mozilla.gecko.sync.repositories.domain.ClientRecord;
 import org.mozilla.gecko.sync.setup.SyncAccounts;
 import org.mozilla.gecko.sync.setup.activities.LocaleAware.LocaleAwareActivity;
+import org.mozilla.gecko.sync.stage.SyncClientsEngineStage;
 import org.mozilla.gecko.sync.syncadapter.SyncAdapter;
 
 import android.accounts.Account;
@@ -45,7 +46,7 @@ import android.widget.Toast;
 
 public class SendTabActivity extends LocaleAwareActivity {
   private interface TabSender {
-    public static final String[] STAGES_TO_SYNC = new String[] { "clients", "tabs" };
+    static final String[] CLIENTS_STAGE = new String[] { SyncClientsEngineStage.COLLECTION_NAME };
 
     /**
      * @return Return null if the account isn't correctly initialized. Return
@@ -54,9 +55,9 @@ public class SendTabActivity extends LocaleAwareActivity {
     String getAccountGUID();
 
     /**
-     * Sync this account, specifying only clients and tabs as the engines to sync.
+     * Sync this account, specifying only clients as the engine to sync.
      */
-    void sync();
+    void syncClientsStage();
   }
 
   private static class FxAccountTabSender implements TabSender {
@@ -78,8 +79,8 @@ public class SendTabActivity extends LocaleAwareActivity {
     }
 
     @Override
-    public void sync() {
-      fxAccount.requestSync(FirefoxAccounts.FORCE, STAGES_TO_SYNC, null);
+    public void syncClientsStage() {
+      fxAccount.requestSync(FirefoxAccounts.FORCE, CLIENTS_STAGE, null);
     }
   }
 
@@ -106,8 +107,8 @@ public class SendTabActivity extends LocaleAwareActivity {
     }
 
     @Override
-    public void sync() {
-      SyncAdapter.requestImmediateSync(this.account, STAGES_TO_SYNC);
+    public void syncClientsStage() {
+      SyncAdapter.requestImmediateSync(this.account, CLIENTS_STAGE);
     }
   }
 
@@ -301,7 +302,7 @@ public class SendTabActivity extends LocaleAwareActivity {
         }
 
         Logger.info(LOG_TAG, "Requesting immediate clients stage sync.");
-        sender.sync();
+        sender.syncClientsStage();
 
         return true;
       }

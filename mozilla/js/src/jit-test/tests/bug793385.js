@@ -1,5 +1,4 @@
-// |jit-test| allow-oom; allow-overrecursed
-
+// |jit-test| error: out of memory
 gcparam("maxBytes", gcparam("gcBytes") + 4*1024);
 function f() {
     var upvar = "";

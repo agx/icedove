@@ -19,7 +19,6 @@
 #include "webrtc/common_types.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_common_defs.h"
 #include "webrtc/modules/audio_coding/main/acm2/acm_resampler.h"
-#include "webrtc/modules/audio_coding/main/acm2/call_statistics.h"
 #include "webrtc/modules/audio_coding/main/acm2/nack.h"
 #include "webrtc/modules/audio_coding/neteq4/interface/audio_decoder.h"
 #include "webrtc/modules/audio_coding/neteq4/interface/neteq.h"
@@ -31,10 +30,9 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 namespace {
 
+const int kRtpHeaderSize = 12;
 const int kNeteqInitSampleRateHz = 16000;
 const int kNackThresholdPackets = 2;
 
@@ -123,7 +121,7 @@ AcmReceiver::AcmReceiver()
       last_audio_decoder_(-1),  // Invalid value.
       decode_lock_(RWLockWrapper::CreateRWLock()),
       neteq_crit_sect_(CriticalSectionWrapper::CreateCriticalSection()),
-      vad_enabled_(true),
+      vad_enabled_(false),
       previous_audio_activity_(AudioFrame::kVadUnknown),
       current_sample_rate_hz_(kNeteqInitSampleRateHz),
       nack_(),
@@ -136,9 +134,8 @@ AcmReceiver::AcmReceiver()
     decoders_[n].registered = false;
   }
 
-  // Make sure we are on the same page as NetEq. Post-decode VAD is disabled by
-  // default in NetEq4, however, Audio Conference Mixer relies on VAD decision
-  // and fails if VAD decision is not provided.
+  // Make sure we are on the same page as NetEq, although the default behavior
+  // for NetEq has been VAD disabled.
   if (vad_enabled_)
     neteq_->EnableVad();
   else
@@ -462,7 +459,6 @@ int AcmReceiver::GetAudio(int desired_freq_hz, AudioFrame* audio_frame) {
   audio_frame->vad_activity_ = previous_audio_activity_;
   SetAudioFrameActivityAndType(vad_enabled_, type, audio_frame);
   previous_audio_activity_ = audio_frame->vad_activity_;
-  call_stats_.DecodedByNetEq(audio_frame->speech_type_);
   return 0;
 }
 
@@ -549,17 +545,15 @@ int AcmReceiver::RemoveAllCodecs() {
       }
     }
   }
-  // No codec is registered, invalidate last audio decoder.
-  last_audio_decoder_ = -1;
   return ret_val;
 }
 
 int AcmReceiver::RemoveCodec(uint8_t payload_type) {
   int codec_index = PayloadType2CodecIndex(payload_type);
   if (codec_index < 0) {  // Such a payload-type is not registered.
-    LOG(LS_WARNING) << "payload_type " << payload_type << " is not registered,"
-        " no action is taken.";
-    return 0;
+    LOG(LS_ERROR) << "payload_type " << payload_type << " is not registered"
+        " to be removed.";
+    return -1;
   }
   if (neteq_->RemovePayloadType(payload_type) != NetEq::kOK) {
     LOG_FERR1(LS_ERROR, "AcmReceiver::RemoveCodec", payload_type);
@@ -567,8 +561,6 @@ int AcmReceiver::RemoveCodec(uint8_t payload_type) {
   }
   CriticalSectionScoped lock(neteq_crit_sect_);
   decoders_[codec_index].registered = false;
-  if (last_audio_decoder_ == codec_index)
-    last_audio_decoder_ = -1;  // Codec is removed, invalidate last decoder.
   return 0;
 }
 
@@ -763,9 +755,6 @@ bool AcmReceiver::GetSilence(int desired_sample_rate_hz, AudioFrame* frame) {
     return false;
   }
 
-  // Update statistics.
-  call_stats_.DecodedBySilenceGenerator();
-
   // Set the values if already got a packet, otherwise set to default values.
   if (last_audio_decoder_ >= 0) {
     current_sample_rate_hz_ = ACMCodecDB::database_[last_audio_decoder_].plfreq;
@@ -836,13 +825,5 @@ void AcmReceiver::InsertStreamOfSyncPackets(
     sync_stream->receive_timestamp += sync_stream->timestamp_step;
   }
 }
-
-void AcmReceiver::GetDecodingCallStatistics(
-    AudioDecodingCallStats* stats) const {
-  CriticalSectionScoped lock(neteq_crit_sect_);
-  *stats = call_stats_.GetDecodingStatistics();
-}
-
-}  // namespace acm2
 
 }  // namespace webrtc

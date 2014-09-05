@@ -932,7 +932,7 @@ nsresult nsParseMailMessageState::ParseHeaders ()
     buf[buf_length - 1] == '\n'), "Header text should always end in a newline");
   while (buf < buf_end)
   {
-    char *colon = PL_strnchr(buf, ':', buf_length);
+    char *colon = PL_strnchr(buf, ':', buf_end - buf);
     char *end;
     char *value = 0;
     struct message_header *header = 0;
@@ -1045,7 +1045,7 @@ nsresult nsParseMailMessageState::ParseHeaders ()
 #endif
 
       ToLowerCase(headerStr);
-      size_t customHeaderIndex = m_customDBHeaders.IndexOf(headerStr);
+      uint32_t customHeaderIndex = m_customDBHeaders.IndexOf(headerStr);
       if (customHeaderIndex != m_customDBHeaders.NoIndex)
         header = & m_customDBHeaderValues[customHeaderIndex];
     }
@@ -1295,6 +1295,7 @@ nsresult nsParseMailMessageState::FinalizeHeaders()
   struct message_header *content_type;
   char md5_data [50];
 
+  const char *s;
   uint32_t flags = 0;
   uint32_t delta = 0;
   nsMsgPriorityValue priorityFlags = nsMsgPriority::notSet;
@@ -1342,8 +1343,11 @@ nsresult nsParseMailMessageState::FinalizeHeaders()
   {
     if (mozstatus->length == 4)
     {
-      NS_ASSERTION(MsgIsHex(mozstatus->value, 4), "Expected 4 hex digits for flags.");
-      flags = MsgUnhex(mozstatus->value, 4);
+      int i;
+      for (i=0,s=mozstatus->value ; i<4 ; i++,s++)
+      {
+        flags = (flags << 4) | msg_UnHex(*s);
+      }
       // strip off and remember priority bits.
       flags &= ~nsMsgMessageFlags::RuntimeOnly;
       priorityFlags = (nsMsgPriorityValue) ((flags & nsMsgMessageFlags::Priorities) >> 13);
@@ -1507,7 +1511,7 @@ nsresult nsParseMailMessageState::FinalizeHeaders()
         if (!mozstatus && statush)
         {
           /* Parse a little bit of the Berkeley Mail status header. */
-          for (const char *s = statush->value; *s; s++) {
+          for (s = statush->value; *s; s++) {
             uint32_t msgFlags = 0;
             (void)m_newMsgHdr->GetFlags(&msgFlags);
             switch (*s)
@@ -2504,14 +2508,10 @@ nsresult nsParseNewMailState::MoveIncorporatedMessage(nsIMsgDBHdr *mailHdr,
                                             getter_AddRefs(newHdr));
   if (NS_SUCCEEDED(rv) && !newHdr)
     rv = NS_ERROR_UNEXPECTED;
-
-  if (NS_FAILED(rv))
+  if (NS_SUCCEEDED(rv))
   {
-    destIFolder->ThrowAlertMsg("filterFolderHdrAddFailed", msgWindow);
-  } else {
-    rv = AppendMsgFromStream(inputStream, newHdr, messageLength, destIFolder);
-    if (NS_FAILED(rv))
-      destIFolder->ThrowAlertMsg("filterFolderWriteFailed", msgWindow);
+    rv = AppendMsgFromStream(inputStream, newHdr, messageLength,
+                             destIFolder);
   }
 
   if (NS_FAILED(rv))
@@ -2519,8 +2519,11 @@ nsresult nsParseNewMailState::MoveIncorporatedMessage(nsIMsgDBHdr *mailHdr,
     if (destMailDB)
       destMailDB->Close(true);
 
-    destIFolder->ReleaseSemaphore(myISupports);
-
+    if (destIFolder)
+    {
+      destIFolder->ReleaseSemaphore(myISupports);
+      destIFolder->ThrowAlertMsg("filterFolderWriteFailed", msgWindow);
+    }
     return NS_MSG_ERROR_WRITING_MAIL_FOLDER;
   }
 

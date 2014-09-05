@@ -30,7 +30,6 @@
 
     <style name="TabsList" parent="TabsListBase">
          <item name="android:orientation">horizontal</item>
-         <item name="android:scrollbars">horizontal</item>
     </style>
 
     <style name="TabsItem">
@@ -41,11 +40,25 @@
          <item name="android:nextFocusUp">@+id/info</item>
     </style>
 
-    <style name="Toast" parent="ToastBase">
-        <item name="android:layout_width">400dp</item>
+    <style name="Toast">
+        <item name="android:layout_width">300dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_centerHorizontal">true</item>
 
-        <!-- Same as pre-19 Toast style, but with no left and right margins.
-             They're removed since large tablets are never going to be only 400dp wide. -->
+        <!-- Copied from root Toast style. Margin-left/right were removed since they
+             large tablets are never going to be 300dp wide. -->
+        <item name="android:layout_alignParentBottom">true</item>
+        <item name="android:layout_marginBottom">64dp</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:background">@drawable/toast</item>
+        <item name="android:clickable">true</item>
+        <item name="android:showDividers">middle</item>
+        <item name="android:dividerPadding">16dp</item>
+
+        <item name="android:paddingTop">0dp</item>
+        <item name="android:paddingBottom">0dp</item>
+        <item name="android:paddingLeft">0dp</item>
+        <item name="android:paddingRight">0dp</item>
     </style>
 
     <style name="Widget.MenuItemActionBar">
@@ -92,12 +105,6 @@
     <style name="Widget.HomeBanner">
         <item name="android:paddingLeft">32dp</item>
         <item name="android:paddingRight">32dp</item>
-    </style>
-
-    <!-- Tabs panel -->
-    <style name="RemoteTabsPanelChild" parent="RemoteTabsPanelChildBase">
-        <item name="android:paddingLeft">112dp</item>
-        <item name="android:paddingRight">112dp</item>
     </style>
 
 </resources>

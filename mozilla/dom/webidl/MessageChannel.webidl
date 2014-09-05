@@ -7,7 +7,7 @@
  * http://www.whatwg.org/specs/web-apps/current-work/#channel-messaging
  */
 
-[Constructor, Func="MessageChannel::Enabled"]
+[Constructor, Pref="dom.messageChannel.enabled"]
 interface MessageChannel {
   readonly attribute MessagePort port1;
   readonly attribute MessagePort port2;

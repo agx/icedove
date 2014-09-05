@@ -63,7 +63,6 @@ nsWifiMonitor::StartWatching(nsIWifiListener *aListener)
     mTimer = do_CreateInstance("@mozilla.org/timer;1");
     mTimer->Init(this, 5000, nsITimer::TYPE_REPEATING_SLACK);
   }
-  StartScan();
   return NS_OK;
 }
 
@@ -89,24 +88,20 @@ nsWifiMonitor::StopWatching(nsIWifiListener *aListener)
   return NS_OK;
 }
 
-void
-nsWifiMonitor::StartScan()
-{
-  nsCOMPtr<nsIInterfaceRequestor> ir = do_GetService("@mozilla.org/telephony/system-worker-manager;1");
-  nsCOMPtr<nsIWifi> wifi = do_GetInterface(ir);
-  if (!wifi) {
-    return;
-  }
-  wifi->GetWifiScanResults(this);
-}
-
 NS_IMETHODIMP
 nsWifiMonitor::Observe(nsISupports *subject, const char *topic,
                        const char16_t *data)
 {
   if (!strcmp(topic, "timer-callback")) {
     LOG(("timer callback\n"));
-    StartScan();
+
+    nsCOMPtr<nsIInterfaceRequestor> ir = do_GetService("@mozilla.org/telephony/system-worker-manager;1");
+    nsCOMPtr<nsIWifi> wifi = do_GetInterface(ir);
+    if (!wifi) {
+      return NS_ERROR_UNEXPECTED;
+    }
+
+    wifi->GetWifiScanResults(this);
     return NS_OK;
   }
 

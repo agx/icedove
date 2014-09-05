@@ -53,12 +53,12 @@ nsPKCS11Slot::refreshSlotInfo()
     // Set the Hardware Version field
     mSlotHWVersion = EmptyString();
     mSlotHWVersion.AppendInt(slot_info.hardwareVersion.major);
-    mSlotHWVersion.Append('.');
+    mSlotHWVersion.AppendLiteral(".");
     mSlotHWVersion.AppendInt(slot_info.hardwareVersion.minor);
     // Set the Firmware Version field
     mSlotFWVersion = EmptyString();
     mSlotFWVersion.AppendInt(slot_info.firmwareVersion.major);
-    mSlotFWVersion.Append('.');
+    mSlotFWVersion.AppendLiteral(".");
     mSlotFWVersion.AppendInt(slot_info.firmwareVersion.minor);
   }
 

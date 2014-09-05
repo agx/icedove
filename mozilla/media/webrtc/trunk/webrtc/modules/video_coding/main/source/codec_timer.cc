@@ -15,13 +15,10 @@
 namespace webrtc
 {
 
-// The first kIgnoredSampleCount samples will be ignored.
-static const int32_t kIgnoredSampleCount = 5;
-
 VCMCodecTimer::VCMCodecTimer()
 :
 _filteredMax(0),
-_ignoredSampleCount(0),
+_firstDecodeTime(true),
 _shortMax(0),
 _history()
 {
@@ -38,7 +35,7 @@ int32_t VCMCodecTimer::StopTimer(int64_t startTimeMs, int64_t nowMs)
 void VCMCodecTimer::Reset()
 {
     _filteredMax = 0;
-    _ignoredSampleCount = 0;
+    _firstDecodeTime = true;
     _shortMax = 0;
     for (int i=0; i < MAX_HISTORY_SIZE; i++)
     {
@@ -50,14 +47,14 @@ void VCMCodecTimer::Reset()
 // Update the max-value filter
 void VCMCodecTimer::MaxFilter(int32_t decodeTime, int64_t nowMs)
 {
-    if (_ignoredSampleCount >= kIgnoredSampleCount)
+    if (!_firstDecodeTime)
     {
         UpdateMaxHistory(decodeTime, nowMs);
         ProcessHistory(nowMs);
     }
     else
     {
-        _ignoredSampleCount++;
+        _firstDecodeTime = false;
     }
 }
 

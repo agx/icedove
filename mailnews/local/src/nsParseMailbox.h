@@ -65,6 +65,7 @@ public:
   nsresult              InternSubject (struct message_header *header);
 
   static bool    IsEnvelopeLine(const char *buf, int32_t buf_size);
+  static int  msg_UnHex(char C);
 
   nsCOMPtr<nsIMsgDBHdr> m_newMsgHdr; /* current message header we're building */
   nsCOMPtr<nsIMsgDatabase>  m_mailDB;
@@ -125,6 +126,14 @@ public:
   nsCString m_receivedValue; // accumulated received header
 protected:
 };
+
+// this should go in some utility class.
+inline int nsParseMailMessageState::msg_UnHex(char C)
+{
+  return ((C >= '0' && C <= '9') ? C - '0' :
+    ((C >= 'A' && C <= 'F') ? C - 'A' + 10 :
+     ((C >= 'a' && C <= 'f') ? C - 'a' + 10 : 0)));
+}
 
 // This class is part of the mailbox parsing state machine
 class nsMsgMailboxParser : public nsIStreamListener, public nsParseMailMessageState, public nsMsgLineBuffer

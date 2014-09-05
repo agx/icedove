@@ -145,6 +145,11 @@ const WorkerSandbox = EventEmitter.compose({
       wantGlobalProperties.push("XMLHttpRequest");
     }
 
+    // Instantiate trusted code in another Sandbox in order to prevent content
+    // script from messing with standard classes used by proxy and API code.
+    let apiSandbox = sandbox(principals, { wantXrays: true, sameZoneAs: window });
+    apiSandbox.console = console;
+
     // Create the sandbox and bind it to window in order for content scripts to
     // have access to all standard globals (window, document, ...)
     let content = this._sandbox = sandbox(principals, {
@@ -176,7 +181,9 @@ const WorkerSandbox = EventEmitter.compose({
     });
 
     // Load trusted code that will inject content script API.
-    let ContentWorker = load(content, CONTENT_WORKER_URL);
+    // We need to expose JS objects defined in same principal in order to
+    // avoid having any kind of wrapper.
+    load(apiSandbox, CONTENT_WORKER_URL);
 
     // prepare a clean `self.options`
     let options = 'contentScriptOptions' in worker ?
@@ -216,7 +223,8 @@ const WorkerSandbox = EventEmitter.compose({
       }
     };
     let onEvent = this._onContentEvent.bind(this);
-    let result = Cu.waiveXrays(ContentWorker).inject(content, chromeAPI, onEvent, options);
+    // `ContentWorker` is defined in CONTENT_WORKER_URL file
+    let result = apiSandbox.ContentWorker.inject(content, chromeAPI, onEvent, options);
     this._emitToContent = result.emitToContent;
     this._hasListenerFor = result.hasListenerFor;
 
@@ -385,7 +393,7 @@ const WorkerSandbox = EventEmitter.compose({
 /**
  * Message-passing facility for communication between code running
  * in the content and add-on process.
- * @see https://developer.mozilla.org/en-US/Add-ons/SDK/Low-Level_APIs/content_worker
+ * @see https://addons.mozilla.org/en-US/developers/docs/sdk/latest/modules/sdk/content/worker.html
  */
 const Worker = EventEmitter.compose({
   on: Trait.required,

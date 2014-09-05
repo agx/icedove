@@ -6,13 +6,16 @@
 
 "use strict";
 
-const { Cc, Ci, Cu } = require("chrome");
-const Debugger = require("Debugger");
-const { DebuggerServer, ActorPool } = require("devtools/server/main");
-const { EnvironmentActor, LongStringActor, ObjectActor, ThreadActor } = require("devtools/server/actors/script");
-const { update } = require("devtools/toolkit/DevToolsUtils");
+let {Cc, Ci, Cu} = require("chrome");
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
+let { DebuggerServer, ActorPool } = require("devtools/server/main");
+// Symbols from script.js
+let { ThreadActor, EnvironmentActor, ObjectActor, LongStringActor } = DebuggerServer;
+
+Cu.import("resource://gre/modules/jsdebugger.jsm");
+addDebuggerToGlobal(this);
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
@@ -46,6 +49,7 @@ for (let name of ["WebConsoleUtils", "ConsoleServiceListener",
     enumerable: true
   });
 }
+
 
 /**
  * The WebConsoleActor implements capabilities needed for the Web Console
@@ -1315,7 +1319,6 @@ WebConsoleActor.prototype =
     delete result.wrappedJSObject;
     delete result.ID;
     delete result.innerID;
-    delete result.consoleID;
 
     result.arguments = Array.map(aMessage.arguments || [], (aObj) => {
       let dbgObj = this.makeDebuggeeValue(aObj, true);
@@ -1399,91 +1402,6 @@ WebConsoleActor.prototype.requestTypes =
   setPreferences: WebConsoleActor.prototype.onSetPreferences,
   sendHTTPRequest: WebConsoleActor.prototype.onSendHTTPRequest
 };
-
-
-/**
- * The AddonConsoleActor implements capabilities needed for the add-on web
- * console feature.
- *
- * @constructor
- * @param object aAddon
- *        The add-on that this console watches.
- * @param object aConnection
- *        The connection to the client, DebuggerServerConnection.
- * @param object aParentActor
- *        The parent BrowserAddonActor actor.
- */
-function AddonConsoleActor(aAddon, aConnection, aParentActor)
-{
-  this.addon = aAddon;
-  WebConsoleActor.call(this, aConnection, aParentActor);
-}
-
-AddonConsoleActor.prototype = Object.create(WebConsoleActor.prototype);
-
-update(AddonConsoleActor.prototype, {
-  constructor: AddonConsoleActor,
-
-  actorPrefix: "addonConsole",
-
-  /**
-   * The add-on that this console watches.
-   */
-  addon: null,
-
-  /**
-   * The main add-on JS global
-   */
-  get window() {
-    return this.parentActor.global;
-  },
-
-  /**
-   * Destroy the current AddonConsoleActor instance.
-   */
-  disconnect: function ACA_disconnect()
-  {
-    WebConsoleActor.prototype.disconnect.call(this);
-    this.addon = null;
-  },
-
-  /**
-   * Handler for the "startListeners" request.
-   *
-   * @param object aRequest
-   *        The JSON request object received from the Web Console client.
-   * @return object
-   *         The response object which holds the startedListeners array.
-   */
-  onStartListeners: function ACA_onStartListeners(aRequest)
-  {
-    let startedListeners = [];
-
-    while (aRequest.listeners.length > 0) {
-      let listener = aRequest.listeners.shift();
-      switch (listener) {
-        case "ConsoleAPI":
-          if (!this.consoleAPIListener) {
-            this.consoleAPIListener =
-              new ConsoleAPIListener(null, this, "addon/" + this.addon.id);
-            this.consoleAPIListener.init();
-          }
-          startedListeners.push(listener);
-          break;
-      }
-    }
-    return {
-      startedListeners: startedListeners,
-      nativeConsoleAPI: true,
-      traits: this.traits,
-    };
-  },
-});
-
-AddonConsoleActor.prototype.requestTypes = Object.create(WebConsoleActor.prototype.requestTypes);
-AddonConsoleActor.prototype.requestTypes.startListeners = AddonConsoleActor.prototype.onStartListeners;
-
-exports.AddonConsoleActor = AddonConsoleActor;
 
 /**
  * Creates an actor for a network event.

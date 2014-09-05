@@ -30,13 +30,13 @@ class NativePanZoomController implements PanZoomController, GeckoEventListener {
         if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
             init();
         } else {
-            mDispatcher.registerGeckoThreadListener(this, "Gecko:Ready");
+            mDispatcher.registerEventListener("Gecko:Ready", this);
         }
     }
 
     public void handleMessage(String event, JSONObject message) {
         if ("Gecko:Ready".equals(event)) {
-            mDispatcher.unregisterGeckoThreadListener(this, "Gecko:Ready");
+            mDispatcher.unregisterEventListener("Gecko:Ready", this);
             init();
         }
     }

@@ -2079,24 +2079,18 @@ function archive_messages(aMsgHdrs) {
 }
 
 /**
- * Check if the selected messages match the summarized messages.
- *
- * @param aSummarizedKeys An array of keys (messageKey + folder.URI) for the
- *     summarized messages.
- * @param aSelectedMessages An array of nsIMsgDBHdrs for the selected messages.
- * @return true is aSelectedMessages and aSummarizedKeys refer to the same set
- *     of messages.
+ * @return true if |aSetOne| is equivalent to |aSetTwo| where the sets are
+ *     really just lists of nsIMsgDBHdrs with cool names.
  */
-function _verify_summarized_message_set(aSummarizedKeys, aSelectedMessages) {
-  let summarizedKeys = aSummarizedKeys.slice();
-  summarizedKeys.sort();
-  // We use the same key-generation as in multimessageview.js.
-  let selectedKeys = [msgHdr.messageKey + msgHdr.folder.URI
-                      for (msgHdr of aSelectedMessages)];
-  selectedKeys.sort();
-
-  // Stringified versions should now be equal...
-  return selectedKeys.toString() == summarizedKeys.toString();
+function _verify_message_sets_equivalent(aSetOne, aSetTwo) {
+  let uniqy1 = [msgHdr.folder.URI + msgHdr.messageKey for each
+                 ([, msgHdr] in Iterator(aSetOne))];
+  uniqy1.sort();
+  let uniqy2 = [msgHdr.folder.URI + msgHdr.messageKey for each
+                 ([, msgHdr] in Iterator(aSetTwo))];
+  uniqy2.sort();
+  // stringified versions should now be equal...
+  return uniqy1.toString() == uniqy2.toString();
 }
 
 /**
@@ -2124,17 +2118,15 @@ function assert_messages_summarized(aController, aSelectedMessages) {
   if (aSelectedMessages.synMessages)
     aSelectedMessages = [msgHdr for each (msgHdr in aSelectedMessages.msgHdrs)];
 
-  let summaryFrame = aController.window.gSummaryFrameManager.iframe;
-  let summary = summaryFrame.contentWindow.gMessageSummary;
-  let summarizedKeys = Object.keys(summary._msgNodes);
-  if (aSelectedMessages.length != summarizedKeys.length) {
-    let elaboration = "Summary contains " + summarizedKeys.length +
+  let summary = aController.window.gSummary;
+  if (aSelectedMessages.length != summary._msgHdrs.length) {
+    let elaboration = "Summary contains " + summary._msgHdrs.length +
                       " messages, expected " + aSelectedMessages.length + ".";
     throw new Error("Summary does not contain the right set of messages. " +
                     elaboration);
   }
-  if (!_verify_summarized_message_set(summarizedKeys, aSelectedMessages)) {
-    let elaboration = "Summary: " + summarizedKeys + "  Selected: " +
+  if (!_verify_message_sets_equivalent(summary._msgHdrs, aSelectedMessages)) {
+    let elaboration = "Summary: " + summary._msgHdrs + "  Selected: " +
                       aSelectedMessages + ".";
     throw new Error("Summary does not contain the right set of messages. " +
                     elaboration);
@@ -2731,21 +2723,18 @@ function reset_close_message_on_delete() {
 
 /**
  * assert that the multimessage/thread summary view contains
- * the specified number of elements of the specified selector.
+ * the specified number of elements of the specified class.
  *
- * @param aSelector: the CSS selector to use to select
+ * @param aClassName: the class to use to select
  * @param aNumElts: the number of expected elements that have that class
  */
 
-function assert_summary_contains_N_elts(aSelector, aNumElts) {
+function assert_summary_contains_N_divs(aClassName, aNumElts) {
   let htmlframe = mc.e('multimessage');
-  let matches = htmlframe.contentDocument.querySelectorAll(aSelector);
-  if (matches.length != aNumElts) {
-    throw new Error(
-      "Expected to find " + aNumElts + " elements with selector '" +
-      aSelector + "', found: " + matches.length
-    );
-  }
+  let matches = htmlframe.contentDocument.getElementsByClassName(aClassName);
+  if (matches.length != aNumElts)
+    throw new Error("Expected to find " + aNumElts + " elements with class " +
+                    aClassName + ", found: " + matches.length);
 }
 
 

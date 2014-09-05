@@ -26,38 +26,29 @@ namespace mozilla {
 class AsyncEventDispatcher : public nsRunnable
 {
 public:
-  AsyncEventDispatcher(nsINode* aTarget, const nsAString& aEventType,
+  AsyncEventDispatcher(nsINode* aEventNode, const nsAString& aEventType,
                        bool aBubbles, bool aDispatchChromeOnly)
-    : mTarget(aTarget)
+    : mEventNode(aEventNode)
     , mEventType(aEventType)
     , mBubbles(aBubbles)
     , mDispatchChromeOnly(aDispatchChromeOnly)
   {
   }
 
-  AsyncEventDispatcher(dom::EventTarget* aTarget, const nsAString& aEventType,
-                       bool aBubbles)
-    : mTarget(aTarget)
-    , mEventType(aEventType)
-    , mBubbles(aBubbles)
-    , mDispatchChromeOnly(false)
-  {
-  }
-
-  AsyncEventDispatcher(dom::EventTarget* aTarget, nsIDOMEvent* aEvent)
-    : mTarget(aTarget)
+  AsyncEventDispatcher(nsINode* aEventNode, nsIDOMEvent* aEvent)
+    : mEventNode(aEventNode)
     , mEvent(aEvent)
     , mDispatchChromeOnly(false)
   {
   }
 
-  AsyncEventDispatcher(dom::EventTarget* aTarget, WidgetEvent& aEvent);
+  AsyncEventDispatcher(nsINode* aEventNode, WidgetEvent& aEvent);
 
   NS_IMETHOD Run() MOZ_OVERRIDE;
   nsresult PostDOMEvent();
   void RunDOMEventWhenSafe();
 
-  nsCOMPtr<dom::EventTarget> mTarget;
+  nsCOMPtr<nsINode>     mEventNode;
   nsCOMPtr<nsIDOMEvent> mEvent;
   nsString              mEventType;
   bool                  mBubbles;

@@ -16,7 +16,6 @@ const { deprecateFunction } = require('../util/deprecate');
 const { isOneOf, is, satisfiesVersion, version } = require('../system/xul-app');
 const { isWindowPrivate } = require('../window/utils');
 const { isPrivateBrowsingSupported } = require('../self');
-const { dispatcher } = require("../util/dispatcher");
 
 let deferredEmit = defer(emit);
 let pbService;
@@ -54,11 +53,10 @@ let isWindowPBSupported = exports.isWindowPBSupported =
 let isTabPBSupported = exports.isTabPBSupported =
                        !pbService && !!PrivateBrowsingUtils && is('Fennec') && satisfiesVersion(version, '>=20.0*');
 
-function isPermanentPrivateBrowsing() {
+exports.isPermanentPrivateBrowsing = function() {
  return !!(PrivateBrowsingUtils && PrivateBrowsingUtils.permanentPrivateBrowsing);
 }
-exports.isPermanentPrivateBrowsing = isPermanentPrivateBrowsing;
-
+                       
 function ignoreWindow(window) {
   return !isPrivateBrowsingSupported && isWindowPrivate(window) && !isGlobalPBSupported;
 }
@@ -92,24 +90,13 @@ exports.setMode = deprecateFunction(
 );
 
 let getMode = function getMode(chromeWin) {
-  if (chromeWin !== undefined && isWindowPrivate(chromeWin))
+  if (isWindowPrivate(chromeWin))
     return true;
 
   // default
-  return isGlobalPrivateBrowsing();
+  return pbService ? pbService.privateBrowsingEnabled : false;
 };
 exports.getMode = getMode;
-
-function isGlobalPrivateBrowsing() {
-  return pbService ? pbService.privateBrowsingEnabled : false;
-}
-
-const isPrivate = dispatcher("isPrivate");
-isPrivate.when(isPermanentPrivateBrowsing, _ => true);
-isPrivate.when(x => x instanceof Ci.nsIDOMWindow, isWindowPrivate);
-isPrivate.when(x => Ci.nsIPrivateBrowsingChannel && x instanceof Ci.nsIPrivateBrowsingChannel, x => x.isChannelPrivate);
-isPrivate.define(isGlobalPrivateBrowsing);
-exports.isPrivate = isPrivate;
 
 exports.on = on.bind(null, exports);
 

@@ -6,13 +6,11 @@ load(libdir + "asserts.js");
 let proto = Object.getPrototypeOf(saveStack());
 
 // Can't create new SavedFrame instances by hand.
-print("Testing constructor");
 assertThrowsInstanceOf(() => {
   new proto.constructor();
 }, TypeError);
 
 for (let p of ["source", "line", "column", "functionDisplayName", "parent"]) {
-  print("Testing getter: " + p);
   // The getters shouldn't work on the prototype.
   assertThrowsInstanceOf(() => proto[p], TypeError);
 

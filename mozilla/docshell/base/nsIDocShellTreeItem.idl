@@ -7,8 +7,6 @@
 #include "nsISupports.idl"
 
 interface nsIDocShellTreeOwner;
-interface nsIDocument;
-interface nsPIDOMWindow;
 
 
 /**
@@ -17,7 +15,7 @@ interface nsPIDOMWindow;
  * node or a leaf. 
  */
 
-[scriptable, uuid(edb99640-8378-4106-8673-e701a086eb1c)]
+[scriptable, uuid(f897f4af-f67e-4115-9d37-ce09f71122e2)]
 interface nsIDocShellTreeItem : nsISupports
 {
 	/*
@@ -177,8 +175,5 @@ interface nsIDocShellTreeItem : nsISupports
 	                                      in boolean aSameType,
 	                                      in nsIDocShellTreeItem aRequestor,
 	                                      in nsIDocShellTreeItem aOriginalRequestor);
-
-  [noscript,nostdcall,notxpcom] nsIDocument getDocument();
-  [noscript,nostdcall,notxpcom] nsPIDOMWindow getWindow();
 };
 

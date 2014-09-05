@@ -12,18 +12,12 @@
 #include "nsStyleContext.h"
 #include "nsRenderingContext.h"
 #include "nsGkAtoms.h"
-#include "nsPresShell.h"
 #include "nsIPresShell.h"
 #include "nsDisplayList.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsFrameManager.h"
 #include "gfxPlatform.h"
-#include "nsPrintfCString.h"
-// for touchcaret
-#include "nsContentList.h"
-#include "nsContentCreatorFunctions.h"
-#include "nsContentUtils.h"
-#include "nsStyleSet.h"
+
 // for focus
 #include "nsIScrollableFrame.h"
 #ifdef DEBUG_CANVAS_FOCUS
@@ -36,7 +30,7 @@ using namespace mozilla;
 using namespace mozilla::layout;
 using namespace mozilla::gfx;
 
-nsCanvasFrame*
+nsIFrame*
 NS_NewCanvasFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsCanvasFrame(aContext);
@@ -46,80 +40,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsCanvasFrame)
 
 NS_QUERYFRAME_HEAD(nsCanvasFrame)
   NS_QUERYFRAME_ENTRY(nsCanvasFrame)
-  NS_QUERYFRAME_ENTRY(nsIAnonymousContentCreator)
 NS_QUERYFRAME_TAIL_INHERITING(nsContainerFrame)
-
-nsresult
-nsCanvasFrame::CreateAnonymousContent(nsTArray<ContentInfo>& aElements)
-{
-  if (!mContent) {
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIDocument> doc = mContent->OwnerDoc();
-  nsresult rv = NS_OK;
-  ErrorResult er;
-  // We won't create touch caret element if preference is not enabled.
-  if (PresShell::TouchCaretPrefEnabled()) {
-    nsCOMPtr<nsINodeInfo> nodeInfo;
-
-    // Create and append touch caret frame.
-    nodeInfo = doc->NodeInfoManager()->GetNodeInfo(nsGkAtoms::div, nullptr,
-                                                   kNameSpaceID_XHTML,
-                                                   nsIDOMNode::ELEMENT_NODE);
-    NS_ENSURE_TRUE(nodeInfo, NS_ERROR_OUT_OF_MEMORY);
-
-    rv = NS_NewHTMLElement(getter_AddRefs(mTouchCaretElement), nodeInfo.forget(),
-                           mozilla::dom::NOT_FROM_PARSER);
-    NS_ENSURE_SUCCESS(rv, rv);
-    aElements.AppendElement(mTouchCaretElement);
-
-    // Add a _moz_anonclass attribute as touch caret selector.
-    mTouchCaretElement->SetAttribute(NS_LITERAL_STRING("_moz_anonclass"),
-                                     NS_LITERAL_STRING("mozTouchCaret"), er);
-    NS_ENSURE_SUCCESS(er.ErrorCode(), er.ErrorCode());
-
-    // Set touch caret to visibility: hidden by default.
-    nsAutoString classValue;
-    classValue.AppendLiteral("moz-touchcaret hidden");
-    rv = mTouchCaretElement->SetAttr(kNameSpaceID_None, nsGkAtoms::_class,
-                                     classValue, true);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  if (PresShell::SelectionCaretPrefEnabled()) {
-    // Selection caret
-    mSelectionCaretsStartElement = doc->CreateHTMLElement(nsGkAtoms::div);
-    aElements.AppendElement(mSelectionCaretsStartElement);
-
-    mSelectionCaretsEndElement = doc->CreateHTMLElement(nsGkAtoms::div);
-    aElements.AppendElement(mSelectionCaretsEndElement);
-
-    mSelectionCaretsStartElement->SetAttribute(NS_LITERAL_STRING("_moz_anonclass"),
-                                               NS_LITERAL_STRING("mozTouchCaret"), er);
-    rv = mSelectionCaretsStartElement->SetAttr(kNameSpaceID_None, nsGkAtoms::_class,
-                                               NS_LITERAL_STRING("moz-selectioncaret-left hidden"),
-                                               true);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    mSelectionCaretsEndElement->SetAttribute(NS_LITERAL_STRING("_moz_anonclass"),
-                                             NS_LITERAL_STRING("mozTouchCaret"), er);
-    rv = mSelectionCaretsEndElement->SetAttr(kNameSpaceID_None, nsGkAtoms::_class,
-                                             NS_LITERAL_STRING("moz-selectioncaret-right hidden"),
-                                             true);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  return NS_OK;
-}
-
-void
-nsCanvasFrame::AppendAnonymousContentTo(nsBaseContentList& aElements, uint32_t aFilter)
-{
-  aElements.MaybeAppendElement(mTouchCaretElement);
-  aElements.MaybeAppendElement(mSelectionCaretsStartElement);
-  aElements.MaybeAppendElement(mSelectionCaretsEndElement);
-}
 
 void
 nsCanvasFrame::DestroyFrom(nsIFrame* aDestructRoot)
@@ -130,9 +51,6 @@ nsCanvasFrame::DestroyFrom(nsIFrame* aDestructRoot)
     sf->RemoveScrollPositionListener(this);
   }
 
-  nsContentUtils::DestroyAnonymousContent(&mTouchCaretElement);
-  nsContentUtils::DestroyAnonymousContent(&mSelectionCaretsStartElement);
-  nsContentUtils::DestroyAnonymousContent(&mSelectionCaretsEndElement);
   nsContainerFrame::DestroyFrom(aDestructRoot);
 }
 
@@ -164,53 +82,85 @@ nsCanvasFrame::SetHasFocus(bool aHasFocus)
   return NS_OK;
 }
 
-#ifdef DEBUG
-void
+nsresult
 nsCanvasFrame::SetInitialChildList(ChildListID     aListID,
                                    nsFrameList&    aChildList)
 {
   NS_ASSERTION(aListID != kPrincipalList ||
                aChildList.IsEmpty() || aChildList.OnlyChild(),
                "Primary child list can have at most one frame in it");
-  nsContainerFrame::SetInitialChildList(aListID, aChildList);
+  return nsContainerFrame::SetInitialChildList(aListID, aChildList);
 }
 
-void
+nsresult
 nsCanvasFrame::AppendFrames(ChildListID     aListID,
                             nsFrameList&    aFrameList)
 {
-  MOZ_ASSERT(aListID == kPrincipalList, "unexpected child list");
-  if (!mFrames.IsEmpty()) {
-    for (nsFrameList::Enumerator e(aFrameList); !e.AtEnd(); e.Next()) {
-      // We only allow native anonymous child frame for touch caret,
-      // which its placeholder is added to the Principal child lists.
-      MOZ_ASSERT(e.get()->GetContent()->IsInNativeAnonymousSubtree(),
-                 "invalid child list");
-    }
+  NS_ASSERTION(aListID == kPrincipalList ||
+               aListID == kAbsoluteList, "unexpected child list ID");
+  NS_PRECONDITION(aListID != kAbsoluteList ||
+                  mFrames.IsEmpty(), "already have a child frame");
+  if (aListID != kPrincipalList) {
+    // We only support the Principal and Absolute child lists.
+    return NS_ERROR_INVALID_ARG;
   }
+
+  if (!mFrames.IsEmpty()) {
+    // We only allow a single principal child frame.
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  // Insert the new frames
+  NS_ASSERTION(aFrameList.FirstChild() == aFrameList.LastChild(),
+               "Only one principal child frame allowed");
+#ifdef DEBUG
   nsFrame::VerifyDirtyBitSet(aFrameList);
-  nsContainerFrame::AppendFrames(aListID, aFrameList);
+#endif
+  mFrames.AppendFrames(nullptr, aFrameList);
+
+  PresContext()->PresShell()->
+    FrameNeedsReflow(this, nsIPresShell::eTreeChange,
+                     NS_FRAME_HAS_DIRTY_CHILDREN);
+
+  return NS_OK;
 }
 
-void
+nsresult
 nsCanvasFrame::InsertFrames(ChildListID     aListID,
                             nsIFrame*       aPrevFrame,
                             nsFrameList&    aFrameList)
 {
   // Because we only support a single child frame inserting is the same
   // as appending
-  MOZ_ASSERT(!aPrevFrame, "unexpected previous sibling frame");
-  AppendFrames(aListID, aFrameList);
+  NS_PRECONDITION(!aPrevFrame, "unexpected previous sibling frame");
+  if (aPrevFrame)
+    return NS_ERROR_UNEXPECTED;
+
+  return AppendFrames(aListID, aFrameList);
 }
 
-void
+nsresult
 nsCanvasFrame::RemoveFrame(ChildListID     aListID,
                            nsIFrame*       aOldFrame)
 {
-  MOZ_ASSERT(aListID == kPrincipalList, "unexpected child list");
-  nsContainerFrame::RemoveFrame(aListID, aOldFrame);
+  NS_ASSERTION(aListID == kPrincipalList ||
+               aListID == kAbsoluteList, "unexpected child list ID");
+  if (aListID != kPrincipalList && aListID != kAbsoluteList) {
+    // We only support the Principal and Absolute child lists.
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  if (aOldFrame != mFrames.FirstChild())
+    return NS_ERROR_FAILURE;
+
+  // Remove the frame and destroy it
+  mFrames.DestroyFrame(aOldFrame);
+
+  PresContext()->PresShell()->
+    FrameNeedsReflow(this, nsIPresShell::eTreeChange,
+                     NS_FRAME_HAS_DIRTY_CHILDREN);
+  return NS_OK;
 }
-#endif
 
 nsRect nsCanvasFrame::CanvasArea() const
 {
@@ -238,16 +188,6 @@ nsDisplayCanvasBackgroundColor::Paint(nsDisplayListBuilder* aBuilder,
     aCtx->FillRect(bgClipRect);
   }
 }
-
-#ifdef MOZ_DUMP_PAINTING
-void
-nsDisplayCanvasBackgroundColor::WriteDebugInfo(nsACString& aTo)
-{
-  aTo += nsPrintfCString(" (rgba %d,%d,%d,%d)",
-          NS_GET_R(mColor), NS_GET_G(mColor),
-          NS_GET_B(mColor), NS_GET_A(mColor));
-}
-#endif
 
 static void BlitSurface(gfxContext* aDest, const gfxRect& aRect, gfxASurface* aSource)
 {
@@ -513,7 +453,7 @@ nsCanvasFrame::GetPrefWidth(nsRenderingContext *aRenderingContext)
   return result;
 }
 
-void
+nsresult
 nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
                       nsHTMLReflowMetrics&     aDesiredSize,
                       const nsHTMLReflowState& aReflowState,
@@ -645,6 +585,7 @@ nsCanvasFrame::Reflow(nsPresContext*           aPresContext,
 
   NS_FRAME_TRACE_REFLOW_OUT("nsCanvasFrame::Reflow", aStatus);
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  return NS_OK;
 }
 
 nsIAtom*

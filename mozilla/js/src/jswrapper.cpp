@@ -193,7 +193,7 @@ bool Wrapper::finalizeInBackground(Value priv)
      * If the wrapped object is in the nursery then we know it doesn't have a
      * finalizer, and so background finalization is ok.
      */
-    if (IsInsideNursery(&priv.toObject()))
+    if (IsInsideNursery(priv.toObject().runtimeFromMainThread(), &priv.toObject()))
         return true;
     return IsBackgroundFinalized(priv.toObject().tenuredGetAllocKind());
 }
@@ -410,7 +410,7 @@ Reify(JSContext *cx, JSCompartment *origin, MutableHandleValue vp)
             if (!ValueToId<CanGC>(cx, v, &id))
                 return false;
             keys.infallibleAppend(id);
-            if (!origin->wrapId(cx, keys[i].address()))
+            if (!origin->wrapId(cx, &keys[i]))
                 return false;
         }
     }
@@ -569,16 +569,8 @@ CrossCompartmentWrapper::fun_toString(JSContext *cx, HandleObject wrapper, unsig
 bool
 CrossCompartmentWrapper::regexp_toShared(JSContext *cx, HandleObject wrapper, RegExpGuard *g)
 {
-    RegExpGuard wrapperGuard(cx);
-    {
-        AutoCompartment call(cx, wrappedObject(wrapper));
-        if (!Wrapper::regexp_toShared(cx, wrapper, &wrapperGuard))
-            return false;
-    }
-
-    // Get an equivalent RegExpShared associated with the current compartment.
-    RegExpShared *re = wrapperGuard.re();
-    return cx->compartment()->regExps.get(cx, re->getSource(), re->getFlags(), g);
+    AutoCompartment call(cx, wrappedObject(wrapper));
+    return Wrapper::regexp_toShared(cx, wrapper, g);
 }
 
 bool
@@ -1007,7 +999,7 @@ js::RemapWrapper(JSContext *cx, JSObject *wobjArg, JSObject *newTargetArg)
     // Update the entry in the compartment's wrapper map to point to the old
     // wrapper, which has now been updated (via reuse or swap).
     JS_ASSERT(wobj->is<WrapperObject>());
-    wcompartment->putWrapper(cx, CrossCompartmentKey(newTarget), ObjectValue(*wobj));
+    wcompartment->putWrapper(cx, ObjectValue(*newTarget), ObjectValue(*wobj));
     return true;
 }
 

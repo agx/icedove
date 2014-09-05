@@ -27,9 +27,6 @@ exports.items = [
     description: gcli.lookup("screenshotDesc"),
     manual: gcli.lookup("screenshotManual"),
     returnType: "dom",
-    buttonId: "command-button-screenshot",
-    buttonClass: "command-button command-button-invertable",
-    tooltipText: gcli.lookup("screenshotTooltip"),
     params: [
       {
         name: "filename",

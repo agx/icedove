@@ -78,8 +78,8 @@ var gPluginHandler = {
     browser.removeEventListener("NewPluginInstalled", gPluginHandler);
   },
 
-  getPluginUI: function (plugin, anonId) {
-    return plugin.ownerDocument.getAnonymousElementByAttribute(plugin, "anonid", anonId);
+  getPluginUI: function (plugin, className) {
+    return plugin.ownerDocument.getAnonymousElementByAttribute(plugin, "class", className);
   },
 
   get CrashSubmit() {
@@ -232,7 +232,7 @@ var gPluginHandler = {
       // The plugin binding fires this event when it is created.
       // As an untrusted event, ensure that this object actually has a binding
       // and make sure we don't handle it twice
-      let overlay = this.getPluginUI(plugin, "main");
+      let overlay = doc.getAnonymousElementByAttribute(plugin, "class", "mainBox");
       if (!overlay || overlay._bindingHandled) {
         return;
       }
@@ -257,12 +257,12 @@ var gPluginHandler = {
         // so don't stomp on the page developers toes.
         if (!(plugin instanceof HTMLObjectElement)) {
           // We don't yet check to see if there's actually an installer available.
-          let installStatus = this.getPluginUI(plugin, "installStatus");
+          let installStatus = doc.getAnonymousElementByAttribute(plugin, "class", "installStatus");
           installStatus.setAttribute("status", "ready");
-          let iconStatus = this.getPluginUI(plugin, "icon");
+          let iconStatus = doc.getAnonymousElementByAttribute(plugin, "class", "icon");
           iconStatus.setAttribute("status", "ready");
 
-          let installLink = this.getPluginUI(plugin, "installPluginLink");
+          let installLink = doc.getAnonymousElementByAttribute(plugin, "anonid", "installPluginLink");
           self.addLinkClickCallback(installLink, "installSinglePlugin", plugin);
         }
         /* FALLTHRU */
@@ -276,14 +276,14 @@ var gPluginHandler = {
         break;
 
       case "PluginDisabled":
-        let manageLink = this.getPluginUI(plugin, "managePluginsLink");
+        let manageLink = doc.getAnonymousElementByAttribute(plugin, "anonid", "managePluginsLink");
         self.addLinkClickCallback(manageLink, "managePlugins");
         break;
     }
 
     // Hide the in-content UI if it's too big. The crashed plugin handler already did this.
     if (eventType != "PluginCrashed") {
-      let overlay = this.getPluginUI(plugin, "main");
+      let overlay = doc.getAnonymousElementByAttribute(plugin, "class", "mainBox");
       if (overlay != null) {
         this.setVisibility(plugin, overlay,
                            this.shouldShowOverlay(plugin, overlay));
@@ -598,8 +598,8 @@ var gPluginHandler = {
     // Force a layout flush so the binding is attached.
     plugin.clientTop;
     let doc = plugin.ownerDocument;
-    let overlay = this.getPluginUI(plugin, "main");
-    let statusDiv = this.getPluginUI(plugin, "submitStatus");
+    let overlay = doc.getAnonymousElementByAttribute(plugin, "class", "mainBox");
+    let statusDiv = doc.getAnonymousElementByAttribute(plugin, "class", "submitStatus");
 #ifdef MOZ_CRASHREPORTER
     let status;
 
@@ -633,7 +633,7 @@ var gPluginHandler = {
 
     statusDiv.setAttribute("status", status);
 
-    let helpIcon = this.getPluginUI(plugin, "helpIcon");
+    let helpIcon = doc.getAnonymousElementByAttribute(plugin, "class", "helpIcon");
     this.addLinkClickCallback(helpIcon, "openPluginCrashHelpPage");
 
     // If we're showing the link to manually trigger report submission, we'll
@@ -669,11 +669,11 @@ var gPluginHandler = {
     }
 #endif
 
-    let crashText = this.getPluginUI(plugin, "crashedText");
+    let crashText = doc.getAnonymousElementByAttribute(plugin, "class", "msgCrashedText");
     crashText.textContent = messageString;
     let browser = tabmail.getBrowserForSelectedTab();
 
-    let link = this.getPluginUI(plugin, "reloadLink");
+    let link = doc.getAnonymousElementByAttribute(plugin, "class", "reloadLink");
     this.addLinkClickCallback(link, "reloadPage", browser);
 
     let notificationBox = getNotificationBox(browser.contentWindow);

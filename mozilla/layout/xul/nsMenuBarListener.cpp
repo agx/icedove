@@ -18,7 +18,6 @@
 #include "nsIDOMElement.h"
 
 #include "nsContentUtils.h"
-#include "mozilla/BasicEvents.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/TextEvents.h"
 
@@ -30,10 +29,16 @@ using namespace mozilla;
 
 NS_IMPL_ISUPPORTS(nsMenuBarListener, nsIDOMEventListener)
 
+#define MODIFIER_SHIFT    1
+#define MODIFIER_CONTROL  2
+#define MODIFIER_ALT      4
+#define MODIFIER_META     8
+#define MODIFIER_OS       16
+
 ////////////////////////////////////////////////////////////////////////
 
 int32_t nsMenuBarListener::mAccessKey = -1;
-Modifiers nsMenuBarListener::mAccessKeyMask = 0;
+uint32_t nsMenuBarListener::mAccessKeyMask = 0;
 bool nsMenuBarListener::mAccessKeyFocuses = false;
 
 nsMenuBarListener::nsMenuBarListener(nsMenuBarFrame* aMenuBar) 
@@ -233,7 +238,7 @@ nsMenuBarListener::KeyPress(nsIDOMEvent* aKeyEvent)
 #ifndef XP_MACOSX
       // Also need to handle F10 specially on Non-Mac platform.
       else if (keyCode == NS_VK_F10) {
-        if ((GetModifiersForAccessKey(keyEvent) & ~MODIFIER_CONTROL) == 0) {
+        if ((GetModifiers(keyEvent) & ~MODIFIER_CONTROL) == 0) {
           // The F10 key just went down by itself or with ctrl pressed.
           // In Windows, both of these activate the menu bar.
           mMenuBarFrame->SetActiveByKeyboard();
@@ -262,24 +267,42 @@ nsMenuBarListener::IsAccessKeyPressed(nsIDOMKeyEvent* aKeyEvent)
 {
   InitAccessKey();
   // No other modifiers are allowed to be down except for Shift.
-  uint32_t modifiers = GetModifiersForAccessKey(aKeyEvent);
+  uint32_t modifiers = GetModifiers(aKeyEvent);
 
   return (mAccessKeyMask != MODIFIER_SHIFT &&
           (modifiers & mAccessKeyMask) &&
           (modifiers & ~(mAccessKeyMask | MODIFIER_SHIFT)) == 0);
 }
 
-Modifiers
-nsMenuBarListener::GetModifiersForAccessKey(nsIDOMKeyEvent* aKeyEvent)
+uint32_t
+nsMenuBarListener::GetModifiers(nsIDOMKeyEvent* aKeyEvent)
 {
+  uint32_t modifiers = 0;
   WidgetInputEvent* inputEvent =
     aKeyEvent->GetInternalNSEvent()->AsInputEvent();
   MOZ_ASSERT(inputEvent);
 
-  static const Modifiers kPossibleModifiersForAccessKey =
-    (MODIFIER_SHIFT | MODIFIER_CONTROL | MODIFIER_ALT | MODIFIER_META |
-     MODIFIER_OS);
-  return (inputEvent->modifiers & kPossibleModifiersForAccessKey);
+  if (inputEvent->IsShift()) {
+    modifiers |= MODIFIER_SHIFT;
+  }
+
+  if (inputEvent->IsControl()) {
+    modifiers |= MODIFIER_CONTROL;
+  }
+
+  if (inputEvent->IsAlt()) {
+    modifiers |= MODIFIER_ALT;
+  }
+
+  if (inputEvent->IsMeta()) {
+    modifiers |= MODIFIER_META;
+  }
+
+  if (inputEvent->IsOS()) {
+    modifiers |= MODIFIER_OS;
+  }
+
+  return modifiers;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -311,7 +334,7 @@ nsMenuBarListener::KeyDown(nsIDOMEvent* aKeyEvent)
     // enhanced 102-key keyboards if we don't check this.
     bool isAccessKeyDownEvent =
       ((theChar == (uint32_t)mAccessKey) &&
-       (GetModifiersForAccessKey(keyEvent) & ~mAccessKeyMask) == 0);
+       (GetModifiers(keyEvent) & ~mAccessKeyMask) == 0);
 
     if (!mAccessKeyDown) {
       // If accesskey isn't being pressed and the key isn't the accesskey,

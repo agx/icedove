@@ -174,7 +174,7 @@ UnreachableCodeElimination::prunePointlessBranchesAndMarkReachableBlocks()
             if (!osrBlock->getSuccessor(i)->isMarked()) {
                 // OSR block has an otherwise unreachable successor, abort.
                 for (MBasicBlockIterator iter(graph_.begin()); iter != graph_.end(); iter++)
-                    iter->markUnchecked();
+                    iter->mark();
                 marked_ = graph_.numBlocks();
                 return true;
             }
@@ -208,10 +208,11 @@ UnreachableCodeElimination::checkDependencyAndRemoveUsesFromUnmarkedBlocks(MDefi
         rerunAliasAnalysis_ = true;
 
     for (MUseIterator iter(instr->usesBegin()); iter != instr->usesEnd(); ) {
-        MUse *use = *iter++;
-        if (!use->consumer()->block()->isMarked()) {
+        if (!iter->consumer()->block()->isMarked()) {
             instr->setUseRemovedUnchecked();
-            use->discardProducer();
+            iter = instr->removeUse(iter);
+        } else {
+            iter++;
         }
     }
 }
@@ -243,6 +244,33 @@ UnreachableCodeElimination::removeUnmarkedBlocksAndClearDominators()
             for (MInstructionIterator iter(block->begin()); iter != block->end(); iter++)
                 checkDependencyAndRemoveUsesFromUnmarkedBlocks(*iter);
         } else {
+            if (block->numPredecessors() > 1) {
+                // If this block had phis, then any reachable
+                // predecessors need to have the successorWithPhis
+                // flag cleared.
+                for (size_t i = 0; i < block->numPredecessors(); i++)
+                    block->getPredecessor(i)->setSuccessorWithPhis(nullptr, 0);
+            }
+
+            if (block->isLoopBackedge()) {
+                // NB. We have to update the loop header if we
+                // eliminate the backedge. At first I thought this
+                // check would be insufficient, because it would be
+                // possible to have code like this:
+                //
+                //    while (true) {
+                //       ...;
+                //       if (1 == 1) break;
+                //    }
+                //
+                // in which the backedge is removed as part of
+                // rewriting the condition, but no actual blocks are
+                // removed.  However, in all such cases, the backedge
+                // would be a critical edge and hence the critical
+                // edge block is being removed.
+                block->loopHeaderOfBackedge()->clearLoopHeader();
+            }
+
             for (size_t i = 0, c = block->numSuccessors(); i < c; i++) {
                 MBasicBlock *succ = block->getSuccessor(i);
                 if (succ->isMarked()) {

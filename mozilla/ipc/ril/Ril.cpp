@@ -95,7 +95,7 @@ PostToRIL(JSContext *aCx,
     JSAutoByteString abs;
     void *data;
     size_t size;
-    if (v.isString()) {
+    if (JSVAL_IS_STRING(v)) {
         JS::Rooted<JSString*> str(aCx, v.toString());
         if (!abs.encodeUtf8(aCx, str)) {
             return false;
@@ -103,8 +103,8 @@ PostToRIL(JSContext *aCx,
 
         data = abs.ptr();
         size = abs.length();
-    } else if (!v.isPrimitive()) {
-        JSObject *obj = v.toObjectOrNull();
+    } else if (!JSVAL_IS_PRIMITIVE(v)) {
+        JSObject *obj = JSVAL_TO_OBJECT(v);
         if (!JS_IsTypedArrayObject(obj)) {
             JS_ReportError(aCx, "Object passed in wasn't a typed array");
             return false;

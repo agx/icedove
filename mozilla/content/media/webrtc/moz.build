@@ -19,13 +19,16 @@ if CONFIG['MOZ_WEBRTC']:
                 'LoadMonitor.h',
                 'MediaEngineWebRTC.h']
     UNIFIED_SOURCES += [
-        'LoadManager.cpp',
         'LoadManagerFactory.cpp',
-        'LoadMonitor.cpp',
         'MediaEngineTabVideoSource.cpp',
         'MediaEngineWebRTCAudio.cpp',
         'MediaEngineWebRTCVideo.cpp',
     ]
+    if CONFIG['OS_ARCH'] == 'Android' or CONFIG['OS_ARCH'] == 'Linux':
+        UNIFIED_SOURCES += [
+            'LoadManager.cpp',
+            'LoadMonitor.cpp',
+        ]
     # MediaEngineWebRTC.cpp needs to be built separately.
     SOURCES += [
         'MediaEngineWebRTC.cpp',
@@ -45,11 +48,6 @@ XPIDL_SOURCES += [
 
 UNIFIED_SOURCES += [
     'MediaEngineDefault.cpp',
-    'PeerIdentity.cpp',
-]
-
-EXPORTS.mozilla += [
-    'PeerIdentity.h',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

@@ -99,7 +99,7 @@ _callHook(JSDContext *jsdc, JSContext *cx, JSAbstractFramePtr frame, bool isCons
         JS::RootedValue newObj(cx);
         if (!frame.getThisValue(cx, &newObj))
             return false;
-        jsd_Constructing(jsdc, cx, newObj.toObjectOrNull(), frame);
+        jsd_Constructing(jsdc, cx, JSVAL_TO_OBJECT(newObj), frame);
     }
 
     jsscript = frame.script();

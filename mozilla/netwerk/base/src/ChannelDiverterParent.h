@@ -27,9 +27,6 @@ public:
   bool Init(const ChannelDiverterArgs& aChannel);
 
   void DivertTo(nsIStreamListener* newListener);
-
-  virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
-
 private:
   nsRefPtr<ADivertableParentChannel> mDivertableChannelParent;
 };

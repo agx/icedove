@@ -31,8 +31,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 // we need this otherwise we cannot use forward declaration
 // in the header file
 #if (defined(WEBRTC_CODEC_ISAC) || defined(WEBRTC_CODEC_ISACFX))
@@ -827,7 +825,5 @@ AudioDecoder* ACMISAC::Decoder(int codec_id) {
 }
 
 #endif
-
-}  // namespace acm2
 
 }  // namespace webrtc

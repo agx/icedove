@@ -120,6 +120,7 @@ nsCSSBorderRenderer::nsCSSBorderRenderer(int32_t aAppUnitsPerPixel,
                                          gfxCornerSizes& aBorderRadii,
                                          const nscolor* aBorderColors,
                                          nsBorderColors* const* aCompositeColors,
+                                         int aSkipSides,
                                          nscolor aBackgroundColor)
   : mContext(aDestContext),
     mOuterRect(aOuterRect),
@@ -129,6 +130,7 @@ nsCSSBorderRenderer::nsCSSBorderRenderer(int32_t aAppUnitsPerPixel,
     mBorderColors(aBorderColors),
     mCompositeColors(aCompositeColors),
     mAUPP(aAppUnitsPerPixel),
+    mSkipSides(aSkipSides),
     mBackgroundColor(aBackgroundColor)
 {
   if (!mCompositeColors) {
@@ -1770,9 +1772,7 @@ nsCSSBorderRenderer::DrawBorders()
     DrawBorderSides(SIDE_BITS_ALL);
     SN("---------------- (1)");
   } else {
-    PROFILER_LABEL("nsCSSBorderRenderer", "DrawBorders::multipass",
-      js::ProfileEntry::Category::GRAPHICS);
-
+    PROFILER_LABEL("nsCSSBorderRenderer", "DrawBorders::multipass");
     /* We have more than one pass to go.  Draw the corners separately from the sides. */
 
     /*

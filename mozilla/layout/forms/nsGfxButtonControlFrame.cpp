@@ -22,7 +22,7 @@ nsGfxButtonControlFrame::nsGfxButtonControlFrame(nsStyleContext* aContext):
 {
 }
 
-nsContainerFrame*
+nsIFrame*
 NS_NewGfxButtonControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsGfxButtonControlFrame(aContext);
@@ -83,7 +83,7 @@ nsGfxButtonControlFrame::CreateFrameFor(nsIContent*      aContent)
   nsIFrame * newFrame = nullptr;
 
   if (aContent == mTextContent) {
-    nsContainerFrame* parentFrame = do_QueryFrame(mFrames.FirstChild());
+    nsIFrame * parentFrame = mFrames.FirstChild();
 
     nsPresContext* presContext = PresContext();
     nsRefPtr<nsStyleContext> textStyleContext;
@@ -210,7 +210,7 @@ nsGfxButtonControlFrame::IsLeaf() const
   return true;
 }
 
-nsContainerFrame*
+nsIFrame*
 nsGfxButtonControlFrame::GetContentInsertionFrame()
 {
   return this;

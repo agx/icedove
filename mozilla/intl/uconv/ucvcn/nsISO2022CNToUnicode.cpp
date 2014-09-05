@@ -4,9 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 #include "nsISO2022CNToUnicode.h"
 #include "nsUCSupport.h"
-#include "mozilla/dom/EncodingUtils.h"
+#include "nsICharsetConverterManager.h"
+#include "nsServiceManagerUtils.h"
 
-using mozilla::dom::EncodingUtils;
+static NS_DEFINE_CID(kCharsetConverterManagerCID, NS_ICHARSETCONVERTERMANAGER_CID);
 
 NS_IMETHODIMP nsISO2022CNToUnicode::GB2312_To_Unicode(unsigned char *aSrc, int32_t aSrcLength, char16_t * aDest, int32_t * aDestLength)
 {
@@ -14,7 +15,14 @@ NS_IMETHODIMP nsISO2022CNToUnicode::GB2312_To_Unicode(unsigned char *aSrc, int32
 
     if(!mGB2312_Decoder) {
        // creating a delegate converter (GB2312)
-       mGB2312_Decoder = EncodingUtils::DecoderForEncoding(NS_LITERAL_CSTRING("GB2312"));
+       nsCOMPtr<nsICharsetConverterManager> ccm =
+              do_GetService(kCharsetConverterManagerCID, &rv);
+       if(NS_FAILED(rv))
+          return NS_ERROR_UNEXPECTED;
+
+       rv = ccm->GetUnicodeDecoderRaw("GB2312", getter_AddRefs(mGB2312_Decoder));
+       if(NS_FAILED(rv))
+          return NS_ERROR_UNEXPECTED;
     }
 
     if(!mGB2312_Decoder) // failed creating a delegate converter
@@ -30,7 +38,14 @@ NS_IMETHODIMP nsISO2022CNToUnicode::EUCTW_To_Unicode(unsigned char *aSrc, int32_
 
     if(!mEUCTW_Decoder) {
        // creating a delegate converter (x-euc-tw)
-       mEUCTW_Decoder = EncodingUtils::DecoderForEncoding(NS_LITERAL_CSTRING("x-euc-tw"));
+       nsCOMPtr<nsICharsetConverterManager> ccm =
+              do_GetService(kCharsetConverterManagerCID, &rv);
+       if(NS_FAILED(rv))
+          return NS_ERROR_UNEXPECTED;
+
+       rv = ccm->GetUnicodeDecoderRaw("x-euc-tw", getter_AddRefs(mEUCTW_Decoder));
+       if(NS_FAILED(rv))
+          return NS_ERROR_UNEXPECTED;
     }
 
     if(!mEUCTW_Decoder) // failed creating a delegate converter

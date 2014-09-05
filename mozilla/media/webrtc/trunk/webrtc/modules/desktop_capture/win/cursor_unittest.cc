@@ -9,9 +9,7 @@
  */
 
 #include "testing/gmock/include/gmock/gmock.h"
-#include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/desktop_geometry.h"
-#include "webrtc/modules/desktop_capture/mouse_cursor.h"
 #include "webrtc/modules/desktop_capture/win/cursor.h"
 #include "webrtc/modules/desktop_capture/win/cursor_unittest_resources.h"
 #include "webrtc/modules/desktop_capture/win/scoped_gdi_object.h"
@@ -21,9 +19,9 @@ namespace webrtc {
 
 namespace {
 
-// Loads |left| from resources, converts it to a |MouseCursor| instance and
-// compares pixels with |right|. Returns true of MouseCursor bits match |right|.
-// |right| must be a 32bpp cursor with alpha channel.
+// Loads |left| from resources, converts it to a |MouseCursorShape| instance
+// and compares pixels with |right|. Returns true of MouseCursorShape bits
+// match |right|. |right| must be a 32bpp cursor with alpha channel.
 bool ConvertToMouseShapeAndCompare(unsigned left, unsigned right) {
   HMODULE instance = GetModuleHandle(NULL);
 
@@ -34,8 +32,8 @@ bool ConvertToMouseShapeAndCompare(unsigned left, unsigned right) {
 
   // Convert |cursor| to |mouse_shape|.
   HDC dc = GetDC(NULL);
-  scoped_ptr<MouseCursor> mouse_shape(
-      CreateMouseCursorFromHCursor(dc, cursor));
+  scoped_ptr<MouseCursorShape> mouse_shape(
+      CreateMouseCursorShapeFromCursor(dc, cursor));
   ReleaseDC(NULL, dc);
 
   EXPECT_TRUE(mouse_shape.get());
@@ -58,7 +56,7 @@ bool ConvertToMouseShapeAndCompare(unsigned left, unsigned right) {
 
   int width = bitmap_info.bmWidth;
   int height = bitmap_info.bmHeight;
-  EXPECT_TRUE(DesktopSize(width, height).equals(mouse_shape->image()->size()));
+  EXPECT_TRUE(DesktopSize(width, height).equals(mouse_shape->size));
 
   // Get the pixels from |scoped_color|.
   int size = width * height;
@@ -66,13 +64,13 @@ bool ConvertToMouseShapeAndCompare(unsigned left, unsigned right) {
   EXPECT_TRUE(GetBitmapBits(scoped_color, size * sizeof(uint32_t), data.get()));
 
   // Compare the 32bpp image in |mouse_shape| with the one loaded from |right|.
-  return memcmp(data.get(), mouse_shape->image()->data(),
+  return memcmp(data.get(), mouse_shape->data.data(),
                 size * sizeof(uint32_t)) == 0;
 }
 
 }  // namespace
 
-TEST(MouseCursorTest, MatchCursors) {
+TEST(MouseCursorShapeTest, MatchCursors) {
   EXPECT_TRUE(ConvertToMouseShapeAndCompare(IDD_CURSOR1_24BPP,
                                             IDD_CURSOR1_32BPP));
 

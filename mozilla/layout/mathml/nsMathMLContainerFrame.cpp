@@ -391,7 +391,7 @@ nsMathMLContainerFrame::Stretch(nsRenderingContext& aRenderingContext,
         // the outermost embellished container will take care of it.
 
         nsEmbellishData parentData;
-        GetEmbellishDataFrom(GetParent(), parentData);
+        GetEmbellishDataFrom(mParent, parentData);
         // ensure that we are the embellished child, not just a sibling
         // (need to test coreFrame since <mfrac> resets other things)
         if (parentData.coreFrame != mEmbellishData.coreFrame) {
@@ -479,7 +479,7 @@ nsMathMLContainerFrame::FinalizeReflow(nsRenderingContext& aRenderingContext,
     // This means the rect.x and rect.y of our children were not set!!
     // Don't go without checking to see if our parent will later fire a Stretch() command
     // targeted at us. The Stretch() will cause the rect.x and rect.y to clear...
-    nsIMathMLFrame* mathMLFrame = do_QueryFrame(GetParent());
+    nsIMathMLFrame* mathMLFrame = do_QueryFrame(mParent);
     if (mathMLFrame) {
       nsEmbellishData embellishData;
       nsPresentationData presentationData;
@@ -724,7 +724,7 @@ nsMathMLContainerFrame::ChildListChanged(int32_t aModType)
   // outermost embellished container.
   nsIFrame* frame = this;
   if (mEmbellishData.coreFrame) {
-    nsIFrame* parent = GetParent();
+    nsIFrame* parent = mParent;
     nsEmbellishData embellishData;
     for ( ; parent; frame = parent, parent = parent->GetParent()) {
       GetEmbellishDataFrom(parent, embellishData);
@@ -735,32 +735,40 @@ nsMathMLContainerFrame::ChildListChanged(int32_t aModType)
   return ReLayoutChildren(frame);
 }
 
-void
+nsresult
 nsMathMLContainerFrame::AppendFrames(ChildListID     aListID,
                                      nsFrameList&    aFrameList)
 {
-  MOZ_ASSERT(aListID == kPrincipalList);
+  if (aListID != kPrincipalList) {
+    return NS_ERROR_INVALID_ARG;
+  }
   mFrames.AppendFrames(this, aFrameList);
-  ChildListChanged(nsIDOMMutationEvent::ADDITION);
+  return ChildListChanged(nsIDOMMutationEvent::ADDITION);
 }
 
-void
+nsresult
 nsMathMLContainerFrame::InsertFrames(ChildListID     aListID,
                                      nsIFrame*       aPrevFrame,
                                      nsFrameList&    aFrameList)
 {
-  MOZ_ASSERT(aListID == kPrincipalList);
+  if (aListID != kPrincipalList) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  // Insert frames after aPrevFrame
   mFrames.InsertFrames(this, aPrevFrame, aFrameList);
-  ChildListChanged(nsIDOMMutationEvent::ADDITION);
+  return ChildListChanged(nsIDOMMutationEvent::ADDITION);
 }
 
-void
+nsresult
 nsMathMLContainerFrame::RemoveFrame(ChildListID     aListID,
                                     nsIFrame*       aOldFrame)
 {
-  MOZ_ASSERT(aListID == kPrincipalList);
+  if (aListID != kPrincipalList) {
+    return NS_ERROR_INVALID_ARG;
+  }
+  // remove the child frame
   mFrames.DestroyFrame(aOldFrame);
-  ChildListChanged(nsIDOMMutationEvent::REMOVAL);
+  return ChildListChanged(nsIDOMMutationEvent::REMOVAL);
 }
 
 nsresult
@@ -819,7 +827,7 @@ nsMathMLContainerFrame::UpdateOverflow()
   return false;
 }
 
-void
+nsresult 
 nsMathMLContainerFrame::ReflowChild(nsIFrame*                aChildFrame,
                                     nsPresContext*           aPresContext,
                                     nsHTMLReflowMetrics&     aDesiredSize,
@@ -841,9 +849,12 @@ nsMathMLContainerFrame::ReflowChild(nsIFrame*                aChildFrame,
   NS_ASSERTION(!inlineFrame, "Inline frames should be wrapped in blocks");
 #endif
   
-  nsContainerFrame::
+  nsresult rv = nsContainerFrame::
          ReflowChild(aChildFrame, aPresContext, aDesiredSize, aReflowState,
                      0, 0, NS_FRAME_NO_MOVE_FRAME, aStatus);
+
+  if (NS_FAILED(rv))
+    return rv;
 
   if (aDesiredSize.TopAscent() == nsHTMLReflowMetrics::ASK_FOR_BASELINE) {
     // This will be suitable for inline frames, which are wrapped in a block.
@@ -867,9 +878,10 @@ nsMathMLContainerFrame::ReflowChild(nsIFrame*                aChildFrame,
     aDesiredSize.mBoundingMetrics.descent = r.YMost() - aDesiredSize.TopAscent();
     aDesiredSize.mBoundingMetrics.width = aDesiredSize.Width();
   }
+  return rv;
 }
 
-void
+nsresult
 nsMathMLContainerFrame::Reflow(nsPresContext*           aPresContext,
                                nsHTMLReflowMetrics&     aDesiredSize,
                                const nsHTMLReflowState& aReflowState,
@@ -891,9 +903,15 @@ nsMathMLContainerFrame::Reflow(nsPresContext*           aPresContext,
                                          aDesiredSize.mFlags);
     nsHTMLReflowState childReflowState(aPresContext, aReflowState,
                                        childFrame, availSize);
-    ReflowChild(childFrame, aPresContext, childDesiredSize,
-                childReflowState, childStatus);
+    nsresult rv = ReflowChild(childFrame, aPresContext, childDesiredSize,
+                              childReflowState, childStatus);
     //NS_ASSERTION(NS_FRAME_IS_COMPLETE(childStatus), "bad status");
+    if (NS_FAILED(rv)) {
+      // Call DidReflow() for the child frames we successfully did reflow.
+      DidReflowChildren(mFrames.FirstChild(), childFrame);
+      return rv;
+    }
+
     SaveReflowAndBoundingMetricsFor(childFrame, childDesiredSize,
                                     childDesiredSize.mBoundingMetrics);
     childFrame = childFrame->GetNextSibling();
@@ -950,6 +968,7 @@ nsMathMLContainerFrame::Reflow(nsPresContext*           aPresContext,
 
   aStatus = NS_FRAME_COMPLETE;
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  return NS_OK;
 }
 
 static nscoord AddInterFrameSpacingToSize(nsHTMLReflowMetrics&    aDesiredSize,
@@ -1570,7 +1589,7 @@ nsMathMLContainerFrame::ReportInvalidChildError(nsIAtom* aChildTag)
 
 //==========================
 
-nsContainerFrame*
+nsIFrame*
 NS_NewMathMLmathBlockFrame(nsIPresShell* aPresShell, nsStyleContext* aContext,
                            nsFrameState aFlags)
 {
@@ -1585,7 +1604,7 @@ NS_QUERYFRAME_HEAD(nsMathMLmathBlockFrame)
   NS_QUERYFRAME_ENTRY(nsMathMLmathBlockFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsBlockFrame)
 
-nsContainerFrame*
+nsIFrame*
 NS_NewMathMLmathInlineFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsMathMLmathInlineFrame(aContext);

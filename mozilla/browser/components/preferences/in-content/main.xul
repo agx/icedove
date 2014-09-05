@@ -1,8 +1,6 @@
-# This Source Code Form is subject to the terms of the Mozilla Public
-# License, v. 2.0. If a copy of the MPL was not distributed with this
-# file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-<!-- General panel -->
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this file,
+   - You can obtain one at http://mozilla.org/MPL/2.0/.  -->
 
 <script type="application/javascript" 
         src="chrome://browser/content/preferences/in-content/main.js"/>
@@ -89,21 +87,20 @@
 
 <hbox id="header-general"
       class="header"
-      hidden="true"
       data-category="paneGeneral">
   <image class="header-icon"/>
-  <label class="header-name">&paneGeneral.title;</label>
+  <label class="header-name"
+         value="&paneGeneral.title;"/>
 </hbox>
 
 <!-- Startup -->
-<groupbox id="startupGroup"
-          data-category="paneGeneral"
-          hidden="true">
-  <caption><label>&startup.label;</label></caption>
+<groupbox id="startupGroup" data-category="paneGeneral">
+  <caption label="&startup.label;"/>
 
   <hbox align="center">
-    <label accesskey="&startupPage.accesskey;"
-           control="browserStartupPage">&startupPage.label;</label>
+    <label value="&startupPage.label;"
+           accesskey="&startupPage.accesskey;"
+           control="browserStartupPage"/>
     <menulist id="browserStartupPage"
               preference="browser.startup.page">
       <menupopup>
@@ -121,8 +118,9 @@
   </hbox>
   <separator class="thin"/>
   <hbox align="center">
-    <label accesskey="&homepage.accesskey;"
-           control="browserHomePage">&homepage.label;</label>
+    <label value="&homepage.label;"
+           accesskey="&homepage.accesskey;"
+           control="browserHomePage"/>
     <textbox id="browserHomePage"
              class="padded uri-element"
              flex="1"
@@ -155,10 +153,8 @@
 </groupbox>
 
 <!-- Downloads -->
-<groupbox id="downloadsGroup"
-          data-category="paneGeneral"
-          hidden="true">
-  <caption><label>&downloads.label;</label></caption>
+<groupbox id="downloadsGroup" data-category="paneGeneral">
+  <caption label="&downloads.label;"/>
 
   <radiogroup id="saveWhere"
               preference="browser.download.useDownloadDir"
@@ -188,19 +184,16 @@
               preference="browser.download.folderList"
               onsynctopreference="return gMainPane.getFolderListPref();"/>
     </hbox>
-    <hbox>
-      <radio id="alwaysAsk"
-             value="false"
-             label="&alwaysAsk.label;"
-             accesskey="&alwaysAsk.accesskey;"/>
-    </hbox>
+    <radio id="alwaysAsk"
+           value="false"
+           label="&alwaysAsk.label;"
+           accesskey="&alwaysAsk.accesskey;"/>
   </radiogroup>
 </groupbox>
 
 <!-- Tab preferences -->
-<groupbox data-category="paneGeneral"
-          hidden="true" align="start">
-    <caption><label>&tabsGroup.label;</label></caption>
+<groupbox data-category="paneGeneral">
+    <caption label="&tabsGroup.label;"/>
     <checkbox id="linkTargeting" label="&newWindowsAsTabs.label;"
               accesskey="&newWindowsAsTabs.accesskey;"
               preference="browser.link.open_newwindow"

@@ -49,13 +49,18 @@ public:
   NS_DECL_QUERYFRAME
 
   // nsIFrame overrides
-  virtual void Init(nsIContent*       aContent,
-                    nsContainerFrame* aParent,
-                    nsIFrame*         aPrevInFlow) MOZ_OVERRIDE;
-  virtual nsContainerFrame* GetContentInsertionFrame() MOZ_OVERRIDE
-  {
-    return this;
-  }
+  virtual void Init(nsIContent* aContent,
+                    nsIFrame*   aParent,
+                    nsIFrame*   aPrevInFlow) MOZ_OVERRIDE;
+  virtual nsresult SetInitialChildList(ChildListID  aListID,
+                                       nsFrameList& aChildList) MOZ_OVERRIDE;
+  virtual nsresult AppendFrames(ChildListID  aListID,
+                                nsFrameList& aFrameList) MOZ_OVERRIDE;
+  virtual nsresult InsertFrames(ChildListID aListID,
+                                nsIFrame* aPrevFrame,
+                                nsFrameList& aFrameList) MOZ_OVERRIDE;
+  virtual nsresult RemoveFrame(ChildListID aListID,
+                               nsIFrame* aOldFrame) MOZ_OVERRIDE;
 
   virtual const nsFrameList& GetChildList(ChildListID aList) const MOZ_OVERRIDE;
   virtual void GetChildLists(nsTArray<ChildList>* aLists) const MOZ_OVERRIDE;
@@ -72,59 +77,6 @@ public:
 #endif  
 
   // nsContainerFrame methods
-
-  /**
-   * Called to set the initial list of frames. This happens after the frame
-   * has been initialized.
-   *
-   * This is only called once for a given child list, and won't be called
-   * at all for child lists with no initial list of frames.
-   *
-   * @param   aListID the child list identifier.
-   * @param   aChildList list of child frames. Each of the frames has its
-   *            NS_FRAME_IS_DIRTY bit set.  Must not be empty.
-   *            This method cannot handle the child list returned by
-   *            GetAbsoluteListID().
-   * @see     #Init()
-   */
-  virtual void SetInitialChildList(ChildListID aListID,
-                                   nsFrameList& aChildList);
-
-  /**
-   * This method is responsible for appending frames to the frame
-   * list.  The implementation should append the frames to the specified
-   * child list and then generate a reflow command.
-   *
-   * @param   aListID the child list identifier.
-   * @param   aFrameList list of child frames to append. Each of the frames has
-   *            its NS_FRAME_IS_DIRTY bit set.  Must not be empty.
-   */
-  virtual void AppendFrames(ChildListID aListID, nsFrameList& aFrameList);
-
-  /**
-   * This method is responsible for inserting frames into the frame
-   * list.  The implementation should insert the new frames into the specified
-   * child list and then generate a reflow command.
-   *
-   * @param   aListID the child list identifier.
-   * @param   aPrevFrame the frame to insert frames <b>after</b>
-   * @param   aFrameList list of child frames to insert <b>after</b> aPrevFrame.
-   *            Each of the frames has its NS_FRAME_IS_DIRTY bit set
-   */
-  virtual void InsertFrames(ChildListID  aListID,
-                            nsIFrame*    aPrevFrame,
-                            nsFrameList& aFrameList);
-
-  /**
-   * This method is responsible for removing a frame in the frame
-   * list.  The implementation should do something with the removed frame
-   * and then generate a reflow command. The implementation is responsible
-   * for destroying aOldFrame (the caller mustn't destroy aOldFrame).
-   *
-   * @param   aListID the child list identifier.
-   * @param   aOldFrame the frame to remove
-   */
-  virtual void RemoveFrame(ChildListID aListID, nsIFrame* aOldFrame);
 
   /**
    * Helper method to create next-in-flows if necessary. If aFrame
@@ -238,15 +190,15 @@ public:
    * NS_FRAME_NO_MOVE_FRAME - don't move the frame. aX and aY are ignored in this
    *    case. Also implies NS_FRAME_NO_MOVE_VIEW
    */
-  void ReflowChild(nsIFrame*                      aKidFrame,
-                   nsPresContext*                 aPresContext,
-                   nsHTMLReflowMetrics&           aDesiredSize,
-                   const nsHTMLReflowState&       aReflowState,
-                   nscoord                        aX,
-                   nscoord                        aY,
-                   uint32_t                       aFlags,
-                   nsReflowStatus&                aStatus,
-                   nsOverflowContinuationTracker* aTracker = nullptr);
+  nsresult ReflowChild(nsIFrame*                      aKidFrame,
+                       nsPresContext*                 aPresContext,
+                       nsHTMLReflowMetrics&           aDesiredSize,
+                       const nsHTMLReflowState&       aReflowState,
+                       nscoord                        aX,
+                       nscoord                        aY,
+                       uint32_t                       aFlags,
+                       nsReflowStatus&                aStatus,
+                       nsOverflowContinuationTracker* aTracker = nullptr);
 
   /**
    * The second half of frame reflow. Does the following:
@@ -265,13 +217,13 @@ public:
    *    don't want to automatically sync the frame and view
    * NS_FRAME_NO_SIZE_VIEW - don't size the frame's view
    */
-  static void FinishReflowChild(nsIFrame*                  aKidFrame,
-                                nsPresContext*             aPresContext,
-                                const nsHTMLReflowMetrics& aDesiredSize,
-                                const nsHTMLReflowState*   aReflowState,
-                                nscoord                    aX,
-                                nscoord                    aY,
-                                uint32_t                   aFlags);
+  static nsresult FinishReflowChild(nsIFrame*                  aKidFrame,
+                                    nsPresContext*             aPresContext,
+                                    const nsHTMLReflowMetrics& aDesiredSize,
+                                    const nsHTMLReflowState*   aReflowState,
+                                    nscoord                    aX,
+                                    nscoord                    aY,
+                                    uint32_t                   aFlags);
 
   
   static void PositionChildViews(nsIFrame* aFrame);
@@ -339,11 +291,11 @@ public:
    *
    * (aFlags just gets passed through to ReflowChild)
    */
-  void ReflowOverflowContainerChildren(nsPresContext*           aPresContext,
-                                       const nsHTMLReflowState& aReflowState,
-                                       nsOverflowAreas&         aOverflowRects,
-                                       uint32_t                 aFlags,
-                                       nsReflowStatus&          aStatus);
+  nsresult ReflowOverflowContainerChildren(nsPresContext*           aPresContext,
+                                           const nsHTMLReflowState& aReflowState,
+                                           nsOverflowAreas&         aOverflowRects,
+                                           uint32_t                 aFlags,
+                                           nsReflowStatus&          aStatus);
 
   /**
    * Move any frames on our overflow list to the end of our principal list.

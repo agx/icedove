@@ -10,12 +10,10 @@
 #include "nsDebug.h"                    // for NS_ASSERTION, etc
 #include "nsEditor.h"                   // for nsEditor
 #include "nsError.h"                    // for NS_ERROR_NULL_POINTER, etc
-#include "nsIContent.h"                 // for nsIContent
 #include "nsIDOMCharacterData.h"        // for nsIDOMCharacterData
 #include "nsIEditor.h"                  // for nsEditor::IsModifiableNode
+#include "nsINode.h"                    // for nsINode
 #include "nsISupportsImpl.h"            // for EditTxn::QueryInterface, etc
-
-using namespace mozilla;
 
 JoinElementTxn::JoinElementTxn()
   : EditTxn()
@@ -56,13 +54,13 @@ NS_IMETHODIMP JoinElementTxn::DoTransaction(void)
   if (!mEditor || !mLeftNode || !mRightNode) { return NS_ERROR_NOT_INITIALIZED; }
 
   // get the parent node
-  nsCOMPtr<nsINode> leftNode = do_QueryInterface(mLeftNode);
-  nsCOMPtr<nsINode> leftParent = leftNode->GetParentNode();
+  nsCOMPtr<nsIDOMNode> leftParent;
+  mLeftNode->GetParentNode(getter_AddRefs(leftParent));
   NS_ENSURE_TRUE(leftParent, NS_ERROR_NULL_POINTER);
 
   // verify that mLeftNode and mRightNode have the same parent
-  nsCOMPtr<nsINode> rightNode = do_QueryInterface(mRightNode);
-  nsCOMPtr<nsINode> rightParent = rightNode->GetParentNode();
+  nsCOMPtr<nsIDOMNode> rightParent;
+  mRightNode->GetParentNode(getter_AddRefs(rightParent));
   NS_ENSURE_TRUE(rightParent, NS_ERROR_NULL_POINTER);
 
   if (leftParent != rightParent) {
@@ -72,10 +70,13 @@ NS_IMETHODIMP JoinElementTxn::DoTransaction(void)
 
   // set this instance mParent. 
   // Other methods will see a non-null mParent and know all is well
-  mParent = leftParent->AsDOMNode();
+  mParent = leftParent;
+  nsCOMPtr<nsINode> leftNode = do_QueryInterface(mLeftNode);
+  nsCOMPtr<nsINode> rightNode = do_QueryInterface(mRightNode);
+  nsCOMPtr<nsINode> parent = do_QueryInterface(mParent);
+  NS_ENSURE_TRUE(leftNode && rightNode && parent, NS_ERROR_FAILURE);
   mOffset = leftNode->Length();
 
-  nsCOMPtr<nsINode> parent = do_QueryInterface(mParent);
   return mEditor->JoinNodesImpl(rightNode, leftNode, parent);
 }
 
@@ -85,9 +86,9 @@ NS_IMETHODIMP JoinElementTxn::UndoTransaction(void)
 {
   NS_ASSERTION(mRightNode && mLeftNode && mParent, "bad state");
   if (!mRightNode || !mLeftNode || !mParent) { return NS_ERROR_NOT_INITIALIZED; }
-  // first, massage the existing node so it is in its post-split state
   nsresult result;
   nsCOMPtr<nsIDOMNode>resultNode;
+  // first, massage the existing node so it is in its post-split state
   nsCOMPtr<nsIDOMCharacterData>rightNodeAsText = do_QueryInterface(mRightNode);
   if (rightNodeAsText)
   {
@@ -108,9 +109,10 @@ NS_IMETHODIMP JoinElementTxn::UndoTransaction(void)
       child = do_QueryInterface(nextSibling);
     }
   }
-  // second, re-insert the left node into the tree
+  // second, re-insert the left node into the tree 
   result = mParent->InsertBefore(mLeftNode, mRightNode, getter_AddRefs(resultNode));
   return result;
+
 }
 
 NS_IMETHODIMP JoinElementTxn::GetTxnDescription(nsAString& aString)

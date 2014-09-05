@@ -114,13 +114,15 @@ DownmixAndInterleave(const nsTArray<const void*>& aChannelData,
                              aDuration, aVolume, aOutputChannels, aOutput);
 }
 
-void AudioSegment::ResampleChunks(SpeexResamplerState* aResampler, uint32_t aInRate, uint32_t aOutRate)
+void AudioSegment::ResampleChunks(SpeexResamplerState* aResampler)
 {
+  uint32_t inRate, outRate;
+
   if (mChunks.IsEmpty()) {
     return;
   }
 
-  MOZ_ASSERT(aResampler || IsNull(), "We can only be here without a resampler if this segment is null.");
+  speex_resampler_get_rate(aResampler, &inRate, &outRate);
 
   AudioSampleFormat format = AUDIO_FORMAT_SILENCE;
   for (ChunkIterator ci(*this); !ci.IsEnded(); ci.Next()) {
@@ -135,10 +137,10 @@ void AudioSegment::ResampleChunks(SpeexResamplerState* aResampler, uint32_t aInR
     // the chunks duration.
     case AUDIO_FORMAT_SILENCE:
     case AUDIO_FORMAT_FLOAT32:
-      Resample<float>(aResampler, aInRate, aOutRate);
+      Resample<float>(aResampler, inRate, outRate);
     break;
     case AUDIO_FORMAT_S16:
-      Resample<int16_t>(aResampler, aInRate, aOutRate);
+      Resample<int16_t>(aResampler, inRate, outRate);
     break;
     default:
       MOZ_ASSERT(false);

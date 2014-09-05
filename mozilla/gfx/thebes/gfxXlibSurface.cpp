@@ -404,7 +404,7 @@ DisplayTable::GetColormapAndVisual(Screen* aScreen, XRenderPictFormat* aFormat,
     }
 
     nsTArray<DisplayInfo>* displays = &sDisplayTable->mDisplays;
-    size_t d = displays->IndexOf(display, 0, FindDisplay());
+    uint32_t d = displays->IndexOf(display, 0, FindDisplay());
 
     if (d == displays->NoIndex) {
         d = displays->Length();

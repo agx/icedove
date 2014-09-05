@@ -74,6 +74,9 @@ public:
 
 mozJSSubScriptLoader::mozJSSubScriptLoader() : mSystemPrincipal(nullptr)
 {
+    // Force construction of the JS component loader.  We may need it later.
+    nsCOMPtr<xpcIJSModuleLoader> componentLoader =
+        do_GetService(MOZJSCOMPONENTLOADER_CONTRACTID);
 }
 
 mozJSSubScriptLoader::~mozJSSubScriptLoader()
@@ -344,6 +347,9 @@ mozJSSubScriptLoader::DoLoadSubScriptWithOptions(const nsAString &url,
     if (function) {
         script = JS_GetFunctionScript(cx, function);
     }
+
+    loader->NoteSubScript(script, targetObj);
+
 
     bool ok = false;
     if (function) {

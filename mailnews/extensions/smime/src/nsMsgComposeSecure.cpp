@@ -476,7 +476,7 @@ nsresult nsMsgComposeSecure::MimeInitEncryption(bool aSign, nsIMsgSendReport *se
   mimeConverter->EncodeMimePartIIStr_UTF8(enc_content_desc_utf8, false, "UTF-8",
       sizeof("Content-Description: "),
       nsIMimeConverter::MIME_ENCODED_WORD_SIZE,
-      encodedContentDescription);
+      getter_Copies(encodedContentDescription));
 
   /* First, construct and write out the opaque-crypto-blob MIME header data.
    */

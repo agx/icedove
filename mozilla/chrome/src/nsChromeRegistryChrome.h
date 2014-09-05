@@ -8,7 +8,7 @@
 
 #include "nsCOMArray.h"
 #include "nsChromeRegistry.h"
-#include "nsTArray.h"
+#include "nsVoidArray.h"
 #include "mozilla/Move.h"
 
 namespace mozilla {
@@ -85,7 +85,8 @@ class nsChromeRegistryChrome : public nsChromeRegistry
    public:
     nsProviderArray() :
     mArray(1) { }
-    ~nsProviderArray() { }
+    ~nsProviderArray()
+    { Clear(); }
 
     // When looking up locales and skins, the "selected" locale is not always
     // available. This enum identifies what kind of match is desired/found.
@@ -99,11 +100,12 @@ class nsChromeRegistryChrome : public nsChromeRegistry
     const nsACString& GetSelected(const nsACString& aPreferred, MatchType aType);
     void    SetBase(const nsACString& aProvider, nsIURI* base);
     void    EnumerateToArray(nsTArray<nsCString> *a);
+    void    Clear();
 
    private:
     ProviderEntry* GetProvider(const nsACString& aPreferred, MatchType aType);
 
-    nsTArray<ProviderEntry> mArray;
+    nsVoidArray mArray;
   };
 
   struct PackageEntry : public PLDHashEntryHdr

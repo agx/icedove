@@ -10,7 +10,7 @@
 
 #include "nsICacheEntryDoomCallback.h"
 
-#include "nsCacheService.h"
+#include "nsICacheService.h"
 #include "nsIApplicationCache.h"
 #include "nsIApplicationCacheService.h"
 #include "nsIURI.h"
@@ -94,9 +94,9 @@ NS_IMETHODIMP AppCacheStorage::AsyncDoomURI(nsIURI *aURI, const nsACString & aId
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  nsRefPtr<_OldStorage> old = new _OldStorage(
-    LoadInfo(), WriteToDisk(), LookupAppCache(), true, mAppCache);
-  return old->AsyncDoomURI(aURI, aIdExtension, aCallback);
+  // TODO - remove entry from app cache
+  // I think no one is using this...
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP AppCacheStorage::AsyncEvictStorage(nsICacheEntryDoomCallback* aCallback)
@@ -119,7 +119,7 @@ NS_IMETHODIMP AppCacheStorage::AsyncEvictStorage(nsICacheEntryDoomCallback* aCal
           do_GetService(NS_CACHESERVICE_CONTRACTID, &rv);
       NS_ENSURE_SUCCESS(rv, rv);
 
-      rv = nsCacheService::GlobalInstance()->EvictEntriesInternal(nsICache::STORE_OFFLINE);
+      rv = serv->EvictEntries(nsICache::STORE_OFFLINE);
       NS_ENSURE_SUCCESS(rv, rv);
     }
     else {
@@ -131,12 +131,12 @@ NS_IMETHODIMP AppCacheStorage::AsyncEvictStorage(nsICacheEntryDoomCallback* aCal
   }
   else {
     // Discard the group
-    nsRefPtr<_OldStorage> old = new _OldStorage(
-      LoadInfo(), WriteToDisk(), LookupAppCache(), true, mAppCache);
-    rv = old->AsyncEvictStorage(aCallback);
+    nsAutoCString groupID;
+    rv = mAppCache->GetGroupID(groupID);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    return NS_OK;
+    rv = appCacheService->DeactivateGroup(groupID);
+    NS_ENSURE_SUCCESS(rv, rv);
   }
 
   if (aCallback)
@@ -153,18 +153,7 @@ NS_IMETHODIMP AppCacheStorage::AsyncVisitStorage(nsICacheStorageVisitor* aVisito
 
   LOG(("AppCacheStorage::AsyncVisitStorage [this=%p, cb=%p]", this, aVisitor));
 
-  nsresult rv;
-
-  nsCOMPtr<nsICacheService> serv =
-    do_GetService(NS_CACHESERVICE_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  nsRefPtr<_OldVisitCallbackWrapper> cb = new _OldVisitCallbackWrapper(
-    "offline", aVisitor, aVisitEntries, LoadInfo());
-  rv = nsCacheService::GlobalInstance()->VisitEntriesInternal(cb);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  return NS_OK;
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 } // net

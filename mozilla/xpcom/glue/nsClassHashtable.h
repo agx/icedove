@@ -6,7 +6,6 @@
 #ifndef nsClassHashtable_h__
 #define nsClassHashtable_h__
 
-#include "mozilla/Move.h"
 #include "nsBaseHashtable.h"
 #include "nsHashKeys.h"
 #include "nsAutoPtr.h"
@@ -110,7 +109,7 @@ nsClassHashtable<KeyClass,T>::RemoveAndForget(KeyType aKey, nsAutoPtr<T> &aOut)
     return;
 
   // Transfer ownership from ent->mData into aOut.
-  aOut = mozilla::Move(ent->mData);
+  aOut = ent->mData;
 
   this->Remove(aKey);
 }

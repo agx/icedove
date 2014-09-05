@@ -35,62 +35,43 @@ function debug(str) {
 // Alerts Service
 // -----------------------------------------------------------------------
 
-const kNotificationSystemMessageName = "notification";
-
-const kMessageAppNotificationSend    = "app-notification-send";
-const kMessageAppNotificationReturn  = "app-notification-return";
-const kMessageAlertNotificationSend  = "alert-notification-send";
-const kMessageAlertNotificationClose = "alert-notification-close";
-
-const kTopicAlertFinished      = "alertfinished";
-const kTopicAlertClickCallback = "alertclickcallback";
-
 function AlertsService() {
-  Services.obs.addObserver(this, "xpcom-shutdown", false);
-  cpmm.addMessageListener(kMessageAppNotificationReturn, this);
+  cpmm.addMessageListener("app-notification-return", this);
 }
 
 AlertsService.prototype = {
   classID: Components.ID("{fe33c107-82a4-41d6-8c64-5353267e04c9}"),
   QueryInterface: XPCOMUtils.generateQI([Ci.nsIAlertsService,
-                                         Ci.nsIAppNotificationService,
-                                         Ci.nsIObserver]),
-
-  observe: function(aSubject, aTopic, aData) {
-    switch (aTopic) {
-      case "xpcom-shutdown":
-        Services.obs.removeObserver(this, "xpcom-shutdown");
-        cpmm.removeMessageListener(kMessageAppNotificationReturn, this);
-        break;
-    }
-  },
+                                         Ci.nsIAppNotificationService]),
 
   // nsIAlertsService
-  showAlertNotification: function(aImageUrl, aTitle, aText, aTextClickable,
-                                  aCookie, aAlertListener, aName, aBidi,
-                                  aLang) {
-    cpmm.sendAsyncMessage(kMessageAlertNotificationSend, {
-      imageURL: aImageUrl,
-      title: aTitle,
-      text: aText,
-      clickable: aTextClickable,
-      cookie: aCookie,
-      listener: aAlertListener,
-      id: aName,
-      dir: aBidi,
-      lang: aLang
-    });
+  showAlertNotification: function showAlertNotification(aImageUrl,
+                                                        aTitle,
+                                                        aText,
+                                                        aTextClickable,
+                                                        aCookie,
+                                                        aAlertListener,
+                                                        aName,
+                                                        aBidi,
+                                                        aLang) {
+    let browser = Services.wm.getMostRecentWindow("navigator:browser");
+    browser.AlertsHelper.showAlertNotification(aImageUrl, aTitle, aText,
+                                               aTextClickable, aCookie,
+                                               aAlertListener, aName, aBidi,
+                                               aLang);
   },
 
   closeAlert: function(aName) {
-    cpmm.sendAsyncMessage(kMessageAlertNotificationClose, {
-      name: aName
-    });
+    let browser = Services.wm.getMostRecentWindow("navigator:browser");
+    browser.AlertsHelper.closeAlert(aName);
   },
 
   // nsIAppNotificationService
-  showAppNotification: function(aImageURL, aTitle, aText, aAlertListener,
-                                aDetails) {
+  showAppNotification: function showAppNotification(aImageURL,
+                                                    aTitle,
+                                                    aText,
+                                                    aAlertListener,
+                                                    aDetails) {
     let uid = (aDetails.id == "") ?
           "app-notif-" + uuidGenerator.generateUUID() : aDetails.id;
 
@@ -104,11 +85,10 @@ AlertsService.prototype = {
       id: aDetails.id || undefined,
       dbId: aDetails.dbId || undefined,
       dir: aDetails.dir || undefined,
-      tag: aDetails.tag || undefined,
-      timestamp: aDetails.timestamp || undefined
+      tag: aDetails.tag || undefined
     };
 
-    cpmm.sendAsyncMessage(kMessageAppNotificationSend, {
+    cpmm.sendAsyncMessage("app-notification-send", {
       imageURL: aImageURL,
       title: aTitle,
       text: aText,
@@ -120,10 +100,10 @@ AlertsService.prototype = {
   // AlertsService.js custom implementation
   _listeners: [],
 
-  receiveMessage: function(aMessage) {
+  receiveMessage: function receiveMessage(aMessage) {
     let data = aMessage.data;
     let listener = this._listeners[data.uid];
-    if (aMessage.name !== kMessageAppNotificationReturn || !listener) {
+    if (aMessage.name !== "app-notification-return" || !listener) {
       return;
     }
 
@@ -136,8 +116,7 @@ AlertsService.prototype = {
       // notification via a system message containing the title/text/icon of
       // the notification so the app get a change to react.
       if (data.target) {
-        gSystemMessenger.sendMessage(kNotificationSystemMessageName, {
-            clicked: (topic === kTopicAlertClickCallback),
+        gSystemMessenger.sendMessage("notification", {
             title: listener.title,
             body: listener.text,
             imageURL: listener.imageURL,
@@ -145,17 +124,15 @@ AlertsService.prototype = {
             dir: listener.dir,
             id: listener.id,
             tag: listener.tag,
-            dbId: listener.dbId,
-            timestamp: listener.timestamp
+            dbId: listener.dbId
           },
           Services.io.newURI(data.target, null, null),
-          Services.io.newURI(listener.manifestURL, null, null)
-        );
+          Services.io.newURI(listener.manifestURL, null, null));
       }
     }
 
     // we're done with this notification
-    if (topic === kTopicAlertFinished) {
+    if (topic === "alertfinished") {
       if (listener.dbId) {
         notificationStorage.delete(listener.manifestURL, listener.dbId);
       }

@@ -132,7 +132,7 @@ nsTableCaptionFrame::GetFrameName(nsAString& aResult) const
 }
 #endif
 
-nsTableCaptionFrame* 
+nsIFrame* 
 NS_NewTableCaptionFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsTableCaptionFrame(aContext);
@@ -188,67 +188,82 @@ nsTableOuterFrame::GetChildLists(nsTArray<ChildList>* aLists) const
   mCaptionFrames.AppendIfNonempty(aLists, kCaptionList);
 }
 
-void 
+nsresult 
 nsTableOuterFrame::SetInitialChildList(ChildListID     aListID,
                                        nsFrameList&    aChildList)
 {
-  MOZ_ASSERT(kCaptionList == aListID || aListID == kPrincipalList,
-             "unexpected child list");
-  MOZ_ASSERT(GetChildList(aListID).IsEmpty(),
-             "already have child frames in SetInitialChildList");
-
   if (kCaptionList == aListID) {
     // the frame constructor already checked for table-caption display type
     mCaptionFrames.SetFrames(aChildList);
-  } else {
-    MOZ_ASSERT(aChildList.FirstChild() &&
-               aChildList.FirstChild() == aChildList.LastChild() &&
-               nsGkAtoms::tableFrame == aChildList.FirstChild()->GetType(),
-               "expected a single table frame");
+  }
+  else {
+    NS_ASSERTION(aListID == kPrincipalList, "wrong childlist");
+    NS_ASSERTION(mFrames.IsEmpty(), "Frame leak!");
+    NS_ASSERTION(aChildList.FirstChild() &&
+                 nsGkAtoms::tableFrame == aChildList.FirstChild()->GetType(),
+                 "expected a table frame");
     mFrames.SetFrames(aChildList);
   }
+
+  return NS_OK;
 }
 
-void
+nsresult
 nsTableOuterFrame::AppendFrames(ChildListID     aListID,
                                 nsFrameList&    aFrameList)
 {
+  nsresult rv;
+
   // We only have two child frames: the inner table and a caption frame.
   // The inner frame is provided when we're initialized, and it cannot change
-  MOZ_ASSERT(kCaptionList == aListID, "unexpected child list");
-  MOZ_ASSERT(aFrameList.IsEmpty() ||
-             aFrameList.FirstChild()->GetType() == nsGkAtoms::tableCaptionFrame,
-             "appending non-caption frame to captionList");
-  mCaptionFrames.AppendFrames(this, aFrameList);
+  if (kCaptionList == aListID) {
+    NS_ASSERTION(aFrameList.IsEmpty() ||
+                 aFrameList.FirstChild()->GetType() == nsGkAtoms::tableCaptionFrame,
+                 "appending non-caption frame to captionList");
+    mCaptionFrames.AppendFrames(this, aFrameList);
+    rv = NS_OK;
 
-  // Reflow the new caption frame. It's already marked dirty, so
-  // just tell the pres shell.
-  PresContext()->PresShell()->
-    FrameNeedsReflow(this, nsIPresShell::eTreeChange,
-                     NS_FRAME_HAS_DIRTY_CHILDREN);
+    // Reflow the new caption frame. It's already marked dirty, so
+    // just tell the pres shell.
+    PresContext()->PresShell()->
+      FrameNeedsReflow(this, nsIPresShell::eTreeChange,
+                       NS_FRAME_HAS_DIRTY_CHILDREN);
+  }
+  else {
+    NS_PRECONDITION(false, "unexpected child list");
+    rv = NS_ERROR_UNEXPECTED;
+  }
+
+  return rv;
 }
 
-void
+nsresult
 nsTableOuterFrame::InsertFrames(ChildListID     aListID,
                                 nsIFrame*       aPrevFrame,
                                 nsFrameList&    aFrameList)
 {
-  MOZ_ASSERT(kCaptionList == aListID, "unexpected child list");
-  MOZ_ASSERT(aFrameList.IsEmpty() ||
-             aFrameList.FirstChild()->GetType() == nsGkAtoms::tableCaptionFrame,
-             "inserting non-caption frame into captionList");
-  MOZ_ASSERT(!aPrevFrame || aPrevFrame->GetParent() == this,
-             "inserting after sibling frame with different parent");
-  mCaptionFrames.InsertFrames(nullptr, aPrevFrame, aFrameList);
+  if (kCaptionList == aListID) {
+    NS_ASSERTION(!aPrevFrame || aPrevFrame->GetParent() == this,
+                 "inserting after sibling frame with different parent");
+    NS_ASSERTION(aFrameList.IsEmpty() ||
+                 aFrameList.FirstChild()->GetType() == nsGkAtoms::tableCaptionFrame,
+                 "inserting non-caption frame into captionList");
+    mCaptionFrames.InsertFrames(nullptr, aPrevFrame, aFrameList);
 
-  // Reflow the new caption frame. It's already marked dirty, so
-  // just tell the pres shell.
-  PresContext()->PresShell()->
-    FrameNeedsReflow(this, nsIPresShell::eTreeChange,
-                     NS_FRAME_HAS_DIRTY_CHILDREN);
+    // Reflow the new caption frame. It's already marked dirty, so
+    // just tell the pres shell.
+    PresContext()->PresShell()->
+      FrameNeedsReflow(this, nsIPresShell::eTreeChange,
+                       NS_FRAME_HAS_DIRTY_CHILDREN);
+    return NS_OK;
+  }
+  else {
+    NS_PRECONDITION(!aPrevFrame, "invalid previous frame");
+    return AppendFrames(aListID, aFrameList);
+  }
 }
 
-void
+nsresult
 nsTableOuterFrame::RemoveFrame(ChildListID     aListID,
                                nsIFrame*       aOldFrame)
 {
@@ -268,6 +283,8 @@ nsTableOuterFrame::RemoveFrame(ChildListID     aListID,
   PresContext()->PresShell()->
     FrameNeedsReflow(this, nsIPresShell::eTreeChange,
                      NS_FRAME_HAS_DIRTY_CHILDREN); // also means child removed
+
+  return NS_OK;
 }
 
 void
@@ -821,7 +838,7 @@ nsTableOuterFrame::OuterBeginReflowChild(nsPresContext*           aPresContext,
   }
 }
 
-void
+nsresult
 nsTableOuterFrame::OuterDoReflowChild(nsPresContext*             aPresContext,
                                       nsIFrame*                  aChildFrame,
                                       const nsHTMLReflowState&   aChildRS,
@@ -842,8 +859,8 @@ nsTableOuterFrame::OuterDoReflowChild(nsPresContext*             aPresContext,
     flags |= NS_FRAME_NO_DELETE_NEXT_IN_FLOW_CHILD;
   }
 
-  ReflowChild(aChildFrame, aPresContext, aMetrics, aChildRS,
-              childPt.x, childPt.y, flags, aStatus);
+  return ReflowChild(aChildFrame, aPresContext, aMetrics, aChildRS,
+                     childPt.x, childPt.y, flags, aStatus);
 }
 
 void 
@@ -862,8 +879,7 @@ nsTableOuterFrame::UpdateReflowMetrics(uint8_t              aCaptionSide,
   }
 }
 
-void
-nsTableOuterFrame::Reflow(nsPresContext*           aPresContext,
+nsresult nsTableOuterFrame::Reflow(nsPresContext*           aPresContext,
                                     nsHTMLReflowMetrics&     aDesiredSize,
                                     const nsHTMLReflowState& aOuterRS,
                                     nsReflowStatus&          aStatus)
@@ -871,6 +887,7 @@ nsTableOuterFrame::Reflow(nsPresContext*           aPresContext,
   DO_GLOBAL_REFLOW_COUNT("nsTableOuterFrame");
   DISPLAY_REFLOW(aPresContext, this, aOuterRS, aDesiredSize, aStatus);
 
+  nsresult rv = NS_OK;
   uint8_t captionSide = GetCaptionSide();
 
   // Initialize out parameters
@@ -964,8 +981,9 @@ nsTableOuterFrame::Reflow(nsPresContext*           aPresContext,
   nsMargin captionMargin;
   if (mCaptionFrames.NotEmpty()) {
     nsReflowStatus capStatus; // don't let the caption cause incomplete
-    OuterDoReflowChild(aPresContext, mCaptionFrames.FirstChild(),
-                       *captionRS, captionMet, capStatus);
+    rv = OuterDoReflowChild(aPresContext, mCaptionFrames.FirstChild(),
+                            *captionRS, captionMet, capStatus);
+    if (NS_FAILED(rv)) return rv;
     captionSize.width = captionMet.Width();
     captionSize.height = captionMet.Height();
     captionMargin = captionRS->ComputedPhysicalMargin();
@@ -994,8 +1012,9 @@ nsTableOuterFrame::Reflow(nsPresContext*           aPresContext,
   // Then, now that we know how much to reduce the width of the inner
   // table to account for side captions, reflow the inner table.
   nsHTMLReflowMetrics innerMet(innerRS->GetWritingMode());
-  OuterDoReflowChild(aPresContext, InnerTableFrame(), *innerRS,
-                     innerMet, aStatus);
+  rv = OuterDoReflowChild(aPresContext, InnerTableFrame(), *innerRS,
+                          innerMet, aStatus);
+  if (NS_FAILED(rv)) return rv;
   nsSize innerSize;
   innerSize.width = innerMet.Width();
   innerSize.height = innerMet.Height();
@@ -1048,6 +1067,7 @@ nsTableOuterFrame::Reflow(nsPresContext*           aPresContext,
   // Return our desired rect
 
   NS_FRAME_SET_TRUNCATION(aStatus, aOuterRS, aDesiredSize);
+  return rv;
 }
 
 nsIAtom*
@@ -1075,7 +1095,7 @@ nsTableOuterFrame::GetCellAt(uint32_t aRowIdx, uint32_t aColIdx) const
 }
 
 
-nsTableOuterFrame*
+nsIFrame*
 NS_NewTableOuterFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsTableOuterFrame(aContext);

@@ -31,13 +31,7 @@ function make_fake_appdir() {
       if (prop == "UAppData") {
         return appD.clone();
       }
-      // Depending on timing we can get requests for other files.
-      // When we threw an exception here, in the world before bug 997440, this got lost
-      // because of the arbitrary JSContext being used in XPCWrappedJSClass::CallMethod.
-      // After bug 997440 this gets reported to our window and causes the tests to fail.
-      // So, we'll just dump out a message to the logs.
-      dump("WARNING: make_fake_appdir - fake nsIDirectoryServiceProvider - Unexpected getFile for: '" + prop + "'\n");
-      return null;
+      throw Components.results.NS_ERROR_FAILURE;
     },
     QueryInterface: function(iid) {
       if (iid.equals(Ci.nsIDirectoryServiceProvider) ||

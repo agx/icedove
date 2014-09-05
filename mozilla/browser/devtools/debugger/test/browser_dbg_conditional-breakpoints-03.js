@@ -46,10 +46,6 @@ function test() {
         return finished;
       })
       .then(testConditionalExpressionInPopup)
-      .then(() => {
-        // Reset traits back to default value
-        client.mainRoot.traits.conditionalBreakpoints = true;
-      })
       .then(() => resumeDebuggerThenCloseAndFinish(gPanel))
       .then(null, aError => {
         ok(false, "Got an error: " + aError.message + "\n" + aError.stack);

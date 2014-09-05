@@ -23,8 +23,6 @@
 #include <stdio.h>
 #include <arpa/inet.h>
 
-#include "prio.h"
-
 namespace android {
 
 struct UDPPusher : public AHandler {
@@ -42,8 +40,8 @@ private:
     };
 
     FILE *mFile;
-    PRFileDesc *mSocket;
-    PRNetAddr mRemoteAddr;
+    int mSocket;
+    struct sockaddr_in mRemoteAddr;
 
     uint32_t mFirstTimeMs;
     int64_t mFirstTimeUs;

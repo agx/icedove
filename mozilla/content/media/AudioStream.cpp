@@ -13,7 +13,6 @@
 #include "mozilla/Mutex.h"
 #include <algorithm>
 #include "mozilla/Preferences.h"
-#include "mozilla/Telemetry.h"
 #include "soundtouch/SoundTouch.h"
 #include "Latency.h"
 
@@ -71,16 +70,6 @@ bool AudioStream::sCubebLatencyPrefSet;
     StaticMutexAutoLock lock(sMutex);
     sCubebLatency = std::min<uint32_t>(std::max<uint32_t>(value, 1), 1000);
   }
-}
-
-/*static*/ bool AudioStream::GetFirstStream()
-{
-  static bool sFirstStream = true;
-
-  StaticMutexAutoLock lock(sMutex);
-  bool result = sFirstStream;
-  sFirstStream = false;
-  return result;
 }
 
 /*static*/ double AudioStream::GetVolumeScale()
@@ -144,8 +133,8 @@ static cubeb_stream_type ConvertChannelToCubebType(dom::AudioChannel aChannel)
       return CUBEB_STREAM_TYPE_VOICE_CALL;
     case dom::AudioChannel::Ringer:
       return CUBEB_STREAM_TYPE_RING;
+    // Currently Android openSLES library doesn't support FORCE_AUDIBLE yet.
     case dom::AudioChannel::Publicnotification:
-      return CUBEB_STREAM_TYPE_SYSTEM_ENFORCED;
     default:
       NS_ERROR("The value of AudioChannel is invalid");
       return CUBEB_STREAM_TYPE_MAX;
@@ -163,10 +152,7 @@ AudioStream::AudioStream()
   , mAudioClock(MOZ_THIS_IN_INITIALIZER_LIST())
   , mLatencyRequest(HighLatency)
   , mReadPoint(0)
-  , mWrittenFramesPast(0)
-  , mLostFramesPast(0)
-  , mWrittenFramesLast(0)
-  , mLostFramesLast(0)
+  , mLostFrames(0)
   , mDumpFile(nullptr)
   , mVolume(1.0)
   , mBytesPerFrame(0)
@@ -395,9 +381,6 @@ AudioStream::Init(int32_t aNumChannels, int32_t aRate,
                   const dom::AudioChannel aAudioChannel,
                   LatencyRequest aLatencyRequest)
 {
-  mStartTime = TimeStamp::Now();
-  mIsFirst = GetFirstStream();
-
   if (!GetCubebContext() || aNumChannels < 0 || aRate < 0) {
     return NS_ERROR_FAILURE;
   }
@@ -465,13 +448,6 @@ nsresult
 AudioStream::OpenCubeb(cubeb_stream_params &aParams,
                        LatencyRequest aLatencyRequest)
 {
-  {
-    MonitorAutoLock mon(mMonitor);
-    if (mState == AudioStream::SHUTDOWN) {
-      return NS_ERROR_FAILURE;
-    }
-  }
-
   cubeb* cubebContext = GetCubebContext();
   if (!cubebContext) {
     MonitorAutoLock mon(mMonitor);
@@ -513,14 +489,6 @@ AudioStream::OpenCubeb(cubeb_stream_params &aParams,
       LOG(("AudioStream::OpenCubeb() %p failed to init cubeb", this));
       return NS_ERROR_FAILURE;
     }
-  }
-
-  if (!mStartTime.IsNull()) {
-		TimeDuration timeDelta = TimeStamp::Now() - mStartTime;
-    LOG(("AudioStream creation time %sfirst: %u ms", mIsFirst ? "" : "not ",
-         (uint32_t) timeDelta.ToMilliseconds()));
-		Telemetry::Accumulate(mIsFirst ? Telemetry::AUDIOSTREAM_FIRST_OPEN_MS :
-                          Telemetry::AUDIOSTREAM_LATER_OPEN_MS, timeDelta.ToMilliseconds());
   }
 
   return NS_OK;
@@ -812,28 +780,9 @@ AudioStream::GetPositionInFramesUnlocked()
 
   // Adjust the reported position by the number of silent frames written
   // during stream underruns.
-  // Since frames sent to DataCallback is not consumed by the backend immediately,
-  // it will be an over adjustment if we return |position - mLostFramesPast - mLostFramesLast|.
-  // On the other hand, we need to keep the whole history of frames sent to DataCallback
-  // in order to adjust position correctly which will require more storage.
-  // We choose a simple way to store the history where |mWrittenFramesPast| and
-  // |mLostFramesPast| are the sum of frames from 1th to |N-1|th callbacks, and
-  // |mWrittenFramesLast| and |mLostFramesLast| represent the frames sent in last callback.
-  // When |position| lies in
-  // [mWrittenFramesPast+mLostFramesPast, mWrittenFramesPast+mLostFramesPast+mWrittenFramesLast+mLostFramesLast],
-  // we will be able to adjust position precisely which should be the major case.
-  // If |position| falls in [0, mWrittenFramesPast+mLostFramesPast), there will be an
-  // error in the adjustment. However that is fine as long as we can ensure the
-  // adjusted position is mono-increasing to avoid audio clock going backward.
   uint64_t adjustedPosition = 0;
-  if (position <= mWrittenFramesPast) {
-    adjustedPosition = position;
-  } else if (position <= mWrittenFramesPast + mLostFramesPast) {
-    adjustedPosition = mWrittenFramesPast;
-  } else if (position <= mWrittenFramesPast + mLostFramesPast + mWrittenFramesLast) {
-    adjustedPosition = position - mLostFramesPast;
-  } else {
-    adjustedPosition = mWrittenFramesPast + mWrittenFramesLast;
+  if (position >= mLostFrames) {
+    adjustedPosition = position - mLostFrames;
   }
   return std::min<uint64_t>(adjustedPosition, INT64_MAX);
 }
@@ -980,9 +929,6 @@ AudioStream::DataCallback(void* aBuffer, long aFrames)
   uint32_t servicedFrames = 0;
   int64_t insertTime;
 
-  mWrittenFramesPast += mWrittenFramesLast;
-  mLostFramesPast += mLostFramesLast;
-
   // NOTE: wasapi (others?) can call us back *after* stop()/Shutdown() (mState == SHUTDOWN)
   // Bug 996162
 
@@ -1046,8 +992,6 @@ AudioStream::DataCallback(void* aBuffer, long aFrames)
   }
 
   underrunFrames = aFrames - servicedFrames;
-  mWrittenFramesLast = servicedFrames;
-  mLostFramesLast = underrunFrames;
 
   if (mState != DRAINING) {
     uint8_t* rpos = static_cast<uint8_t*>(aBuffer) + FramesToBytes(aFrames - underrunFrames);
@@ -1056,6 +1000,7 @@ AudioStream::DataCallback(void* aBuffer, long aFrames)
       PR_LOG(gAudioStreamLog, PR_LOG_WARNING,
              ("AudioStream %p lost %d frames", this, underrunFrames));
     }
+    mLostFrames += underrunFrames;
     servicedFrames += underrunFrames;
   }
 

@@ -50,6 +50,8 @@ public:
 
   virtual gfx::IntSize GetSize() const MOZ_OVERRIDE { return mSize; }
 
+  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE { return nullptr; }
+
   virtual gfx::SurfaceFormat GetFormat() const MOZ_OVERRIDE { return mFormat; }
 
   virtual bool CanExposeDrawTarget() const MOZ_OVERRIDE { return true; }
@@ -94,7 +96,7 @@ protected:
  */
 class DataTextureSourceD3D11 : public DataTextureSource
                              , public TextureSourceD3D11
-                             , public BigImageIterator
+                             , public TileIterator
 {
 public:
   DataTextureSourceD3D11(gfx::SurfaceFormat aFormat, CompositorD3D11* aCompositor,
@@ -128,9 +130,9 @@ public:
 
   virtual void SetCompositor(Compositor* aCompositor) MOZ_OVERRIDE;
 
-  // BigImageIterator
+  // TileIterator
 
-  virtual BigImageIterator* AsBigImageIterator() MOZ_OVERRIDE { return mIsTiled ? this : nullptr; }
+  virtual TileIterator* AsTileIterator() MOZ_OVERRIDE { return mIsTiled ? this : nullptr; }
 
   virtual size_t GetTileCount() MOZ_OVERRIDE { return mTileTextures.size(); }
 
@@ -138,9 +140,9 @@ public:
 
   virtual nsIntRect GetTileRect() MOZ_OVERRIDE;
 
-  virtual void EndBigImageIteration() MOZ_OVERRIDE { mIterating = false; }
+  virtual void EndTileIteration() MOZ_OVERRIDE { mIterating = false; }
 
-  virtual void BeginBigImageIteration() MOZ_OVERRIDE
+  virtual void BeginTileIteration() MOZ_OVERRIDE
   {
     mIterating = true;
     mCurrentTile = 0;

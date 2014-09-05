@@ -8,13 +8,13 @@
 
 #include "nsAutoPtr.h"
 #include "nsICSSLoaderObserver.h"
+#include "nsIStyleRuleProcessor.h"
 
-class nsCSSRuleProcessor;
-class nsCSSStyleSheet;
-class nsIAtom;
 class nsIContent;
-class nsXBLPrototypeBinding;
+class nsIAtom;
 class nsXBLResourceLoader;
+class nsXBLPrototypeBinding;
+class nsCSSStyleSheet;
 
 // *********************************************************************/
 // The XBLPrototypeResources class
@@ -32,37 +32,23 @@ public:
 
   nsresult Write(nsIObjectOutputStream* aStream);
 
-  void Traverse(nsCycleCollectionTraversalCallback &cb);
-  void Unlink();
+  void Traverse(nsCycleCollectionTraversalCallback &cb) const;
 
   void ClearLoader();
 
-  void AppendStyleSheet(nsCSSStyleSheet* aSheet);
-  void RemoveStyleSheet(nsCSSStyleSheet* aSheet);
-  void InsertStyleSheetAt(size_t aIndex, nsCSSStyleSheet* aSheet);
-  nsCSSStyleSheet* StyleSheetAt(size_t aIndex) const;
-  size_t SheetCount() const;
-  bool HasStyleSheets() const;
-  void AppendStyleSheetsTo(nsTArray<nsCSSStyleSheet*>& aResult) const;
-
-  /**
-   * Recreates mRuleProcessor to represent the current list of style sheets
-   * stored in mStyleSheetList.  (Named GatherRuleProcessor to parallel
-   * nsStyleSet::GatherRuleProcessors.)
-   */
-  void GatherRuleProcessor();
-
-  nsCSSRuleProcessor* GetRuleProcessor() const { return mRuleProcessor; }
+  typedef nsTArray<nsRefPtr<nsCSSStyleSheet> > sheet_array_type;
 
 private:
   // A loader object. Exists only long enough to load resources, and then it dies.
   nsRefPtr<nsXBLResourceLoader> mLoader;
 
+public:
   // A list of loaded stylesheets for this binding.
-  nsTArray<nsRefPtr<nsCSSStyleSheet>> mStyleSheetList;
+  sheet_array_type mStyleSheetList;
 
   // The list of stylesheets converted to a rule processor.
-  nsRefPtr<nsCSSRuleProcessor> mRuleProcessor;
+  nsCOMPtr<nsIStyleRuleProcessor> mRuleProcessor;
 };
 
 #endif
+

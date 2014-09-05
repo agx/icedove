@@ -31,7 +31,7 @@ public:
   }
 
 protected:
-  bool GetCallableProperty(JSContext* cx, JS::Handle<jsid> aPropId,
+  bool GetCallableProperty(JSContext* cx, const char* aPropName,
                            JS::MutableHandle<JS::Value> aCallable);
 
 };

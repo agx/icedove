@@ -124,7 +124,7 @@ ActorPool.prototype = {
   },
 
   get: function AP_get(aActorID) {
-    return this._actors[aActorID] || undefined;
+    return this._actors[aActorID];
   },
 
   has: function AP_has(aActorID) {

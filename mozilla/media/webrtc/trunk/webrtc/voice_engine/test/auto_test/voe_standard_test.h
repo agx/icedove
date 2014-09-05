@@ -15,7 +15,6 @@
 #include <string>
 
 #include "gflags/gflags.h"
-#include "webrtc/common.h"
 #include "webrtc/voice_engine/include/voe_audio_processing.h"
 #include "webrtc/voice_engine/include/voe_base.h"
 #include "webrtc/voice_engine/include/voe_dtmf.h"
@@ -80,7 +79,8 @@ class SubAPIManager {
       _rtp_rtcp(false),
       _videoSync(false),
       _volumeControl(false),
-      _apm(false) {
+      _apm(false),
+      _xsel(XSEL_Invalid) {
 #ifdef WEBRTC_VOICE_ENGINE_CALL_REPORT_API
       _callReport = true;
 #endif
@@ -121,11 +121,13 @@ class SubAPIManager {
   }
 
   void DisplayStatus() const;
+  bool GetExtendedMenuSelection(ExtendedSelection& sel);
 
  private:
   bool _base, _callReport, _codec, _dtmf, _encryption;
   bool _externalMedia, _file, _hardware;
   bool _netEqStats, _network, _rtp_rtcp, _videoSync, _volumeControl, _apm;
+  ExtendedSelection _xsel;
 };
 
 class VoETestManager {
@@ -225,8 +227,6 @@ class VoETestManager {
   VoEAudioProcessing*    voe_apm_;
 
   ResourceManager        resource_manager_;
-
-  Config                 config_;
 };
 
 }  // namespace voetest

@@ -23,17 +23,17 @@
 namespace mozilla {
 
 /*
- * Safely subtract two pointers when it is known that aEnd >= aBegin.  This
- * avoids the common compiler bug that if (size_t(aEnd) - size_t(aBegin)) has
- * the MSB set, the unsigned subtraction followed by right shift will produce
- * -1, or size_t(-1), instead of the real difference.
+ * Safely subtract two pointers when it is known that end >= begin.  This avoids
+ * the common compiler bug that if (size_t(end) - size_t(begin)) has the MSB
+ * set, the unsigned subtraction followed by right shift will produce -1, or
+ * size_t(-1), instead of the real difference.
  */
 template<class T>
 MOZ_ALWAYS_INLINE size_t
-PointerRangeSize(T* aBegin, T* aEnd)
+PointerRangeSize(T* begin, T* end)
 {
-  MOZ_ASSERT(aEnd >= aBegin);
-  return (size_t(aEnd) - size_t(aBegin)) / sizeof(T);
+  MOZ_ASSERT(end >= begin);
+  return (size_t(end) - size_t(begin)) / sizeof(T);
 }
 
 /*
@@ -44,14 +44,14 @@ PointerRangeSize(T* aBegin, T* aEnd)
  */
 template<typename T, size_t N>
 MOZ_CONSTEXPR size_t
-ArrayLength(T (&aArr)[N])
+ArrayLength(T (&arr)[N])
 {
   return N;
 }
 
 template<typename T, size_t N>
 MOZ_CONSTEXPR size_t
-ArrayLength(const Array<T, N>& aArr)
+ArrayLength(const Array<T, N>& arr)
 {
   return N;
 }
@@ -63,23 +63,23 @@ ArrayLength(const Array<T, N>& aArr)
  */
 template<typename T, size_t N>
 MOZ_CONSTEXPR T*
-ArrayEnd(T (&aArr)[N])
+ArrayEnd(T (&arr)[N])
 {
-  return aArr + ArrayLength(aArr);
+  return arr + ArrayLength(arr);
 }
 
 template<typename T, size_t N>
 MOZ_CONSTEXPR T*
-ArrayEnd(Array<T, N>& aArr)
+ArrayEnd(Array<T, N>& arr)
 {
-  return &aArr[0] + ArrayLength(aArr);
+  return &arr[0] + ArrayLength(arr);
 }
 
 template<typename T, size_t N>
 MOZ_CONSTEXPR const T*
-ArrayEnd(const Array<T, N>& aArr)
+ArrayEnd(const Array<T, N>& arr)
 {
-  return &aArr[0] + ArrayLength(aArr);
+  return &arr[0] + ArrayLength(arr);
 }
 
 namespace detail {

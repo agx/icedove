@@ -754,8 +754,8 @@ NS_IMETHODIMP nsContentTreeOwner::SetTitle(const char16_t* aTitle)
       //
       nsCOMPtr<nsIDocShellTreeItem> dsitem;
       GetPrimaryContentShell(getter_AddRefs(dsitem));
-      nsCOMPtr<nsIScriptObjectPrincipal> doc =
-        do_QueryInterface(dsitem ? dsitem->GetDocument() : nullptr);
+      nsCOMPtr<nsIDOMDocument> domdoc(do_GetInterface(dsitem));
+      nsCOMPtr<nsIScriptObjectPrincipal> doc(do_QueryInterface(domdoc));
       if (doc) {
         nsCOMPtr<nsIURI> uri;
         nsIPrincipal* principal = doc->GetPrincipal();
@@ -1078,11 +1078,9 @@ nsSiteWindow::SetFocus(void)
   if (window) {
     nsCOMPtr<nsIDocShell> docshell;
     window->GetDocShell(getter_AddRefs(docshell));
-    if (docShell) {
-      nsCOMPtr<nsIDOMWindow> domWindow(docShell->GetWindow());
-      if (domWindow)
-        domWindow->Focus();
-    }
+    nsCOMPtr<nsIDOMWindow> domWindow(do_GetInterface(docshell));
+    if (domWindow)
+      domWindow->Focus();
   }
 #endif
   return NS_OK;
@@ -1142,11 +1140,7 @@ nsSiteWindow::Blur(void)
   if (xulWindow) {
     nsCOMPtr<nsIDocShell> docshell;
     xulWindow->GetDocShell(getter_AddRefs(docshell));
-    if (!docshell) {
-      return NS_OK;
-    }
-
-    nsCOMPtr<nsIDOMWindow> domWindow(docshell->GetWindow());
+    nsCOMPtr<nsIDOMWindow> domWindow(do_GetInterface(docshell));
     if (domWindow)
       domWindow->Focus();
   }

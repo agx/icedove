@@ -4,29 +4,10 @@
 "use strict";
 
 module.metadata = {
-  "stability": "deprecated"
+  "stability": "unstable"
 };
 
-const { deprecateUsage } = require('../util/deprecate');
+exports.Loader = require('./loader').Loader;
+exports.Symbiont = require('../deprecated/symbiont').Symbiont;
+exports.Worker = require('./worker').Worker;
 
-Object.defineProperty(exports, "Loader", { 
-  get: function() {
-    deprecateUsage('`sdk/content/content` is deprecated. Please use `sdk/content/loader` directly.');
-    return require('./loader').Loader;
-  }
-});
-
-Object.defineProperty(exports, "Symbiont", { 
-  get: function() {
-    deprecateUsage('Both `sdk/content/content` and `sdk/deprecated/symbiont` are deprecated. ' +
-                   '`sdk/core/heritage` supersedes Symbiont for inheritance.');
-    return require('../deprecated/symbiont').Symbiont;
-  }
-});
-
-Object.defineProperty(exports, "Worker", { 
-  get: function() {
-    deprecateUsage('`sdk/content/content` is deprecated. Please use `sdk/content/worker` directly.');
-    return require('./worker').Worker;
-  }
-});

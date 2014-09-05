@@ -19,9 +19,6 @@ var a = new Array(N + 1);
 var prefix = a.join("z"); // prefix is sequence of N "z", zzz...zzz
 var str = prefix+"[AB]"; // str is zzz...zzz[AB]
 var re = new RegExp(str);
-try { 
-  re.exec(prefix+"A");
-  reportCompare(expect, actual, status);
-} catch (e) {
-  reportCompare(true, e instanceof Error, actual, status);
-}
+re.exec(prefix+"A");
+
+reportCompare(expect, actual, status);

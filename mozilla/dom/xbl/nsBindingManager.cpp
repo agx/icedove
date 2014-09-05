@@ -216,22 +216,17 @@ nsBindingManager::RemovedFromDocumentInternal(nsIContent* aContent,
 {
   NS_PRECONDITION(aOldDocument != nullptr, "no old document");
 
+  if (mDestroyed)
+    return;
+
   nsRefPtr<nsXBLBinding> binding = aContent->GetXBLBinding();
   if (binding) {
-    // The binding manager may have been destroyed before a runnable
-    // has had a chance to reach this point. If so, we bail out on calling
-    // BindingDetached (which may invoke a XBL destructor) and
-    // ChangeDocument, but we still want to clear out the binding
-    // and insertion parent that may hold references.
-    if (!mDestroyed) {
-      binding->PrototypeBinding()->BindingDetached(binding->GetBoundElement());
-      binding->ChangeDocument(aOldDocument, nullptr);
-    }
-
+    binding->PrototypeBinding()->BindingDetached(binding->GetBoundElement());
+    binding->ChangeDocument(aOldDocument, nullptr);
     aContent->SetXBLBinding(nullptr, this);
   }
 
-  // Clear out insertion parent and content lists.
+  // Clear out insertion parents and content lists.
   aContent->SetXBLInsertionParent(nullptr);
 }
 
@@ -334,7 +329,7 @@ nsBindingManager::RemoveFromAttachedQueue(nsXBLBinding* aBinding)
 {
   // Don't remove items here as that could mess up an executing
   // ProcessAttachedQueue. Instead, null the entry in the queue.
-  size_t index = mAttachedStack.IndexOf(aBinding);
+  uint32_t index = mAttachedStack.IndexOf(aBinding);
   if (index != mAttachedStack.NoIndex) {
     mAttachedStack[index] = nullptr;
   }
@@ -818,7 +813,13 @@ EnumAppendAllSheets(nsRefPtrHashKey<nsIContent> *aKey, void* aClosure)
     static_cast<nsTArray<nsCSSStyleSheet*>*>(aClosure);
   for (nsXBLBinding *binding = boundContent->GetXBLBinding(); binding;
        binding = binding->GetBaseBinding()) {
-    binding->PrototypeBinding()->AppendStyleSheetsTo(*array);
+    nsXBLPrototypeResources::sheet_array_type* sheets =
+      binding->PrototypeBinding()->GetStyleSheets();
+    if (sheets) {
+      // Copy from nsTArray<nsRefPtr<nsCSSStyleSheet> > to
+      // nsTArray<nsCSSStyleSheet*>.
+      array->AppendElements(*sheets);
+    }
   }
   return PL_DHASH_NEXT;
 }
@@ -835,7 +836,7 @@ static void
 InsertAppendedContent(XBLChildrenElement* aPoint,
                       nsIContent* aFirstNewContent)
 {
-  size_t insertionIndex;
+  uint32_t insertionIndex;
   if (nsIContent* prevSibling = aFirstNewContent->GetPreviousSibling()) {
     // If we have a previous sibling, then it must already be in aPoint. Find
     // it and insert after it.
@@ -1078,14 +1079,14 @@ nsBindingManager::HandleChildInsertion(nsIContent* aContainer,
     // TODO If there were multiple insertion points, this approximation can be
     // wrong. We need to re-run the distribution algorithm. In the meantime,
     // this should work well enough.
-    size_t index = aAppend ? point->mInsertedChildren.Length() : 0;
+    uint32_t index = aAppend ? point->mInsertedChildren.Length() : 0;
     for (nsIContent* currentSibling = aChild->GetPreviousSibling();
          currentSibling;
          currentSibling = currentSibling->GetPreviousSibling()) {
       // If we find one of our previous siblings in the insertion point, the
       // index following it is the correct insertion point. Otherwise, we guess
       // based on whether we're appending or inserting.
-      size_t pointIndex = point->IndexOfInsertedChild(currentSibling);
+      uint32_t pointIndex = point->IndexOfInsertedChild(currentSibling);
       if (pointIndex != point->NoIndex) {
         index = pointIndex + 1;
         break;

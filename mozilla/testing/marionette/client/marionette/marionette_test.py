@@ -14,14 +14,7 @@ import unittest
 import weakref
 import warnings
 
-from errors import (
-        ErrorCodes, MarionetteException, InstallGeckoError, TimeoutException, InvalidResponseException, 
-        JavascriptException, NoSuchElementException, XPathLookupException, NoSuchWindowException,
-        StaleElementException, ScriptTimeoutException, ElementNotVisibleException,
-        NoSuchFrameException, InvalidElementStateException, NoAlertPresentException,
-        InvalidCookieDomainException, UnableToSetCookieException, InvalidSelectorException,
-        MoveTargetOutOfBoundsException, FrameSendNotInitializedError, FrameSendFailureError
-        )
+from errors import *
 from marionette import Marionette
 
 class SkipTest(Exception):

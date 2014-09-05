@@ -7,30 +7,25 @@
 #define _LOADMANAGER_H_
 
 #include "LoadMonitor.h"
-#include "mozilla/StaticPtr.h"
-#include "mozilla/TimeStamp.h"
-#include "mozilla/Services.h"
-#include "nsTArray.h"
-#include "nsIObserver.h"
-
 #include "webrtc/common_types.h"
 #include "webrtc/video_engine/include/vie_base.h"
+#include "mozilla/TimeStamp.h"
+#include "nsTArray.h"
 
 extern PRLogModuleInfo *gLoadManagerLog;
 
 namespace mozilla {
 
-class LoadManagerSingleton : public LoadNotificationCallback,
-                             public webrtc::CPULoadStateCallbackInvoker,
-                             public webrtc::CpuOveruseObserver,
-                             public nsIObserver
-
+class LoadManager : public LoadNotificationCallback,
+                    public webrtc::CPULoadStateCallbackInvoker,
+                    public webrtc::CpuOveruseObserver
 {
 public:
-    static LoadManagerSingleton* Get();
-
-    NS_DECL_THREADSAFE_ISUPPORTS
-    NS_DECL_NSIOBSERVER
+    LoadManager(int aLoadMeasurementInterval,
+                int aAveragingMeasurements,
+                float aHighLoadThreshold,
+                float aLowLoadThreshold);
+    ~LoadManager();
 
     // LoadNotificationCallback interface
     virtual void LoadChanged(float aSystemLoad, float aProcessLoad) MOZ_OVERRIDE;
@@ -44,62 +39,22 @@ public:
     virtual void RemoveObserver(webrtc::CPULoadStateObserver * aObserver) MOZ_OVERRIDE;
 
 private:
-    LoadManagerSingleton(int aLoadMeasurementInterval,
-                         int aAveragingMeasurements,
-                         float aHighLoadThreshold,
-                         float aLowLoadThreshold);
-    ~LoadManagerSingleton();
-
     void LoadHasChanged();
 
     nsRefPtr<LoadMonitor> mLoadMonitor;
-
-    // This protexts access to the mObservers list, the current state, pretty much all
-    // the other members (below)
-    Mutex mLock;
-    nsTArray<webrtc::CPULoadStateObserver*> mObservers;
-    webrtc::CPULoadState mCurrentState;
-    // Set when overuse was signaled to us, and hasn't been un-signaled yet.
-    bool  mOveruseActive;
     float mLoadSum;
     int   mLoadSumMeasurements;
+    // Set when overuse was signaled to us, and hasn't been un-signaled yet.
+    bool  mOveruseActive;
     // Load measurement settings
     int mLoadMeasurementInterval;
     int mAveragingMeasurements;
     float mHighLoadThreshold;
     float mLowLoadThreshold;
 
-    static StaticRefPtr<LoadManagerSingleton> sSingleton;
-};
+    webrtc::CPULoadState mCurrentState;
 
-class LoadManager MOZ_FINAL : public webrtc::CPULoadStateCallbackInvoker,
-                              public webrtc::CpuOveruseObserver
-{
-public:
-    LoadManager(LoadManagerSingleton* aManager)
-        : mManager(aManager)
-    {}
-    ~LoadManager() {}
-
-    void AddObserver(webrtc::CPULoadStateObserver * aObserver) MOZ_OVERRIDE
-    {
-        mManager->AddObserver(aObserver);
-    }
-    void RemoveObserver(webrtc::CPULoadStateObserver * aObserver) MOZ_OVERRIDE
-    {
-        mManager->RemoveObserver(aObserver);
-    }
-    void OveruseDetected() MOZ_OVERRIDE
-    {
-        mManager->OveruseDetected();
-    }
-    void NormalUsage() MOZ_OVERRIDE
-    {
-        mManager->NormalUsage();
-    }
-
-private:
-    LoadManagerSingleton* mManager;
+    nsTArray<webrtc::CPULoadStateObserver*> mObservers;
 };
 
 } //namespace

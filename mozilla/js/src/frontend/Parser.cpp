@@ -42,10 +42,7 @@
 
 using namespace js;
 using namespace js::gc;
-
 using mozilla::Maybe;
-
-using JS::AutoGCRooter;
 
 namespace js {
 namespace frontend {
@@ -1205,7 +1202,7 @@ Parser<FullParseHandler>::makeDefIntoUse(Definition *dn, ParseNode *pn, JSAtom *
 template <typename ParseHandler>
 struct BindData
 {
-    explicit BindData(ExclusiveContext *cx) : let(cx) {}
+    BindData(ExclusiveContext *cx) : let(cx) {}
 
     typedef bool
     (*Binder)(BindData *data, HandlePropertyName name, Parser<ParseHandler> *parser);
@@ -1217,7 +1214,7 @@ struct BindData
     Binder          binder;     /* binder, discriminates u */
 
     struct LetData {
-        explicit LetData(ExclusiveContext *cx) : blockObj(cx) {}
+        LetData(ExclusiveContext *cx) : blockObj(cx) {}
         VarContext varContext;
         RootedStaticBlockObject blockObj;
         unsigned   overflow;
@@ -3230,7 +3227,7 @@ struct AddLetDecl
 {
     uint32_t blockid;
 
-    explicit AddLetDecl(uint32_t blockid) : blockid(blockid) {}
+    AddLetDecl(uint32_t blockid) : blockid(blockid) {}
 
     bool operator()(TokenStream &ts, ParseContext<FullParseHandler> *pc,
                     HandleStaticBlockObject blockObj, const Shape &shape, JSAtom *)
@@ -3997,12 +3994,20 @@ Parser<ParseHandler>::doWhileStatement()
         return null();
     PopStatementPC(tokenStream, pc);
 
-    // The semicolon after do-while is even more optional than most
-    // semicolons in JS.  Web compat required this by 2004:
-    //   http://bugzilla.mozilla.org/show_bug.cgi?id=238945
-    // ES3 and ES5 disagreed, but ES6 conforms to Web reality:
-    //   https://bugs.ecmascript.org/show_bug.cgi?id=157
-    tokenStream.matchToken(TOK_SEMI);
+    if (versionNumber() == JSVERSION_ECMA_3) {
+        // Pedantically require a semicolon or line break, following ES3.
+        // Bug 880329 proposes removing this case.
+        if (!MatchOrInsertSemicolon(tokenStream))
+            return null();
+    } else {
+        // The semicolon after do-while is even more optional than most
+        // semicolons in JS.  Web compat required this by 2004:
+        //   http://bugzilla.mozilla.org/show_bug.cgi?id=238945
+        // ES3 and ES5 disagreed, but ES6 conforms to Web reality:
+        //   https://bugs.ecmascript.org/show_bug.cgi?id=157
+        (void) tokenStream.matchToken(TOK_SEMI);
+    }
+
     return handler.newDoWhileStatement(body, cond, TokenPos(begin, pos().end));
 }
 
@@ -6913,11 +6918,11 @@ Parser<ParseHandler>::newRegExp()
     RegExpFlag flags = tokenStream.currentToken().regExpFlags();
 
     Rooted<RegExpObject*> reobj(context);
-    RegExpStatics *res = context->global()->getRegExpStatics(context);
-    if (!res)
-        return null();
+    if (RegExpStatics *res = context->global()->getRegExpStatics())
+        reobj = RegExpObject::create(context, res, chars, length, flags, &tokenStream);
+    else
+        reobj = RegExpObject::createNoStatics(context, chars, length, flags, &tokenStream);
 
-    reobj = RegExpObject::create(context, res, chars, length, flags, &tokenStream, alloc);
     if (!reobj)
         return null();
 

@@ -810,7 +810,7 @@ nsMathMLmoFrame::Stretch(nsRenderingContext& aRenderingContext,
     NS_MATHML_EMBELLISH_IS_ACCENT(mEmbellishData.flags);
   if (isAccent) {
     nsEmbellishData parentData;
-    GetEmbellishDataFrom(GetParent(), parentData);
+    GetEmbellishDataFrom(mParent, parentData);
     isAccent =
        (NS_MATHML_EMBELLISH_IS_ACCENTOVER(parentData.flags) ||
         NS_MATHML_EMBELLISH_IS_ACCENTUNDER(parentData.flags)) &&
@@ -922,16 +922,20 @@ nsMathMLmoFrame::TransmitAutomaticData()
   return NS_OK;
 }
 
-void
+nsresult
 nsMathMLmoFrame::SetInitialChildList(ChildListID     aListID,
                                      nsFrameList&    aChildList)
 {
   // First, let the parent class do its work
-  nsMathMLTokenFrame::SetInitialChildList(aListID, aChildList);
+  nsresult rv = nsMathMLTokenFrame::SetInitialChildList(aListID, aChildList);
+  if (NS_FAILED(rv))
+    return rv;
+
   ProcessTextData();
+  return rv;
 }
 
-void
+nsresult
 nsMathMLmoFrame::Reflow(nsPresContext*          aPresContext,
                         nsHTMLReflowMetrics&     aDesiredSize,
                         const nsHTMLReflowState& aReflowState,
@@ -941,8 +945,8 @@ nsMathMLmoFrame::Reflow(nsPresContext*          aPresContext,
   // it is safer to just process the whole lot here
   ProcessOperatorData();
 
-  nsMathMLTokenFrame::Reflow(aPresContext, aDesiredSize,
-                             aReflowState, aStatus);
+  return nsMathMLTokenFrame::Reflow(aPresContext, aDesiredSize,
+                                    aReflowState, aStatus);
 }
 
 /* virtual */ void

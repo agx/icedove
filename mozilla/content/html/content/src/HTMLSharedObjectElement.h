@@ -192,7 +192,7 @@ private:
   /**
    * Calls LoadObject with the correct arguments to start the plugin load.
    */
-  void StartObjectLoad(bool aNotify);
+  NS_HIDDEN_(void) StartObjectLoad(bool aNotify);
 
   nsIAtom *URIAttrName() const
   {

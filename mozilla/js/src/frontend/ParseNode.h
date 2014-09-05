@@ -1135,7 +1135,7 @@ class ContinueStatement : public LoopControlStatement
 class DebuggerStatement : public ParseNode
 {
   public:
-    explicit DebuggerStatement(const TokenPos &pos)
+    DebuggerStatement(const TokenPos &pos)
       : ParseNode(PNK_DEBUGGER, JSOP_NOP, PN_NULLARY, pos)
     { }
 };
@@ -1178,13 +1178,13 @@ class ConditionalExpression : public ParseNode
 class ThisLiteral : public ParseNode
 {
   public:
-    explicit ThisLiteral(const TokenPos &pos) : ParseNode(PNK_THIS, JSOP_THIS, PN_NULLARY, pos) { }
+    ThisLiteral(const TokenPos &pos) : ParseNode(PNK_THIS, JSOP_THIS, PN_NULLARY, pos) { }
 };
 
 class NullLiteral : public ParseNode
 {
   public:
-    explicit NullLiteral(const TokenPos &pos) : ParseNode(PNK_NULL, JSOP_NULL, PN_NULLARY, pos) { }
+    NullLiteral(const TokenPos &pos) : ParseNode(PNK_NULL, JSOP_NULL, PN_NULLARY, pos) { }
 };
 
 class BooleanLiteral : public ParseNode

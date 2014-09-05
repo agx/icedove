@@ -300,12 +300,7 @@ let TPS = {
             Logger.logInfo("tab for " + taburi + " finished loading");
             if (that._tabsFinished == that._tabsAdded) {
               Logger.logInfo("all tabs loaded, continuing...");
-
-              // Wait a second before continuing to be sure tabs can be synced,
-              // otherwise we can get 'error locating tab'
-              Utils.namedTimer(function () {
-                that.FinishAsyncOperation();
-              }, 1000, this, "postTabsOpening");
+              that.FinishAsyncOperation();
             }
           });
           break;

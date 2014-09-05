@@ -52,12 +52,11 @@ public:
   void OnFacesDetected(camera_frame_metadata_t* aMetaData);
   void OnTakePictureComplete(uint8_t* aData, uint32_t aLength);
   void OnTakePictureError();
-  void OnRateLimitPreview(bool aLimit);
   void OnNewPreviewFrame(layers::TextureClient* aBuffer);
   void OnRecorderEvent(int msg, int ext1, int ext2);
-  void OnSystemError(CameraControlListener::SystemContext aWhere, nsresult aError);
+  void OnError(CameraControlListener::CameraErrorContext aWhere,
+               CameraControlListener::CameraError aError);
 
-  // See ICameraControl.h for getter/setter return values.
   virtual nsresult Set(uint32_t aKey, const nsAString& aValue) MOZ_OVERRIDE;
   virtual nsresult Get(uint32_t aKey, nsAString& aValue) MOZ_OVERRIDE;
   virtual nsresult Set(uint32_t aKey, double aValue) MOZ_OVERRIDE;
@@ -66,8 +65,6 @@ public:
   virtual nsresult Get(uint32_t aKey, int32_t& aValue) MOZ_OVERRIDE;
   virtual nsresult Set(uint32_t aKey, int64_t aValue) MOZ_OVERRIDE;
   virtual nsresult Get(uint32_t aKey, int64_t& aValue) MOZ_OVERRIDE;
-  virtual nsresult Set(uint32_t aKey, bool aValue) MOZ_OVERRIDE;
-  virtual nsresult Get(uint32_t aKey, bool& aValue) MOZ_OVERRIDE;
   virtual nsresult Set(uint32_t aKey, const Size& aValue) MOZ_OVERRIDE;
   virtual nsresult Get(uint32_t aKey, Size& aValue) MOZ_OVERRIDE;
   virtual nsresult Set(uint32_t aKey, const nsTArray<Region>& aRegions) MOZ_OVERRIDE;
@@ -85,29 +82,27 @@ public:
 protected:
   ~nsGonkCameraControl();
 
-  using CameraControlImpl::OnRateLimitPreview;
   using CameraControlImpl::OnNewPreviewFrame;
   using CameraControlImpl::OnAutoFocusComplete;
   using CameraControlImpl::OnFacesDetected;
   using CameraControlImpl::OnTakePictureComplete;
   using CameraControlImpl::OnConfigurationChange;
-  using CameraControlImpl::OnUserError;
+  using CameraControlImpl::OnError;
 
   virtual void BeginBatchParameterSet() MOZ_OVERRIDE;
   virtual void EndBatchParameterSet() MOZ_OVERRIDE;
 
+  virtual nsresult StartImpl(const Configuration* aInitialConfig = nullptr) MOZ_OVERRIDE;
+  virtual nsresult StopImpl() MOZ_OVERRIDE;
   nsresult Initialize();
 
+  virtual nsresult SetConfigurationImpl(const Configuration& aConfig) MOZ_OVERRIDE;
   nsresult SetConfigurationInternal(const Configuration& aConfig);
   nsresult SetPictureConfiguration(const Configuration& aConfig);
   nsresult SetVideoConfiguration(const Configuration& aConfig);
 
   template<class T> nsresult SetAndPush(uint32_t aKey, const T& aValue);
 
-  // See CameraControlImpl.h for these methods' return values.
-  virtual nsresult StartImpl(const Configuration* aInitialConfig = nullptr) MOZ_OVERRIDE;
-  virtual nsresult SetConfigurationImpl(const Configuration& aConfig) MOZ_OVERRIDE;
-  virtual nsresult StopImpl() MOZ_OVERRIDE;
   virtual nsresult StartPreviewImpl() MOZ_OVERRIDE;
   virtual nsresult StopPreviewImpl() MOZ_OVERRIDE;
   virtual nsresult AutoFocusImpl() MOZ_OVERRIDE;
@@ -123,8 +118,8 @@ protected:
   virtual already_AddRefed<RecorderProfileManager> GetRecorderProfileManagerImpl() MOZ_OVERRIDE;
   already_AddRefed<GonkRecorderProfileManager> GetGonkRecorderProfileManager();
 
-  nsresult SetupRecording(int aFd, int aRotation, uint64_t aMaxFileSizeBytes,
-                          uint64_t aMaxVideoLengthMs);
+  nsresult SetupRecording(int aFd, int aRotation, int64_t aMaxFileSizeBytes,
+                          int64_t aMaxVideoLengthMs);
   nsresult SetupRecordingFlash(bool aAutoEnableLowLightTorch);
   nsresult SetupVideoMode(const nsAString& aProfile);
   nsresult SetPreviewSize(const Size& aSize);
@@ -176,7 +171,6 @@ private:
 };
 
 // camera driver callbacks
-void OnRateLimitPreview(nsGonkCameraControl* gc, bool aLimit);
 void OnTakePictureComplete(nsGonkCameraControl* gc, uint8_t* aData, uint32_t aLength);
 void OnTakePictureError(nsGonkCameraControl* gc);
 void OnAutoFocusComplete(nsGonkCameraControl* gc, bool aSuccess);
@@ -185,9 +179,8 @@ void OnFacesDetected(nsGonkCameraControl* gc, camera_frame_metadata_t* aMetaData
 void OnNewPreviewFrame(nsGonkCameraControl* gc, layers::TextureClient* aBuffer);
 void OnShutter(nsGonkCameraControl* gc);
 void OnClosed(nsGonkCameraControl* gc);
-void OnSystemError(nsGonkCameraControl* gc,
-                   CameraControlListener::SystemContext aWhere,
-                   int32_t aArg1, int32_t aArg2);
+void OnError(nsGonkCameraControl* gc, CameraControlListener::CameraError aError,
+             int32_t aArg1, int32_t aArg2);
 
 } // namespace mozilla
 

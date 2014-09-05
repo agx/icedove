@@ -48,8 +48,7 @@ MacIOSurfaceTextureHostOGL::GetFormat() const {
   if (!mSurface) {
     return gfx::SurfaceFormat::UNKNOWN;
   }
-  return mSurface->HasAlpha() ? gfx::SurfaceFormat::R8G8B8A8
-                              : gfx::SurfaceFormat::R8G8B8X8;
+  return mSurface->HasAlpha() ? gfx::SurfaceFormat::R8G8B8A8 : gfx::SurfaceFormat::B8G8R8X8;
 }
 
 gfx::IntSize
@@ -81,8 +80,7 @@ MacIOSurfaceTextureSourceOGL::GetSize() const
 gfx::SurfaceFormat
 MacIOSurfaceTextureSourceOGL::GetFormat() const
 {
-  return mSurface->HasAlpha() ? gfx::SurfaceFormat::R8G8B8A8
-                              : gfx::SurfaceFormat::R8G8B8X8;
+  return mSurface->HasAlpha() ? gfx::SurfaceFormat::R8G8B8A8 : gfx::SurfaceFormat::B8G8R8X8;
 }
 
 void

@@ -132,14 +132,8 @@ public:
   }
 
   void
-  GetResult(JS::MutableHandle<JS::Value> aResult, ErrorResult& aRv) const;
-
-  void
   GetResult(JSContext* aCx, JS::MutableHandle<JS::Value> aResult,
-            ErrorResult& aRv) const
-  {
-    GetResult(aResult, aRv);
-  }
+            ErrorResult& aRv) const;
 
   IDBTransaction*
   GetTransaction() const

@@ -16,7 +16,6 @@
 #include "nsPoint.h"                    // for nsIntPoint
 #include "nsRect.h"                     // for nsIntRect
 #include "nsRegion.h"                   // for nsIntRegion
-#include "ReadbackProcessor.h"
 
 using namespace mozilla::gfx;
 
@@ -116,19 +115,14 @@ BasicContainerLayer::ChildrenPartitionVisibleRegion(const nsIntRect& aInRect)
 
 void
 BasicContainerLayer::Validate(LayerManager::DrawThebesLayerCallback aCallback,
-                              void* aCallbackData,
-                              ReadbackProcessor* aReadback)
+                              void* aCallbackData)
 {
-  ReadbackProcessor readback;
-  if (BasicManager()->IsRetained()) {
-    readback.BuildUpdates(this);
-  }
   for (Layer* l = mFirstChild; l; l = l->GetNextSibling()) {
     BasicImplData* data = ToData(l);
-    data->Validate(aCallback, aCallbackData, &readback);
+    data->Validate(aCallback, aCallbackData);
     if (l->GetMaskLayer()) {
       data = ToData(l->GetMaskLayer());
-      data->Validate(aCallback, aCallbackData, nullptr);
+      data->Validate(aCallback, aCallbackData);
     }
   }
 }

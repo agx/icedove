@@ -46,14 +46,13 @@ class JSFunction : public JSObject
         SELF_HOSTED_CTOR = 0x0200,  /* function is self-hosted builtin constructor and
                                        must be constructible but not decompilable. */
         HAS_REST         = 0x0400,  /* function has a rest (...) parameter */
-        ASMJS            = 0x0800,  /* function is an asm.js module or exported function */
+        // 0x0800 is available
         INTERPRETED_LAZY = 0x1000,  /* function is interpreted but doesn't have a script yet */
         ARROW            = 0x2000,  /* ES6 '(args) => body' syntax */
 
         /* Derived Flags values for convenience: */
         NATIVE_FUN = 0,
-        ASMJS_CTOR = ASMJS | NATIVE_CTOR,
-        ASMJS_LAMBDA_CTOR = ASMJS | NATIVE_CTOR | LAMBDA,
+        NATIVE_LAMBDA_FUN = NATIVE_FUN | LAMBDA,
         INTERPRETED_LAMBDA = INTERPRETED | LAMBDA,
         INTERPRETED_LAMBDA_ARROW = INTERPRETED | LAMBDA | ARROW
     };
@@ -119,7 +118,6 @@ class JSFunction : public JSObject
 
     /* Possible attributes of a native function: */
     bool isNativeConstructor()      const { return flags() & NATIVE_CTOR; }
-    bool isAsmJSNative()            const { return flags() & ASMJS; }
 
     /* Possible attributes of an interpreted function: */
     bool isFunctionPrototype()      const { return flags() & IS_FUN_PROTO; }
@@ -149,7 +147,7 @@ class JSFunction : public JSObject
 
     /* Compound attributes: */
     bool isBuiltin() const {
-        return (isNative() && !isAsmJSNative()) || isSelfHostedBuiltin();
+        return isNative() || isSelfHostedBuiltin();
     }
     bool isInterpretedConstructor() const {
         // Note: the JITs inline this check, so be careful when making changes
@@ -218,8 +216,8 @@ class JSFunction : public JSObject
     }
 
     void setGuessedAtom(JSAtom *atom) {
-        JS_ASSERT(!atom_);
-        JS_ASSERT(atom);
+        JS_ASSERT(atom_ == nullptr);
+        JS_ASSERT(atom != nullptr);
         JS_ASSERT(!hasGuessedAtom());
         atom_ = atom;
         flags_ |= HAS_GUESSED_ATOM;
@@ -531,6 +529,9 @@ FunctionHasResolveHook(const JSAtomState &atomState, PropertyName *name);
 
 extern bool
 fun_resolve(JSContext *cx, HandleObject obj, HandleId id, MutableHandleObject objp);
+
+// ES6 9.2.5 IsConstructor
+bool IsConstructor(const Value &v);
 
 /*
  * Function extended with reserved slots for use by various kinds of functions.

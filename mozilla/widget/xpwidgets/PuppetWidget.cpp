@@ -649,17 +649,15 @@ PuppetWidget::NotifyIMEOfSelectionChange(
 NS_IMETHODIMP
 PuppetWidget::SetCursor(nsCursor aCursor)
 {
-  if (mCursor == aCursor && !mUpdateCursor) {
+  if (mCursor == aCursor) {
     return NS_OK;
   }
 
-  if (mTabChild &&
-      !mTabChild->SendSetCursor(aCursor, mUpdateCursor)) {
+  if (mTabChild && !mTabChild->SendSetCursor(aCursor)) {
     return NS_ERROR_FAILURE;
   }
 
   mCursor = aCursor;
-  mUpdateCursor = false;
 
   return NS_OK;
 }

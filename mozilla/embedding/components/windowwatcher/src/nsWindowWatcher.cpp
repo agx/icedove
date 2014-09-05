@@ -342,7 +342,7 @@ nsWindowWatcher::OpenWindow(nsIDOMWindow *aParent,
 
   return OpenWindowInternal(aParent, aUrl, aName, aFeatures,
                             /* calledFromJS = */ false, dialog,
-                            /* navigate = */ true, nullptr, argv, _retval);
+                            /* navigate = */ true, argv, _retval);
 }
 
 struct SizeSpec {
@@ -394,7 +394,6 @@ nsWindowWatcher::OpenWindow2(nsIDOMWindow *aParent,
                               bool aCalledFromScript,
                               bool aDialog,
                               bool aNavigate,
-                              nsITabParent *aOpeningTab,
                               nsISupports *aArguments,
                               nsIDOMWindow **_retval)
 {
@@ -415,7 +414,7 @@ nsWindowWatcher::OpenWindow2(nsIDOMWindow *aParent,
 
   return OpenWindowInternal(aParent, aUrl, aName, aFeatures,
                             aCalledFromScript, dialog,
-                            aNavigate, aOpeningTab, argv, _retval);
+                            aNavigate, argv, _retval);
 }
 
 nsresult
@@ -426,7 +425,6 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
                                     bool aCalledFromJS,
                                     bool aDialog,
                                     bool aNavigate,
-                                    nsITabParent *aOpeningTab,
                                     nsIArray *argv,
                                     nsIDOMWindow **_retval)
 {
@@ -700,7 +698,7 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
         bool cancel = false;
         rv = windowCreator2->CreateChromeWindow2(parentChrome, chromeFlags,
                                                  contextFlags, uriToLoad,
-                                                 aOpeningTab, &cancel,
+                                                 &cancel,
                                                  getter_AddRefs(newChrome));
         if (NS_SUCCEEDED(rv) && cancel) {
           newChrome = 0; // just in case
@@ -787,14 +785,15 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
 
   // Now we have to set the right opener principal on the new window.  Note
   // that we have to do this _before_ starting any URI loads, thanks to the
-  // sync nature of javascript: loads.
-  //
-  // Note: The check for the current JSContext isn't necessarily sensical.
-  // It's just designed to preserve old semantics during a mass-conversion
-  // patch.
-  nsCOMPtr<nsIPrincipal> subjectPrincipal =
-    nsContentUtils::GetCurrentJSContext() ? nsContentUtils::SubjectPrincipal()
-                                          : nullptr;
+  // sync nature of javascript: loads.  Since this is the only place where we
+  // set said opener principal, we need to do it for all URIs, including
+  // chrome ones.  So to deal with the mess that is bug 79775, just press on in
+  // a reasonable way even if GetSubjectPrincipal fails.  In that case, just
+  // use a null subjectPrincipal.
+  nsCOMPtr<nsIPrincipal> subjectPrincipal;
+  if (NS_FAILED(sm->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal)))) {
+    subjectPrincipal = nullptr;
+  }
 
   if (windowIsNew) {
     // Now set the opener principal on the new window.  Note that we need to do
@@ -803,8 +802,10 @@ nsWindowWatcher::OpenWindowInternal(nsIDOMWindow *aParent,
     // cases we do _not_ set the parent window principal as the owner of the
     // load--since we really don't know who the owner is, just leave it null.
     nsCOMPtr<nsPIDOMWindow> newWindow = do_QueryInterface(*_retval);
-    NS_ASSERTION(newWindow == newDocShell->GetWindow(), "Different windows??");
-
+#ifdef DEBUG
+    nsCOMPtr<nsPIDOMWindow> newDebugWindow = do_GetInterface(newDocShell);
+    NS_ASSERTION(newWindow == newDebugWindow, "Different windows??");
+#endif
     // The principal of the initial about:blank document gets set up in
     // nsWindowWatcher::AddWindow. Make sure to call it. In the common case
     // this call already happened when the window was created, but
@@ -1312,10 +1313,8 @@ nsWindowWatcher::GetWindowByName(const char16_t *aTargetName,
     FindItemWithName(aTargetName, nullptr, nullptr, getter_AddRefs(treeItem));
   }
 
-  if (treeItem) {
-    nsCOMPtr<nsIDOMWindow> domWindow = treeItem->GetWindow();
-    domWindow.forget(aResult);
-  }
+  nsCOMPtr<nsIDOMWindow> domWindow = do_GetInterface(treeItem);
+  domWindow.swap(*aResult);
 
   return NS_OK;
 }
@@ -1736,7 +1735,7 @@ nsWindowWatcher::GetCallerTreeItem(nsIDocShellTreeItem* aParentItem)
   return callerItem.forget();
 }
 
-nsPIDOMWindow*
+already_AddRefed<nsIDOMWindow>
 nsWindowWatcher::SafeGetWindowByName(const nsAString& aName,
                                      nsIDOMWindow* aCurrentWindow)
 {
@@ -1757,7 +1756,8 @@ nsWindowWatcher::SafeGetWindowByName(const nsAString& aName,
                      getter_AddRefs(foundItem));
   }
 
-  return foundItem ? foundItem->GetWindow() : nullptr;
+  nsCOMPtr<nsIDOMWindow> foundWin = do_GetInterface(foundItem);
+  return foundWin.forget();
 }
 
 /* Fetch the nsIDOMWindow corresponding to the given nsIDocShellTreeItem.
@@ -1773,10 +1773,8 @@ nsWindowWatcher::ReadyOpenedDocShellItem(nsIDocShellTreeItem *aOpenedItem,
 {
   nsresult rv = NS_ERROR_FAILURE;
 
-  NS_ENSURE_ARG(aOpenedWindow);
-
   *aOpenedWindow = 0;
-  nsCOMPtr<nsPIDOMWindow> piOpenedWindow = aOpenedItem->GetWindow();
+  nsCOMPtr<nsPIDOMWindow> piOpenedWindow(do_GetInterface(aOpenedItem));
   if (piOpenedWindow) {
     if (aParent) {
       piOpenedWindow->SetOpenerWindow(aParent, aWindowIsNew); // damnit

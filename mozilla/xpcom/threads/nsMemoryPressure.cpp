@@ -24,14 +24,14 @@ NS_GetPendingMemoryPressure()
 }
 
 void
-NS_DispatchEventualMemoryPressure(MemoryPressureState aState)
+NS_DispatchEventualMemoryPressure(MemoryPressureState state)
 {
   /*
    * A new memory pressure event erases an ongoing memory pressure, but an
    * existing "new" memory pressure event takes precedence over a new "ongoing"
    * memory pressure event.
    */
-  switch (aState) {
+  switch (state) {
     case MemPressure_None:
       sMemoryPressurePending = MemPressure_None;
       break;
@@ -39,16 +39,15 @@ NS_DispatchEventualMemoryPressure(MemoryPressureState aState)
       sMemoryPressurePending = MemPressure_New;
       break;
     case MemPressure_Ongoing:
-      sMemoryPressurePending.compareExchange(MemPressure_None,
-                                             MemPressure_Ongoing);
+      sMemoryPressurePending.compareExchange(MemPressure_None, MemPressure_Ongoing);
       break;
   }
 }
 
 nsresult
-NS_DispatchMemoryPressure(MemoryPressureState aState)
+NS_DispatchMemoryPressure(MemoryPressureState state)
 {
-  NS_DispatchEventualMemoryPressure(aState);
+  NS_DispatchEventualMemoryPressure(state);
   nsCOMPtr<nsIRunnable> event = new nsRunnable;
   return NS_DispatchToMainThread(event);
 }

@@ -8,7 +8,6 @@
 
 #include "MediaStreamGraph.h"
 #include "AudioNodeStream.h"
-#include "mozilla/Atomics.h"
 
 // Forward declaration for mResamplerMap
 typedef struct SpeexResamplerState_ SpeexResamplerState;
@@ -93,15 +92,8 @@ private:
    * Creates a TrackMapEntry for the track, if needed. Returns the index
    * of the TrackMapEntry or NoIndex if no entry is needed yet.
    */
-  size_t GetTrackMapEntry(const StreamBuffer::Track& aTrack,
-                          GraphTime aFrom);
-
-  /**
-   * Determines if this is enabled or not.  Disabled nodes produce silence.
-   * This node becomes disabled if the document principal does not subsume the
-   * DOMMediaStream principal.
-   */
-  bool IsEnabled();
+  uint32_t GetTrackMapEntry(const StreamBuffer::Track& aTrack,
+                            GraphTime aFrom);
 };
 
 }

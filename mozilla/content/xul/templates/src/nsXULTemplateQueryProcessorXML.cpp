@@ -251,7 +251,7 @@ nsXULTemplateQueryProcessorXML::CompileQuery(nsIXULTemplateBuilder* aBuilder,
     // if an expression is not specified, then the default is to
     // just take all of the children
     if (expr.IsEmpty())
-        expr.Assign('*');
+        expr.AssignLiteral("*");
 
     nsCOMPtr<nsIDOMXPathExpression> compiledexpr;
     rv = CreateExpression(expr, aQueryNode, getter_AddRefs(compiledexpr));

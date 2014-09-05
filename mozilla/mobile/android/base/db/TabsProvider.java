@@ -20,7 +20,6 @@ import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.database.sqlite.SQLiteQueryBuilder;
 import android.net.Uri;
-import android.os.Build;
 import android.text.TextUtils;
 
 public class TabsProvider extends PerProfileDatabaseProvider<TabsProvider.TabsDatabaseHelper> {
@@ -155,10 +154,7 @@ public class TabsProvider extends PerProfileDatabaseProvider<TabsProvider.TabsDa
             db.rawQuery("PRAGMA synchronous=OFF", null).close();
 
             if (shouldUseTransactions()) {
-                // Modern Android allows WAL to be enabled through a mode flag.
-                if (Build.VERSION.SDK_INT < 16) {
-                    db.enableWriteAheadLogging();
-                }
+                db.enableWriteAheadLogging();
                 db.setLockingEnabled(false);
                 return;
             }

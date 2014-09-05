@@ -7,18 +7,13 @@
 #include "nsSVGMaskFrame.h"
 
 // Keep others in (case-insensitive) order:
-#include "gfx2DGlue.h"
 #include "gfxContext.h"
 #include "gfxImageSurface.h"
-#include "mozilla/gfx/2D.h"
-#include "mozilla/RefPtr.h"
 #include "nsRenderingContext.h"
 #include "nsSVGEffects.h"
 #include "mozilla/dom/SVGMaskElement.h"
 
-using namespace mozilla;
 using namespace mozilla::dom;
-using namespace mozilla::gfx;
 
 /**
  * Byte offsets of channels in a native packed gfxColor or cairo image surface.
@@ -75,11 +70,11 @@ static const uint8_t gsRGBToLinearRGBMap[256] = {
 static void
 ComputesRGBLuminanceMask(uint8_t *aData,
                          int32_t aStride,
-                         const IntSize &aSize,
+                         const nsIntRect &aRect,
                          float aOpacity)
 {
-  for (int32_t y = 0; y < aSize.height; y++) {
-    for (int32_t x = 0; x < aSize.width; x++) {
+  for (int32_t y = aRect.y; y < aRect.YMost(); y++) {
+    for (int32_t x = aRect.x; x < aRect.XMost(); x++) {
       uint8_t *pixel = aData + aStride * y + 4 * x;
       uint8_t a = pixel[GFX_ARGB32_OFFSET_A];
 
@@ -104,11 +99,11 @@ ComputesRGBLuminanceMask(uint8_t *aData,
 static void
 ComputeLinearRGBLuminanceMask(uint8_t *aData,
                               int32_t aStride,
-                              const IntSize &aSize,
+                              const nsIntRect &aRect,
                               float aOpacity)
 {
-  for (int32_t y = 0; y < aSize.height; y++) {
-    for (int32_t x = 0; x < aSize.width; x++) {
+  for (int32_t y = aRect.y; y < aRect.YMost(); y++) {
+    for (int32_t x = aRect.x; x < aRect.XMost(); x++) {
       uint8_t *pixel = aData + aStride * y + 4 * x;
       uint8_t a = pixel[GFX_ARGB32_OFFSET_A];
 
@@ -144,11 +139,11 @@ ComputeLinearRGBLuminanceMask(uint8_t *aData,
 static void
 ComputeAlphaMask(uint8_t *aData,
                  int32_t aStride,
-                 const IntSize &aSize,
+                 const nsIntRect &aRect,
                  float aOpacity)
 {
-  for (int32_t y = 0; y < aSize.height; y++) {
-    for (int32_t x = 0; x < aSize.width; x++) {
+  for (int32_t y = aRect.y; y < aRect.YMost(); y++) {
+    for (int32_t x = aRect.x; x < aRect.XMost(); x++) {
       uint8_t *pixel = aData + aStride * y + 4 * x;
       uint8_t luminance = pixel[GFX_ARGB32_OFFSET_A] * aOpacity;
       memset(pixel, luminance, 4);
@@ -168,10 +163,10 @@ NS_NewSVGMaskFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 NS_IMPL_FRAMEARENA_HELPERS(nsSVGMaskFrame)
 
 already_AddRefed<gfxPattern>
-nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
-                                      nsIFrame* aMaskedFrame,
-                                      const gfxMatrix &aMatrix,
-                                      float aOpacity)
+nsSVGMaskFrame::ComputeMaskAlpha(nsRenderingContext *aContext,
+                                 nsIFrame* aParent,
+                                 const gfxMatrix &aMatrix,
+                                 float aOpacity)
 {
   // If the flag is set when we get here, it means this mask frame
   // has already been used painting the current mask, and the document
@@ -182,46 +177,45 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
   }
   AutoMaskReferencer maskRef(this);
 
-  SVGMaskElement *maskElem = static_cast<SVGMaskElement*>(mContent);
+  SVGMaskElement *mask = static_cast<SVGMaskElement*>(mContent);
 
   uint16_t units =
-    maskElem->mEnumAttributes[SVGMaskElement::MASKUNITS].GetAnimValue();
+    mask->mEnumAttributes[SVGMaskElement::MASKUNITS].GetAnimValue();
   gfxRect bbox;
   if (units == SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
-    bbox = nsSVGUtils::GetBBox(aMaskedFrame);
+    bbox = nsSVGUtils::GetBBox(aParent);
   }
 
-  // Bounds in the user space of aMaskedFrame
   gfxRect maskArea = nsSVGUtils::GetRelativeRect(units,
-                       &maskElem->mLengthAttributes[SVGMaskElement::ATTR_X],
-                       bbox, aMaskedFrame);
+    &mask->mLengthAttributes[SVGMaskElement::ATTR_X], bbox, aParent);
+
+  gfxContext *gfx = aContext->ThebesContext();
 
   // Get the clip extents in device space:
-  // Minimizing the mask surface extents (using both the current clip extents
-  // and maskArea) is important for performance.
-  aContext->Save();
-  nsSVGUtils::SetClipRect(aContext, aMatrix, maskArea);
-  aContext->IdentityMatrix();
-  gfxRect maskSurfaceRect = aContext->GetClipExtents();
-  maskSurfaceRect.RoundOut();
-  aContext->Restore();
+  gfx->Save();
+  nsSVGUtils::SetClipRect(gfx, aMatrix, maskArea);
+  gfx->IdentityMatrix();
+  gfxRect clipExtents = gfx->GetClipExtents();
+  clipExtents.RoundOut();
+  gfx->Restore();
 
   bool resultOverflows;
-  IntSize maskSurfaceSize =
-    ToIntSize(nsSVGUtils::ConvertToSurfaceSize(maskSurfaceRect.Size(),
-                                               &resultOverflows));
+  gfxIntSize surfaceSize =
+    nsSVGUtils::ConvertToSurfaceSize(gfxSize(clipExtents.Width(),
+                                             clipExtents.Height()),
+                                     &resultOverflows);
 
-  if (resultOverflows || maskSurfaceSize.IsEmpty()) {
-    // XXXjwatt we should return an empty surface so we don't paint aMaskedFrame!
+  // 0 disables mask, < 0 is an error
+  if (surfaceSize.width <= 0 || surfaceSize.height <= 0)
     return nullptr;
-  }
 
-  RefPtr<DrawTarget> maskDT =
-    Factory::CreateDrawTarget(BackendType::CAIRO, maskSurfaceSize,
-                              SurfaceFormat::B8G8R8A8);
-  if (!maskDT) {
+  if (resultOverflows)
     return nullptr;
-  }
+
+  nsRefPtr<gfxImageSurface> image =
+    new gfxImageSurface(surfaceSize, gfxImageFormat::ARGB32);
+  if (!image || image->CairoStatus())
+    return nullptr;
 
   // We would like to use gfxImageSurface::SetDeviceOffset() to position
   // 'image'. However, we need to set the same matrix on the temporary context
@@ -229,14 +223,14 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
   // Unfortunately, any device offset set by SetDeviceOffset() is affected by
   // the transform passed to the SetMatrix() calls, so to avoid that we account
   // for the device offset in the transform rather than use SetDeviceOffset().
-  gfxMatrix maskSurfaceMatrix =
-    aContext->CurrentMatrix() * gfxMatrix().Translate(-maskSurfaceRect.TopLeft());
+  gfxMatrix matrix =
+    gfx->CurrentMatrix() * gfxMatrix().Translate(-clipExtents.TopLeft());
 
-  nsRefPtr<nsRenderingContext> tmpCtx = new nsRenderingContext();
-  tmpCtx->Init(this->PresContext()->DeviceContext(), maskDT);
-  tmpCtx->ThebesContext()->SetMatrix(maskSurfaceMatrix);
+  nsRefPtr<nsRenderingContext> tmpCtx(new nsRenderingContext);
+  tmpCtx->Init(this->PresContext()->DeviceContext(), image);
+  tmpCtx->ThebesContext()->SetMatrix(matrix);
 
-  mMaskParent = aMaskedFrame;
+  mMaskParent = aParent;
   if (mMaskParentMatrix) {
     *mMaskParentMatrix = aMatrix;
   } else {
@@ -253,36 +247,23 @@ nsSVGMaskFrame::GetMaskForMaskedFrame(gfxContext* aContext,
     nsSVGUtils::PaintFrameWithEffects(tmpCtx, nullptr, kid);
   }
 
-  RefPtr<SourceSurface> maskSnapshot = maskDT->Snapshot();
-  if (!maskSnapshot) {
-    return nullptr;
-  }
-  RefPtr<DataSourceSurface> maskSurface = maskSnapshot->GetDataSurface();
-  DataSourceSurface::MappedSurface map;
-  if (!maskSurface->Map(DataSourceSurface::MapType::READ_WRITE, &map)) {
-    return nullptr;
-  }
+  uint8_t *data   = image->Data();
+  int32_t  stride = image->Stride();
+  nsIntRect rect(0, 0, surfaceSize.width, surfaceSize.height);
 
   if (StyleSVGReset()->mMaskType == NS_STYLE_MASK_TYPE_LUMINANCE) {
     if (StyleSVG()->mColorInterpolation ==
         NS_STYLE_COLOR_INTERPOLATION_LINEARRGB) {
-      ComputeLinearRGBLuminanceMask(map.mData, map.mStride, maskSurfaceSize, aOpacity);
+      ComputeLinearRGBLuminanceMask(data, stride, rect, aOpacity);
     } else {
-      ComputesRGBLuminanceMask(map.mData, map.mStride, maskSurfaceSize, aOpacity);
+      ComputesRGBLuminanceMask(data, stride, rect, aOpacity);
     }
   } else {
-    ComputeAlphaMask(map.mData, map.mStride, maskSurfaceSize, aOpacity);
+    ComputeAlphaMask(data, stride, rect, aOpacity);
   }
 
-  maskSurface->Unmap();
-
-  // Moz2D transforms in the opposite direction to Thebes
-  maskSurfaceMatrix.Invert();
-  if (maskSurfaceMatrix.IsSingular()) {
-    return nullptr;
-  }
-  nsRefPtr<gfxPattern> retval =
-    new gfxPattern(maskSurface, ToMatrix(maskSurfaceMatrix));
+  nsRefPtr<gfxPattern> retval = new gfxPattern(image);
+  retval->SetMatrix(matrix);
   return retval.forget();
 }
 
@@ -307,9 +288,9 @@ nsSVGMaskFrame::AttributeChanged(int32_t  aNameSpaceID,
 
 #ifdef DEBUG
 void
-nsSVGMaskFrame::Init(nsIContent*       aContent,
-                     nsContainerFrame* aParent,
-                     nsIFrame*         aPrevInFlow)
+nsSVGMaskFrame::Init(nsIContent* aContent,
+                     nsIFrame* aParent,
+                     nsIFrame* aPrevInFlow)
 {
   NS_ASSERTION(aContent->IsSVG(nsGkAtoms::mask),
                "Content is not an SVG mask");

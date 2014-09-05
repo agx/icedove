@@ -306,7 +306,7 @@ class AsmJSModule
         PropertyName *name_;
       public:
         Name() : name_(nullptr) {}
-        MOZ_IMPLICIT Name(PropertyName *name) : name_(name) {}
+        Name(PropertyName *name) : name_(name) {}
         PropertyName *name() const { return name_; }
         PropertyName *&name() { return name_; }
         size_t serializedSize() const;
@@ -377,39 +377,6 @@ class AsmJSModule
 
     struct RelativeLink
     {
-        enum Kind
-        {
-            RawPointer,
-            CodeLabel,
-            InstructionImmediate
-        };
-
-        RelativeLink()
-        { }
-
-        RelativeLink(Kind kind)
-        {
-#if defined(JS_CODEGEN_MIPS)
-            kind_ = kind;
-#elif defined(JS_CODEGEN_ARM)
-            // On ARM, CodeLabels are only used to label raw pointers, so in
-            // all cases on ARM, a RelativePatch means patching a raw pointer.
-            JS_ASSERT(kind == CodeLabel || kind == RawPointer);
-#endif
-            // On X64 and X86, all RelativePatch-es are patched as raw pointers.
-        }
-
-        bool isRawPointerPatch() {
-#if defined(JS_CODEGEN_MIPS)
-            return kind_ == RawPointer;
-#else
-            return true;
-#endif
-        }
-
-#ifdef JS_CODEGEN_MIPS
-        Kind kind_;
-#endif
         uint32_t patchAtOffset;
         uint32_t targetOffset;
     };
@@ -495,7 +462,7 @@ class AsmJSModule
     StaticLinkData                        staticLinkData_;
     bool                                  dynamicallyLinked_;
     bool                                  loadedFromCache_;
-    HeapPtrArrayBufferObject              maybeHeap_;
+    HeapPtr<ArrayBufferObject>            maybeHeap_;
 
     // The next two fields need to be kept out of the Pod as they depend on the
     // position of the module within the ScriptSource and thus aren't invariant
@@ -504,8 +471,6 @@ class AsmJSModule
     uint32_t                              offsetToEndOfUseAsm_;
 
     ScriptSource *                        scriptSource_;
-
-    FunctionCountsVector                  functionCounts_;
 
     // This field is accessed concurrently when requesting an interrupt.
     // Access must be synchronized via the runtime's interrupt lock.
@@ -645,9 +610,6 @@ class AsmJSModule
         *exitIndex = unsigned(exits_.length());
         return exits_.append(Exit(ffiIndex, globalDataOffset));
     }
-    bool addFunctionCounts(jit::IonScriptCounts *counts) {
-        return functionCounts_.append(counts);
-    }
 
     bool addExportedFunction(PropertyName *name, uint32_t srcStart, uint32_t srcEnd,
                              PropertyName *maybeFieldName,
@@ -746,12 +708,6 @@ class AsmJSModule
         JS_ASSERT(exit.ionCodeOffset_);
         return code_ + exit.ionCodeOffset_;
     }
-    unsigned numFunctionCounts() const {
-        return functionCounts_.length();
-    }
-    jit::IonScriptCounts *functionCounts(unsigned i) {
-        return functionCounts_[i];
-    }
 
     // An Exit holds bookkeeping information about an exit; the ExitDatum
     // struct overlays the actual runtime data stored in the global data
@@ -767,8 +723,7 @@ class AsmJSModule
     // The global data section is placed after the executable code (i.e., at
     // offset codeBytes_) in the module's linear allocation. The global data
     // are laid out in this order:
-    //   0. a pointer (padded up to 8 bytes to ensure double-alignment of
-    //      globals) for the heap that was linked to the module.
+    //   0. a pointer/descriptor for the heap that was linked to the module
     //   1. global variable state (elements are sizeof(uint64_t))
     //   2. interleaved function-pointer tables and exits. These are allocated
     //      while type checking function bodies (as exits and uses of
@@ -781,7 +736,7 @@ class AsmJSModule
         return code_ + offsetOfGlobalData();
     }
     size_t globalDataBytes() const {
-        return sizeof(uint64_t) +
+        return sizeof(void*) +
                pod.numGlobalVars_ * sizeof(uint64_t) +
                pod.funcPtrTableAndExitBytes_;
     }
@@ -793,7 +748,7 @@ class AsmJSModule
     }
     unsigned globalVarIndexToGlobalDataOffset(unsigned i) const {
         JS_ASSERT(i < pod.numGlobalVars_);
-        return sizeof(uint64_t) +
+        return sizeof(void*) +
                i * sizeof(uint64_t);
     }
     void *globalVarIndexToGlobalDatum(unsigned i) const {

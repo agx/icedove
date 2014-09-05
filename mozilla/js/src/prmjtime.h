@@ -32,24 +32,14 @@ struct PRMJTime {
 
 /* Return the current local time in micro-seconds */
 extern int64_t
-PRMJ_Now();
-
-/* Initialize the resources associated with PRMJ_Now. */
-#if defined(XP_WIN)
-extern void
-PRMJ_NowInit();
-#else
-inline void
-PRMJ_NowInit() {}
-#endif
+PRMJ_Now(void);
 
 /* Release the resources associated with PRMJ_Now; don't call PRMJ_Now again */
 #if defined(JS_THREADSAFE) && defined(XP_WIN)
 extern void
-PRMJ_NowShutdown();
+PRMJ_NowShutdown(void);
 #else
-inline void
-PRMJ_NowShutdown() {}
+#define PRMJ_NowShutdown()
 #endif
 
 /* Format a time value into a buffer. Same semantics as strftime() */

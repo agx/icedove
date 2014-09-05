@@ -17,13 +17,14 @@ namespace webrtc {
 
 PushSincResampler::PushSincResampler(int source_frames,
                                      int destination_frames)
-    : resampler_(new SincResampler(source_frames * 1.0 / destination_frames,
-                                   source_frames, this)),
+    : resampler_(NULL),
       float_buffer_(new float[destination_frames]),
       source_ptr_(NULL),
       destination_frames_(destination_frames),
       first_pass_(true),
       source_available_(0) {
+  resampler_.reset(new SincResampler(source_frames * 1.0 / destination_frames,
+                                     source_frames, this));
 }
 
 PushSincResampler::~PushSincResampler() {

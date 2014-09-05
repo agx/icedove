@@ -11,8 +11,7 @@ const { activateTab, getTabTitle, setTabTitle, closeTab, getTabURL, getTabConten
         getTabForBrowser,
         setTabURL, getOwnerWindow, getTabContentType, getTabId } = require('./utils');
 const { emit } = require('../event/core');
-const { isPrivate } = require('../private-browsing/utils');
-const { isWindowPrivate } = require('../window/utils');
+const { getOwnerWindow: getPBOwnerWindow } = require('../private-browsing/window/utils');
 const { when: unload } = require('../system/unload');
 const { viewFor } = require('../view/core');
 const { EVENTS } = require('./events');
@@ -241,6 +240,6 @@ function onTabClose(event) {
   cleanupTab(this);
 };
 
-isPrivate.implement(Tab, tab => {
-  return isWindowPrivate(getTabContentWindow(tabNS(tab).tab));
+getPBOwnerWindow.define(Tab, function(tab) {
+  return getTabContentWindow(tabNS(tab).tab);
 });

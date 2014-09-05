@@ -21,15 +21,9 @@ class nsHttpConnection;
 // Abstract base class for a HTTP connection
 //-----------------------------------------------------------------------------
 
-// 5a66aed7-eede-468b-ac2b-e5fb431fcc5c
-#define NS_AHTTPCONNECTION_IID \
-{ 0x5a66aed7, 0xeede, 0x468b, {0xac, 0x2b, 0xe5, 0xfb, 0x43, 0x1f, 0xcc, 0x5c }}
-
 class nsAHttpConnection : public nsISupports
 {
 public:
-    NS_DECLARE_STATIC_IID_ACCESSOR(NS_AHTTPCONNECTION_IID)
-
     //-------------------------------------------------------------------------
     // NOTE: these methods may only be called on the socket thread.
     //-------------------------------------------------------------------------
@@ -54,9 +48,8 @@ public:
     virtual nsresult ResumeSend() = 0;
     virtual nsresult ResumeRecv() = 0;
 
-    // called by a transaction to force a "send/recv from network" iteration
+    // called by a transaction to force a "read from network" iteration
     // even if not scheduled by socket associated with connection
-    virtual nsresult ForceSend() = 0;
     virtual nsresult ForceRecv() = 0;
 
     // After a connection has had ResumeSend() called by a transaction,
@@ -142,8 +135,6 @@ public:
     virtual void SetSecurityCallbacks(nsIInterfaceRequestor* aCallbacks) = 0;
 };
 
-NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpConnection, NS_AHTTPCONNECTION_IID)
-
 #define NS_DECL_NSAHTTPCONNECTION(fwdObject)                    \
     nsresult OnHeadersAvailable(nsAHttpTransaction *, nsHttpRequestHead *, nsHttpResponseHead *, bool *reset); \
     void CloseTransaction(nsAHttpTransaction *, nsresult); \
@@ -188,12 +179,6 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpConnection, NS_AHTTPCONNECTION_IID)
         if (!(fwdObject))                  \
             return NS_ERROR_FAILURE;       \
         return (fwdObject)->ResumeRecv();  \
-    }                                      \
-    nsresult ForceSend()                   \
-    {                                      \
-        if (!(fwdObject))                  \
-            return NS_ERROR_FAILURE;       \
-        return (fwdObject)->ForceSend();   \
     }                                      \
     nsresult ForceRecv()                   \
     {                                      \

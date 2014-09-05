@@ -293,14 +293,6 @@ LIRGeneratorShared::useOrConstant(MDefinition *mir)
 }
 
 LAllocation
-LIRGeneratorShared::useOrConstantAtStart(MDefinition *mir)
-{
-    if (mir->isConstant())
-        return LAllocation(mir->toConstant()->vp());
-    return useAtStart(mir);
-}
-
-LAllocation
 LIRGeneratorShared::useRegisterOrConstant(MDefinition *mir)
 {
     if (mir->isConstant())
@@ -408,7 +400,7 @@ LIRGeneratorShared::useFixed(MDefinition *mir, FloatRegister reg)
 LUse
 LIRGeneratorShared::useFixed(MDefinition *mir, AnyRegister reg)
 {
-    return reg.isFloat() ? use(mir, LUse(reg.fpu())) : use(mir, LUse(reg.gpr()));
+    return reg.isFloat() ? use(mir, reg.fpu()) : use(mir, reg.gpr());
 }
 
 LDefinition

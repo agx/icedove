@@ -26,10 +26,11 @@ public:
   void
   Shutdown();
 
-  Icc*
+  already_AddRefed<Icc>
   GetIcc()
   {
-    return mIcc;
+    nsRefPtr<Icc> icc = mIcc;
+    return icc.forget();
   }
 
 private:

@@ -28,26 +28,21 @@
 #define DESCR_STRUCT_FIELD_OFFSETS(obj) \
     UnsafeGetReservedSlot(obj, JS_DESCR_SLOT_STRUCT_FIELD_OFFSETS)
 
-// Typed prototype slots
-
-#define TYPROTO_DESCR(obj) \
-    UnsafeGetReservedSlot(obj, JS_TYPROTO_SLOT_DESCR)
-
 // Typed object slots
 
 #define TYPEDOBJ_BYTEOFFSET(obj) \
-    TO_INT32(UnsafeGetReservedSlot(obj, JS_BUFVIEW_SLOT_BYTEOFFSET))
+    TO_INT32(UnsafeGetReservedSlot(obj, JS_TYPEDOBJ_SLOT_BYTEOFFSET))
+#define TYPEDOBJ_BYTELENGTH(obj) \
+    TO_INT32(UnsafeGetReservedSlot(obj, JS_TYPEDOBJ_SLOT_BYTELENGTH))
+#define TYPEDOBJ_TYPE_DESCR(obj) \
+    UnsafeGetReservedSlot(obj, JS_TYPEDOBJ_SLOT_TYPE_DESCR)
 #define TYPEDOBJ_OWNER(obj) \
-    UnsafeGetReservedSlot(obj, JS_BUFVIEW_SLOT_OWNER)
+    UnsafeGetReservedSlot(obj, JS_TYPEDOBJ_SLOT_OWNER)
 #define TYPEDOBJ_LENGTH(obj) \
-    TO_INT32(UnsafeGetReservedSlot(obj, JS_BUFVIEW_SLOT_LENGTH))
+    TO_INT32(UnsafeGetReservedSlot(obj, JS_TYPEDOBJ_SLOT_LENGTH))
 
 #define HAS_PROPERTY(obj, prop) \
     callFunction(std_Object_hasOwnProperty, obj, prop)
-
-function TypedObjectTypeDescr(typedObj) {
-  return TYPROTO_DESCR(typedObj.__proto__);
-}
 
 ///////////////////////////////////////////////////////////////////////////
 // Getting values
@@ -63,9 +58,8 @@ function TypedObjectTypeDescr(typedObj) {
 function TypedObjectGet(descr, typedObj, offset) {
   assert(IsObject(descr) && ObjectIsTypeDescr(descr),
          "get() called with bad type descr");
-
-  if (!TypedObjectIsAttached(typedObj))
-    ThrowError(JSMSG_TYPEDOBJECT_HANDLE_UNATTACHED);
+  assert(TypedObjectIsAttached(typedObj),
+         "get() called with unattached typedObj");
 
   switch (DESCR_KIND(descr)) {
   case JS_TYPEREPR_SCALAR_KIND:
@@ -192,14 +186,13 @@ function TypedObjectGetX4(descr, typedObj, offset) {
 // it to `descr` as needed. This is the most general entry point
 // and works for any type.
 function TypedObjectSet(descr, typedObj, offset, fromValue) {
-  if (!TypedObjectIsAttached(typedObj))
-    ThrowError(JSMSG_TYPEDOBJECT_HANDLE_UNATTACHED);
+  assert(TypedObjectIsAttached(typedObj), "set() called with unattached typedObj");
 
   // Fast path: `fromValue` is a typed object with same type
   // representation as the destination. In that case, we can just do a
   // memcpy.
   if (IsObject(fromValue) && ObjectIsTypedObject(fromValue)) {
-    if (!descr.variable && DescrsEquiv(descr, TypedObjectTypeDescr(fromValue))) {
+    if (!descr.variable && DescrsEquiv(descr, TYPEDOBJ_TYPE_DESCR(fromValue))) {
       if (!TypedObjectIsAttached(fromValue))
         ThrowError(JSMSG_TYPEDOBJECT_HANDLE_UNATTACHED);
 
@@ -389,6 +382,26 @@ function Reify(sourceDescr,
   return TypedObjectGet(sourceDescr, sourceTypedObj, sourceOffset);
 }
 
+function FillTypedArrayWithValue(destArray, fromValue) {
+  assert(IsObject(handle) && ObjectIsTypedObject(destArray),
+         "FillTypedArrayWithValue: not typed handle");
+
+  var descr = TYPEDOBJ_TYPE_DESCR(destArray);
+  var length = DESCR_SIZED_ARRAY_LENGTH(descr);
+  if (length === 0)
+    return;
+
+  // Use convert and copy to to produce the first element:
+  var elemDescr = DESCR_ARRAY_ELEMENT_TYPE(descr);
+  TypedObjectSet(elemDescr, destArray, 0, fromValue);
+
+  // Stamp out the remaining copies:
+  var elemSize = DESCR_SIZE(elemDescr);
+  var totalSize = length * elemSize;
+  for (var offset = elemSize; offset < totalSize; offset += elemSize)
+    Memcpy(destArray, offset, destArray, 0, elemSize);
+}
+
 // Warning: user exposed!
 function TypeDescrEquivalent(otherDescr) {
   if (!IsObject(this) || !ObjectIsTypeDescr(this))
@@ -427,7 +440,7 @@ function TypedArrayRedimension(newArrayType) {
 
   // Peel away the outermost array layers from the type of `this` to find
   // the core element type. In the process, count the number of elements.
-  var oldArrayType = TypedObjectTypeDescr(this);
+  var oldArrayType = TYPEDOBJ_TYPE_DESCR(this);
   var oldArrayReprKind = DESCR_KIND(oldArrayType);
   var oldElementType = oldArrayType;
   var oldElementCount = 1;
@@ -494,7 +507,7 @@ function X4ToSource() {
   if (!IsObject(this) || !ObjectIsTypedObject(this))
     ThrowError(JSMSG_INCOMPATIBLE_PROTO, "X4", "toSource", typeof this);
 
-  var descr = TypedObjectTypeDescr(this);
+  var descr = TYPEDOBJ_TYPE_DESCR(this);
 
   if (DESCR_KIND(descr) != JS_TYPEREPR_X4_KIND)
     ThrowError(JSMSG_INCOMPATIBLE_PROTO, "X4", "toSource", typeof this);
@@ -556,18 +569,10 @@ function StorageOfTypedObject(obj) {
     if (ObjectIsOpaqueTypedObject(obj))
       return null;
 
-    if (ObjectIsTransparentTypedObject(obj)) {
-      var descr = TypedObjectTypeDescr(obj);
-      var byteLength;
-      if (DESCR_KIND(descr) == JS_TYPEREPR_UNSIZED_ARRAY_KIND)
-        byteLength = DESCR_SIZE(descr.elementType) * obj.length;
-      else
-        byteLength = DESCR_SIZE(descr);
-
+    if (ObjectIsTransparentTypedObject(obj))
       return { buffer: TYPEDOBJ_OWNER(obj),
-               byteLength: byteLength,
+               byteLength: TYPEDOBJ_BYTELENGTH(obj),
                byteOffset: TYPEDOBJ_BYTEOFFSET(obj) };
-    }
   }
 
   ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
@@ -580,7 +585,7 @@ function StorageOfTypedObject(obj) {
 // Warning: user exposed!
 function TypeOfTypedObject(obj) {
   if (IsObject(obj) && ObjectIsTypedObject(obj))
-    return TypedObjectTypeDescr(obj);
+    return TYPEDOBJ_TYPE_DESCR(obj);
 
   // Note: Do not create bindings for `Any`, `String`, etc in
   // Utilities.js, but rather access them through
@@ -674,7 +679,7 @@ function TypedObjectArrayTypeFrom(a, b, c) {
 function TypedArrayMap(a, b) {
   if (!IsObject(this) || !ObjectIsTypedObject(this))
     return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
-  var thisType = TypedObjectTypeDescr(this);
+  var thisType = TYPEDOBJ_TYPE_DESCR(this);
   if (!TypeDescrIsArrayType(thisType))
     return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
 
@@ -694,7 +699,7 @@ function TypedArrayMapPar(a, b) {
   // when not working with typed objects.
   if (!IsObject(this) || !ObjectIsTypedObject(this))
     return callFunction(TypedArrayMap, this, a, b);
-  var thisType = TypedObjectTypeDescr(this);
+  var thisType = TYPEDOBJ_TYPE_DESCR(this);
   if (!TypeDescrIsArrayType(thisType))
     return callFunction(TypedArrayMap, this, a, b);
 
@@ -710,7 +715,7 @@ function TypedArrayReduce(a, b) {
   // Arguments: func, [initial]
   if (!IsObject(this) || !ObjectIsTypedObject(this))
     return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
-  var thisType = TypedObjectTypeDescr(this);
+  var thisType = TYPEDOBJ_TYPE_DESCR(this);
   if (!TypeDescrIsArrayType(thisType))
     return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
 
@@ -726,7 +731,7 @@ function TypedArrayScatter(a, b, c, d) {
   // Arguments: outputArrayType, indices, defaultValue, conflictFunction
   if (!IsObject(this) || !ObjectIsTypedObject(this))
     return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
-  var thisType = TypedObjectTypeDescr(this);
+  var thisType = TYPEDOBJ_TYPE_DESCR(this);
   if (!TypeDescrIsArrayType(thisType))
     return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
 
@@ -744,7 +749,7 @@ function TypedArrayFilter(func) {
   // Arguments: predicate
   if (!IsObject(this) || !ObjectIsTypedObject(this))
     return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
-  var thisType = TypedObjectTypeDescr(this);
+  var thisType = TYPEDOBJ_TYPE_DESCR(this);
   if (!TypeDescrIsArrayType(thisType))
     return ThrowError(JSMSG_TYPEDOBJECT_BAD_ARGS);
 
@@ -1127,7 +1132,7 @@ function RedirectPointer(typedObj, offset, outputIsScalar) {
     // is an overapproximation: users can manually declare opaque
     // types that nonetheless only contain scalar data.
 
-    typedObj = NewDerivedTypedObject(TypedObjectTypeDescr(typedObj),
+    typedObj = NewDerivedTypedObject(TYPEDOBJ_TYPE_DESCR(typedObj),
                                      typedObj, 0);
   }
 

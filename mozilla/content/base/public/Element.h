@@ -49,7 +49,6 @@ class nsIScrollableFrame;
 class nsAttrValueOrString;
 class ContentUnbinder;
 class nsContentList;
-class nsDOMSettableTokenList;
 class nsDOMTokenList;
 struct nsRect;
 class nsFocusManager;
@@ -114,12 +113,11 @@ class Link;
 class UndoManager;
 class DOMRect;
 class DOMRectList;
-class DestinationInsertionPointList;
 
 // IID for the dom::Element interface
 #define NS_ELEMENT_IID \
-{ 0xd123f791, 0x124a, 0x43f3, \
-  { 0x84, 0xe3, 0x55, 0x81, 0x0b, 0x6c, 0xf3, 0x08 } }
+{ 0xf7c18f0f, 0xa8fd, 0x4a95, \
+  { 0x91, 0x72, 0xd3, 0xa7, 0x4a, 0xb8, 0xc4, 0xbe } }
 
 class Element : public FragmentOrElement
 {
@@ -278,6 +276,13 @@ public:
    */
   virtual nsChangeHint GetAttributeChangeHint(const nsIAtom* aAttribute,
                                               int32_t aModType) const;
+
+  /**
+   * Returns an atom holding the name of the "class" attribute on this
+   * content node (if applicable).  Returns null if there is no
+   * "class" attribute for this type of content node.
+   */
+  virtual nsIAtom *GetClassAttributeName() const;
 
   inline Directionality GetDirectionality() const {
     if (HasFlag(NODE_HAS_DIRECTION_RTL)) {
@@ -520,8 +525,6 @@ public:
     return FindAttributeDependence(aAttribute, aMaps, N);
   }
 
-  static nsIAtom*** HTMLSVGPropertiesToTraverseAndUnlink();
-
 private:
   void DescribeAttribute(uint32_t index, nsAString& aOutDescription) const;
 
@@ -580,20 +583,8 @@ public:
   {
     SetAttr(kNameSpaceID_None, nsGkAtoms::id, aId, true);
   }
-  void GetClassName(nsAString& aClassName)
-  {
-    GetAttr(kNameSpaceID_None, nsGkAtoms::_class, aClassName);
-  }
-  void GetClassName(DOMString& aClassName)
-  {
-    GetAttr(kNameSpaceID_None, nsGkAtoms::_class, aClassName);
-  }
-  void SetClassName(const nsAString& aClassName)
-  {
-    SetAttr(kNameSpaceID_None, nsGkAtoms::_class, aClassName, true);
-  }
 
-  nsDOMTokenList* ClassList();
+  nsDOMTokenList* GetClassList();
   nsDOMAttributeMap* Attributes()
   {
     nsDOMSlots* slots = DOMSlots();
@@ -699,7 +690,6 @@ public:
   already_AddRefed<DOMRect> GetBoundingClientRect();
 
   already_AddRefed<ShadowRoot> CreateShadowRoot(ErrorResult& aError);
-  already_AddRefed<DestinationInsertionPointList> GetDestinationInsertionPoints();
 
   void ScrollIntoView()
   {
@@ -867,6 +857,8 @@ public:
     const nsAttrValue* mValue;
   };
 
+  // Be careful when using this method. This does *NOT* handle
+  // XUL prototypes. You may want to use GetAttrInfo.
   const nsAttrValue* GetParsedAttr(nsIAtom* aAttr) const
   {
     return mAttrsAndChildren.GetAttr(aAttr);
@@ -949,7 +941,7 @@ public:
    * @param aAttr    name of attribute.
    * @param aValue   Boolean value of attribute.
    */
-  bool GetBoolAttr(nsIAtom* aAttr) const
+  NS_HIDDEN_(bool) GetBoolAttr(nsIAtom* aAttr) const
   {
     return HasAttr(kNameSpaceID_None, aAttr);
   }
@@ -962,7 +954,7 @@ public:
    * @param aAttr    name of attribute.
    * @param aValue   Boolean value of attribute.
    */
-  nsresult SetBoolAttr(nsIAtom* aAttr, bool aValue);
+  NS_HIDDEN_(nsresult) SetBoolAttr(nsIAtom* aAttr, bool aValue);
 
   /**
    * Retrieve the ratio of font-size-inflated text font size to computed font
@@ -1131,7 +1123,8 @@ protected:
    * Add/remove this element to the documents id cache
    */
   void AddToIdTable(nsIAtom* aId);
-  void RemoveFromIdTable();
+  void RemoveFromIdTable(); // checks HasID() and uses DoGetID()
+  void RemoveFromIdTable(nsIAtom* aId);
 
   /**
    * Functions to carry out event default actions for links of all types
@@ -1171,10 +1164,6 @@ protected:
    */
   virtual void GetLinkTarget(nsAString& aTarget);
 
-  nsDOMSettableTokenList* GetTokenList(nsIAtom* aAtom);
-  void GetTokenList(nsIAtom* aAtom, nsIVariant** aResult);
-  nsresult SetTokenList(nsIAtom* aAtom, nsIVariant* aValue);
-
 private:
   /**
    * Get this element's client area rect in app units.
@@ -1187,29 +1176,6 @@ private:
 
   // Data members
   EventStates mState;
-};
-
-class DestinationInsertionPointList : public nsINodeList
-{
-public:
-  DestinationInsertionPointList(Element* aElement);
-  virtual ~DestinationInsertionPointList();
-
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_CLASS(DestinationInsertionPointList)
-
-  // nsIDOMNodeList
-  NS_DECL_NSIDOMNODELIST
-
-  // nsINodeList
-  virtual nsIContent* Item(uint32_t aIndex);
-  virtual int32_t IndexOf(nsIContent* aContent);
-  virtual nsINode* GetParentObject() { return mParent; }
-  virtual uint32_t Length() const;
-  virtual JSObject* WrapObject(JSContext* aCx) MOZ_OVERRIDE;
-protected:
-  nsRefPtr<Element> mParent;
-  nsCOMArray<nsIContent> mDestinationPoints;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(Element, NS_ELEMENT_IID)
@@ -1364,26 +1330,6 @@ typedef mozilla::dom::Element Element;                                        \
 NS_IMETHOD GetTagName(nsAString& aTagName) MOZ_FINAL                          \
 {                                                                             \
   Element::GetTagName(aTagName);                                              \
-  return NS_OK;                                                               \
-}                                                                             \
-NS_IMETHOD GetId(nsAString& aId) MOZ_FINAL                                    \
-{                                                                             \
-  Element::GetId(aId);                                                        \
-  return NS_OK;                                                               \
-}                                                                             \
-NS_IMETHOD SetId(const nsAString& aId) MOZ_FINAL                              \
-{                                                                             \
-  Element::SetId(aId);                                                        \
-  return NS_OK;                                                               \
-}                                                                             \
-NS_IMETHOD GetClassName(nsAString& aClassName) MOZ_FINAL                      \
-{                                                                             \
-  Element::GetClassName(aClassName);                                          \
-  return NS_OK;                                                               \
-}                                                                             \
-NS_IMETHOD SetClassName(const nsAString& aClassName) MOZ_FINAL                \
-{                                                                             \
-  Element::SetClassName(aClassName);                                          \
   return NS_OK;                                                               \
 }                                                                             \
 NS_IMETHOD GetClassList(nsISupports** aClassList) MOZ_FINAL                   \

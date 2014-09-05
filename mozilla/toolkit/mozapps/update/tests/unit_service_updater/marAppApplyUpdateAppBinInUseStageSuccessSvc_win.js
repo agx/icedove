@@ -24,8 +24,6 @@ function run_test() {
   gTestDirs = gTestDirsCompleteSuccess;
   setupUpdaterTest(FILE_COMPLETE_MAR, false, false);
 
-  createUpdaterINI(true);
-
   if (IS_WIN) {
     Services.prefs.setBoolPref(PREF_APP_UPDATE_SERVICE_ENABLED, true);
   }
@@ -137,12 +135,6 @@ function checkUpdateApplied() {
     return;
   }
 
-  if (IS_MACOSX || IS_WIN) {
-    // Check that the post update process was not launched when staging an
-    // update.
-    do_check_false(getPostUpdateFile(".running").exists());
-  }
-
   let updatedDir = getUpdatedDir();
   logTestInfo("testing " + updatedDir.path + " should exist");
   do_check_true(updatedDir.exists());
@@ -209,23 +201,10 @@ function checkUpdateApplied() {
 }
 
 /**
- * Checks if the post update binary was properly launched for the platforms that
- * support launching post update process.
- */
-function checkUpdateFinished() {
-  if (IS_MACOSX || IS_WIN) {
-    gCheckFunc = finishCheckUpdateFinished;
-    checkPostUpdateAppLog();
-  } else {
-    finishCheckUpdateFinished();
-  }
-}
-
-/**
  * Checks if the update has finished and if it has finished performs checks for
  * the test.
  */
-function finishCheckUpdateFinished() {
+function checkUpdateFinished() {
   gTimeoutRuns++;
   // Don't proceed until the update's status state is the expected value.
   let state = readStatusState();

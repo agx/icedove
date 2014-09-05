@@ -5,7 +5,6 @@
  *
  * The origin of this IDL file is
  * http://dev.w3.org/2011/webrtc/editor/webrtc.html#rtcstatsreport-object
- * http://www.w3.org/2011/04/webrtc/wiki/Stats
  */
 
 enum RTCStatsType {
@@ -32,12 +31,6 @@ dictionary RTCRTPStreamStats : RTCStats {
   DOMString mediaTrackId;
   DOMString transportId;
   DOMString codecId;
-
-  // Video encoder/decoder measurements (absent for rtcp)
-  double bitrateMean;
-  double bitrateStdDev;
-  double framerateMean;
-  double framerateStdDev;
 };
 
 dictionary RTCInboundRTPStreamStats : RTCRTPStreamStats {
@@ -48,38 +41,24 @@ dictionary RTCInboundRTPStreamStats : RTCRTPStreamStats {
   long mozAvSyncDelay;
   long mozJitterBufferDelay;
   long mozRtt;
-
-  // Video decoder measurement (absent in rtcp case)
-  unsigned long discardedPackets;
 };
 
 dictionary RTCOutboundRTPStreamStats : RTCRTPStreamStats {
   unsigned long packetsSent;
   unsigned long long bytesSent;
-  double targetBitrate;  // config encoder bitrate target of this SSRC in bits/s
-
-  // Video encoder measurement (absent in rtcp case)
-  unsigned long droppedFrames;
 };
 
 dictionary RTCMediaStreamTrackStats : RTCStats {
   DOMString trackIdentifier;      // track.id property
   boolean remoteSource;
   sequence<DOMString> ssrcIds;
-  // Stuff that makes sense for video
+  unsigned long audioLevel;       // Only for audio, the rest are only for video
   unsigned long frameWidth;
   unsigned long frameHeight;
-  double framesPerSecond;        // The nominal FPS value
+  double framesPerSecond;         // The nominal FPS value
   unsigned long framesSent;
-  unsigned long framesReceived;  // Only for remoteSource=true
+  unsigned long framesReceived;   // Only for remoteSource=true
   unsigned long framesDecoded;
-  unsigned long framesDropped;   // See VideoPlaybackQuality.droppedVideoFrames
-  unsigned long framesCorrupted; // as above.
-  // Stuff that makes sense for audio
-  double audioLevel;               // linear, 1.0 = 0 dBov (from RFC 6464).
-  // AEC stuff on audio tracks sourced from a microphone where AEC is applied
-  double echoReturnLoss;           // in decibels from G.168 (2012) section 3.14
-  double echoReturnLossEnhancement; // as above, section 3.15
 };
 
 dictionary RTCMediaStreamStats : RTCStats {
@@ -152,6 +131,7 @@ callback RTCStatsReportCallback = void (RTCStatsReport obj);
 
 dictionary RTCStatsReportInternal {
   DOMString                           pcid = "";
+  sequence<RTCRTPStreamStats>         rtpStreamStats;
   sequence<RTCInboundRTPStreamStats>  inboundRTPStreamStats;
   sequence<RTCOutboundRTPStreamStats> outboundRTPStreamStats;
   sequence<RTCMediaStreamTrackStats>  mediaStreamTrackStats;
@@ -161,10 +141,6 @@ dictionary RTCStatsReportInternal {
   sequence<RTCIceCandidatePairStats>  iceCandidatePairStats;
   sequence<RTCIceCandidateStats>      iceCandidateStats;
   sequence<RTCCodecStats>             codecStats;
-  DOMString                           localSdp;
-  DOMString                           remoteSdp;
-  DOMHighResTimeStamp                 timestamp;
-  boolean                             closed; // Is the PC now closed
 };
 
 [Pref="media.peerconnection.enabled",

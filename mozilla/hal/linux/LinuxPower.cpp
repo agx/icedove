@@ -9,7 +9,6 @@
 #include <sys/reboot.h>
 #include "nsIObserverService.h"
 #include "mozilla/Services.h"
-#include "MainThreadUtils.h"
 
 namespace mozilla {
 namespace hal_impl {
@@ -17,11 +16,9 @@ namespace hal_impl {
 void
 Reboot()
 {
-  if (NS_IsMainThread()) {
-    nsCOMPtr<nsIObserverService> obsServ = services::GetObserverService();
-    if (obsServ) {
-      obsServ->NotifyObservers(nullptr, "system-reboot", nullptr);
-    }
+  nsCOMPtr<nsIObserverService> obsServ = services::GetObserverService();
+  if (obsServ) {
+    obsServ->NotifyObservers(nullptr, "system-reboot", nullptr);
   }
   sync();
   reboot(RB_AUTOBOOT);
@@ -30,11 +27,9 @@ Reboot()
 void
 PowerOff()
 {
-  if (NS_IsMainThread()) {
-    nsCOMPtr<nsIObserverService> obsServ = services::GetObserverService();
-    if (obsServ) {
-      obsServ->NotifyObservers(nullptr, "system-power-off", nullptr);
-    }
+  nsCOMPtr<nsIObserverService> obsServ = services::GetObserverService();
+  if (obsServ) {
+    obsServ->NotifyObservers(nullptr, "system-power-off", nullptr);
   }
   sync();
   reboot(RB_POWER_OFF);

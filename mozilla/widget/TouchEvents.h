@@ -167,7 +167,6 @@ public:
   {
     modifiers = aOther.modifiers;
     time = aOther.time;
-    timeStamp = aOther.timeStamp;
     touches.AppendElements(aOther.touches);
     mFlags.mCancelable = message != NS_TOUCH_CANCEL;
     MOZ_COUNT_CTOR(WidgetTouchEvent);

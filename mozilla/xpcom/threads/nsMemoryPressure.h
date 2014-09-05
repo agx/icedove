@@ -9,8 +9,7 @@
 
 #include "nscore.h"
 
-enum MemoryPressureState
-{
+enum MemoryPressureState {
   /*
    * No memory pressure.
    */
@@ -60,7 +59,7 @@ NS_GetPendingMemoryPressure();
  * You may call this function from any thread.
  */
 void
-NS_DispatchEventualMemoryPressure(MemoryPressureState aState);
+NS_DispatchEventualMemoryPressure(MemoryPressureState state);
 
 /**
  * This function causes the main thread to fire a memory pressure event
@@ -72,6 +71,6 @@ NS_DispatchEventualMemoryPressure(MemoryPressureState aState);
  * You may call this function from any thread.
  */
 nsresult
-NS_DispatchMemoryPressure(MemoryPressureState aState);
+NS_DispatchMemoryPressure(MemoryPressureState state);
 
 #endif // nsMemoryPressure_h__

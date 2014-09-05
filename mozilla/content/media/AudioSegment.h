@@ -131,8 +131,6 @@ struct AudioChunk {
   }
   int ChannelCount() const { return mChannelData.Length(); }
 
-  bool IsMuted() const { return mVolume == 0.0f; }
-
   size_t SizeOfExcludingThisIfUnshared(MallocSizeOf aMallocSizeOf) const
   {
     return SizeOfExcludingThis(aMallocSizeOf, true);
@@ -180,9 +178,6 @@ public:
   void Resample(SpeexResamplerState* aResampler, uint32_t aInRate, uint32_t aOutRate)
   {
     mDuration = 0;
-#ifdef DEBUG
-    uint32_t segmentChannelCount = ChannelCount();
-#endif
 
     for (ChunkIterator ci(*this); !ci.IsEnded(); ci.Next()) {
       nsAutoTArray<nsTArray<T>, GUESS_AUDIO_CHANNELS> output;
@@ -195,7 +190,6 @@ public:
         continue;
       }
       uint32_t channels = c.mChannelData.Length();
-      MOZ_ASSERT(channels == segmentChannelCount);
       output.SetLength(channels);
       bufferPtrs.SetLength(channels);
       uint32_t inFrames = c.mDuration;
@@ -225,9 +219,7 @@ public:
     }
   }
 
-  void ResampleChunks(SpeexResamplerState* aResampler,
-                      uint32_t aInRate,
-                      uint32_t aOutRate);
+  void ResampleChunks(SpeexResamplerState* aResampler);
 
   void AppendFrames(already_AddRefed<ThreadSharedObject> aBuffer,
                     const nsTArray<const float*>& aChannelData,
@@ -287,15 +279,6 @@ public:
       }
     }
     return 0;
-  }
-
-  bool IsNull() {
-    for (ChunkIterator ci(*this); !ci.IsEnded(); ci.Next()) {
-      if (!ci->IsNull()) {
-        return false;
-      }
-    }
-    return true;
   }
 
   static Type StaticType() { return AUDIO; }

@@ -18,7 +18,6 @@
 #include "nsGridRowGroupLayout.h"
 #include "nsCOMPtr.h"
 #include "nsIScrollableFrame.h"
-#include "nsBox.h"
 #include "nsBoxLayoutState.h"
 #include "nsGridLayout2.h"
 #include "nsGridRow.h"
@@ -157,7 +156,7 @@ nsGridRowGroupLayout::DirtyRows(nsIFrame* aBox, nsBoxLayoutState& aState)
     // calling MarkIntrinsicWidthsDirty for every row group.
     aState.PresShell()->FrameNeedsReflow(aBox, nsIPresShell::eTreeChange,
                                          NS_FRAME_IS_DIRTY);
-    nsIFrame* child = nsBox::GetChildBox(aBox);
+    nsIFrame* child = aBox->GetChildBox();
 
     while(child) {
 
@@ -169,7 +168,7 @@ nsGridRowGroupLayout::DirtyRows(nsIFrame* aBox, nsBoxLayoutState& aState)
       if (monument) 
         monument->DirtyRows(deepChild, aState);
 
-      child = nsBox::GetNextBox(child);
+      child = child->GetNextBox();
     }
   }
 }
@@ -181,7 +180,7 @@ nsGridRowGroupLayout::CountRowsColumns(nsIFrame* aBox, int32_t& aRowCount, int32
   if (aBox) {
     int32_t startCount = aRowCount;
 
-    nsIFrame* child = nsBox::GetChildBox(aBox);
+    nsIFrame* child = aBox->GetChildBox();
 
     while(child) {
       
@@ -191,12 +190,12 @@ nsGridRowGroupLayout::CountRowsColumns(nsIFrame* aBox, int32_t& aRowCount, int32
       nsIGridPart* monument = nsGrid::GetPartFromBox(deepChild);
       if (monument) {
         monument->CountRowsColumns(deepChild, aRowCount, aComputedColumnCount);
-        child = nsBox::GetNextBox(child);
+        child = child->GetNextBox();
         deepChild = child;
         continue;
       }
 
-      child = nsBox::GetNextBox(child);
+      child = child->GetNextBox();
 
       // if not a monument. Then count it. It will be a bogus row
       aRowCount++;
@@ -216,7 +215,7 @@ nsGridRowGroupLayout::BuildRows(nsIFrame* aBox, nsGridRow* aRows)
   int32_t rowCount = 0;
 
   if (aBox) {
-    nsIFrame* child = nsBox::GetChildBox(aBox);
+    nsIFrame* child = aBox->GetChildBox();
 
     while(child) {
       
@@ -226,14 +225,14 @@ nsGridRowGroupLayout::BuildRows(nsIFrame* aBox, nsGridRow* aRows)
       nsIGridPart* monument = nsGrid::GetPartFromBox(deepChild);
       if (monument) {
         rowCount += monument->BuildRows(deepChild, &aRows[rowCount]);
-        child = nsBox::GetNextBox(child);
+        child = child->GetNextBox();
         deepChild = child;
         continue;
       }
 
       aRows[rowCount].Init(child, true);
 
-      child = nsBox::GetNextBox(child);
+      child = child->GetNextBox();
 
       // if not a monument. Then count it. It will be a bogus row
       rowCount++;

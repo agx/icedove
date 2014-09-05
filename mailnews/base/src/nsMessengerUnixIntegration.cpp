@@ -232,7 +232,7 @@ nsMessengerUnixIntegration::BuildNotificationBody(nsIMsgDBHdr *aHdr,
 
   bool localOnly;
 
-  size_t msgURIIndex = mFetchingURIs.IndexOf(msgURI);
+  uint32_t msgURIIndex = mFetchingURIs.IndexOf(msgURI);
   if (msgURIIndex == mFetchingURIs.NoIndex)
   {
     localOnly = false;

@@ -16,8 +16,7 @@
 
 namespace mozilla {
 
-static void
-SanitizeEnvironmentVariables()
+static void SanitizeEnvironmentVariables()
 {
   DWORD bufferSize = GetEnvironmentVariableW(L"PATH", nullptr, 0);
   if (bufferSize) {

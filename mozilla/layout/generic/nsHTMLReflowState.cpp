@@ -141,9 +141,9 @@ nsCSSOffsetState::nsCSSOffsetState(nsIFrame *aFrame,
   , rendContext(aRenderingContext)
   , mWritingMode(aFrame->GetWritingMode())
 {
-  MOZ_ASSERT(!aFrame->IsFlexOrGridItem(),
+  MOZ_ASSERT(!aFrame->IsFlexItem(),
              "We're about to resolve vertical percent margin & padding "
-             "values against CB width, which is incorrect for flex/grid items");
+             "values against CB width, which is incorrect for flex items");
   InitOffsets(aContainingBlockWidth, aContainingBlockWidth, frame->GetType());
 }
 
@@ -717,7 +717,6 @@ nsHTMLReflowState::InitFrameType(nsIAtom* aFrameType)
     case NS_STYLE_DISPLAY_TABLE:
     case NS_STYLE_DISPLAY_TABLE_CAPTION:
     case NS_STYLE_DISPLAY_FLEX:
-    case NS_STYLE_DISPLAY_GRID:
       frameType = NS_CSS_FRAME_TYPE_BLOCK;
       break;
 
@@ -728,7 +727,6 @@ nsHTMLReflowState::InitFrameType(nsIAtom* aFrameType)
     case NS_STYLE_DISPLAY_INLINE_XUL_GRID:
     case NS_STYLE_DISPLAY_INLINE_STACK:
     case NS_STYLE_DISPLAY_INLINE_FLEX:
-    case NS_STYLE_DISPLAY_INLINE_GRID:
       frameType = NS_CSS_FRAME_TYPE_INLINE;
       break;
 
@@ -1875,7 +1873,7 @@ VerticalOffsetPercentBasis(const nsIFrame* aFrame,
                            nscoord aContainingBlockWidth,
                            nscoord aContainingBlockHeight)
 {
-  if (!aFrame->IsFlexOrGridItem()) {
+  if (!aFrame->IsFlexItem()) {
     return aContainingBlockWidth;
   }
 

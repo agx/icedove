@@ -18,7 +18,6 @@
 #include "nsThreadUtils.h"
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 #include "mozilla/dom/BluetoothManagerBinding.h"
-#include "mozilla/Services.h"
 
 using namespace mozilla;
 
@@ -107,7 +106,7 @@ BluetoothManager::BluetoothManager(nsPIDOMWindow *aWindow)
   MOZ_ASSERT(aWindow);
   MOZ_ASSERT(IsDOMBinding());
 
-  mPath.Assign('/');
+  mPath.AssignLiteral("/");
 
   BluetoothService* bs = BluetoothService::Get();
   NS_ENSURE_TRUE_VOID(bs);
@@ -192,6 +191,25 @@ BluetoothManager::Create(nsPIDOMWindow* aWindow)
 
   nsRefPtr<BluetoothManager> manager = new BluetoothManager(aWindow);
   return manager.forget();
+}
+
+// static
+bool
+BluetoothManager::CheckPermission(nsPIDOMWindow* aWindow)
+{
+  NS_ASSERTION(aWindow, "Null pointer!");
+
+  nsCOMPtr<nsIPermissionManager> permMgr =
+    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
+  NS_ENSURE_TRUE(permMgr, false);
+
+  uint32_t permission;
+  nsresult rv =
+    permMgr->TestPermissionFromWindow(aWindow, "bluetooth",
+                                      &permission);
+  NS_ENSURE_SUCCESS(rv, false);
+
+  return permission == nsIPermissionManager::ALLOW_ACTION;
 }
 
 void

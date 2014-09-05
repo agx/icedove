@@ -20,7 +20,6 @@ class nsIDOMEvent;
 class nsIEventListenerInfo;
 class nsIScriptContext;
 class nsPIDOMWindow;
-class JSTracer;
 
 struct EventTypeData;
 
@@ -292,6 +291,7 @@ public:
   // documents?  Need to double-check the spec here.
   nsresult SetEventHandler(nsIAtom *aName,
                            const nsAString& aFunc,
+                           uint32_t aLanguage,
                            bool aDeferCompilation,
                            bool aPermitUntrustedEvents,
                            dom::Element* aElement);
@@ -403,8 +403,6 @@ public:
   }
 
   void MarkForCC();
-
-  void TraceListeners(JSTracer* aTrc);
 
   dom::EventTarget* GetTarget() { return mTarget; }
 

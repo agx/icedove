@@ -3,9 +3,9 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 ifndef UNIVERSAL_BINARY
-PKG_STAGE = $(DIST)/test-stage
+PKG_STAGE = $(DIST)/test-package-stage
 else
-PKG_STAGE = $(DIST)/universal/test-stage
+PKG_STAGE = $(DIST)/universal/test-package-stage
 endif
 
 # This is the target that should be called externally

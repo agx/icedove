@@ -8,15 +8,12 @@ package org.mozilla.gecko.webapp;
 import org.mozilla.gecko.ActivityHandlerHelper;
 import org.mozilla.gecko.AppConstants;
 import org.mozilla.gecko.GeckoAppShell;
-import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.GeckoProfile;
 import org.mozilla.gecko.favicons.decoders.FaviconDecoder;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.util.ActivityResultHandler;
 import org.mozilla.gecko.EventDispatcher;
-import org.mozilla.gecko.util.EventCallback;
-import org.mozilla.gecko.util.NativeEventListener;
-import org.mozilla.gecko.util.NativeJSObject;
+import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.ThreadUtils;
 import org.mozilla.gecko.WebappAllocator;
 
@@ -33,43 +30,52 @@ import android.net.Uri;
 import android.util.Log;
 
 import java.io.File;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-public class EventListener implements NativeEventListener  {
+public class EventListener implements GeckoEventListener {
 
     private static final String LOGTAG = "GeckoWebappEventListener";
 
+    private static EventListener mEventListener;
+
+    private static EventListener getEventListener() {
+        if (mEventListener == null) {
+            mEventListener = new EventListener();
+        }
+        return mEventListener;
+    }
+
     public void registerEvents() {
-        EventDispatcher.getInstance().registerGeckoThreadListener(this,
-            "Webapps:Preinstall",
-            "Webapps:InstallApk",
-            "Webapps:Postinstall",
-            "Webapps:Open",
-            "Webapps:Uninstall",
-            "Webapps:GetApkVersions");
+        EventDispatcher dispatcher = GeckoAppShell.getEventDispatcher(); 
+        dispatcher.registerEventListener("Webapps:Preinstall", this);
+        dispatcher.registerEventListener("Webapps:InstallApk", this);
+        dispatcher.registerEventListener("Webapps:Postinstall", this);
+        dispatcher.registerEventListener("Webapps:Open", this);
+        dispatcher.registerEventListener("Webapps:Uninstall", this);
+        dispatcher.registerEventListener("Webapps:GetApkVersions", this);
     }
 
     public void unregisterEvents() {
-        EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
-            "Webapps:Preinstall",
-            "Webapps:InstallApk",
-            "Webapps:Postinstall",
-            "Webapps:Open",
-            "Webapps:Uninstall",
-            "Webapps:GetApkVersions");
+        EventDispatcher dispatcher = GeckoAppShell.getEventDispatcher(); 
+        dispatcher.unregisterEventListener("Webapps:Preinstall", this);
+        dispatcher.unregisterEventListener("Webapps:InstallApk", this);
+        dispatcher.unregisterEventListener("Webapps:Postinstall", this);
+        dispatcher.unregisterEventListener("Webapps:Open", this);
+        dispatcher.unregisterEventListener("Webapps:Uninstall", this);
+        dispatcher.unregisterEventListener("Webapps:GetApkVersions", this);
     }
 
     @Override
-    public void handleMessage(String event, NativeJSObject message, EventCallback callback) {
+    public void handleMessage(String event, JSONObject message) {
         try {
             if (AppConstants.MOZ_ANDROID_SYNTHAPKS && event.equals("Webapps:InstallApk")) {
-                installApk(GeckoAppShell.getGeckoInterface().getActivity(), message, callback);
+                installApk(GeckoAppShell.getGeckoInterface().getActivity(), message.getString("filePath"), message.getString("data"));
             } else if (event.equals("Webapps:Postinstall")) {
                 if (AppConstants.MOZ_ANDROID_SYNTHAPKS) {
                     postInstallWebapp(message.getString("apkPackageName"), message.getString("origin"));
@@ -97,12 +103,12 @@ public class EventListener implements NativeEventListener  {
 
                 JSONObject obj = new JSONObject();
                 obj.put("profile", preInstallWebapp(name, manifestURL, origin).toString());
-                callback.sendSuccess(obj);
+                EventDispatcher.sendResponse(message, obj);
             } else if (event.equals("Webapps:GetApkVersions")) {
                 JSONObject obj = new JSONObject();
                 obj.put("versions", getApkVersions(GeckoAppShell.getGeckoInterface().getActivity(),
-                                                   message.getStringArray("packageNames")));
-                callback.sendSuccess(obj);
+                                                   message.getJSONArray("packageNames")));
+                EventDispatcher.sendResponse(message, obj);
             }
         } catch (Exception e) {
             Log.e(LOGTAG, "Exception handling message \"" + event + "\":", e);
@@ -183,27 +189,25 @@ public class EventListener implements NativeEventListener  {
         }
     }
 
-    public static void installApk(final Activity context, NativeJSObject message, final EventCallback callback) {
-        final JSONObject messageData;
+    public static void installApk(final Activity context, String filePath, String data) {
+        // This is the data that mozApps.install sent to Webapps.jsm.
+        JSONObject argsObj = null;
 
         // We get the manifest url out of javascript here so we can use it as a checksum
         // in a minute, when a package has been installed.
         String manifestUrl = null;
-        String filePath = null;
-
         try {
-            filePath = message.getString("filePath");
-            messageData = new JSONObject(message.getObject("data").toString());
-            manifestUrl = messageData.getJSONObject("app").getString("manifestURL");
+            argsObj = new JSONObject(data);
+            manifestUrl = argsObj.getJSONObject("app").getString("manifestURL");
         } catch (JSONException e) {
-            Log.wtf(LOGTAG, "Error getting file path and data", e);
-            callback.sendError("Error getting file path and data: " + e.toString());
+            Log.e(LOGTAG, "can't get manifest URL from JSON data", e);
+            // TODO: propagate the error back to the mozApps.install caller.
             return;
         }
 
         // We will check the manifestUrl from the one in the APK.
         // Thus, we can have a one-to-one mapping of apk to receiver.
-        final InstallListener receiver = new InstallListener(manifestUrl, messageData);
+        final InstallListener receiver = new InstallListener(manifestUrl, argsObj);
 
         // Listen for packages being installed.
         IntentFilter filter = new IntentFilter(Intent.ACTION_PACKAGE_ADDED);
@@ -213,7 +217,7 @@ public class EventListener implements NativeEventListener  {
         File file = new File(filePath);
         if (!file.exists()) {
             Log.wtf(LOGTAG, "APK file doesn't exist at path " + filePath);
-            callback.sendError("APK file doesn't exist at path " + filePath);
+            // TODO: propagate the error back to the mozApps.install caller.
             return;
         }
 
@@ -237,7 +241,6 @@ public class EventListener implements NativeEventListener  {
                         // unregistered the receiver).
                         Log.e(LOGTAG, "error unregistering install receiver: ", e);
                     }
-                    callback.sendError("APK installation cancelled by user");
                 }
             }
         });
@@ -245,9 +248,15 @@ public class EventListener implements NativeEventListener  {
 
     private static final int DEFAULT_VERSION_CODE = -1;
 
-    public static JSONObject getApkVersions(Activity context, String[] packageNames) {
+    public static JSONObject getApkVersions(Activity context, JSONArray packageNames) {
         Set<String> packageNameSet = new HashSet<String>();
-        packageNameSet.addAll(Arrays.asList(packageNames));
+        for (int i = 0; i < packageNames.length(); i++) {
+            try {
+                packageNameSet.add(packageNames.getString(i));
+            } catch (JSONException e) {
+                Log.w(LOGTAG, "exception populating settings item", e);
+            }
+        }
 
         final PackageManager pm = context.getPackageManager();
         List<ApplicationInfo> apps = pm.getInstalledApplications(0);

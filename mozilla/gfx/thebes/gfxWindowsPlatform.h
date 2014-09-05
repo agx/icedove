@@ -128,6 +128,9 @@ public:
     virtual already_AddRefed<gfxASurface>
       CreateOffscreenSurface(const IntSize& size,
                              gfxContentType contentType) MOZ_OVERRIDE;
+    virtual already_AddRefed<gfxASurface>
+      CreateOffscreenImageSurface(const gfxIntSize& aSize,
+                                  gfxContentType aContentType);
 
     virtual mozilla::TemporaryRef<mozilla::gfx::ScaledFont>
       GetScaledFontForFont(mozilla::gfx::DrawTarget* aTarget, gfxFont *aFont);
@@ -192,9 +195,13 @@ public:
                                         int32_t aRunScript,
                                         nsTArray<const char*>& aFontList);
 
+    nsresult ResolveFontName(const nsAString& aFontName,
+                             FontResolverCallback aCallback,
+                             void *aClosure, bool& aAborted);
+
     nsresult GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName);
 
-    gfxFontGroup *CreateFontGroup(const mozilla::FontFamilyList& aFontFamilyList,
+    gfxFontGroup *CreateFontGroup(const nsAString &aFamilies,
                                   const gfxFontStyle *aStyle,
                                   gfxUserFontSet *aUserFontSet);
 

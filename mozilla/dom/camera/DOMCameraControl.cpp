@@ -32,7 +32,6 @@
 #include "mozilla/dom/CameraCapabilitiesBinding.h"
 #include "DOMCameraDetectedFace.h"
 #include "mozilla/dom/BindingUtils.h"
-#include "nsPrintfCString.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -179,7 +178,7 @@ nsDOMCameraControl::nsDOMCameraControl(uint32_t aCameraId,
       break;
 
     default:
-      MOZ_ASSERT_UNREACHABLE("Unanticipated camera mode!");
+      MOZ_ASSUME_UNREACHABLE("Unanticipated camera mode!");
   }
 
   config.mPreviewSize.width = aInitialConfig.mPreviewSize.mWidth;
@@ -203,7 +202,8 @@ nsDOMCameraControl::nsDOMCameraControl(uint32_t aCameraId,
   // Start the camera...
   nsresult rv = mCameraControl->Start(&config);
   if (NS_FAILED(rv)) {
-    mListener->OnUserError(DOMCameraControlListener::kInStartCamera, rv);
+    mListener->OnError(DOMCameraControlListener::kInStartCamera,
+                       DOMCameraControlListener::kErrorApiFailed);
   }
 }
 
@@ -224,84 +224,124 @@ nsDOMCameraControl::IsWindowStillActive()
   return nsDOMCameraManager::IsWindowStillActive(mWindow->WindowID());
 }
 
+// JS-to-native helpers
 // Setter for weighted regions: { top, bottom, left, right, weight }
 nsresult
-nsDOMCameraControl::Set(uint32_t aKey, const Optional<Sequence<CameraRegion> >& aValue, uint32_t aLimit)
+nsDOMCameraControl::Set(JSContext* aCx, uint32_t aKey, const JS::Value& aValue, uint32_t aLimit)
 {
   if (aLimit == 0) {
     DOM_CAMERA_LOGI("%s:%d : aLimit = 0, nothing to do\n", __func__, __LINE__);
     return NS_OK;
   }
 
+  if (!aValue.isObject()) {
+    return NS_ERROR_INVALID_ARG;
+  }
+
+  uint32_t length = 0;
+
+  JS::Rooted<JSObject*> regions(aCx, &aValue.toObject());
+  if (!JS_GetArrayLength(aCx, regions, &length)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  DOM_CAMERA_LOGI("%s:%d : got %d regions (limited to %d)\n", __func__, __LINE__, length, aLimit);
+  if (length > aLimit) {
+    length = aLimit;
+  }
+
   nsTArray<ICameraControl::Region> regionArray;
-  if (aValue.WasPassed()) {
-    const Sequence<CameraRegion>& regions = aValue.Value();
-    uint32_t length = regions.Length();
+  regionArray.SetCapacity(length);
 
-    DOM_CAMERA_LOGI("%s:%d : got %d regions (limited to %d)\n", __func__, __LINE__, length, aLimit);
-    if (length > aLimit) {
-      length = aLimit;
+  for (uint32_t i = 0; i < length; ++i) {
+    JS::Rooted<JS::Value> v(aCx);
+
+    if (!JS_GetElement(aCx, regions, i, &v)) {
+      return NS_ERROR_FAILURE;
     }
 
-    // aLimit supplied by camera library provides sane ceiling (i.e. <10)
-    regionArray.SetCapacity(length);
-
-    for (uint32_t i = 0; i < length; ++i) {
-      ICameraControl::Region* r = regionArray.AppendElement();
-      const CameraRegion &region = regions[i];
-      r->top = region.mTop;
-      r->left = region.mLeft;
-      r->bottom = region.mBottom;
-      r->right = region.mRight;
-      r->weight = region.mWeight;
-
-      DOM_CAMERA_LOGI("region %d: top=%d, left=%d, bottom=%d, right=%d, weight=%u\n",
-        i,
-        r->top,
-        r->left,
-        r->bottom,
-        r->right,
-        r->weight
-      );
+    CameraRegion region;
+    if (!region.Init(aCx, v)) {
+      return NS_ERROR_FAILURE;
     }
-  } else {
-    DOM_CAMERA_LOGI("%s:%d : clear regions\n", __func__, __LINE__);
+
+    ICameraControl::Region* r = regionArray.AppendElement();
+    r->top = region.mTop;
+    r->left = region.mLeft;
+    r->bottom = region.mBottom;
+    r->right = region.mRight;
+    r->weight = region.mWeight;
+
+    DOM_CAMERA_LOGI("region %d: top=%d, left=%d, bottom=%d, right=%d, weight=%u\n",
+      i,
+      r->top,
+      r->left,
+      r->bottom,
+      r->right,
+      r->weight
+    );
   }
   return mCameraControl->Set(aKey, regionArray);
 }
 
 // Getter for weighted regions: { top, bottom, left, right, weight }
 nsresult
-nsDOMCameraControl::Get(uint32_t aKey, nsTArray<CameraRegion>& aValue)
+nsDOMCameraControl::Get(JSContext* aCx, uint32_t aKey, JS::Value* aValue)
 {
   nsTArray<ICameraControl::Region> regionArray;
 
   nsresult rv = mCameraControl->Get(aKey, regionArray);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  uint32_t length = regionArray.Length();
-  DOM_CAMERA_LOGI("%s:%d : got %d regions\n", __func__, __LINE__, length);
-  aValue.SetLength(length);
-
-  for (uint32_t i = 0; i < length; ++i) {
-    ICameraControl::Region& r = regionArray[i];
-    CameraRegion& v = aValue[i];
-    v.mTop = r.top;
-    v.mLeft = r.left;
-    v.mBottom = r.bottom;
-    v.mRight = r.right;
-    v.mWeight = r.weight;
-
-    DOM_CAMERA_LOGI("region %d: top=%d, left=%d, bottom=%d, right=%d, weight=%u\n",
-      i,
-      v.mTop,
-      v.mLeft,
-      v.mBottom,
-      v.mRight,
-      v.mWeight
-    );
+  JS::Rooted<JSObject*> array(aCx, JS_NewArrayObject(aCx, 0));
+  if (!array) {
+    return NS_ERROR_OUT_OF_MEMORY;
   }
 
+  uint32_t length = regionArray.Length();
+  DOM_CAMERA_LOGI("%s:%d : got %d regions\n", __func__, __LINE__, length);
+
+  for (uint32_t i = 0; i < length; ++i) {
+    ICameraControl::Region* r = &regionArray[i];
+    JS::Rooted<JS::Value> v(aCx);
+
+    JS::Rooted<JSObject*> o(aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr()));
+    if (!o) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+
+    DOM_CAMERA_LOGI("top=%d\n", r->top);
+    v = INT_TO_JSVAL(r->top);
+    if (!JS_SetProperty(aCx, o, "top", v)) {
+      return NS_ERROR_FAILURE;
+    }
+    DOM_CAMERA_LOGI("left=%d\n", r->left);
+    v = INT_TO_JSVAL(r->left);
+    if (!JS_SetProperty(aCx, o, "left", v)) {
+      return NS_ERROR_FAILURE;
+    }
+    DOM_CAMERA_LOGI("bottom=%d\n", r->bottom);
+    v = INT_TO_JSVAL(r->bottom);
+    if (!JS_SetProperty(aCx, o, "bottom", v)) {
+      return NS_ERROR_FAILURE;
+    }
+    DOM_CAMERA_LOGI("right=%d\n", r->right);
+    v = INT_TO_JSVAL(r->right);
+    if (!JS_SetProperty(aCx, o, "right", v)) {
+      return NS_ERROR_FAILURE;
+    }
+    DOM_CAMERA_LOGI("weight=%d\n", r->weight);
+    v = INT_TO_JSVAL(r->weight);
+    if (!JS_SetProperty(aCx, o, "weight", v)) {
+      return NS_ERROR_FAILURE;
+    }
+
+    if (!JS_SetElement(aCx, array, i, o)) {
+      return NS_ERROR_FAILURE;
+    }
+  }
+
+  *aValue = JS::ObjectValue(*array);
   return NS_OK;
 }
 
@@ -400,32 +440,64 @@ nsDOMCameraControl::SetZoom(double aZoom, ErrorResult& aRv)
   aRv = mCameraControl->Set(CAMERA_PARAM_ZOOM, aZoom);
 }
 
+/* attribute jsval meteringAreas; */
 void
-nsDOMCameraControl::GetMeteringAreas(nsTArray<CameraRegion>& aAreas, ErrorResult& aRv)
+nsDOMCameraControl::GetMeteringAreas(JSContext* cx,
+				     JS::MutableHandle<JS::Value> aMeteringAreas,
+				     ErrorResult& aRv)
 {
-  aRv = Get(CAMERA_PARAM_METERINGAREAS, aAreas);
+  aRv = Get(cx, CAMERA_PARAM_METERINGAREAS, aMeteringAreas.address());
 }
+
 void
-nsDOMCameraControl::SetMeteringAreas(const Optional<Sequence<CameraRegion> >& aMeteringAreas, ErrorResult& aRv)
+nsDOMCameraControl::SetMeteringAreas(JSContext* cx, JS::Handle<JS::Value> aMeteringAreas, ErrorResult& aRv)
 {
-  aRv = Set(CAMERA_PARAM_METERINGAREAS, aMeteringAreas,
+  aRv = Set(cx, CAMERA_PARAM_METERINGAREAS, aMeteringAreas,
             mCurrentConfiguration->mMaxMeteringAreas);
 }
 
 void
-nsDOMCameraControl::GetFocusAreas(nsTArray<CameraRegion>& aAreas, ErrorResult& aRv)
+nsDOMCameraControl::GetFocusAreas(JSContext* cx,
+				  JS::MutableHandle<JS::Value> aFocusAreas,
+				  ErrorResult& aRv)
 {
-  aRv = Get(CAMERA_PARAM_FOCUSAREAS, aAreas);
+  aRv = Get(cx, CAMERA_PARAM_FOCUSAREAS, aFocusAreas.address());
 }
 void
-nsDOMCameraControl::SetFocusAreas(const Optional<Sequence<CameraRegion> >& aFocusAreas, ErrorResult& aRv)
+nsDOMCameraControl::SetFocusAreas(JSContext* cx, JS::Handle<JS::Value> aFocusAreas, ErrorResult& aRv)
 {
-  aRv = Set(CAMERA_PARAM_FOCUSAREAS, aFocusAreas,
+  aRv = Set(cx, CAMERA_PARAM_FOCUSAREAS, aFocusAreas,
             mCurrentConfiguration->mMaxFocusAreas);
 }
 
+static nsresult
+GetSize(JSContext* aCx, JS::Value* aValue, const ICameraControl::Size& aSize)
+{
+  JS::Rooted<JSObject*> o(aCx, JS_NewObject(aCx, nullptr, JS::NullPtr(), JS::NullPtr()));
+  if (!o) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  JS::Rooted<JS::Value> v(aCx);
+
+  v = INT_TO_JSVAL(aSize.width);
+  if (!JS_SetProperty(aCx, o, "width", v)) {
+    return NS_ERROR_FAILURE;
+  }
+  v = INT_TO_JSVAL(aSize.height);
+  if (!JS_SetProperty(aCx, o, "height", v)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  *aValue = JS::ObjectValue(*o);
+  return NS_OK;
+}
+
+/* attribute any pictureSize */
 void
-nsDOMCameraControl::GetPictureSize(CameraSize& aSize, ErrorResult& aRv)
+nsDOMCameraControl::GetPictureSize(JSContext* cx,
+				   JS::MutableHandle<JS::Value> aSize,
+				   ErrorResult& aRv)
 {
   ICameraControl::Size size;
   aRv = mCameraControl->Get(CAMERA_PARAM_PICTURE_SIZE, size);
@@ -433,19 +505,26 @@ nsDOMCameraControl::GetPictureSize(CameraSize& aSize, ErrorResult& aRv)
     return;
   }
 
-  aSize.mWidth = size.width;
-  aSize.mHeight = size.height;
+  aRv = GetSize(cx, aSize.address(), size);
 }
-
 void
-nsDOMCameraControl::SetPictureSize(const CameraSize& aSize, ErrorResult& aRv)
+nsDOMCameraControl::SetPictureSize(JSContext* aCx, JS::Handle<JS::Value> aSize, ErrorResult& aRv)
 {
-  ICameraControl::Size s = { aSize.mWidth, aSize.mHeight };
+  CameraSize size;
+  if (!size.Init(aCx, aSize)) {
+    aRv = NS_ERROR_FAILURE;
+    return;
+  }
+
+  ICameraControl::Size s = { size.mWidth, size.mHeight };
   aRv = mCameraControl->Set(CAMERA_PARAM_PICTURE_SIZE, s);
 }
 
+/* attribute any thumbnailSize */
 void
-nsDOMCameraControl::GetThumbnailSize(CameraSize& aSize, ErrorResult& aRv)
+nsDOMCameraControl::GetThumbnailSize(JSContext* aCx,
+				     JS::MutableHandle<JS::Value> aSize,
+				     ErrorResult& aRv)
 {
   ICameraControl::Size size;
   aRv = mCameraControl->Get(CAMERA_PARAM_THUMBNAILSIZE, size);
@@ -453,14 +532,18 @@ nsDOMCameraControl::GetThumbnailSize(CameraSize& aSize, ErrorResult& aRv)
     return;
   }
 
-  aSize.mWidth = size.width;
-  aSize.mHeight = size.height;
+  aRv = GetSize(aCx, aSize.address(), size);
 }
-
 void
-nsDOMCameraControl::SetThumbnailSize(const CameraSize& aSize, ErrorResult& aRv)
+nsDOMCameraControl::SetThumbnailSize(JSContext* aCx, JS::Handle<JS::Value> aSize, ErrorResult& aRv)
 {
-  ICameraControl::Size s = { aSize.mWidth, aSize.mHeight };
+  CameraSize size;
+  if (!size.Init(aCx, aSize)) {
+    aRv = NS_ERROR_FAILURE;
+    return;
+  }
+
+  ICameraControl::Size s = { size.mWidth, size.mHeight };
   aRv = mCameraControl->Set(CAMERA_PARAM_THUMBNAILSIZE, s);
 }
 
@@ -653,7 +736,7 @@ nsDOMCameraControl::StartRecording(const CameraStartRecordingOptions& aOptions,
   nsCOMPtr<nsIDOMDOMRequest> request;
   mDSFileDescriptor = new DeviceStorageFileDescriptor();
   aRv = aStorageArea.CreateFileDescriptor(aFilename, mDSFileDescriptor.get(),
-                                          getter_AddRefs(request));
+                                         getter_AddRefs(request));
   if (aRv.Failed()) {
     return;
   }
@@ -673,8 +756,6 @@ nsDOMCameraControl::StartRecording(const CameraStartRecordingOptions& aOptions,
 void
 nsDOMCameraControl::OnCreatedFileDescriptor(bool aSucceeded)
 {
-  nsresult rv = NS_ERROR_FAILURE;
-
   if (aSucceeded && mDSFileDescriptor->mFileDescriptor.IsValid()) {
     ICameraControl::StartRecordingOptions o;
 
@@ -682,13 +763,12 @@ nsDOMCameraControl::OnCreatedFileDescriptor(bool aSucceeded)
     o.maxFileSizeBytes = mOptions.mMaxFileSizeBytes;
     o.maxVideoLengthMs = mOptions.mMaxVideoLengthMs;
     o.autoEnableLowLightTorch = mOptions.mAutoEnableLowLightTorch;
-    rv = mCameraControl->StartRecording(mDSFileDescriptor.get(), &o);
+    nsresult rv = mCameraControl->StartRecording(mDSFileDescriptor.get(), &o);
     if (NS_SUCCEEDED(rv)) {
       return;
     }
   }
-
-  OnUserError(CameraControlListener::kInStartRecording, rv);
+  OnError(CameraControlListener::kInStartRecording, NS_LITERAL_STRING("FAILURE"));
 
   if (mDSFileDescriptor->mFileDescriptor.IsValid()) {
     // An error occured. We need to manually close the file associated with the
@@ -722,28 +802,6 @@ nsDOMCameraControl::ResumePreview(ErrorResult& aRv)
   aRv = mCameraControl->StartPreview();
 }
 
-class ImmediateErrorCallback : public nsRunnable
-{
-public:
-  ImmediateErrorCallback(CameraErrorCallback* aCallback, const nsAString& aMessage)
-    : mCallback(aCallback)
-    , mMessage(aMessage)
-  { }
-  
-  NS_IMETHODIMP
-  Run()
-  {
-    MOZ_ASSERT(NS_IsMainThread());
-    ErrorResult ignored;
-    mCallback->Call(mMessage, ignored);
-    return NS_OK;
-  }
-
-protected:
-  nsRefPtr<CameraErrorCallback> mCallback;
-  nsString mMessage;
-};
-
 void
 nsDOMCameraControl::SetConfiguration(const CameraConfiguration& aConfiguration,
                                      const Optional<OwningNonNull<CameraSetConfigurationCallback> >& aOnSuccess,
@@ -756,14 +814,10 @@ nsDOMCameraControl::SetConfiguration(const CameraConfiguration& aConfiguration,
   if (cb) {
     // We're busy taking a picture, can't change modes right now.
     if (aOnError.WasPassed()) {
-      // There is already a call to TakePicture() in progress, abort this
-      // call and invoke the error callback (if one was passed in).
-      NS_DispatchToMainThread(new ImmediateErrorCallback(&aOnError.Value(),
-                              NS_LITERAL_STRING("TakePictureInProgress")));
-    } else {
-      // Only throw if no error callback was passed in.
-      aRv = NS_ERROR_FAILURE;
+      ErrorResult ignored;
+      aOnError.Value().Call(NS_LITERAL_STRING("Busy"), ignored);
     }
+    aRv = NS_ERROR_FAILURE;
     return;
   }
 
@@ -788,6 +842,29 @@ nsDOMCameraControl::SetConfiguration(const CameraConfiguration& aConfiguration,
   aRv = mCameraControl->SetConfiguration(config);
 }
 
+class ImmediateErrorCallback : public nsRunnable
+{
+public:
+  ImmediateErrorCallback(CameraErrorCallback* aCallback, const nsAString& aMessage)
+    : mCallback(aCallback)
+    , mMessage(aMessage)
+  { }
+  
+  NS_IMETHODIMP
+  Run()
+  {
+    MOZ_ASSERT(NS_IsMainThread());
+    ErrorResult ignored;
+    mCallback->Call(mMessage, ignored);
+    return NS_OK;
+  }
+
+protected:
+  nsRefPtr<CameraErrorCallback> mCallback;
+  nsString mMessage;
+};
+
+
 void
 nsDOMCameraControl::AutoFocus(CameraAutoFocusCallback& aOnSuccess,
                               const Optional<OwningNonNull<CameraErrorCallback> >& aOnError,
@@ -802,10 +879,8 @@ nsDOMCameraControl::AutoFocus(CameraAutoFocusCallback& aOnSuccess,
       // and invoke the error callback (if one was passed in).
       NS_DispatchToMainThread(new ImmediateErrorCallback(&aOnError.Value(),
                               NS_LITERAL_STRING("AutoFocusAlreadyInProgress")));
-    } else {
-      // Only throw if no error callback was passed in.
-      aRv = NS_ERROR_FAILURE;
     }
+    aRv = NS_ERROR_FAILURE;
     return;
   }
 
@@ -847,10 +922,8 @@ nsDOMCameraControl::TakePicture(const CameraPictureOptions& aOptions,
       // one and invoke the error callback (if one was passed in).
       NS_DispatchToMainThread(new ImmediateErrorCallback(&aOnError.Value(),
                               NS_LITERAL_STRING("TakePictureAlreadyInProgress")));
-    } else {
-      // Only throw if no error callback was passed in.
-      aRv = NS_ERROR_FAILURE;
     }
+    aRv = NS_ERROR_FAILURE;
     return;
   }
 
@@ -991,7 +1064,7 @@ nsDOMCameraControl::OnHardwareStateChange(CameraControlListener::HardwareState a
       break;
 
     default:
-      MOZ_ASSERT_UNREACHABLE("Unanticipated camera hardware state");
+      MOZ_ASSUME_UNREACHABLE("Unanticipated camera hardware state");
   }
 }
 
@@ -1086,7 +1159,7 @@ nsDOMCameraControl::OnRecorderStateChange(CameraControlListener::RecorderState a
 #endif
 
     default:
-      MOZ_ASSERT_UNREACHABLE("Unanticipated video recorder error");
+      MOZ_ASSUME_UNREACHABLE("Unanticipated video recorder error");
       return;
   }
 
@@ -1195,8 +1268,10 @@ nsDOMCameraControl::OnTakePictureComplete(nsIDOMBlob* aPicture)
 }
 
 void
-nsDOMCameraControl::OnUserError(CameraControlListener::UserContext aContext, nsresult aError)
+nsDOMCameraControl::OnError(CameraControlListener::CameraErrorContext aContext, const nsAString& aError)
 {
+  DOM_CAMERA_LOGI("DOM OnError context=%d, error='%s'\n", aContext,
+    NS_LossyConvertUTF16toASCII(aError).get());
   MOZ_ASSERT(NS_IsMainThread());
 
   nsRefPtr<CameraErrorCallback> errorCb;
@@ -1232,24 +1307,6 @@ nsDOMCameraControl::OnUserError(CameraControlListener::UserContext aContext, nsr
       errorCb = mStartRecordingOnErrorCb.forget();
       break;
 
-    case CameraControlListener::kInStartFaceDetection:
-      // This method doesn't have any callbacks, so all we can do is log the
-      // failure. This only happens after the hardware has been released.
-      NS_WARNING("Failed to start face detection");
-      return;
-
-    case CameraControlListener::kInStopFaceDetection:
-      // This method doesn't have any callbacks, so all we can do is log the
-      // failure. This only happens after the hardware has been released.
-      NS_WARNING("Failed to stop face detection");
-      return;
-
-    case CameraControlListener::kInResumeContinuousFocus:
-      // This method doesn't have any callbacks, so all we can do is log the
-      // failure. This only happens after the hardware has been released.
-      NS_WARNING("Failed to resume continuous focus");
-      return;
-
     case CameraControlListener::kInStopRecording:
       // This method doesn't have any callbacks, so all we can do is log the
       // failure. This only happens after the hardware has been released.
@@ -1262,79 +1319,36 @@ nsDOMCameraControl::OnUserError(CameraControlListener::UserContext aContext, nsr
       NS_WARNING("Failed to (re)start preview");
       return;
 
-    case CameraControlListener::kInStopPreview:
-      // This method doesn't have any callbacks, so all we can do is log the
-      // failure. This only happens after the hardware has been released.
-      NS_WARNING("Failed to stop preview");
-      return;
-
-    case CameraControlListener::kInSetPictureSize:
-      // This method doesn't have any callbacks, so all we can do is log the
-      // failure. This only happens after the hardware has been released.
-      NS_WARNING("Failed to set picture size");
-      return;
-
-    case CameraControlListener::kInSetThumbnailSize:
-      // This method doesn't have any callbacks, so all we can do is log the
-      // failure. This only happens after the hardware has been released.
-      NS_WARNING("Failed to set thumbnail size");
-      return;
+    case CameraControlListener::kInUnspecified:
+      if (aError.EqualsASCII("ErrorServiceFailed")) {
+        // If the camera service fails, we will get preview-stopped and
+        // hardware-closed events, so nothing to do here.
+        NS_WARNING("Camera service failed");
+        return;
+      }
+      if (aError.EqualsASCII("ErrorSetPictureSizeFailed") ||
+          aError.EqualsASCII("ErrorSetThumbnailSizeFailed")) {
+        // We currently don't handle attribute setter failure. Practically,
+        // this only ever happens if a setter is called after the hardware
+        // has gone away before an asynchronous set gets to happen, so we
+        // swallow these.
+        NS_WARNING("Failed to set either picture or thumbnail size");
+        return;
+      }
+      // fallthrough
 
     default:
-      {
-        nsPrintfCString msg("Unhandled aContext=%u, aError=0x%x\n", aContext, aError);
-        NS_WARNING(msg.get());
-      }
-      MOZ_ASSERT_UNREACHABLE("Unhandled user error");
+      MOZ_ASSUME_UNREACHABLE("Error occurred in unanticipated camera state");
       return;
   }
 
   if (!errorCb) {
-    DOM_CAMERA_LOGW("DOM No error handler for aError=0x%x in aContext=%u\n",
-      aError, aContext);
+    DOM_CAMERA_LOGW("DOM No error handler for error '%s' in context=%d\n",
+      NS_LossyConvertUTF16toASCII(aError).get(), aContext);
     return;
   }
 
-  nsString error;
-  switch (aError) {
-    case NS_ERROR_INVALID_ARG:
-      error = NS_LITERAL_STRING("InvalidArgument");
-      break;
-
-    case NS_ERROR_NOT_AVAILABLE:
-      error = NS_LITERAL_STRING("NotAvailable");
-      break;
-
-    case NS_ERROR_NOT_IMPLEMENTED:
-      error = NS_LITERAL_STRING("NotImplemented");
-      break;
-
-    case NS_ERROR_NOT_INITIALIZED:
-      error = NS_LITERAL_STRING("HardwareClosed");
-      break;
-
-    case NS_ERROR_ALREADY_INITIALIZED:
-      error = NS_LITERAL_STRING("HardwareAlreadyOpen");
-      break;
-
-    case NS_ERROR_OUT_OF_MEMORY:
-      error = NS_LITERAL_STRING("OutOfMemory");
-      break;
-
-    default:
-      {
-        nsPrintfCString msg("Reporting aError=0x%x as generic\n", aError);
-        NS_WARNING(msg.get());
-      }
-      // fallthrough
-
-    case NS_ERROR_FAILURE:
-      error = NS_LITERAL_STRING("GeneralFailure");
-      break;
-  }
-
-  DOM_CAMERA_LOGI("DOM OnUserError aContext=%u, error='%s'\n", aContext,
-    NS_ConvertUTF16toUTF8(error).get());
   ErrorResult ignored;
-  errorCb->Call(error, ignored);
+  errorCb->Call(aError, ignored);
 }
+

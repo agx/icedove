@@ -14,7 +14,8 @@
     'variables': {
       'variables': {
         'variables': {
-          # This will already be set to zero by supplement.gypi
+          # This will be set to zero in the supplement.gypi triggered by a
+          # gclient hook in the standalone build.
           'build_with_chromium%': 1,
         },
         'build_with_chromium%': '<(build_with_chromium)',
@@ -24,14 +25,14 @@
             'build_with_libjingle': 1,
             'webrtc_root%': '<(DEPTH)/third_party/webrtc',
             'apk_tests_path%': '<(DEPTH)/third_party/webrtc/build/apk_tests.gyp',
+            'import_isolate_path%': '<(DEPTH)/third_party/webrtc/build/import_isolate_chromium.gyp',
             'modules_java_gyp_path%': '<(DEPTH)/third_party/webrtc/modules/modules_java_chromium.gyp',
-            'gen_core_neon_offsets_gyp%': '<(DEPTH)/third_party/webrtc/modules/audio_processing/gen_core_neon_offsets_chromium.gyp',
           }, {
             'build_with_libjingle%': 0,
             'webrtc_root%': '<(DEPTH)/webrtc',
             'apk_tests_path%': '<(DEPTH)/webrtc/build/apk_test_noop.gyp',
+            'import_isolate_path%': '<(DEPTH)/webrtc/build/import_isolate_webrtc.gyp',
             'modules_java_gyp_path%': '<(DEPTH)/webrtc/modules/modules_java.gyp',
-            'gen_core_neon_offsets_gyp%':'<(DEPTH)/webrtc/modules/audio_processing/gen_core_neon_offsets.gyp',
           }],
         ],
       },
@@ -39,10 +40,10 @@
       'build_with_libjingle%': '<(build_with_libjingle)',
       'webrtc_root%': '<(webrtc_root)',
       'apk_tests_path%': '<(apk_tests_path)',
+      'import_isolate_path%': '<(import_isolate_path)',
       'modules_java_gyp_path%': '<(modules_java_gyp_path)',
-      'gen_core_neon_offsets_gyp%': '<(gen_core_neon_offsets_gyp)',
+
       'webrtc_vp8_dir%': '<(webrtc_root)/modules/video_coding/codecs/vp8',
-      'webrtc_h264_dir%': '<(webrtc_root)/modules/video_coding/codecs/h264',
       'rbe_components_path%': '<(webrtc_root)/modules/remote_bitrate_estimator',
       'include_g711%': 1,
       'include_g722%': 1,
@@ -55,10 +56,9 @@
     'build_with_libjingle%': '<(build_with_libjingle)',
     'webrtc_root%': '<(webrtc_root)',
     'apk_tests_path%': '<(apk_tests_path)',
+    'import_isolate_path%': '<(import_isolate_path)',
     'modules_java_gyp_path%': '<(modules_java_gyp_path)',
-    'gen_core_neon_offsets_gyp%': '<(gen_core_neon_offsets_gyp)',
     'webrtc_vp8_dir%': '<(webrtc_vp8_dir)',
-    'webrtc_h264_dir%': '<(webrtc_h264_dir)',
 
     'include_g711%': '<(include_g711)',
     'include_g722%': '<(include_g722)',
@@ -76,9 +76,6 @@
     # We can set this here to have WebRTC code treated as Chromium code. Our
     # third party code will still have the reduced warning settings.
     'chromium_code': 1,
-
-    # Remote bitrate estimator logging/plotting.
-    'enable_bwe_test_logging%': 0,
 
     # Adds video support to dependencies shared by voice and video engine.
     # This should normally be enabled; the intended use is to disable only
@@ -110,7 +107,6 @@
     'mips_arch_variant%': 'mips32r1',
     'mips_dsp_rev%': 0,
     'mips_fpu%' : 1,
-    'enable_android_opensl%': 1,
 
     'conditions': [
       ['build_with_chromium==1', {
@@ -127,10 +123,11 @@
         # Exclude internal video render module in Chromium build.
         'include_internal_video_render%': 0,
 
+        # Include ndk cpu features in Chromium build.
+        'include_ndk_cpu_features%': 1,
+
         # lazily allocate the ~4MB of trace message buffers if set
         'enable_lazy_trace_alloc%': 0,
-
-        'include_ndk_cpu_features%': 0,
       }, {  # Settings for the standalone (not-in-Chromium) build.
         # TODO(andrew): For now, disable the Chrome plugins, which causes a
         # flood of chromium-style warnings. Investigate enabling them:
@@ -145,10 +142,14 @@
       }],
       ['build_with_libjingle==1', {
         'include_tests%': 0,
-        'restrict_webrtc_logging%': 1,
+        'enable_tracing%': 0,
+        'enable_android_opensl%': 0,
       }, {
         'include_tests%': 1,
-        'restrict_webrtc_logging%': 0,
+        'enable_tracing%': 1,
+        # Switch between Android audio device OpenSL ES implementation
+        # and Java Implementation
+        'enable_android_opensl%': 0,
       }],
       ['OS=="linux"', {
         'include_alsa_audio%': 1,
@@ -177,6 +178,8 @@
   },
   'target_defaults': {
     'include_dirs': [
+      # TODO(andrew): Remove '..' when we've added webrtc/ to include paths.
+      '..',
       # Allow includes to be prefixed with webrtc/ in case it is not an
       # immediate subdirectory of <(DEPTH).
       '../..',
@@ -184,23 +187,26 @@
       # use full paths (e.g. headers inside testing/ or third_party/).
       '<(DEPTH)',
     ],
+    'defines': [
+      # TODO(leozwang): Run this as a gclient hook rather than at build-time:
+      # http://code.google.com/p/webrtc/issues/detail?id=687
+      'WEBRTC_SVNREVISION="Unavailable_issue687"',
+      #'WEBRTC_SVNREVISION="<!(python <(webrtc_root)/build/version.py)"',
+    ],
     'conditions': [
       ['moz_widget_toolkit_gonk==1', {
         'defines' : [
           'WEBRTC_GONK',
         ],
       }],
-      ['restrict_webrtc_logging==1', {
-        'defines': ['WEBRTC_RESTRICT_LOGGING',],
+      ['enable_tracing==1', {
+        'defines': ['WEBRTC_LOGGING',],
       }],
       ['build_with_mozilla==1', {
         'defines': [
           # Changes settings for Mozilla build.
           'WEBRTC_MOZILLA_BUILD',
          ],
-      }],
-      ['enable_video==1', {
-        'defines': ['WEBRTC_MODULE_UTILITY_VIDEO',],
       }],
       ['build_with_chromium==1', {
         'defines': [
@@ -216,17 +222,10 @@
               # that get overridden by -Wextra.
               '-Wno-unused-parameter',
               '-Wno-missing-field-initializers',
-              '-Wno-strict-overflow',
             ],
             'cflags_cc': [
-              '-Wnon-virtual-dtor',
               # This is enabled for clang; enable for gcc as well.
               '-Woverloaded-virtual',
-            ],
-          }],
-          ['clang==1', {
-            'cflags': [
-              '-Wthread-safety',
             ],
           }],
         ],
@@ -236,7 +235,7 @@
           'WEBRTC_ARCH_ARM',
         ],
         'conditions': [
-          ['arm_version==7', {
+          ['armv7==1', {
             'defines': ['WEBRTC_ARCH_ARM_V7',
                         'WEBRTC_BUILD_NEON_LIBS'],
             'conditions': [

@@ -88,7 +88,7 @@ class JS_FRIEND_API(PerfMeasurement)
      * then the eventsMeasured bitmask will only include the subset of
      * |toMeasure| corresponding to the events that can be measured.
      */
-    explicit PerfMeasurement(EventMask toMeasure);
+    PerfMeasurement(EventMask toMeasure);
 
     /* Done with this set of measurements, tear down OS-level state. */
     ~PerfMeasurement();

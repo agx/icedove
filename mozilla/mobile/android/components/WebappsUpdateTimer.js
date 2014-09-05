@@ -56,6 +56,7 @@ WebappsUpdateTimer.prototype = {
     }
 
     log("network back online for webapp update check; commencing");
+    // TODO: observe pref to do this only on wifi.
     Services.obs.removeObserver(this, "network:offline-status-changed");
     WebappManager.checkForUpdates();
   }

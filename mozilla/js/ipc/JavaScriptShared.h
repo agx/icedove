@@ -37,39 +37,38 @@ class CpowIdHolder : public CpowHolder
 };
 
 // Map ids -> JSObjects
-class IdToObjectMap
+class ObjectStore
 {
     typedef js::DefaultHasher<ObjectId> TableKeyHasher;
 
-    typedef js::HashMap<ObjectId, JS::Heap<JSObject *>, TableKeyHasher, js::SystemAllocPolicy> Table;
+    typedef js::HashMap<ObjectId, JS::Heap<JSObject *>, TableKeyHasher, js::SystemAllocPolicy> ObjectTable;
 
   public:
-    IdToObjectMap();
+    ObjectStore();
 
     bool init();
     void trace(JSTracer *trc);
-    void finalize(JSFreeOp *fop);
 
     bool add(ObjectId id, JSObject *obj);
     JSObject *find(ObjectId id);
     void remove(ObjectId id);
 
   private:
-    Table table_;
+    ObjectTable table_;
 };
 
 // Map JSObjects -> ids
-class ObjectToIdMap
+class ObjectIdCache
 {
     typedef js::PointerHasher<JSObject *, 3> Hasher;
-    typedef js::HashMap<JSObject *, ObjectId, Hasher, js::SystemAllocPolicy> Table;
+    typedef js::HashMap<JSObject *, ObjectId, Hasher, js::SystemAllocPolicy> ObjectIdTable;
 
   public:
-    ObjectToIdMap();
-    ~ObjectToIdMap();
+    ObjectIdCache();
+    ~ObjectIdCache();
 
     bool init();
-    void finalize(JSFreeOp *fop);
+    void trace(JSTracer *trc);
 
     bool add(JSContext *cx, JSObject *obj, ObjectId id);
     ObjectId find(JSObject *obj);
@@ -78,21 +77,13 @@ class ObjectToIdMap
   private:
     static void keyMarkCallback(JSTracer *trc, JSObject *key, void *data);
 
-    Table *table_;
+    ObjectIdTable *table_;
 };
-
-class Logging;
 
 class JavaScriptShared
 {
   public:
-    JavaScriptShared(JSRuntime *rt);
-    virtual ~JavaScriptShared() {}
-
     bool init();
-
-    void decref();
-    void incref();
 
     static const uint32_t OBJECT_EXTRA_BITS  = 1;
     static const uint32_t OBJECT_IS_CALLABLE = (1 << 0);
@@ -102,50 +93,43 @@ class JavaScriptShared
 
   protected:
     bool toVariant(JSContext *cx, JS::HandleValue from, JSVariant *to);
-    bool fromVariant(JSContext *cx, const JSVariant &from, JS::MutableHandleValue to);
-
-    bool fromDescriptor(JSContext *cx, JS::Handle<JSPropertyDescriptor> desc,
-                        PPropertyDescriptor *out);
+    bool toValue(JSContext *cx, const JSVariant &from, JS::MutableHandleValue to);
+    bool fromDescriptor(JSContext *cx, JS::Handle<JSPropertyDescriptor> desc, PPropertyDescriptor *out);
     bool toDescriptor(JSContext *cx, const PPropertyDescriptor &in,
                       JS::MutableHandle<JSPropertyDescriptor> out);
-
     bool convertIdToGeckoString(JSContext *cx, JS::HandleId id, nsString *to);
     bool convertGeckoStringToId(JSContext *cx, const nsString &from, JS::MutableHandleId id);
 
-    virtual bool toObjectVariant(JSContext *cx, JSObject *obj, ObjectVariant *objVarp) = 0;
-    virtual JSObject *fromObjectVariant(JSContext *cx, ObjectVariant objVar) = 0;
+    bool toValue(JSContext *cx, const JSVariant &from, jsval *to) {
+        JS::RootedValue v(cx);
+        if (!toValue(cx, from, &v))
+            return false;
+        *to = v;
+        return true;
+    }
+
+    virtual bool makeId(JSContext *cx, JSObject *obj, ObjectId *idp) = 0;
+    virtual JSObject *unwrap(JSContext *cx, ObjectId id) = 0;
+
+    bool unwrap(JSContext *cx, ObjectId id, JS::MutableHandle<JSObject*> objp) {
+        if (!id) {
+            objp.set(nullptr);
+            return true;
+        }
+
+        objp.set(unwrap(cx, id));
+        return bool(objp.get());
+    }
 
     static void ConvertID(const nsID &from, JSIID *to);
     static void ConvertID(const JSIID &from, nsID *to);
 
-    JSObject *findCPOWById(uint32_t objId) {
-        return cpows_.find(objId);
-    }
-    JSObject *findObjectById(uint32_t objId) {
+    JSObject *findObject(uint32_t objId) {
         return objects_.find(objId);
     }
-    JSObject *findObjectById(JSContext *cx, uint32_t objId);
-
-    static bool LoggingEnabled() { return sLoggingEnabled; }
-    static bool StackLoggingEnabled() { return sStackLoggingEnabled; }
-
-    friend class Logging;
-
-    virtual bool isParent() = 0;
 
   protected:
-    JSRuntime *rt_;
-    uintptr_t refcount_;
-
-    IdToObjectMap objects_;
-    IdToObjectMap cpows_;
-
-    ObjectId lastId_;
-    ObjectToIdMap objectIds_;
-
-    static bool sLoggingInitialized;
-    static bool sLoggingEnabled;
-    static bool sStackLoggingEnabled;
+    ObjectStore objects_;
 };
 
 // Use 47 at most, to be safe, since jsval privates are encoded as doubles.

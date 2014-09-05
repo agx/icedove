@@ -122,15 +122,14 @@ public:
     *
     * @return           the frame that was created
     */
-  friend nsTableFrame* NS_NewTableFrame(nsIPresShell* aPresShell,
-                                        nsStyleContext* aContext);
+  friend nsIFrame* NS_NewTableFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   /** sets defaults for table-specific style.
     * @see nsIFrame::Init 
     */
-  virtual void Init(nsIContent*       aContent,
-                    nsContainerFrame* aParent,
-                    nsIFrame*         aPrevInFlow) MOZ_OVERRIDE;
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
 
   static float GetTwipsToPixels(nsPresContext* aPresContext);
 
@@ -174,15 +173,13 @@ public:
   /** @see nsIFrame::DidSetStyleContext */
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
 
-  virtual void SetInitialChildList(ChildListID     aListID,
-                                   nsFrameList&    aChildList) MOZ_OVERRIDE;
-  virtual void AppendFrames(ChildListID     aListID,
-                            nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  virtual void InsertFrames(ChildListID     aListID,
-                            nsIFrame*       aPrevFrame,
-                            nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  virtual void RemoveFrame(ChildListID     aListID,
-                           nsIFrame*       aOldFrame) MOZ_OVERRIDE;
+  virtual nsresult AppendFrames(ChildListID     aListID,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult InsertFrames(ChildListID     aListID,
+                                nsIFrame*       aPrevFrame,
+                                nsFrameList&    aFrameList) MOZ_OVERRIDE;
+  virtual nsresult RemoveFrame(ChildListID     aListID,
+                               nsIFrame*       aOldFrame) MOZ_OVERRIDE;
 
   virtual nsMargin GetUsedBorder() const MOZ_OVERRIDE;
   virtual nsMargin GetUsedPadding() const MOZ_OVERRIDE;
@@ -235,6 +232,12 @@ public:
     * (header, footer, or body)
     */
   bool IsRowGroup(int32_t aDisplayType) const;
+
+  /** Initialize the table frame with a set of children.
+    * @see nsIFrame::SetInitialChildList 
+    */
+  virtual nsresult SetInitialChildList(ChildListID     aListID,
+                                       nsFrameList&    aChildList) MOZ_OVERRIDE;
 
   virtual const nsFrameList& GetChildList(ChildListID aListID) const MOZ_OVERRIDE;
   virtual void GetChildLists(nsTArray<ChildList>* aLists) const MOZ_OVERRIDE;
@@ -335,16 +338,16 @@ public:
     *
     * @see nsIFrame::Reflow
     */
-  virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
-                      nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*          aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
-  void ReflowTable(nsHTMLReflowMetrics&     aDesiredSize,
-                   const nsHTMLReflowState& aReflowState,
-                   nscoord                  aAvailHeight,
-                   nsIFrame*&               aLastChildReflowed,
-                   nsReflowStatus&          aStatus);
+  nsresult ReflowTable(nsHTMLReflowMetrics&     aDesiredSize,
+                       const nsHTMLReflowState& aReflowState,
+                       nscoord                  aAvailHeight,
+                       nsIFrame*&               aLastChildReflowed,
+                       nsReflowStatus&          aStatus);
 
   nsFrameList& GetColGroups();
 
@@ -539,10 +542,10 @@ protected:
                                   nsTableRowGroupFrame* aFrame,
                                   nscoord* aDesiredHeight);
 
-  void ReflowChildren(nsTableReflowState&  aReflowState,
-                      nsReflowStatus&      aStatus,
-                      nsIFrame*&           aLastChildReflowed,
-                      nsOverflowAreas&     aOverflowAreas);
+  nsresult ReflowChildren(nsTableReflowState&  aReflowState,
+                          nsReflowStatus&      aStatus,
+                          nsIFrame*&           aLastChildReflowed,
+                          nsOverflowAreas&     aOverflowAreas);
 
   // This calls the col group and column reflow methods, which do two things:
   //  (1) set all the dimensions to 0

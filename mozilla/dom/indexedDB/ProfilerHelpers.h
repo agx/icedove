@@ -118,7 +118,7 @@ public:
   ProfilerString(const Key& aKey)
   {
     if (aKey.IsUnset()) {
-      AssignLiteral("null");
+      Assign("null");
     }
     else if (aKey.IsFloat()) {
       AppendPrintf("%g", aKey.ToFloat());

@@ -47,8 +47,6 @@ class TestActorPunningPunnedParent :
 public:
     TestActorPunningPunnedParent() {}
     virtual ~TestActorPunningPunnedParent() {}
-protected:
-    virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE {}
 };
 
 class TestActorPunningSubParent :
@@ -57,8 +55,6 @@ class TestActorPunningSubParent :
 public:
     TestActorPunningSubParent() {}
     virtual ~TestActorPunningSubParent() {}
-protected:
-    virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE {}
 };
 
 

@@ -37,8 +37,6 @@
 class nsVoidArray;
 
 typedef nsAutoTArray<nsMsgViewIndex, 1> nsMsgViewIndexArray;
-static_assert(nsMsgViewIndex(nsMsgViewIndexArray::NoIndex) ==
-  nsMsgViewIndex_None, "These need to be the same value.");
 
 enum eFieldType {
     kCollationKey,

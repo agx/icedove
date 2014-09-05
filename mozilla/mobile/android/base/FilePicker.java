@@ -21,7 +21,6 @@ import android.net.Uri;
 import android.os.Environment;
 import android.os.Parcelable;
 import android.provider.MediaStore;
-import android.text.TextUtils;
 import android.util.Log;
 
 import java.io.File;
@@ -48,7 +47,7 @@ public class FilePicker implements GeckoEventListener {
 
     protected FilePicker(Context context) {
         this.context = context;
-        EventDispatcher.getInstance().registerGeckoThreadListener(this, "FilePicker:Show");
+        GeckoAppShell.getEventDispatcher().registerEventListener("FilePicker:Show", this);
     }
 
     @Override
@@ -57,14 +56,13 @@ public class FilePicker implements GeckoEventListener {
             String mimeType = "*/*";
             final String mode = message.optString("mode");
             final int tabId = message.optInt("tabId", -1);
-            final String title = message.optString("title");
 
             if ("mimeType".equals(mode))
                 mimeType = message.optString("mimeType");
             else if ("extension".equals(mode))
                 mimeType = GeckoAppShell.getMimeTypeFromExtensions(message.optString("extensions"));
 
-            showFilePickerAsync(title, mimeType, new ResultHandler() {
+            showFilePickerAsync(mimeType, new ResultHandler() {
                 public void gotFile(String filename) {
                     try {
                         message.put("file", filename);
@@ -179,8 +177,7 @@ public class FilePicker implements GeckoEventListener {
      * one of the intents is selected. If the caller passes in null for the handler, will still
      * prompt for the activity, but will throw away the result.
      */
-    private void getFilePickerIntentAsync(String title,
-                                          final String mimeType,
+    private void getFilePickerIntentAsync(final String mimeType,
                                           final FilePickerResultHandler fileHandler,
                                           final IntentHandler handler) {
         List<Intent> intents = getIntentsForFilePicker(mimeType, fileHandler);
@@ -198,10 +195,7 @@ public class FilePicker implements GeckoEventListener {
             return;
         }
 
-        if (TextUtils.isEmpty(title)) {
-            title = getFilePickerTitle(mimeType);
-        }
-        Intent chooser = Intent.createChooser(base, title);
+        Intent chooser = Intent.createChooser(base, getFilePickerTitle(mimeType));
         chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, intents.toArray(new Parcelable[]{}));
         handler.gotIntent(chooser);
     }
@@ -210,9 +204,9 @@ public class FilePicker implements GeckoEventListener {
      * sends the file returned to the passed in handler. If a null handler is passed in, will still
      * pick and launch the file picker, but will throw away the result.
      */
-    protected void showFilePickerAsync(final String title, final String mimeType, final ResultHandler handler, final int tabId) {
+    protected void showFilePickerAsync(String mimeType, final ResultHandler handler, final int tabId) {
         final FilePickerResultHandler fileHandler = new FilePickerResultHandler(handler, context, tabId);
-        getFilePickerIntentAsync(title, mimeType, fileHandler, new IntentHandler() {
+        getFilePickerIntentAsync(mimeType, fileHandler, new IntentHandler() {
             @Override
             public void gotIntent(Intent intent) {
                 if (handler == null) {

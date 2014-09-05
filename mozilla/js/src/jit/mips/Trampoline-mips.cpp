@@ -236,8 +236,7 @@ JitRuntime::generateEnterJIT(JSContext *cx, EnterJitType type)
         masm.storePtr(scratch, Address(StackPointer, sizeof(uintptr_t))); // Frame descriptor
         masm.storePtr(zero, Address(StackPointer, 0)); // fake return address
 
-        // No GC things to mark, push a bare token.
-        masm.enterFakeExitFrame(IonExitFrameLayout::BareToken());
+        masm.enterFakeExitFrame();
 
         masm.reserveStack(2 * sizeof(uintptr_t));
         masm.storePtr(framePtr, Address(StackPointer, sizeof(uintptr_t))); // BaselineFrame
@@ -337,10 +336,7 @@ JitRuntime::generateInvalidator(JSContext *cx)
 
     // Save floating point registers
     // We can use as_sd because stack is alligned.
-    // :TODO: (Bug 972836) // Fix this once odd regs can be used as float32
-    // only. For now we skip saving odd regs for O32 ABI.
-    uint32_t increment = 2;
-    for (uint32_t i = 0; i < FloatRegisters::Total; i += increment)
+    for (uint32_t i = 0; i < FloatRegisters::Total; i++)
         masm.as_sd(FloatRegister::FromCode(i), StackPointer,
                    InvalidationBailoutStack::offsetOfFpRegs() + i * sizeof(double));
 
@@ -561,10 +557,7 @@ GenerateBailoutThunk(JSContext *cx, MacroAssembler &masm, uint32_t frameClass)
 
     // Save floating point registers
     // We can use as_sd because stack is alligned.
-    // :TODO: (Bug 972836) // Fix this once odd regs can be used as float32
-    // only. For now we skip saving odd regs for O32 ABI.
-    uint32_t increment = 2;
-    for (uint32_t i = 0; i < FloatRegisters::Total; i += increment)
+    for (uintptr_t i = 0; i < FloatRegisters::Total; i++)
         masm.as_sd(FloatRegister::FromCode(i), StackPointer,
                    BailoutStack::offsetOfFpRegs() + i * sizeof(double));
 

@@ -31,7 +31,7 @@ public:
                       const nsACString& aFileExt,
                       bool* aFound);
 
-    virtual nsresult
+    virtual NS_HIDDEN_(nsresult)
     OSProtocolHandlerExists(const char* aScheme,
                             bool* aExists);
 };

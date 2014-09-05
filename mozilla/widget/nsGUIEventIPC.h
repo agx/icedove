@@ -49,7 +49,6 @@ struct ParamTraits<mozilla::WidgetEvent>
     WriteParam(aMsg, aParam.message);
     WriteParam(aMsg, aParam.refPoint);
     WriteParam(aMsg, aParam.time);
-    WriteParam(aMsg, aParam.timeStamp);
     WriteParam(aMsg, aParam.mFlags);
   }
 
@@ -60,7 +59,6 @@ struct ParamTraits<mozilla::WidgetEvent>
                ReadParam(aMsg, aIter, &aResult->message) &&
                ReadParam(aMsg, aIter, &aResult->refPoint) &&
                ReadParam(aMsg, aIter, &aResult->time) &&
-               ReadParam(aMsg, aIter, &aResult->timeStamp) &&
                ReadParam(aMsg, aIter, &aResult->mFlags);
     aResult->eventStructType = static_cast<nsEventStructType>(eventStructType);
     return ret;
@@ -262,7 +260,7 @@ struct ParamTraits<mozilla::WidgetTouchEvent>
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
-    size_t numTouches;
+    uint32_t numTouches;
     if (!ReadParam(aMsg, aIter,
                    static_cast<mozilla::WidgetInputEvent*>(aResult)) ||
         !ReadParam(aMsg, aIter, &numTouches)) {
@@ -299,9 +297,7 @@ struct ParamTraits<mozilla::WidgetKeyboardEvent>
   {
     WriteParam(aMsg, static_cast<mozilla::WidgetInputEvent>(aParam));
     WriteParam(aMsg, static_cast<uint32_t>(aParam.mKeyNameIndex));
-    WriteParam(aMsg, static_cast<uint32_t>(aParam.mCodeNameIndex));
     WriteParam(aMsg, aParam.mKeyValue);
-    WriteParam(aMsg, aParam.mCodeValue);
     WriteParam(aMsg, aParam.keyCode);
     WriteParam(aMsg, aParam.charCode);
     WriteParam(aMsg, aParam.isChar);
@@ -314,13 +310,11 @@ struct ParamTraits<mozilla::WidgetKeyboardEvent>
 
   static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
   {
-    uint32_t keyNameIndex = 0, codeNameIndex = 0;
+    uint32_t keyNameIndex = 0;
     if (ReadParam(aMsg, aIter,
                   static_cast<mozilla::WidgetInputEvent*>(aResult)) &&
         ReadParam(aMsg, aIter, &keyNameIndex) &&
-        ReadParam(aMsg, aIter, &codeNameIndex) &&
         ReadParam(aMsg, aIter, &aResult->mKeyValue) &&
-        ReadParam(aMsg, aIter, &aResult->mCodeValue) &&
         ReadParam(aMsg, aIter, &aResult->keyCode) &&
         ReadParam(aMsg, aIter, &aResult->charCode) &&
         ReadParam(aMsg, aIter, &aResult->isChar) &&
@@ -329,8 +323,6 @@ struct ParamTraits<mozilla::WidgetKeyboardEvent>
         ReadParam(aMsg, aIter, &aResult->mUniqueId))
     {
       aResult->mKeyNameIndex = static_cast<mozilla::KeyNameIndex>(keyNameIndex);
-      aResult->mCodeNameIndex =
-        static_cast<mozilla::CodeNameIndex>(codeNameIndex);
       aResult->mNativeKeyEvent = nullptr;
       return true;
     }

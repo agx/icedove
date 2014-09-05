@@ -392,7 +392,7 @@ public class SyncAccounts {
    *
    * @param context
    *          current Android context.
-   * @return the <code>Intent</code> started, or null if we couldn't start settings.
+   * @return the <code>Intent</code> started.
    */
   public static Intent openSyncSettings(Context context) {
     // Bug 721760 - opening Sync settings takes user to Battery & Data Manager
@@ -406,14 +406,7 @@ public class SyncAccounts {
     // Open default Sync settings activity.
     intent = new Intent(Settings.ACTION_SYNC_SETTINGS);
     // Bug 774233: do not start activity as a new task (second run fails on some HTC devices).
-    try {
-      context.startActivity(intent); // We should always find this Activity.
-    } catch (ActivityNotFoundException ex) {
-      // We're probably on a Kindle, and the user hasn't installed the Android
-      // settings app. See Bug 945341.
-      // We simply mute the error.
-      return null;
-    }
+    context.startActivity(intent); // We should always find this Activity.
     return intent;
   }
 

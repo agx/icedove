@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import re
 from progressbar import NullProgressBar, ProgressBar
 import pipes
@@ -137,10 +135,10 @@ class ResultsSink:
 
             if show:
                 if self.options.show_output:
-                    print('## %s: rc = %d, run time = %f' % (output.test.path, output.rc, output.dt), file=self.fp)
+                    print >> self.fp, '## %s: rc = %d, run time = %f' % (output.test.path, output.rc, output.dt)
 
                 if self.options.show_cmd:
-                    print(escape_cmdline(output.cmd), file=self.fp)
+                    print >> self.fp, escape_cmdline(output.cmd)
 
                 if self.options.show_output:
                     self.fp.write(output.out)
@@ -201,29 +199,28 @@ class ResultsSink:
 
     def list(self, completed):
         for label, paths in sorted(self.groups.items()):
-            if label == '':
-                continue
+            if label == '': continue
 
-            print(label)
+            print label
             for path in paths:
-                print('    %s' % path)
+                print '    %s'%path
 
         if self.options.failure_file:
               failure_file = open(self.options.failure_file, 'w')
               if not self.all_passed():
                   if 'REGRESSIONS' in self.groups:
                       for path in self.groups['REGRESSIONS']:
-                          print(path, file=failure_file)
+                          print >> failure_file, path
                   if 'TIMEOUTS' in self.groups:
                       for path in self.groups['TIMEOUTS']:
-                          print(path, file=failure_file)
+                          print >> failure_file, path
               failure_file.close()
 
         suffix = '' if completed else ' (partial run -- interrupted by user)'
         if self.all_passed():
-            print('PASS' + suffix)
+            print 'PASS' + suffix
         else:
-            print('FAIL' + suffix)
+            print 'FAIL' + suffix
 
     def all_passed(self):
         return 'REGRESSIONS' not in self.groups and 'TIMEOUTS' not in self.groups
@@ -238,4 +235,5 @@ class ResultsSink:
             result += ' | (SKIP)'
         if time > self.options.timeout:
             result += ' | (TIMEOUT)'
-        print(result)
+        print result
+

@@ -64,7 +64,7 @@ class AliasSetIterator
     unsigned pos;
 
   public:
-    explicit AliasSetIterator(AliasSet set)
+    AliasSetIterator(AliasSet set)
       : flags(set.flags()), pos(0)
     {
         while (flags && (flags & 1) == 0) {
@@ -166,7 +166,7 @@ AliasAnalysis::analyze()
     Vector<MDefinitionVector, AliasSet::NumCategories, IonAllocPolicy> stores(alloc());
 
     // Initialize to the first instruction.
-    MDefinition *firstIns = *graph_.entryBlock()->begin();
+    MDefinition *firstIns = *graph_.begin()->begin();
     for (unsigned i = 0; i < AliasSet::NumCategories; i++) {
         MDefinitionVector defs(alloc());
         if (!defs.append(firstIns))

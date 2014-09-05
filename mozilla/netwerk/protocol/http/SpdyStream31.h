@@ -34,10 +34,13 @@ public:
     return static_cast<bool>(mRequestBlockedOnRead);
   }
 
-  bool GetFullyOpen();
-  // returns failure if stream cannot be made ready and stream
-  // should be canceled
-  nsresult SetFullyOpen();
+  // returns false if called more than once
+  bool GetFullyOpen() {return mFullyOpen;}
+  void SetFullyOpen()
+  {
+    MOZ_ASSERT(!mFullyOpen);
+    mFullyOpen = 1;
+  }
 
   bool HasRegisteredID() { return mStreamID != 0; }
 
@@ -212,8 +215,7 @@ private:
   // place the fin flag on the last data packet instead of waiting
   // for a stream closed indication. Relying on stream close results
   // in an extra 0-length runt packet and seems to have some interop
-  // problems with the google servers. Connect does rely on stream
-  // close by setting this to the max value.
+  // problems with the google servers.
   int64_t                      mRequestBodyLenRemaining;
 
   // based on nsISupportsPriority definitions
@@ -246,17 +248,6 @@ private:
 
   // For SpdyPush
   SpdyPushedStream31 *mPushSource;
-
-/// connect tunnels
-public:
-  bool IsTunnel() { return mIsTunnel; }
-private:
-  void ClearTransactionsBlockedOnTunnel();
-  void MapStreamToPlainText();
-  void MapStreamToHttpConnection();
-
-  bool mIsTunnel;
-  bool mPlainTextTunnel;
 };
 
 }} // namespace mozilla::net

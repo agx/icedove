@@ -915,24 +915,24 @@ nsWindowsShellService::SetDesktopBackground(nsIDOMElement* aElement,
     nsAutoString style;
     switch (aPosition) {
       case BACKGROUND_TILE:
-        style.Assign('0');
-        tile.Assign('1');
+        style.AssignLiteral("0");
+        tile.AssignLiteral("1");
         break;
       case BACKGROUND_CENTER:
-        style.Assign('0');
-        tile.Assign('0');
+        style.AssignLiteral("0");
+        tile.AssignLiteral("0");
         break;
       case BACKGROUND_STRETCH:
-        style.Assign('2');
-        tile.Assign('0');
+        style.AssignLiteral("2");
+        tile.AssignLiteral("0");
         break;
       case BACKGROUND_FILL:
         style.AssignLiteral("10");
-        tile.Assign('0');
+        tile.AssignLiteral("0");
         break;
       case BACKGROUND_FIT:
-        style.Assign('6');
-        tile.Assign('0');
+        style.AssignLiteral("6");
+        tile.AssignLiteral("0");
         break;
     }
 
@@ -990,7 +990,7 @@ nsWindowsShellService::OpenApplication(int32_t aApplication)
   ::RegCloseKey(theKey);
 
   // Find the "open" command
-  application.Append('\\');
+  application.AppendLiteral("\\");
   application.Append(buf);
   application.AppendLiteral("\\shell\\open\\command");
 

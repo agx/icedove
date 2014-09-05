@@ -11,7 +11,7 @@
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/telephony/TelephonyCommon.h"
 
-#include "nsITelephonyService.h"
+#include "nsITelephonyProvider.h"
 
 // Need to include TelephonyCall.h because we have inline methods that
 // assume they see the definition of TelephonyCall.
@@ -29,7 +29,7 @@ class Telephony MOZ_FINAL : public DOMEventTargetHelper
   /**
    * Class Telephony doesn't actually inherit nsITelephonyListener.
    * Instead, it owns an nsITelephonyListener derived instance mListener
-   * and passes it to nsITelephonyService. The onreceived events are first
+   * and passes it to nsITelephonyProvider. The onreceived events are first
    * delivered to mListener and then forwarded to its owner, Telephony. See
    * also bug 775997 comment #51.
    */
@@ -41,9 +41,10 @@ class Telephony MOZ_FINAL : public DOMEventTargetHelper
   class EnumerationAck;
   friend class EnumerationAck;
 
-  nsCOMPtr<nsITelephonyService> mService;
+  nsCOMPtr<nsITelephonyProvider> mProvider;
   nsRefPtr<Listener> mListener;
 
+  TelephonyCall* mActiveCall;
   nsTArray<nsRefPtr<TelephonyCall> > mCalls;
   nsRefPtr<CallsList> mCallsList;
 
@@ -116,6 +117,7 @@ public:
   {
     NS_ASSERTION(!mCalls.Contains(aCall), "Already know about this one!");
     mCalls.AppendElement(aCall);
+    UpdateActiveCall(aCall, IsActiveState(aCall->CallState()));
     NotifyCallsChanged(aCall);
   }
 
@@ -124,13 +126,14 @@ public:
   {
     NS_ASSERTION(mCalls.Contains(aCall), "Didn't know about this one!");
     mCalls.RemoveElement(aCall);
+    UpdateActiveCall(aCall, false);
     NotifyCallsChanged(aCall);
   }
 
-  nsITelephonyService*
-  Service() const
+  nsITelephonyProvider*
+  Provider() const
   {
-    return mService;
+    return mProvider;
   }
 
   const nsTArray<nsRefPtr<TelephonyCall> >&
@@ -166,12 +169,14 @@ private:
   bool
   HasDialingCall();
 
+  bool
+  MatchActiveCall(TelephonyCall* aCall);
+
   already_AddRefed<Promise>
   DialInternal(uint32_t aServiceId, const nsAString& aNumber, bool isEmergency);
 
   already_AddRefed<TelephonyCall>
-  CreateNewDialingCall(uint32_t aServiceId, const nsAString& aNumber,
-                       uint32_t aCallIndex);
+  CreateNewDialingCall(uint32_t aServiceId, const nsAString& aNumber);
 
   nsresult
   NotifyCallsChanged(TelephonyCall* aCall);
@@ -181,6 +186,9 @@ private:
 
   void
   EnqueueEnumerationAck();
+
+  void
+  UpdateActiveCall(TelephonyCall* aCall, bool aIsActive);
 
   already_AddRefed<TelephonyCall>
   GetCall(uint32_t aServiceId, uint32_t aCallIndex);

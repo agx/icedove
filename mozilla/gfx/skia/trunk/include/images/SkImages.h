@@ -5,9 +5,6 @@
  * found in the LICENSE file.
  */
 
-#ifndef SkImages_DEFINED
-#define SkImages_DEFINED
-
 class SkImages {
 public:
     /**
@@ -15,5 +12,3 @@ public:
      */
     static void InitializeFlattenables();
 };
-
-#endif

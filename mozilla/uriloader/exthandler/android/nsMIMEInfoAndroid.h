@@ -31,8 +31,8 @@ public:
   nsMIMEInfoAndroid(const nsACString& aMIMEType);
 
 protected:
-  virtual nsresult LaunchDefaultWithFile(nsIFile* aFile);
-  virtual nsresult LoadUriInternal(nsIURI *aURI);
+  virtual NS_HIDDEN_(nsresult) LaunchDefaultWithFile(nsIFile* aFile);
+  virtual NS_HIDDEN_(nsresult) LoadUriInternal(nsIURI *aURI);
   nsCOMPtr<nsIMutableArray> mHandlerApps;
   nsCString mType;
   nsTArray<nsCString> mExtensions;

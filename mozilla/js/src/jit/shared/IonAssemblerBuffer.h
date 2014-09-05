@@ -13,11 +13,9 @@
 namespace js {
 namespace jit {
 
-// This should theoretically reside inside of AssemblerBuffer, but that won't be
-// nice AssemblerBuffer is templated, BufferOffset would be indirectly.
-//
-// A BufferOffset is the offset into a buffer, expressed in bytes of
-// instructions.
+// This should theoretically reside inside of AssemblerBuffer, but that won't be nice
+// AssemblerBuffer is templated, BufferOffset would be indirectly.
+// A BufferOffset is the offset into a buffer, expressed in bytes of instructions.
 
 class BufferOffset
 {
@@ -29,10 +27,10 @@ class BufferOffset
     int getOffset() const { return offset; }
 
     // A BOffImm is a Branch Offset Immediate. It is an architecture-specific
-    // structure that holds the immediate for a pc relative branch. diffB takes
-    // the label for the destination of the branch, and encodes the immediate
-    // for the branch. This will need to be fixed up later, since A pool may be
-    // inserted between the branch and its destination.
+    // structure that holds the immediate for a pc relative branch.
+    // diffB takes the label for the destination of the branch, and encodes
+    // the immediate for the branch.  This will need to be fixed up later, since
+    // A pool may be inserted between the branch and its destination
     template <class BOffImm>
     BOffImm diffB(BufferOffset other) const {
         return BOffImm(offset - other.offset);
@@ -40,7 +38,7 @@ class BufferOffset
 
     template <class BOffImm>
     BOffImm diffB(Label *other) const {
-        MOZ_ASSERT(other->bound());
+        JS_ASSERT(other->bound());
         return BOffImm(offset - other->offset());
     }
 
@@ -56,29 +54,29 @@ class BufferOffset
 template<int SliceSize>
 struct BufferSlice {
   protected:
-    BufferSlice<SliceSize> *prev_;
-    BufferSlice<SliceSize> *next_;
+    BufferSlice<SliceSize> *prev;
+    BufferSlice<SliceSize> *next;
     // How much data has been added to the current node.
-    uint32_t nodeSize_;
+    uint32_t nodeSize;
   public:
-    BufferSlice *getNext() const { return next_; }
-    BufferSlice *getPrev() const { return prev_; }
-    void setNext(BufferSlice<SliceSize> *next) {
-        MOZ_ASSERT(next_ == nullptr);
-        MOZ_ASSERT(next->prev_ == nullptr);
-        next_ = next;
-        next->prev_ = this;
+    BufferSlice *getNext() { return this->next; }
+    BufferSlice *getPrev() { return this->prev; }
+    void setNext(BufferSlice<SliceSize> *next_) {
+        JS_ASSERT(this->next == nullptr);
+        JS_ASSERT(next_->prev == nullptr);
+        this->next = next_;
+        next_->prev = this;
     }
 
     mozilla::Array<uint8_t, SliceSize> instructions;
-    size_t size() const {
-        return nodeSize_;
+    unsigned int size() {
+        return nodeSize;
     }
-    explicit BufferSlice() : prev_(nullptr), next_(nullptr), nodeSize_(0) {}
+    BufferSlice() : prev(nullptr), next(nullptr), nodeSize(0) {}
     void putBlob(uint32_t instSize, uint8_t* inst) {
         if (inst != nullptr)
             memcpy(&instructions[size()], inst, instSize);
-        nodeSize_ += instSize;
+        nodeSize += instSize;
     }
 };
 
@@ -86,8 +84,7 @@ template<int SliceSize, class Inst>
 struct AssemblerBuffer
 {
   public:
-    explicit AssemblerBuffer() : head(nullptr), tail(nullptr), m_oom(false),
-                                 m_bail(false), bufferSize(0), lifoAlloc_(8192) {}
+    AssemblerBuffer() : head(nullptr), tail(nullptr), m_oom(false), m_bail(false), bufferSize(0), LifoAlloc_(8192) {}
   protected:
     typedef BufferSlice<SliceSize> Slice;
     typedef AssemblerBuffer<SliceSize, Inst> AssemblerBuffer_;
@@ -96,12 +93,12 @@ struct AssemblerBuffer
   public:
     bool m_oom;
     bool m_bail;
-    // How much data has been added to the buffer thus far.
+    // How much data has been added to the buffer thusfar.
     uint32_t bufferSize;
     uint32_t lastInstSize;
     bool isAligned(int alignment) const {
-        // Make sure the requested alignment is a power of two.
-        MOZ_ASSERT(IsPowerOfTwo(alignment));
+        // make sure the requested alignment is a power of two.
+        JS_ASSERT((alignment & (alignment-1)) == 0);
         return !(size() & (alignment - 1));
     }
     virtual Slice *newSlice(LifoAlloc &a) {
@@ -114,9 +111,9 @@ struct AssemblerBuffer
         return tmp;
     }
     bool ensureSpace(int size) {
-        if (tail != nullptr && tail->size() + size <= SliceSize)
+        if (tail != nullptr && tail->size()+size <= SliceSize)
             return true;
-        Slice *tmp = newSlice(lifoAlloc_);
+        Slice *tmp = newSlice(LifoAlloc_);
         if (tmp == nullptr)
             return false;
         if (tail != nullptr) {
@@ -158,6 +155,9 @@ struct AssemblerBuffer
             executableSize = bufferSize;
         return executableSize;
     }
+    unsigned int uncheckedSize() const {
+        return size();
+    }
     bool oom() const {
         return m_oom || m_bail;
     }
@@ -170,22 +170,22 @@ struct AssemblerBuffer
     void fail_bail() {
         m_bail = true;
     }
-    // Finger for speeding up accesses.
+    // finger for speeding up accesses
     Slice *finger;
     unsigned int finger_offset;
     Inst *getInst(BufferOffset off) {
         int local_off = off.getOffset();
-        // Don't update the structure's finger in place, so there is the option
+        // don't update the structure's finger in place, so there is the option
         // to not update it.
         Slice *cur = nullptr;
         int cur_off;
-        // Get the offset that we'd be dealing with by walking through
-        // backwards.
+        // get the offset that we'd be dealing with by walking through backwards
         int end_off = bufferSize - local_off;
         // If end_off is negative, then it is in the last chunk, and there is no
         // real work to be done.
-        if (end_off <= 0)
+        if (end_off <= 0) {
             return (Inst*)&tail->instructions[-end_off];
+        }
         bool used_finger = false;
         int finger_off = abs((int)(local_off - finger_offset));
         if (finger_off < Min(local_off, end_off)) {
@@ -194,11 +194,11 @@ struct AssemblerBuffer
             cur_off = finger_offset;
             used_finger = true;
         } else if (local_off < end_off) {
-            // It is closest to the start.
+            // it is closest to the start
             cur = head;
             cur_off = 0;
         } else {
-            // It is closest to the end.
+            // it is closest to the end
             cur = tail;
             cur_off = bufferSize;
         }
@@ -211,7 +211,7 @@ struct AssemblerBuffer
                 }
                 count++;
             }
-            MOZ_ASSERT(cur != nullptr);
+            JS_ASSERT(cur != nullptr);
         } else {
             for (; cur != nullptr; cur = cur->getNext()) {
                 int cur_size = cur->size();
@@ -222,15 +222,14 @@ struct AssemblerBuffer
                 cur_off += cur_size;
                 count++;
             }
-            MOZ_ASSERT(cur != nullptr);
+            JS_ASSERT(cur != nullptr);
         }
         if (count > 2 || used_finger) {
             finger = cur;
             finger_offset = cur_off;
         }
-        // The offset within this node should not be larger than the node
-        // itself.
-        MOZ_ASSERT(local_off < (int)cur->size());
+        // the offset within this node should not be larger than the node itself.
+        JS_ASSERT(local_off < (int)cur->size());
         return (Inst*)&cur->instructions[local_off];
     }
     BufferOffset nextOffset() const {
@@ -245,24 +244,12 @@ struct AssemblerBuffer
 
     // Break the instruction stream so we can go back and edit it at this point
     void perforate() {
-        Slice *tmp = newSlice(lifoAlloc_);
-        if (!tmp) {
+        Slice *tmp = newSlice(LifoAlloc_);
+        if (!tmp)
             m_oom = true;
-            return;
-        }
         bufferSize += tail->size();
         tail->setNext(tmp);
         tail = tmp;
-    }
-
-    void executableCopy(uint8_t *dest_) {
-        if (this->oom())
-            return;
-
-        for (Slice *cur = head; cur != nullptr; cur = cur->getNext()) {
-            memcpy(dest_, &cur->instructions, cur->size());
-            dest_ += cur->size();
-        }
     }
 
     class AssemblerBufferInstIterator {
@@ -270,13 +257,10 @@ struct AssemblerBuffer
         BufferOffset bo;
         AssemblerBuffer_ *m_buffer;
       public:
-        explicit AssemblerBufferInstIterator(BufferOffset off, AssemblerBuffer_ *buff)
-            : bo(off), m_buffer(buff)
-        {
-        }
+        AssemblerBufferInstIterator(BufferOffset off, AssemblerBuffer_ *buff) : bo(off), m_buffer(buff) {}
         Inst *next() {
             Inst *i = m_buffer->getInst(bo);
-            bo = BufferOffset(bo.getOffset() + i->size());
+            bo = BufferOffset(bo.getOffset()+i->size());
             return cur();
         };
         Inst *cur() {
@@ -284,7 +268,7 @@ struct AssemblerBuffer
         }
     };
   public:
-    LifoAlloc lifoAlloc_;
+    LifoAlloc LifoAlloc_;
 };
 
 } // ion

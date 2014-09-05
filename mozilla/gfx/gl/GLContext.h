@@ -38,10 +38,13 @@
 #include "SurfaceTypes.h"
 #include "GLScreenBuffer.h"
 #include "GLContextSymbols.h"
-#include "base/platform_thread.h"       // for PlatformThreadId
 #include "mozilla/GenericRefCounted.h"
 #include "mozilla/Scoped.h"
 #include "gfx2DGlue.h"
+
+#ifdef DEBUG
+#define MOZ_ENABLE_GL_TRACKING 1
+#endif
 
 class nsIntRegion;
 class nsIRunnable;
@@ -338,7 +341,6 @@ public:
         OES_depth32,
         OES_stencil8,
         OES_texture_npot,
-        IMG_texture_npot,
         ARB_depth_texture,
         OES_depth_texture,
         OES_packed_depth_stencil,
@@ -580,20 +582,6 @@ private:
     GLenum mGLError;
 #endif // DEBUG
 
-    static void GLAPIENTRY StaticDebugCallback(GLenum source,
-                                               GLenum type,
-                                               GLuint id,
-                                               GLenum severity,
-                                               GLsizei length,
-                                               const GLchar* message,
-                                               const GLvoid* userParam);
-    void DebugCallback(GLenum source,
-                       GLenum type,
-                       GLuint id,
-                       GLenum severity,
-                       GLsizei length,
-                       const GLchar* message);
-
 
 // -----------------------------------------------------------------------------
 // MOZ_GL_DEBUG implementation
@@ -602,7 +590,7 @@ private:
 #undef BEFORE_GL_CALL
 #undef AFTER_GL_CALL
 
-#ifdef DEBUG
+#ifdef MOZ_ENABLE_GL_TRACKING
 
 #ifndef MOZ_FUNCTION_NAME
 # ifdef __GNUC__
@@ -662,8 +650,6 @@ private:
         return tip;
     }
 
-    static void AssertNotPassingStackBufferToTheGL(const void* ptr);
-
 #define BEFORE_GL_CALL                              \
             do {                                    \
                 BeforeGLCall(MOZ_FUNCTION_NAME);    \
@@ -679,14 +665,11 @@ private:
                 TrackingContext()->a;               \
             } while (0)
 
-#define ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(ptr) AssertNotPassingStackBufferToTheGL(ptr)
-
 #else // ifdef DEBUG
 
 #define BEFORE_GL_CALL do { } while (0)
 #define AFTER_GL_CALL do { } while (0)
 #define TRACKING_CONTEXT(a) do {} while (0)
-#define ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(ptr) do {} while (0)
 
 #endif // ifdef DEBUG
 
@@ -826,7 +809,6 @@ public:
 
 private:
     void raw_fBufferData(GLenum target, GLsizeiptr size, const GLvoid* data, GLenum usage) {
-        ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(data);
         BEFORE_GL_CALL;
         mSymbols.fBufferData(target, size, data, usage);
         AFTER_GL_CALL;
@@ -841,14 +823,12 @@ public:
             !data &&
             Vendor() == GLVendor::NVIDIA)
         {
-            ScopedDeleteArray<char> buf(new char[1]);
-            buf[0] = 0;
-            fBufferSubData(target, size-1, 1, buf);
+            char c = 0;
+            fBufferSubData(target, size-1, 1, &c);
         }
     }
 
     void fBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const GLvoid* data) {
-        ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(data);
         BEFORE_GL_CALL;
         mSymbols.fBufferSubData(target, offset, size, data);
         AFTER_GL_CALL;
@@ -893,14 +873,12 @@ public:
     }
 
     void fCompressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLsizei imageSize, const GLvoid *pixels) {
-        ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(pixels);
         BEFORE_GL_CALL;
         mSymbols.fCompressedTexImage2D(target, level, internalformat, width, height, border, imageSize, pixels);
         AFTER_GL_CALL;
     }
 
     void fCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLsizei imageSize, const GLvoid *pixels) {
-        ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(pixels);
         BEFORE_GL_CALL;
         mSymbols.fCompressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, imageSize, pixels);
         AFTER_GL_CALL;
@@ -1406,7 +1384,6 @@ public:
     }
 
     void fTextureRangeAPPLE(GLenum target, GLsizei length, GLvoid *pointer) {
-        ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(pointer);
         BEFORE_GL_CALL;
         mSymbols.fTextureRangeAPPLE(target, length, pointer);
         AFTER_GL_CALL;
@@ -1446,7 +1423,6 @@ public:
 
 private:
     void raw_fReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLvoid *pixels) {
-        ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(pixels);
         BEFORE_GL_CALL;
         mSymbols.fReadPixels(x, y, width, height, format, type, pixels);
         AFTER_GL_CALL;
@@ -1548,7 +1524,6 @@ public:
 
 private:
     void raw_fTexImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, const GLvoid *pixels) {
-        ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(pixels);
         BEFORE_GL_CALL;
         mSymbols.fTexImage2D(target, level, internalformat, width, height, border, format, type, pixels);
         AFTER_GL_CALL;
@@ -1568,7 +1543,6 @@ public:
     }
 
     void fTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid* pixels) {
-        ASSERT_NOT_PASSING_STACK_BUFFER_TO_GL(pixels);
         BEFORE_GL_CALL;
         mSymbols.fTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels);
         AFTER_GL_CALL;
@@ -2522,7 +2496,7 @@ protected:
     virtual bool MakeCurrentImpl(bool aForce) = 0;
 
 public:
-#ifdef DEBUG
+#ifdef MOZ_ENABLE_GL_TRACKING
     static void StaticInit() {
         PR_NewThreadPrivateIndex(&sCurrentGLContextTLS, nullptr);
     }
@@ -2532,7 +2506,7 @@ public:
         if (IsDestroyed()) {
             return false;
         }
-#ifdef DEBUG
+#ifdef MOZ_ENABLE_GL_TRACKING
     PR_SetThreadPrivate(sCurrentGLContextTLS, this);
 
     // XXX this assertion is disabled because it's triggering on Mac;
@@ -2571,6 +2545,7 @@ public:
      * executing thread.
      */
     bool IsOwningThreadCurrent();
+    void DispatchToOwningThread(nsIRunnable *event);
 
     static void PlatformStartup();
 
@@ -2700,6 +2675,19 @@ public:
     GLint GetMaxTextureImageSize() { return mMaxTextureImageSize; }
 
 public:
+    /**
+     * Context reset constants.
+     * These are used to determine who is guilty when a context reset
+     * happens.
+     */
+    enum ContextResetARB {
+        CONTEXT_NO_ERROR = 0,
+        CONTEXT_GUILTY_CONTEXT_RESET_ARB = 0x8253,
+        CONTEXT_INNOCENT_CONTEXT_RESET_ARB = 0x8254,
+        CONTEXT_UNKNOWN_CONTEXT_RESET_ARB = 0x8255
+    };
+
+public:
     std::map<GLuint, SharedSurface_GL*> mFBOMapping;
 
     enum {
@@ -2721,8 +2709,8 @@ public:
 protected:
     nsRefPtr<GLContext> mSharedContext;
 
-    // The thread id which this context was created.
-    PlatformThreadId mOwningThreadId;
+    // The thread on which this context was created.
+    nsCOMPtr<nsIThread> mOwningThread;
 
     GLContextSymbols mSymbols;
 
@@ -2965,7 +2953,7 @@ public:
 
 #undef ASSERT_SYMBOL_PRESENT
 
-#ifdef DEBUG
+#ifdef MOZ_ENABLE_GL_TRACKING
     void CreatedProgram(GLContext *aOrigin, GLuint aName);
     void CreatedShader(GLContext *aOrigin, GLuint aName);
     void CreatedBuffers(GLContext *aOrigin, GLsizei aCount, GLuint *aNames);

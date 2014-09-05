@@ -39,11 +39,6 @@ SHARED_LIBRARY_LIBS += \
     $(NULL)
 endif
 
-# Windows needs this to be linked with a static library.
-ifndef MOZ_NATIVE_FFI
-DEFINES += -DFFI_BUILDING
-endif
-
 endif # JS_HAS_CTYPES
 
 DASH_R		= -r
@@ -389,7 +384,6 @@ selfhosted_out_h_deps := \
   $(srcdir)/js.msg \
   $(srcdir)/builtin/embedjs.py \
   $(srcdir)/builtin/TypedObjectConstants.h \
-  $(srcdir)/builtin/SelfHostingDefines.h \
   $(NULL)
 
 SELFHOSTED_DEFINES += $(DEFINES) $(ACDEFINES)

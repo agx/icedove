@@ -40,7 +40,7 @@ struct FeedWriterEnabled {
     // Now check the spec itself
     nsAutoCString spec;
     uri->GetSpec(spec);
-    return spec.EqualsLiteral("about:feeds");
+    return spec.Equals("about:feeds");
   }
 };
 

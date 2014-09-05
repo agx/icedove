@@ -85,13 +85,13 @@ GetTopBaselineFrame(JSContext *cx)
 inline JSScript *
 GetTopIonJSScript(JSContext *cx, void **returnAddrOut = nullptr)
 {
-    return GetTopIonJSScript(cx->mainThread().jitTop, returnAddrOut, SequentialExecution);
+    return GetTopIonJSScript(cx->mainThread().ionTop, returnAddrOut, SequentialExecution);
 }
 
 inline JSScript *
 GetTopIonJSScript(ForkJoinContext *cx, void **returnAddrOut = nullptr)
 {
-    return GetTopIonJSScript(cx->perThreadData->jitTop, returnAddrOut, ParallelExecution);
+    return GetTopIonJSScript(cx->perThreadData->ionTop, returnAddrOut, ParallelExecution);
 }
 
 } // namespace jit

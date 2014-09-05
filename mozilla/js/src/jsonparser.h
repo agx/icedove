@@ -9,14 +9,12 @@
 
 #include "mozilla/Attributes.h"
 
-#include "jspubtd.h"
-
 #include "ds/IdValuePair.h"
 #include "vm/String.h"
 
 namespace js {
 
-class MOZ_STACK_CLASS JSONParser : private JS::AutoGCRooter
+class MOZ_STACK_CLASS JSONParser : private AutoGCRooter
 {
   public:
     enum ErrorHandling { RaiseError, NoError };
@@ -77,11 +75,11 @@ class MOZ_STACK_CLASS JSONParser : private JS::AutoGCRooter
             return * static_cast<PropertyVector *>(vector);
         }
 
-        explicit StackEntry(ElementVector *elements)
+        StackEntry(ElementVector *elements)
           : state(FinishArrayElement), vector(elements)
         {}
 
-        explicit StackEntry(PropertyVector *properties)
+        StackEntry(PropertyVector *properties)
           : state(FinishObjectMember), vector(properties)
         {}
 

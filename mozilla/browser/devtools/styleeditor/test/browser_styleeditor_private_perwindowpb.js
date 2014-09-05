@@ -5,47 +5,53 @@
 // This test makes sure that the style editor does not store any
 // content CSS files in the permanent cache when opened from PB mode.
 
+let gUI;
+
 function test() {
   waitForExplicitFinish();
-  let gUI;
+  let windowsToClose = [];
   let testURI = 'http://' + TEST_HOST + '/browser/browser/devtools/styleeditor/test/test_private.html';
 
-  info("Opening a new private window");
-  let win = OpenBrowserWindow({private: true});
-  win.addEventListener("load", function onLoad() {
-    win.removeEventListener("load", onLoad, false);
-    executeSoon(startTest);
-  }, false);
+  function checkCache() {
+    checkDiskCacheFor(TEST_HOST, function() {
+      gUI = null;
+      finish();
+    });
+  }
 
-  function startTest() {
-    win.gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
-      win.gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
-
-      info("Clearing the browser cache");
+  function doTest(aWindow) {
+    aWindow.gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
+      aWindow.gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
       cache.clear();
-
-      info("Opening the style editor in the private window");
-      openStyleEditorInWindow(win, function(panel) {
+      openStyleEditorInWindow(aWindow, function(panel) {
         gUI = panel.UI;
         gUI.on("editor-added", onEditorAdded);
       });
     }, true);
 
-    info("Loading the test URL in the new private window");
-    win.content.location = testURI;
+    aWindow.gBrowser.selectedBrowser.loadURI(testURI);
   }
 
   function onEditorAdded(aEvent, aEditor) {
-    info("The style editor is ready")
     aEditor.getSourceEditor().then(checkCache);
   }
 
-  function checkCache() {
-    checkDiskCacheFor(TEST_HOST, function() {
+  function testOnWindow(options, callback) {
+    let win = OpenBrowserWindow(options);
+    win.addEventListener("load", function onLoad() {
+      win.removeEventListener("load", onLoad, false);
+      windowsToClose.push(win);
+      executeSoon(function() callback(win));
+    }, false);
+  };
+
+  registerCleanupFunction(function() {
+    windowsToClose.forEach(function(win) {
       win.close();
-      win = null;
-      gUI = null;
-      finish();
     });
-  }
+  });
+
+  testOnWindow({private: true}, function(win) {
+    doTest(win);
+  });
 }

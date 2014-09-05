@@ -377,7 +377,8 @@ nsAsyncStreamCopier::AsyncCopy(nsIRequestObserver *observer, nsISupports *ctx)
 
     if (NS_IsMainThread()) {
         // Don't perform buffer sniffing on the main thread
-        nsCOMPtr<nsIRunnable> event = new AsyncApplyBufferingPolicyEvent(this);
+        nsCOMPtr<AsyncApplyBufferingPolicyEvent> event
+            = new AsyncApplyBufferingPolicyEvent(this);
         rv = mTarget->Dispatch(event, NS_DISPATCH_NORMAL);
         if (NS_FAILED(rv)) {
           Cancel(rv);

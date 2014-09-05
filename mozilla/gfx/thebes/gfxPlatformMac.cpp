@@ -106,6 +106,20 @@ gfxPlatformMac::CreateOffscreenSurface(const IntSize& size,
 }
 
 already_AddRefed<gfxASurface>
+gfxPlatformMac::CreateOffscreenImageSurface(const gfxIntSize& aSize,
+                                            gfxContentType aContentType)
+{
+    nsRefPtr<gfxASurface> surface =
+        CreateOffscreenSurface(aSize.ToIntSize(), aContentType);
+#ifdef DEBUG
+    nsRefPtr<gfxImageSurface> imageSurface = surface->GetAsImageSurface();
+    NS_ASSERTION(imageSurface, "Surface cannot be converted to a gfxImageSurface");
+#endif
+    return surface.forget();
+}
+
+
+already_AddRefed<gfxASurface>
 gfxPlatformMac::OptimizeImage(gfxImageSurface *aSurface,
                               gfxImageFormat format)
 {
@@ -132,6 +146,21 @@ gfxPlatformMac::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
 }
 
 nsresult
+gfxPlatformMac::ResolveFontName(const nsAString& aFontName,
+                                FontResolverCallback aCallback,
+                                void *aClosure, bool& aAborted)
+{
+    nsAutoString resolvedName;
+    if (!gfxPlatformFontList::PlatformFontList()->
+             ResolveFontName(aFontName, resolvedName)) {
+        aAborted = false;
+        return NS_OK;
+    }
+    aAborted = !(*aCallback)(resolvedName, aClosure);
+    return NS_OK;
+}
+
+nsresult
 gfxPlatformMac::GetStandardFamilyName(const nsAString& aFontName, nsAString& aFamilyName)
 {
     gfxPlatformFontList::PlatformFontList()->GetStandardFamilyName(aFontName, aFamilyName);
@@ -139,11 +168,11 @@ gfxPlatformMac::GetStandardFamilyName(const nsAString& aFontName, nsAString& aFa
 }
 
 gfxFontGroup *
-gfxPlatformMac::CreateFontGroup(const FontFamilyList& aFontFamilyList,
+gfxPlatformMac::CreateFontGroup(const nsAString &aFamilies,
                                 const gfxFontStyle *aStyle,
                                 gfxUserFontSet *aUserFontSet)
 {
-    return new gfxFontGroup(aFontFamilyList, aStyle, aUserFontSet);
+    return new gfxFontGroup(aFamilies, aStyle, aUserFontSet);
 }
 
 // these will move to gfxPlatform once all platforms support the fontlist

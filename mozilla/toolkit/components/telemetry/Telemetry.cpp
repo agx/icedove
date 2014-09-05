@@ -516,7 +516,7 @@ bool TelemetryIOInterposeObserver::ReflectFileStats(FileIOEntryType* entry,
     stages[s].setObject(*jsStats);
   }
 
-  JS::Rooted<JSObject*> jsEntry(cx, JS_NewArrayObject(cx, stages));
+  JS::RootedObject jsEntry(cx, JS_NewArrayObject(cx, stages));
   if (!jsEntry) {
     return false;
   }
@@ -524,7 +524,8 @@ bool TelemetryIOInterposeObserver::ReflectFileStats(FileIOEntryType* entry,
   // Add jsEntry to top-level dictionary
   const nsAString& key = entry->GetKey();
   return JS_DefineUCProperty(cx, obj, key.Data(), key.Length(),
-                             jsEntry, JSPROP_ENUMERATE | JSPROP_READONLY);
+                             OBJECT_TO_JSVAL(jsEntry), nullptr, nullptr,
+                             JSPROP_ENUMERATE | JSPROP_READONLY);
 }
 
 bool TelemetryIOInterposeObserver::ReflectIntoJS(JSContext *cx,
@@ -805,7 +806,7 @@ FillRanges(JSContext *cx, JS::Handle<JSObject*> array, Histogram *h)
   JS::Rooted<JS::Value> range(cx);
   for (size_t i = 0; i < h->bucket_count(); i++) {
     range = INT_TO_JSVAL(h->ranges(i));
-    if (!JS_DefineElement(cx, array, i, range, JSPROP_ENUMERATE))
+    if (!JS_DefineElement(cx, array, i, range, nullptr, nullptr, JSPROP_ENUMERATE))
       return false;
   }
   return true;
@@ -869,7 +870,8 @@ ReflectHistogramAndSamples(JSContext *cx, JS::Handle<JSObject*> obj, Histogram *
     return REFLECT_FAILURE;
   }
   for (size_t i = 0; i < count; i++) {
-    if (!JS_DefineElement(cx, counts_array, i, ss.counts(i), JSPROP_ENUMERATE)) {
+    if (!JS_DefineElement(cx, counts_array, i, INT_TO_JSVAL(ss.counts(i)),
+                          nullptr, nullptr, JSPROP_ENUMERATE)) {
       return REFLECT_FAILURE;
     }
   }
@@ -1069,7 +1071,7 @@ public:
     nsCOMPtr<nsIRunnable> e =
       NS_NewRunnableMethod(this, &nsFetchTelemetryData::MainThread);
     NS_ENSURE_STATE(e);
-    NS_DispatchToMainThread(e);
+    NS_DispatchToMainThread(e, NS_DISPATCH_NORMAL);
     return NS_OK;
   }
 
@@ -1483,7 +1485,7 @@ AddonHistogramName(const nsACString &id, const nsACString &name,
                    nsACString &ret)
 {
   ret.Append(id);
-  ret.Append(':');
+  ret.Append(NS_LITERAL_CSTRING(":"));
   ret.Append(name);
 }
 

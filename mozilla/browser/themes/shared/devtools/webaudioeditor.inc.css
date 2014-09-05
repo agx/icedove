@@ -8,12 +8,12 @@
 }
 
 .theme-dark .notice-container {
-  background-color: #343c45; /* Toolbars */
+  background: url(background-noise-toolbar.png), #343c45; /* Toolbars */
   color: #f5f7fa; /* Light foreground text */
 }
 
 .theme-light .notice-container {
-  background-color: #f0f1f2; /* Toolbars */
+  background: url(background-noise-toolbar.png), #f0f1f2; /* Toolbars */
   color: #585959; /* Grey foreground text */
 }
 
@@ -46,40 +46,39 @@ svg {
 
 /* Edges in graph */
 .edgePath path {
-  stroke-width: 1px;
+  stroke-width: 1.5px;
   fill: none;
 }
 
-.theme-dark .edgePath path {
-  stroke: #b6babf; /* Grey foreground text */
-}
-.theme-light .edgePath path {
-  stroke: #aaaaaa; /* Splitters */
-}
+.theme-dark .edgePath path { stroke: #f5f7fa; }
+.theme-light .edgePath path { stroke: #585959; }
 
 /* Audio Nodes */
 .nodes rect {
-  stroke-width: 1px;
+  stroke-width: 2px;
   cursor: pointer;
 }
 
 .theme-dark .nodes rect {
-  stroke: #252c33; /* Tab toolbar */
-  fill: #343c45; /* Toolbars */
+  stroke: #585959;
+  fill: #f5f7fa;
 }
 
 .theme-light .nodes rect {
-  stroke: #ebeced; /* Tab toolbar */
-  fill: #f0f1f2; /* Toolbar */
+  fill: #585959;
+  stroke: #f5f7fa;
 }
 
-.theme-dark .nodes g.selected rect {
-  fill: #1d4f73; /* Select Highlight Blue */
+.nodes g.selected rect {
+  stroke-width: 1.5px;
+  animation-duration: 1s;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+  animation-direction: alternate;
 }
 
-.theme-light .nodes g.selected rect {
-  fill: #4c9ed9; /* Select Highlight Blue */
-}
+.theme-dark .nodes g.selected rect { animation-name: dark-selected-glow; }
+.theme-light .nodes g.selected rect { animation-name: light-selected-glow; }
 
 /* Text in nodes */
 text {
@@ -90,13 +89,23 @@ text {
 }
 
 .theme-dark text {
-  fill: #b6babf; /* Grey foreground text */
+  fill: #333;
+  /* text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff; */
 }
 .theme-light text {
-  fill: #585959; /* Grey foreground text */
+  fill: #111;
 }
-.theme-light g.selected text {
-  fill: #f0f1f2; /* Toolbars */
+
+/**
+ * Animations for graphs
+ */
+@keyframes dark-selected-glow {
+  0% { fill: #1d4f73; }
+  100% { fill: #3CA3ED; }
+}
+@keyframes light-selected-glow {
+  0% { fill: #4c9ed9; }
+  100% { fill: #59BAFF; }
 }
 
 /**
@@ -104,51 +113,8 @@ text {
  */
 
 .web-audio-inspector .error {
-  background-image: url(alerticon-warning.png);
-  background-size: 13px 12px;
+  background-image: url(chrome://browser/skin/devtools/alerticon-warning.png);
   -moz-appearance: none;
   opacity: 0;
   transition: opacity .5s ease-out 0s;
-}
-
-@media (min-resolution: 2dppx) {
-  .web-audio-inspector .error {
-    background-image: url(alerticon-warning@2x.png);
-  }
-}
-
-#inspector-pane-toggle {
-  background: none;
-  box-shadow: none;
-  border: none;
-  list-style-image: url(debugger-collapse.png);
-  -moz-image-region: rect(0px,16px,16px,0px);
-}
-
-#inspector-pane-toggle > .toolbarbutton-icon {
-  width: 16px;
-  height: 16px;
-}
-
-#inspector-pane-toggle[pane-collapsed] {
-  list-style-image: url(debugger-expand.png);
-}
-
-#inspector-pane-toggle:active {
-  -moz-image-region: rect(0px,32px,16px,16px);
-}
-
-@media (min-resolution: 2dppx) {
-  #inspector-pane-toggle {
-    list-style-image: url(debugger-collapse@2x.png);
-    -moz-image-region: rect(0px,32px,32px,0px);
-  }
-
-  #inspector-pane-toggle[pane-collapsed] {
-    list-style-image: url(debugger-expand@2x.png);
-  }
-
-  #inspector-pane-toggle:active {
-    -moz-image-region: rect(0px,64px,32px,32px);
-  }
 }

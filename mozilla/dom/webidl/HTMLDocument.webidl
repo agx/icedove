@@ -72,7 +72,8 @@ interface HTMLDocument : Document {
 
   void clear();
 
-  readonly attribute HTMLAllCollection all;
+  [Throws]
+  readonly attribute object all;
 
   // https://dvcs.w3.org/hg/editing/raw-file/tip/editing.html#selections
   [Throws]

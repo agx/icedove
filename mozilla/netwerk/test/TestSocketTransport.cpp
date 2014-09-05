@@ -54,9 +54,9 @@ public:
         , mOutput(out)
         , mWriteOffset(0)
         {
-            mBuf.AssignLiteral("GET ");
+            mBuf.Assign(NS_LITERAL_CSTRING("GET "));
             mBuf.Append(path);
-            mBuf.AppendLiteral(" HTTP/1.0\r\n\r\n");
+            mBuf.Append(NS_LITERAL_CSTRING(" HTTP/1.0\r\n\r\n"));
         }
     virtual ~MyHandler() {}
 

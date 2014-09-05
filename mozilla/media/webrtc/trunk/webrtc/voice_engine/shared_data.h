@@ -56,8 +56,7 @@ public:
       _audioDeviceLayer = layer;
     }
 
-    int NumOfSendingChannels();
-    int NumOfPlayingChannels();
+    uint16_t NumOfSendingChannels();
 
     // Convenience methods for calling statistics().SetLastError().
     void SetLastError(int32_t error) const;

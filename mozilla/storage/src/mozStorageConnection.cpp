@@ -563,8 +563,7 @@ nsresult
 Connection::initialize()
 {
   NS_ASSERTION (!mDBConn, "Initialize called on already opened database!");
-  PROFILER_LABEL("mozStorageConnection", "initialize",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_LABEL("storage", "Connection::initialize");
 
   // in memory database requested, sqlite uses a magic file name
   int srv = ::sqlite3_open_v2(":memory:", &mDBConn, mFlags, nullptr);
@@ -581,8 +580,7 @@ Connection::initialize(nsIFile *aDatabaseFile)
 {
   NS_ASSERTION (aDatabaseFile, "Passed null file!");
   NS_ASSERTION (!mDBConn, "Initialize called on already opened database!");
-  PROFILER_LABEL("mozStorageConnection", "initialize",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_LABEL("storage", "Connection::initialize");
 
   mDatabaseFile = aDatabaseFile;
 
@@ -610,8 +608,7 @@ Connection::initialize(nsIFileURL *aFileURL)
 {
   NS_ASSERTION (aFileURL, "Passed null file URL!");
   NS_ASSERTION (!mDBConn, "Initialize called on already opened database!");
-  PROFILER_LABEL("mozStorageConnection", "initialize",
-    js::ProfileEntry::Category::STORAGE);
+  PROFILER_LABEL("storage", "Connection::initialize");
 
   nsCOMPtr<nsIFile> databaseFile;
   nsresult rv = aFileURL->GetFile(getter_AddRefs(databaseFile));
@@ -736,19 +733,19 @@ Connection::databaseElementExists(enum DatabaseElementType aElementType,
     element.Assign(Substring(aElementName, ind + 1, aElementName.Length()));
     query.Append(db);
   }
-  query.AppendLiteral("sqlite_master UNION ALL SELECT * FROM sqlite_temp_master) WHERE type = '");
+  query.Append("sqlite_master UNION ALL SELECT * FROM sqlite_temp_master) WHERE type = '");
 
   switch (aElementType) {
     case INDEX:
-      query.AppendLiteral("index");
+      query.Append("index");
       break;
     case TABLE:
-      query.AppendLiteral("table");
+      query.Append("table");
       break;
   }
-  query.AppendLiteral("' AND name ='");
+  query.Append("' AND name ='");
   query.Append(element);
-  query.Append('\'');
+  query.Append("'");
 
   sqlite3_stmt *stmt;
   int srv = prepareStatement(mDBConn, query, &stmt);
@@ -1170,9 +1167,7 @@ NS_IMETHODIMP
 Connection::AsyncClone(bool aReadOnly,
                        mozIStorageCompletionCallback *aCallback)
 {
-  PROFILER_LABEL("mozStorageConnection", "AsyncClone",
-    js::ProfileEntry::Category::STORAGE);
-
+  PROFILER_LABEL("storage", "Connection::Clone");
   if (!NS_IsMainThread()) {
     return NS_ERROR_NOT_SAME_THREAD;
   }
@@ -1253,9 +1248,7 @@ Connection::Clone(bool aReadOnly,
 {
   MOZ_ASSERT(threadOpenedOn == NS_GetCurrentThread());
 
-  PROFILER_LABEL("mozStorageConnection", "Clone",
-    js::ProfileEntry::Category::STORAGE);
-
+  PROFILER_LABEL("storage", "Connection::Clone");
   if (!mDBConn)
     return NS_ERROR_NOT_INITIALIZED;
   if (!mDatabaseFile)

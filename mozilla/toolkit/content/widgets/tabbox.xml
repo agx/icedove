@@ -147,14 +147,12 @@
             return;
           }
 
-          // Don't check if the event was already consumed because tab
-          // navigation should always work for better user experience.
-
           switch (event.keyCode) {
             case event.DOM_VK_TAB:
               if (event.ctrlKey && !event.altKey && !event.metaKey)
                 if (this.tabs && this.handleCtrlTab) {
                   this.tabs.advanceSelectedTab(event.shiftKey ? -1 : 1, true);
+                  event.stopPropagation();
                   event.preventDefault();
                 }
               break;
@@ -162,6 +160,7 @@
               if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey)
                 if (this.tabs && this.handleCtrlPageUpDown) {
                   this.tabs.advanceSelectedTab(-1, true);
+                  event.stopPropagation();
                   event.preventDefault();
                 }
               break;
@@ -169,6 +168,7 @@
               if (event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey)
                 if (this.tabs && this.handleCtrlPageUpDown) {
                   this.tabs.advanceSelectedTab(1, true);
+                  event.stopPropagation();
                   event.preventDefault();
                 }
               break;
@@ -178,6 +178,7 @@
                   var offset = window.getComputedStyle(this, "")
                                      .direction == "ltr" ? -1 : 1;
                   this.tabs.advanceSelectedTab(offset, true);
+                  event.stopPropagation();
                   event.preventDefault();
                 }
               break;
@@ -187,6 +188,7 @@
                   var offset = window.getComputedStyle(this, "")
                                      .direction == "ltr" ? 1 : -1;
                   this.tabs.advanceSelectedTab(offset, true);
+                  event.stopPropagation();
                   event.preventDefault();
                 }
               break;
@@ -201,12 +203,8 @@
         <setter>
           <![CDATA[
             if (val != this._eventNode) {
-              const nsIEventListenerService =
-                Components.interfaces.nsIEventListenerService;
-              let els = Components.classes["@mozilla.org/eventlistenerservice;1"]
-                                  .getService(nsIEventListenerService);
-              els.addSystemEventListener(val, "keydown", this, false);
-              els.removeSystemEventListener(this._eventNode, "keydown", this, false);
+              val.addEventListener("keypress", this, false);
+              this._eventNode.removeEventListener("keypress", this, false);
               this._eventNode = val;
             }
             return val;
@@ -220,19 +218,11 @@
           case "window": this._eventNode = window; break;
           case "document": this._eventNode = document; break;
         }
-        const nsIEventListenerService =
-          Components.interfaces.nsIEventListenerService;
-        let els = Components.classes["@mozilla.org/eventlistenerservice;1"]
-                            .getService(nsIEventListenerService);
-        els.addSystemEventListener(this._eventNode, "keydown", this, false);
+        this._eventNode.addEventListener("keypress", this, false);
       </constructor>
 
       <destructor>
-        const nsIEventListenerService =
-          Components.interfaces.nsIEventListenerService;
-        let els = Components.classes["@mozilla.org/eventlistenerservice;1"]
-                            .getService(nsIEventListenerService);
-        els.removeSystemEventListener(this._eventNode, "keydown", this, false);
+        this._eventNode.removeEventListener("keypress", this, false);
       </destructor>
     </implementation>
   </binding>
@@ -816,39 +806,39 @@
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_LEFT" group="system" preventdefault="true">
+      <handler event="keypress" keycode="VK_LEFT">
       <![CDATA[
         var direction = window.getComputedStyle(this.parentNode, null).direction;
         this.parentNode.advanceSelectedTab(direction == 'ltr' ? -1 : 1, this.arrowKeysShouldWrap);
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_RIGHT" group="system" preventdefault="true">
+      <handler event="keypress" keycode="VK_RIGHT">
       <![CDATA[
         var direction = window.getComputedStyle(this.parentNode, null).direction;
         this.parentNode.advanceSelectedTab(direction == 'ltr' ? 1 : -1, this.arrowKeysShouldWrap);
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_UP" group="system" preventdefault="true">
+      <handler event="keypress" keycode="VK_UP">
       <![CDATA[
         this.parentNode.advanceSelectedTab(-1, this.arrowKeysShouldWrap);
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_DOWN" group="system" preventdefault="true">
+      <handler event="keypress" keycode="VK_DOWN">
       <![CDATA[
         this.parentNode.advanceSelectedTab(1, this.arrowKeysShouldWrap);
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_HOME" group="system" preventdefault="true">
+      <handler event="keypress" keycode="VK_HOME">
       <![CDATA[
         this.parentNode._selectNewTab(this.parentNode.childNodes[0]);
       ]]>
       </handler>
 
-      <handler event="keydown" keycode="VK_END" group="system" preventdefault="true">
+      <handler event="keypress" keycode="VK_END">
       <![CDATA[
         var tabs = this.parentNode.childNodes;
         this.parentNode._selectNewTab(tabs[tabs.length - 1], -1);

@@ -9,7 +9,6 @@
 #define nsGenericHTMLFrameElement_h
 
 #include "mozilla/Attributes.h"
-#include "nsElementFrameLoaderOwner.h"
 #include "nsGenericHTMLElement.h"
 #include "nsIFrameLoader.h"
 #include "nsIMozBrowserFrame.h"
@@ -24,19 +23,24 @@ class nsXULElement;
  * A helper class for frame elements
  */
 class nsGenericHTMLFrameElement : public nsGenericHTMLElement,
-                                  public nsElementFrameLoaderOwner,
+                                  public nsIFrameLoaderOwner,
                                   public nsIMozBrowserFrame
 {
 public:
   nsGenericHTMLFrameElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
                             mozilla::dom::FromParser aFromParser)
     : nsGenericHTMLElement(aNodeInfo)
-    , nsElementFrameLoaderOwner(aFromParser)
+    , mNetworkCreated(aFromParser == mozilla::dom::FROM_PARSER_NETWORK)
+    , mBrowserFrameListenersRegistered(false)
+    , mFrameLoaderCreationDisallowed(false)
   {
   }
 
+  virtual ~nsGenericHTMLFrameElement();
+
   NS_DECL_ISUPPORTS_INHERITED
 
+  NS_DECL_NSIFRAMELOADEROWNER
   NS_DECL_NSIDOMMOZBROWSERFRAME
   NS_DECL_NSIMOZBROWSERFRAME
 
@@ -69,6 +73,8 @@ public:
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED_NO_UNLINK(nsGenericHTMLFrameElement,
                                                      nsGenericHTMLElement)
 
+  void SwapFrameLoaders(nsXULElement& aOtherOwner, mozilla::ErrorResult& aError);
+
   static bool BrowserFramesEnabled();
 
   /**
@@ -82,10 +88,24 @@ public:
   static int32_t MapScrollingAttribute(const nsAttrValue* aValue);
 
 protected:
-  virtual mozilla::dom::Element* ThisFrameElement() MOZ_OVERRIDE
-  {
-    return this;
-  }
+  // This doesn't really ensure a frame loade in all cases, only when
+  // it makes sense.
+  void EnsureFrameLoader();
+  nsresult LoadSrc();
+  nsIDocument* GetContentDocument();
+  nsresult GetContentDocument(nsIDOMDocument** aContentDocument);
+  already_AddRefed<nsPIDOMWindow> GetContentWindow();
+  nsresult GetContentWindow(nsIDOMWindow** aContentWindow);
+
+  nsRefPtr<nsFrameLoader> mFrameLoader;
+
+  // True when the element is created by the parser
+  // using NS_FROM_PARSER_NETWORK flag.
+  // If the element is modified, it may lose the flag.
+  bool                    mNetworkCreated;
+
+  bool                    mBrowserFrameListenersRegistered;
+  bool                    mFrameLoaderCreationDisallowed;
 };
 
 #endif // nsGenericHTMLFrameElement_h

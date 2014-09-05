@@ -717,11 +717,7 @@ var gCookiesWindow = {
   },
 
   onCookieKeyPress: function (aEvent) {
-    if (aEvent.keyCode == KeyEvent.DOM_VK_DELETE
-#ifdef XP_MACOSX
-        || aEvent.keyCode == KeyEvent.DOM_VK_BACK_SPACE
-#endif
-       )
+    if (aEvent.keyCode == 46)
       this.deleteCookie();
   },
 

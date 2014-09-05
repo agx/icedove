@@ -3878,25 +3878,55 @@ nsresult nsMsgDatabase::RowCellColumnToCharPtr(nsIMdbRow *row, mdb_token columnT
 // this is so we can leave default values as they were.
 /* static */void nsMsgDatabase::YarnToUInt32(struct mdbYarn *yarn, uint32_t *pResult)
 {
-  uint8_t numChars = std::min<mdb_fill>(8, yarn->mYarn_Fill);
+  uint32_t result;
+  char *p = (char *) yarn->mYarn_Buf;
+  int32_t numChars = std::min((mdb_fill)8, yarn->mYarn_Fill);
+  int32_t i;
 
-  if (numChars == 0)
-    return;
+  if (numChars > 0)
+  {
+    for (i=0, result = 0; i<numChars; i++, p++)
+    {
+      char C = *p;
 
-  *pResult = MsgUnhex((char *) yarn->mYarn_Buf, numChars);
+      int8_t unhex = ((C >= '0' && C <= '9') ? C - '0' :
+      ((C >= 'A' && C <= 'F') ? C - 'A' + 10 :
+         ((C >= 'a' && C <= 'f') ? C - 'a' + 10 : -1)));
+       if (unhex < 0)
+         break;
+       result = (result << 4) | unhex;
+    }
+
+    *pResult = result;
+  }
 }
 
 // WARNING - if yarn is empty, *pResult will not be changed!!!!
 // this is so we can leave default values as they were.
 /* static */void nsMsgDatabase::YarnToUInt64(struct mdbYarn *yarn, uint64_t *pResult)
 {
-  uint8_t numChars = std::min<mdb_fill>(16, yarn->mYarn_Fill);
+  uint64_t result;
+  char *p = (char *) yarn->mYarn_Buf;
+  int32_t numChars = std::min((mdb_fill)16, yarn->mYarn_Fill);
+  int32_t i;
 
-  if (numChars == 0)
-    return;
+  if (numChars > 0)
+  {
+    for (i = 0, result = 0; i < numChars; i++, p++)
+    {
+      char C = *p;
 
-  *pResult = MsgUnhex((char *) yarn->mYarn_Buf, numChars);
+      int8_t unhex = ((C >= '0' && C <= '9') ? C - '0' :
+      ((C >= 'A' && C <= 'F') ? C - 'A' + 10 :
+         ((C >= 'a' && C <= 'f') ? C - 'a' + 10 : -1)));
+       if (unhex < 0)
+         break;
+       result = (result << 4) | unhex;
+    }
+    *pResult = result;
+  }
 }
+
 
 nsresult nsMsgDatabase::GetProperty(nsIMdbRow *row, const char *propertyName, char **result)
 {

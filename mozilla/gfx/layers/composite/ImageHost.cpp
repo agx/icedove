@@ -106,26 +106,12 @@ ImageHost::Composite(EffectChain& aEffectChain,
   gfx::Rect pictureRect(0, 0,
                         mPictureRect.width,
                         mPictureRect.height);
-  BigImageIterator* it = source->AsBigImageIterator();
+  //XXX: We might have multiple texture sources here (e.g. 3 YCbCr textures), and we're
+  // only iterating over the tiles of the first one. Are we assuming that the tiling
+  // will be identical? Can we ensure that somehow?
+  TileIterator* it = source->AsTileIterator();
   if (it) {
-
-    // This iteration does not work if we have multiple texture sources here
-    // (e.g. 3 YCbCr textures). There's nothing preventing the different
-    // planes from having different resolutions or tile sizes. For example, a
-    // YCbCr frame could have Cb and Cr planes that are half the resolution of
-    // the Y plane, in such a way that the Y plane overflows the maximum
-    // texture size and the Cb and Cr planes do not. Then the Y plane would be
-    // split into multiple tiles and the Cb and Cr planes would just be one
-    // tile each.
-    // To handle the general case correctly, we'd have to create a grid of
-    // intersected tiles over all planes, and then draw each grid tile using
-    // the corresponding source tiles from all planes, with appropriate
-    // per-plane per-tile texture coords.
-    // DrawQuad currently assumes that all planes use the same texture coords.
-    MOZ_ASSERT(it->GetTileCount() == 1 || !source->GetNextSibling(),
-               "Can't handle multi-plane BigImages");
-
-    it->BeginBigImageIteration();
+    it->BeginTileIteration();
     do {
       nsIntRect tileRect = it->GetTileRect();
       gfx::Rect rect(tileRect.x, tileRect.y, tileRect.width, tileRect.height);
@@ -138,18 +124,14 @@ ImageHost::Composite(EffectChain& aEffectChain,
       } else {
         effect->mTextureCoords = Rect(0, 0, 1, 1);
       }
-      if (mFrontBuffer->GetFlags() & TextureFlags::NEEDS_Y_FLIP) {
-        effect->mTextureCoords.y = effect->mTextureCoords.YMost();
-        effect->mTextureCoords.height = -effect->mTextureCoords.height;
-      }
       GetCompositor()->DrawQuad(rect, aClipRect, aEffectChain,
                                 aOpacity, aTransform);
-      GetCompositor()->DrawDiagnostics(DiagnosticFlags::IMAGE | DiagnosticFlags::BIGIMAGE,
+      GetCompositor()->DrawDiagnostics(DIAGNOSTIC_IMAGE|DIAGNOSTIC_BIGIMAGE,
                                        rect, aClipRect, aTransform, mFlashCounter);
     } while (it->NextTile());
-    it->EndBigImageIteration();
+    it->EndTileIteration();
     // layer border
-    GetCompositor()->DrawDiagnostics(DiagnosticFlags::IMAGE,
+    GetCompositor()->DrawDiagnostics(DIAGNOSTIC_IMAGE,
                                      gfxPictureRect, aClipRect,
                                      aTransform, mFlashCounter);
   } else {
@@ -166,14 +148,14 @@ ImageHost::Composite(EffectChain& aEffectChain,
       rect = gfx::Rect(0, 0, textureSize.width, textureSize.height);
     }
 
-    if (mFrontBuffer->GetFlags() & TextureFlags::NEEDS_Y_FLIP) {
+    if (mFrontBuffer->GetFlags() & TEXTURE_NEEDS_Y_FLIP) {
       effect->mTextureCoords.y = effect->mTextureCoords.YMost();
       effect->mTextureCoords.height = -effect->mTextureCoords.height;
     }
 
     GetCompositor()->DrawQuad(rect, aClipRect, aEffectChain,
                               aOpacity, aTransform);
-    GetCompositor()->DrawDiagnostics(DiagnosticFlags::IMAGE,
+    GetCompositor()->DrawDiagnostics(DIAGNOSTIC_IMAGE,
                                      rect, aClipRect,
                                      aTransform, mFlashCounter);
   }

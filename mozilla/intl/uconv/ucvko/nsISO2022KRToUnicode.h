@@ -23,6 +23,7 @@ public:
 
   virtual ~nsISO2022KRToUnicode()
   {
+    NS_IF_RELEASE(mEUCKRDecoder);
   }
 
   NS_IMETHOD Convert(const char * aSrc, int32_t * aSrcLength,
@@ -60,6 +61,6 @@ private:
   // Length of non-ASCII run
   uint32_t mRunLength;
 
-  nsCOMPtr<nsIUnicodeDecoder> mEUCKRDecoder;
+  nsIUnicodeDecoder *mEUCKRDecoder;
 };
 #endif // nsISO2022KRToUnicode_h__

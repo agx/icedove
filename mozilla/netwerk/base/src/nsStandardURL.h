@@ -28,6 +28,7 @@
 class nsIBinaryInputStream;
 class nsIBinaryOutputStream;
 class nsIIDNService;
+class nsICharsetConverterManager;
 class nsIPrefBranch;
 class nsIFile;
 class nsIURLParser;
@@ -165,7 +166,7 @@ private:
     void     Clear();
     void     InvalidateCache(bool invalidateCachedFile = true);
 
-    bool     ValidIPv6orHostname(const char *host);
+    bool     EscapeIPv6(const char *host, nsCString &result);
     bool     NormalizeIDN(const nsCSubstring &host, nsCString &result);
     void     CoalescePath(netCoalesceFlags coalesceFlag, char *path);
 
@@ -274,6 +275,7 @@ private:
     // coredump if we leak it.
     static nsIIDNService               *gIDN;
     static char                         gHostLimitDigits[];
+    static nsICharsetConverterManager  *gCharsetMgr;
     static bool                         gInitialized;
     static bool                         gEscapeUTF8;
     static bool                         gAlwaysEncodeInUTF8;

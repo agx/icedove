@@ -217,9 +217,6 @@ class CxxCodeGen(CodePrinter, Visitor):
 
 
     def visitMethodDefn(self, md):
-        if md.decl.pure:
-            return
-
         self.printdent()
         md.decl.accept(self)
         self.println()

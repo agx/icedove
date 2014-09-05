@@ -54,7 +54,6 @@
 #include "updatelogging.h"
 
 #include "mozilla/Compiler.h"
-#include "mozilla/Types.h"
 
 // Amount of the progress bar to use in each of the 3 update stages,
 // should total 100.0.
@@ -69,7 +68,7 @@
 #if defined(XP_MACOSX)
 // These functions are defined in launchchild_osx.mm
 void LaunchChild(int argc, char **argv);
-void LaunchMacPostProcess(const char* aAppBundle);
+void LaunchMacPostProcess(const char* aAppExe);
 #endif
 
 #ifndef _O_BINARY
@@ -100,7 +99,7 @@ void LaunchMacPostProcess(const char* aAppBundle);
 // The only header file in bionic which has a function prototype for ioprio_set
 // is libc/include/sys/linux-unistd.h. However, linux-unistd.h conflicts
 // badly with unistd.h, so we declare the prototype for ioprio_set directly.
-extern "C" MOZ_EXPORT int ioprio_set(int which, int who, int ioprio);
+extern "C" int ioprio_set(int which, int who, int ioprio);
 
 # define MAYBE_USE_HARD_LINKS 1
 static bool sUseHardLinks = true;
@@ -3173,10 +3172,7 @@ int NS_main(int argc, NS_tchar **argv)
 #endif /* XP_WIN */
 #ifdef XP_MACOSX
     if (gSucceeded) {
-      char installDir[MAXPATHLEN];
-      if (GetInstallationDir(installDir)) {
-        LaunchMacPostProcess(installDir);
-      }
+      LaunchMacPostProcess(argv[callbackIndex]);
     }
 #endif /* XP_MACOSX */
 

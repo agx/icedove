@@ -60,7 +60,7 @@ nsGridRowLayout::GetParentGridPart(nsIFrame* aBox, nsIFrame** aParentBox)
 
   // get the parent
   if (aBox)
-    aBox = nsBox::GetParentBox(aBox);
+    aBox = aBox->GetParentBox();
 
   if (aBox)
   {
@@ -89,7 +89,7 @@ nsGridRowLayout::GetGrid(nsIFrame* aBox, int32_t* aIndex, nsGridRowLayout* aRequ
    }
 
    int32_t index = -1;
-   nsIFrame* child = nsBox::GetChildBox(aBox);
+   nsIFrame* child = aBox->GetChildBox();
    int32_t count = 0;
    while(child)
    {
@@ -108,7 +108,7 @@ nsGridRowLayout::GetGrid(nsIFrame* aBox, int32_t* aIndex, nsGridRowLayout* aRequ
      } else 
        count++;
 
-     child = nsBox::GetNextBox(child);
+     child = child->GetNextBox();
    }
 
    // if we didn't find ourselves then the tree isn't properly formed yet
@@ -143,10 +143,10 @@ nsGridRowLayout::GetTotalMargin(nsIFrame* aBox, bool aIsHorizontal)
     aBox = nsGrid::GetScrollBox(aBox);
 
     // see if we have a next to see if we are last
-    nsIFrame* next = nsBox::GetNextBox(aBox);
+    nsIFrame* next = aBox->GetNextBox();
 
     // get the parent first child to see if we are first
-    nsIFrame* child = nsBox::GetChildBox(parent);
+    nsIFrame* child = parent->GetChildBox();
 
     margin = part->GetTotalMargin(parent, aIsHorizontal);
 

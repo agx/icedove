@@ -7,7 +7,9 @@ function test() {
   waitForExplicitFinish();
 
   let newWin = openDialog(location, "_blank", "chrome,all,dialog=no");
-  promiseWindowLoaded(newWin).then(() => {
+  newWin.addEventListener("load", function(aEvent) {
+    newWin.removeEventListener("load", arguments.callee, false);
+
     let newState = { windows: [{
       tabs: [{ entries: [] }],
       _closedTabs: [{
@@ -57,5 +59,5 @@ function test() {
         }, 0);
       }, 0);
     }, 0);
-  });
+  }, false);
 }

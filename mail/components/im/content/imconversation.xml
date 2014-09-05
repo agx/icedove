@@ -148,8 +148,8 @@
         if (!aMsg.system && conv.isChat) {
           let name = aMsg.who;
           let color;
-          if (this.buddies.has(name)) {
-            let buddy = this.buddies.get(name);
+          if (this._hasBuddy(name)) {
+            let buddy = this.buddies[name];
             color = buddy.color;
             buddy.removeAttribute("inactive");
             this._activeBuddies[name] = true;
@@ -457,7 +457,7 @@
             else
               firstWordSuffix = ": ";
 
-            completions = [b for (b of this.buddies.keys())];
+            completions = Object.keys(this.buddies);
             let outgoingNick = this._conv.nick;
             completions = completions.filter(function(c) c != outgoingNick);
           }
@@ -477,8 +477,8 @@
             // If only one of the possible completions is an active nick, take it.
             let activeNick = null;
             for each (let c in completions) {
-              if (this.buddies.has(c) &&
-                  !this.buddies.get(c).hasAttribute("inactive")) {
+              if (this._hasBuddy(c) &&
+                  !this.buddies[c].hasAttribute("inactive")) {
                 if (!activeNick)
                   activeNick = c;
                 else {
@@ -787,7 +787,8 @@
      <method name="updateParticipantCount">
        <body>
        <![CDATA[
-         document.getElementById("participantCount").value = this.buddies.size;
+         document.getElementById("participantCount").value =
+           Object.keys(this.buddies).length;
        ]]>
        </body>
      </method>
@@ -847,6 +848,17 @@
        </body>
      </method>
 
+     <!-- Test if aBuddyName is known in this.buddies without
+          risking a conflict with an hypothetical hasOwnProperty nick. -->
+     <method name="_hasBuddy">
+       <parameter name="aBuddyName"/>
+       <body>
+       <![CDATA[
+         return Object.prototype.hasOwnProperty.call(this.buddies, aBuddyName);
+       ]]>
+       </body>
+     </method>
+
      <method name="_isBuddyActive">
        <parameter name="aBuddyName"/>
        <body>
@@ -862,7 +874,7 @@
        <body>
        <![CDATA[
          var name = aBuddy.name;
-         if (this.buddies.has(name))
+         if (this._hasBuddy(name))
            throw "Adding a chat buddy twice?!";
          var item = document.createElement("listitem");
          item.chatBuddy = aBuddy;
@@ -876,7 +888,7 @@
          if (!this._isBuddyActive(name))
            item.setAttribute("inactive", "true");
          item.color = color;
-         this.buddies.set(name, item);
+         this.buddies[name] = item;
 
          // Insert item at the right position
          this.addNick(item);
@@ -921,7 +933,7 @@
          var name = aBuddy.name;
          if (!aOldName) {
            // If aOldName is null, we are changing the flags of the buddy
-           let item = this.buddies.get(name);
+           var item = this.buddies[name];
            item.chatBuddy = aBuddy;
            this.setBuddyAttributes(item);
            return;
@@ -936,16 +948,16 @@
            return;
 
          // Is aOldName is not null, then we are renaming the buddy
-         if (!this.buddies.has(aOldName))
+         if (!this._hasBuddy(aOldName))
            throw "Updating a chat buddy that does not exist: " + aOldName;
 
-         if (this.buddies.has(name))
+         if (this._hasBuddy(name))
            throw "Updating a chat buddy to an already existing one: " + name;
 
-         let item = this.buddies.get(aOldName);
+         var item = this.buddies[aOldName];
          item.chatBuddy = aBuddy;
-         this.buddies.delete(aOldName);
-         this.buddies.set(name, item);
+         delete this.buddies[aOldName];
+         this.buddies[name] = item;
          item.setAttribute("label", name);
 
          // Move this item to the right position if its name changed
@@ -958,10 +970,10 @@
        <parameter name="aName"/>
        <body>
        <![CDATA[
-         if (!this.buddies.has(aName))
+         if (!this._hasBuddy(aName))
            throw "Cannot remove a buddy that was not in the room";
-         this.buddies.get(aName).remove();
-         this.buddies.delete(aName);
+         this.buddies[aName].remove();
+         delete this.buddies[aName];
          if (this._isBuddyActive(aName))
            delete this._activeBuddies[aName];
        ]]>
@@ -984,7 +996,7 @@
             cti.removeAttribute("noTopic");
           }
           else {
-            topic = this._conv.noTopicString;
+            topic = this.bundle.GetStringFromName("noTopic");
             cti.setAttribute("noTopic", "true");
             cti.setAttribute("statusTooltiptext", topic);
           }
@@ -1124,7 +1136,7 @@
            while (nicklist.hasChildNodes())
              nicklist.lastChild.remove();
            // Populate the nicklist
-           this.buddies = new Map();
+           this.buddies = {};
            let nicks = fixIterator(this.conv.getParticipants());
            for (let n in nicks)
              this.addBuddy(n);
@@ -1319,11 +1331,8 @@
     </resources>
     <content>
       <xul:stack anonid="statusImageStack" class="statusImageStack">
-        <!-- The box around the user icon is a workaround for bug 955673. -->
-        <xul:box class="userIconHolder" xbl:inherits="userIcon">
-          <xul:image anonid="userIcon" class="userIcon" mousethrough="always"
-                     xbl:inherits="src=userIcon"/>
-        </xul:box>
+        <xul:image anonid="userIcon" class="userIcon" mousethrough="always"
+                   xbl:inherits="src=userIcon"/>
         <xul:image anonid="statusTypeIcon" class="statusTypeIcon"
                    xbl:inherits="status,typing,typed,tooltiptext=statusTypeTooltiptext"/>
       </xul:stack>

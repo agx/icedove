@@ -156,11 +156,6 @@ nsStyleSet::SizeOfIncludingThis(MallocSizeOf aMallocSizeOf) const
     if (mRuleProcessors[i]) {
       n += mRuleProcessors[i]->SizeOfIncludingThis(aMallocSizeOf);
     }
-    // mSheets is a C-style array of nsCOMArrays.  We do not own the sheets in
-    // the nsCOMArrays (either the nsLayoutStyleSheetCache singleton or our
-    // document owns them) so we do not count the sheets here (we pass nullptr
-    // as the aSizeOfElementIncludingThis argument).  All we're doing here is
-    // counting the size of the nsCOMArrays' buffers.
     n += mSheets[i].SizeOfExcludingThis(nullptr, aMallocSizeOf);
   }
 
@@ -637,10 +632,6 @@ nsStyleSet::EndUpdate()
 void
 nsStyleSet::EnableQuirkStyleSheet(bool aEnable)
 {
-  if (!mQuirkStyleSheet) {
-    // SVG-as-an-image doesn't load this sheet
-    return;
-  }
 #ifdef DEBUG
   bool oldEnabled;
   {
@@ -803,13 +794,12 @@ nsStyleSet::GetContext(nsStyleContext* aParentContext,
 
   if (!result) {
     result = NS_NewStyleContext(aParentContext, aPseudoTag, aPseudoType,
-                                aRuleNode,
-                                aFlags & eSkipFlexOrGridItemStyleFixup);
+                                aRuleNode, aFlags & eSkipFlexItemStyleFixup);
     if (aVisitedRuleNode) {
       nsRefPtr<nsStyleContext> resultIfVisited =
         NS_NewStyleContext(parentIfVisited, aPseudoTag, aPseudoType,
                            aVisitedRuleNode,
-                           aFlags & eSkipFlexOrGridItemStyleFixup);
+                           aFlags & eSkipFlexItemStyleFixup);
       if (!parentIfVisited) {
         mRoots.AppendElement(resultIfVisited);
       }
@@ -950,8 +940,7 @@ nsStyleSet::FileRules(nsIStyleRuleProcessor::EnumFunc aCollectorFunc,
                       RuleProcessorData* aData, Element* aElement,
                       nsRuleWalker* aRuleWalker)
 {
-  PROFILER_LABEL("nsStyleSet", "FileRules",
-    js::ProfileEntry::Category::CSS);
+  PROFILER_LABEL("nsStyleSet", "FileRules");
 
   // Cascading order:
   // [least important]
@@ -1225,8 +1214,8 @@ nsStyleSet::ResolveStyleFor(Element* aElement,
                             HasState(NS_EVENT_STATE_VISITED)) {
     flags |= eIsVisitedLink;
   }
-  if (aTreeMatchContext.mSkippingFlexOrGridItemStyleFixup) {
-    flags |= eSkipFlexOrGridItemStyleFixup;
+  if (aTreeMatchContext.mSkippingFlexItemStyleFixup) {
+    flags |= eSkipFlexItemStyleFixup;
   }
 
   return GetContext(aParentContext, ruleNode, visitedRuleNode,
@@ -1389,11 +1378,10 @@ nsStyleSet::ResolvePseudoElementStyle(Element* aParentElement,
       aType == nsCSSPseudoElements::ePseudo_after) {
     flags |= eDoAnimation;
   } else {
-    // Flex and grid containers don't expect to have any pseudo-element children
-    // aside from ::before and ::after.  So if we have such a child, we're not
-    // actually in a flex/grid container, and we should skip flex/grid item
-    // style fixup.
-    flags |= eSkipFlexOrGridItemStyleFixup;
+    // Flex containers don't expect to have any pseudo-element children aside
+    // from ::before and ::after.  So if we have such a child, we're not
+    // actually in a flex container, and we should skip flex-item style fixup.
+    flags |= eSkipFlexItemStyleFixup;
   }
 
   return GetContext(aParentContext, ruleNode, visitedRuleNode,
@@ -1461,11 +1449,10 @@ nsStyleSet::ProbePseudoElementStyle(Element* aParentElement,
       aType == nsCSSPseudoElements::ePseudo_after) {
     flags |= eDoAnimation;
   } else {
-    // Flex and grid containers don't expect to have any pseudo-element children
-    // aside from ::before and ::after.  So if we have such a child, we're not
-    // actually in a flex/grid container, and we should skip flex/grid item
-    // style fixup.
-    flags |= eSkipFlexOrGridItemStyleFixup;
+    // Flex containers don't expect to have any pseudo-element children aside
+    // from ::before and ::after.  So if we have such a child, we're not
+    // actually in a flex container, and we should skip flex-item style fixup.
+    flags |= eSkipFlexItemStyleFixup;
   }
 
   nsRefPtr<nsStyleContext> result =
@@ -1646,17 +1633,18 @@ nsStyleSet::GetFontFeatureValuesLookup()
     for (i = 0; i < numRules; i++) {
       nsCSSFontFeatureValuesRule *rule = rules[i];
 
-      const nsTArray<FontFamilyName>& familyList = rule->GetFamilyList().GetFontlist();
+      const nsTArray<nsString>& familyList = rule->GetFamilyList();
       const nsTArray<gfxFontFeatureValueSet::FeatureValues>&
         featureValues = rule->GetFeatureValues();
 
       // for each family
-      size_t f, numFam;
+      uint32_t f, numFam;
 
       numFam = familyList.Length();
       for (f = 0; f < numFam; f++) {
-        mFontFeatureValuesLookup->AddFontFeatureValues(familyList[f].mName,
-                                                       featureValues);
+        const nsString& family = familyList.ElementAt(f);
+        nsAutoString silly(family);
+        mFontFeatureValuesLookup->AddFontFeatureValues(silly, featureValues);
       }
     }
   }
@@ -1868,11 +1856,11 @@ nsStyleSet::ReparentStyleContext(nsStyleContext* aStyleContext,
   }
 
   if (aElement && aElement->IsRootOfAnonymousSubtree()) {
-    // For anonymous subtree roots, don't tweak "display" value based on whether
-    // or not the parent is styled as a flex/grid container. (If the parent
+    // For anonymous subtree roots, don't tweak "display" value based on
+    // whether or not the parent is styled as a flex container. (If the parent
     // has anonymous-subtree kids, then we know it's not actually going to get
-    // a flex/grid container frame, anyway.)
-    flags |= eSkipFlexOrGridItemStyleFixup;
+    // a flex container frame, anyway.)
+    flags |= eSkipFlexItemStyleFixup;
   }
 
   return GetContext(aNewParentContext, ruleNode, visitedRuleNode,

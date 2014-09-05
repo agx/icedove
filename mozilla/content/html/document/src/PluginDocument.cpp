@@ -73,8 +73,7 @@ private:
 NS_IMETHODIMP
 PluginStreamListener::OnStartRequest(nsIRequest* request, nsISupports *ctxt)
 {
-  PROFILER_LABEL("PluginStreamListener", "OnStartRequest",
-    js::ProfileEntry::Category::NETWORK);
+  PROFILER_LABEL("PluginStreamListener", "OnStartRequest");
 
   nsCOMPtr<nsIContent> embed = mPluginDoc->GetPluginContent();
   nsCOMPtr<nsIObjectLoadingContent> objlc = do_QueryInterface(embed);

@@ -32,7 +32,7 @@ class PrivateDataPreference extends MultiChoicePreference {
         if (!positiveResult)
             return;
 
-        Telemetry.sendUIEvent(TelemetryContract.Event.SANITIZE, TelemetryContract.Method.DIALOG, "settings");
+        Telemetry.sendUIEvent(TelemetryContract.Event.SANITIZE, TelemetryContract.Method.DIALOG);
 
         CharSequence keys[] = getEntryKeys();
         boolean values[] = getValues();

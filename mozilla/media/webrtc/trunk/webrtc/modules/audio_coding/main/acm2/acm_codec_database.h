@@ -22,8 +22,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 // TODO(tlegrand): replace class ACMCodecDB with a namespace.
 class ACMCodecDB {
  public:
@@ -351,8 +349,6 @@ class ACMCodecDB {
   static const CodecSettings codec_settings_[kMaxNumCodecs];
   static const NetEqDecoder neteq_decoders_[kMaxNumCodecs];
 };
-
-}  // namespace acm2
 
 }  // namespace webrtc
 

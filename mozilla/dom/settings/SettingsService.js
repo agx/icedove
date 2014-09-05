@@ -26,7 +26,7 @@ const SETTINGSSERVICELOCK_CONTRACTID = "@mozilla.org/settingsServiceLock;1";
 const SETTINGSSERVICELOCK_CID        = Components.ID("{d7a395a0-e292-11e1-834e-1761d57f5f99}");
 const nsISettingsServiceLock         = Ci.nsISettingsServiceLock;
 
-function SettingsServiceLock(aSettingsService, aTransactionCallback)
+function SettingsServiceLock(aSettingsService)
 {
   if (DEBUG) debug("settingsServiceLock constr!");
   this._open = true;
@@ -34,7 +34,6 @@ function SettingsServiceLock(aSettingsService, aTransactionCallback)
   this._requests = new Queue();
   this._settingsService = aSettingsService;
   this._transaction = null;
-  this._transactionCallback = aTransactionCallback;
 }
 
 SettingsServiceLock.prototype = {
@@ -60,14 +59,6 @@ SettingsServiceLock.prototype = {
       aCallback ? aCallback.handleError(aMessage) : null;
     } catch (e) {
       dump("settings 'error' callback threw an exception, dropping: " + e + "\n");
-    }
-  },
-
-  callTransactionHandle: function callTransactionHandle() {
-    try {
-      this._transactionCallback ? this._transactionCallback.handle() : null;
-    } catch (e) {
-      dump("settings 'Transaction handle' callback threw an exception, dropping: " + e + "\n");
     }
   },
 
@@ -166,20 +157,20 @@ SettingsServiceLock.prototype = {
     lock._open = true;
   },
 
-  createTransactionAndProcess: function() {
+  createTransactionAndProcess: function(aCallback) {
     if (this._settingsService._settingsDB._db) {
       let lock;
       while (lock = this._settingsService._locks.dequeue()) {
         if (!lock._transaction) {
           lock._transaction = lock._settingsService._settingsDB._db.transaction(SETTINGSSTORE_NAME, "readwrite");
-          if (lock._transactionCallback) {
-            lock._transaction.oncomplete = lock.callTransactionHandle.bind(lock);
+          if (aCallback) {
+            lock._transaction.oncomplete = aCallback.handle;
             lock._transaction.onabort = function(event) {
               let message = '';
               if (event.target.error) {
                 message = event.target.error.name + ': ' + event.target.error.message;
               }
-              this.callAbort(lock._transactionCallback.handleAbort, message);
+              this.callAbort(aCallback, message);
             };
           }
         }
@@ -238,10 +229,10 @@ SettingsService.prototype = {
   },
 
   createLock: function createLock(aCallback) {
-    var lock = new SettingsServiceLock(this, aCallback);
+    var lock = new SettingsServiceLock(this);
     this._locks.enqueue(lock);
     this._settingsDB.ensureDB(
-      function() { lock.createTransactionAndProcess(); },
+      function() { lock.createTransactionAndProcess(aCallback); },
       function() { dump("SettingsService failed to open DB!\n"); }
     );
     this.nextTick(function() { this._open = false; }, lock);

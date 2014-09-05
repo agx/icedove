@@ -23,18 +23,14 @@ const TESTS = [ {
   pageid: PAGEID_ERROR_PATCHING,
   buttonClick: "next"
 }, {
-  pageid: PAGEID_DOWNLOADING,
-  extraStartFunction: createContinueFile
+  pageid: PAGEID_DOWNLOADING
 }, {
   pageid: PAGEID_FINISHED,
-  buttonClick: "extra1",
-  extraStartFunction: removeContinueFile
+  buttonClick: "extra1"
 } ];
 
 function runTest() {
   debugDump("entering");
-
-  removeContinueFile();
 
   // Specify the url to update.sjs with a slowDownloadMar param so the ui can
   // load before the download completes.

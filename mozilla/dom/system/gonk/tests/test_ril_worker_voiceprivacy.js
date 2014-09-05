@@ -7,8 +7,27 @@ function run_test() {
   run_next_test();
 }
 
+function _getWorker() {
+  let _postedMessage;
+  let _worker = newWorker({
+    postRILMessage: function(data) {
+    },
+    postMessage: function(message) {
+      _postedMessage = message;
+    }
+  });
+  return {
+    get postedMessage() {
+      return _postedMessage;
+    },
+    get worker() {
+      return _worker;
+    }
+  };
+}
+
 add_test(function test_setVoicePrivacyMode_success() {
-  let workerHelper = newInterceptWorker();
+  let workerHelper = _getWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 
@@ -30,7 +49,7 @@ add_test(function test_setVoicePrivacyMode_success() {
 });
 
 add_test(function test_setVoicePrivacyMode_generic_failure() {
-  let workerHelper = newInterceptWorker();
+  let workerHelper = _getWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 
@@ -52,7 +71,7 @@ add_test(function test_setVoicePrivacyMode_generic_failure() {
 });
 
 add_test(function test_queryVoicePrivacyMode_success_enabled_true() {
-  let workerHelper = newInterceptWorker();
+  let workerHelper = _getWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 
@@ -76,7 +95,7 @@ add_test(function test_queryVoicePrivacyMode_success_enabled_true() {
 });
 
 add_test(function test_queryVoicePrivacyMode_success_enabled_false() {
-  let workerHelper = newInterceptWorker();
+  let workerHelper = _getWorker();
   let worker = workerHelper.worker;
   let context = worker.ContextPool._contexts[0];
 

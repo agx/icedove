@@ -41,7 +41,6 @@ function checkPlacesContextMenu(aItemWithContextMenu) {
   return Task.spawn(function* () {
     let contextMenu = document.getElementById("placesContext");
     let newBookmarkItem = document.getElementById("placesContext_new:bookmark");
-    info("Waiting for context menu on " + aItemWithContextMenu.id);
     let shownPromise = popupShown(contextMenu);
     EventUtils.synthesizeMouseAtCenter(aItemWithContextMenu,
                                        {type: "contextmenu", button: 2});
@@ -50,7 +49,6 @@ function checkPlacesContextMenu(aItemWithContextMenu) {
     ok(!newBookmarkItem.hasAttribute("disabled"),
        "New bookmark item shouldn't be disabled");
 
-    info("Closing context menu");
     yield closePopup(contextMenu);
   });
 }
@@ -83,17 +81,14 @@ function checkSpecialContextMenus() {
     for (let menuID in kSpecialItemIDs) {
       let menuItem = document.getElementById(menuID);
       let menuPopup = document.getElementById(kSpecialItemIDs[menuID]);
-      info("Waiting to open menu for " + menuID);
       let shownPromise = popupShown(menuPopup);
-      menuPopup.openPopup(menuItem, null, 0, 0, false, false, null);
+      menuPopup.openPopup(menuItem, null, 0, 0, false, false, null);
       yield shownPromise;
 
       yield checkPlacesContextMenu(menuPopup);
-      info("Closing menu for " + menuID);
       yield closePopup(menuPopup);
     }
 
-    info("Closing bookmarks menu");
     yield closePopup(bookmarksMenuPopup);
   });
 }
@@ -121,7 +116,6 @@ function checkBookmarksItemsChevronContextMenu() {
     let shownPromise = popupShown(chevronPopup);
     let chevron = document.getElementById("PlacesChevron");
     EventUtils.synthesizeMouseAtCenter(chevron, {});
-    info("Waiting for bookmark toolbar item chevron popup to show");
     yield shownPromise;
     yield waitForCondition(() => {
       for (let child of chevronPopup.children) {
@@ -130,7 +124,6 @@ function checkBookmarksItemsChevronContextMenu() {
       }
     });
     yield checkPlacesContextMenu(chevronPopup);
-    info("Waiting for bookmark toolbar item chevron popup to close");
     yield closePopup(chevronPopup);
   });
 }
@@ -141,7 +134,6 @@ function checkBookmarksItemsChevronContextMenu() {
  * overflowable nav-bar is showing its chevron.
  */
 function overflowEverything() {
-  info("Waiting for overflow");
   window.resizeTo(kSmallWidth, window.outerHeight);
   return waitForCondition(() => gNavBar.hasAttribute("overflowing"));
 }
@@ -152,7 +144,6 @@ function overflowEverything() {
  * overflowing.
  */
 function stopOverflowing() {
-  info("Waiting until we stop overflowing");
   window.resizeTo(kOriginalWindowWidth, window.outerHeight);
   return waitForCondition(() => !gNavBar.hasAttribute("overflowing"));
 }
@@ -211,7 +202,6 @@ add_task(function* testOverflowingBookmarksButtonContextMenu() {
  * to the menu from the overflow panel, and then back to the toolbar.
  */
 add_task(function* testOverflowingBookmarksItemsContextMenu() {
-  info("Ensuring panel is ready.");
   yield PanelUI.ensureReady();
 
   let bookmarksToolbarItems = document.getElementById(kBookmarksItems);
@@ -245,7 +235,6 @@ add_task(function* testOverflowingBookmarksItemsChevronContextMenu() {
   let placesToolbarItems = document.getElementById("PlacesToolbarItems");
   let placesChevron = document.getElementById("PlacesChevron");
   placesToolbarItems.style.maxWidth = "10px";
-  info("Waiting for chevron to no longer be collapsed");
   yield waitForCondition(() => !placesChevron.collapsed);
 
   yield checkBookmarksItemsChevronContextMenu();

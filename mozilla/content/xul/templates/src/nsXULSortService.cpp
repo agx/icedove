@@ -373,7 +373,7 @@ XULSortServiceImpl::InitializeSortState(nsIContent* aRootElement,
       if (!sortResource2.IsEmpty()) {
         nsCOMPtr<nsIAtom> sortkeyatom2 = do_GetAtom(sortResource2);
         aSortState->sortKeys.AppendObject(sortkeyatom2);
-        sort.Append(' ');
+        sort.AppendLiteral(" ");
         sort.Append(sortResource2);
       }
     }

@@ -250,12 +250,10 @@ UIConversation.prototype = {
       delete this._disconnected;
       if (!this.isChat)
         this._justReconnected = true;
-      // Exclude convs with contacts, these receive presence info updates
-      // (and therefore a reconnected message).
-      if ((this.isChat && !this._wasLeft) ||
-          (!this.isChat && !this.contact))
+      else if (!this._wasLeft)
         this.systemMessage(bundle.GetStringFromName("accountReconnected"));
-      delete this._wasLeft;
+      else
+        delete this._wasLeft;
     }
     this.notifyObservers(this, "update-buddy-status");
   },
@@ -346,10 +344,8 @@ UIConversation.prototype = {
   set topic(aTopic) { this.target.topic = aTopic; },
   get topicSetter() this.target.topicSetter,
   get topicSettable() this.target.topicSettable,
-  get noTopicString() bundle.GetStringFromName("noTopic"),
   get nick() this.target.nick,
-  get left() this.target.left,
-  get joining() this.target.joining
+  get left() this.target.left
 };
 
 var gConversationsService;

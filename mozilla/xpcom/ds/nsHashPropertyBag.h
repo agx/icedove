@@ -33,6 +33,9 @@ protected:
     nsInterfaceHashtable<nsStringHashKey, nsIVariant> mPropertyHash;
 };
 
+#undef  IMETHOD_VISIBILITY
+#define IMETHOD_VISIBILITY NS_VISIBILITY_HIDDEN
+
 // Note: NS_NewHashPropertyBag returns a HPB that
 // uses a non-thread-safe internal hash
 extern "C" nsresult

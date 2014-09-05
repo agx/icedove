@@ -245,7 +245,9 @@ add_test(function() {
   AddonManager.getInstallForURL(TESTROOT + "addons/browser_install1_1.xpi",
                                 function(aInstall) {
     aInstall.addListener({
-      onInstallEnded: run_next_test
+      onInstallEnded: function() {
+        executeSoon(run_next_test);
+      }
     });
     aInstall.install();
   }, "application/x-xpinstall");

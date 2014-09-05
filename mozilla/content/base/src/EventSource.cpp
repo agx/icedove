@@ -10,7 +10,6 @@
 #include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/EventSourceBinding.h"
 #include "mozilla/dom/MessageEvent.h"
-#include "mozilla/dom/ScriptSettings.h"
 
 #include "js/OldDebugAPI.h"
 #include "nsNetUtil.h"
@@ -30,6 +29,7 @@
 #include "nsIChannelPolicy.h"
 #include "nsIContentSecurityPolicy.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "mozilla/Preferences.h"
 #include "xpcpublic.h"
 #include "nsCrossSiteListenerProxy.h"
@@ -382,7 +382,7 @@ EventSource::OnStartRequest(nsIRequest *aRequest,
     NS_NewRunnableMethod(this, &EventSource::AnnounceConnection);
   NS_ENSURE_STATE(event);
 
-  rv = NS_DispatchToMainThread(event);
+  rv = NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
   NS_ENSURE_SUCCESS(rv, rv);
 
   mStatus = PARSE_STATE_BEGIN_OF_STREAM;
@@ -484,7 +484,7 @@ EventSource::OnStopRequest(nsIRequest *aRequest,
     NS_NewRunnableMethod(this, &EventSource::ReestablishConnection);
   NS_ENSURE_STATE(event);
 
-  rv = NS_DispatchToMainThread(event);
+  rv = NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return healthOfRequestResult;
@@ -1010,7 +1010,7 @@ EventSource::DispatchFailConnection()
     NS_NewRunnableMethod(this, &EventSource::FailConnection);
   NS_ENSURE_STATE(event);
 
-  return NS_DispatchToMainThread(event);
+  return NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
 }
 
 void
@@ -1156,7 +1156,7 @@ EventSource::Thaw()
 
     mGoingToDispatchAllMessages = true;
 
-    rv = NS_DispatchToMainThread(event);
+    rv = NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
@@ -1216,7 +1216,7 @@ EventSource::DispatchCurrentMessageEvent()
 
     mGoingToDispatchAllMessages = true;
 
-    return NS_DispatchToMainThread(event);
+    return NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
   }
 
   return NS_OK;
@@ -1236,15 +1236,15 @@ EventSource::DispatchAllMessageEvents()
     return;
   }
 
-  // We need a parent object so that we can enter its compartment.
-  nsCOMPtr<nsIGlobalObject> parentObject = do_QueryInterface(GetParentObject());
-  if (NS_WARN_IF(!parentObject)) {
-    return;
-  }
+  // Let's play get the JSContext
+  nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(GetOwner());
+  NS_ENSURE_TRUE_VOID(sgo);
 
-  AutoJSAPI jsapi;
-  JSContext* cx = jsapi.cx();
-  JSAutoCompartment ac(cx, parentObject->GetGlobalJSObject());
+  nsIScriptContext* scriptContext = sgo->GetContext();
+  NS_ENSURE_TRUE_VOID(scriptContext);
+
+  AutoPushJSContext cx(scriptContext->GetNativeContext());
+  NS_ENSURE_TRUE_VOID(cx);
 
   while (mMessagesToDispatch.GetSize() > 0) {
     nsAutoPtr<Message>

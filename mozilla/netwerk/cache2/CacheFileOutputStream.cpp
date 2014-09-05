@@ -94,15 +94,6 @@ CacheFileOutputStream::Write(const char * aBuf, uint32_t aCount,
     return NS_FAILED(mStatus) ? mStatus : NS_BASE_STREAM_CLOSED;
   }
 
-  if (CacheObserver::EntryIsTooBig(mPos + aCount, !mFile->mMemoryOnly)) {
-    LOG(("CacheFileOutputStream::Write() - Entry is too big, failing and "
-         "dooming the entry. [this=%p]", this));
-
-    mFile->DoomLocked(nullptr);
-    CloseWithStatusLocked(NS_ERROR_FILE_TOO_BIG);
-    return NS_ERROR_FILE_TOO_BIG;
-  }
-
   *_retval = aCount;
 
   while (aCount) {
@@ -169,15 +160,6 @@ CacheFileOutputStream::CloseWithStatus(nsresult aStatus)
   LOG(("CacheFileOutputStream::CloseWithStatus() [this=%p, aStatus=0x%08x]",
        this, aStatus));
 
-  return CloseWithStatusLocked(aStatus);
-}
-
-nsresult
-CacheFileOutputStream::CloseWithStatusLocked(nsresult aStatus)
-{
-  LOG(("CacheFileOutputStream::CloseWithStatusLocked() [this=%p, "
-       "aStatus=0x%08x]", this, aStatus));
-
   if (mClosed) {
     MOZ_ASSERT(!mCallback);
     return NS_OK;
@@ -186,13 +168,11 @@ CacheFileOutputStream::CloseWithStatusLocked(nsresult aStatus)
   mClosed = true;
   mStatus = NS_FAILED(aStatus) ? aStatus : NS_BASE_STREAM_CLOSED;
 
-  if (mChunk) {
+  if (mChunk)
     ReleaseChunk();
-  }
 
-  if (mCallback) {
+  if (mCallback)
     NotifyListener();
-  }
 
   mFile->RemoveOutput(this);
 
@@ -365,12 +345,11 @@ CacheFileOutputStream::EnsureCorrectChunk(bool aReleaseOnly)
     return;
 
   nsresult rv;
-  rv = mFile->GetChunkLocked(chunkIdx, CacheFile::WRITER, nullptr,
-                             getter_AddRefs(mChunk));
+  rv = mFile->GetChunkLocked(chunkIdx, true, nullptr, getter_AddRefs(mChunk));
   if (NS_FAILED(rv)) {
     LOG(("CacheFileOutputStream::EnsureCorrectChunk() - GetChunkLocked failed. "
          "[this=%p, idx=%d, rv=0x%08x]", this, chunkIdx, rv));
-    CloseWithStatusLocked(rv);
+    mStatus = rv;
   }
 }
 

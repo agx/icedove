@@ -439,9 +439,7 @@ AudioNodeStream::UpMixDownMixChunk(const AudioChunk* aChunk,
 void
 AudioNodeStream::ProcessInput(GraphTime aFrom, GraphTime aTo, uint32_t aFlags)
 {
-  if (!mFinished) {
-    EnsureTrack(AUDIO_TRACK, mSampleRate);
-  }
+  EnsureTrack(AUDIO_TRACK, mSampleRate);
   // No more tracks will be coming
   mBuffer.AdvanceKnownTracksTime(STREAM_TIME_MAX);
 
@@ -524,7 +522,6 @@ AudioNodeStream::AdvanceOutputSegment()
 TrackTicks
 AudioNodeStream::GetCurrentPosition()
 {
-  NS_ASSERTION(!mFinished, "Don't create another track after finishing");
   return EnsureTrack(AUDIO_TRACK, mSampleRate)->Get<AudioSegment>()->GetDuration();
 }
 

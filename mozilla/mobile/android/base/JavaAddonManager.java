@@ -65,7 +65,7 @@ class JavaAddonManager implements GeckoEventListener {
     }
 
     private JavaAddonManager() {
-        mDispatcher = EventDispatcher.getInstance();
+        mDispatcher = GeckoAppShell.getEventDispatcher();
         mAddonCallbacks = new HashMap<String, Map<String, GeckoEventListener>>();
     }
 
@@ -75,9 +75,8 @@ class JavaAddonManager implements GeckoEventListener {
             return;
         }
         mApplicationContext = applicationContext;
-        mDispatcher.registerGeckoThreadListener(this,
-            "Dex:Load",
-            "Dex:Unload");
+        mDispatcher.registerEventListener("Dex:Load", this);
+        mDispatcher.registerEventListener("Dex:Unload", this);
     }
 
     @Override
@@ -122,7 +121,7 @@ class JavaAddonManager implements GeckoEventListener {
         addonCallbacks = new HashMap<String, GeckoEventListener>();
         for (String event : callbacks.keySet()) {
             CallbackWrapper wrapper = new CallbackWrapper(callbacks.get(event));
-            mDispatcher.registerGeckoThreadListener(wrapper, event);
+            mDispatcher.registerEventListener(event, wrapper);
             addonCallbacks.put(event, wrapper);
         }
         mAddonCallbacks.put(zipFile, addonCallbacks);
@@ -135,7 +134,7 @@ class JavaAddonManager implements GeckoEventListener {
             return;
         }
         for (String event : callbacks.keySet()) {
-            mDispatcher.unregisterGeckoThreadListener(callbacks.get(event), event);
+            mDispatcher.unregisterEventListener(event, callbacks.get(event));
         }
     }
 

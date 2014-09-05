@@ -8,26 +8,22 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_ISACTEST_H_
-#define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_ISACTEST_H_
+#ifndef ACM_ISAC_TEST_H
+#define ACM_ISAC_TEST_H
 
 #include <string.h>
 
-#include "webrtc/common.h"
-#include "webrtc/common_types.h"
-#include "webrtc/modules/audio_coding/main/interface/audio_coding_module.h"
-#include "webrtc/modules/audio_coding/main/test/ACMTest.h"
-#include "webrtc/modules/audio_coding/main/test/Channel.h"
-#include "webrtc/modules/audio_coding/main/test/PCMFile.h"
-#include "webrtc/modules/audio_coding/main/test/utility.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
+#include "ACMTest.h"
+#include "Channel.h"
+#include "PCMFile.h"
+#include "audio_coding_module.h"
+#include "utility.h"
+#include "common_types.h"
 
 #define MAX_FILE_NAME_LENGTH_BYTE 500
 #define NO_OF_CLIENTS             15
 
 namespace webrtc {
-
-class Config;
 
 struct ACMTestISACConfig {
   int32_t currentRateBitPerSec;
@@ -42,7 +38,7 @@ struct ACMTestISACConfig {
 
 class ISACTest : public ACMTest {
  public:
-  ISACTest(int testMode, const Config& config);
+  ISACTest(int testMode);
   ~ISACTest();
 
   void Perform();
@@ -56,11 +52,11 @@ class ISACTest : public ACMTest {
 
   void SwitchingSamplingRate(int testNr, int maxSampRateChange);
 
-  scoped_ptr<AudioCodingModule> _acmA;
-  scoped_ptr<AudioCodingModule> _acmB;
+  AudioCodingModule* _acmA;
+  AudioCodingModule* _acmB;
 
-  scoped_ptr<Channel> _channel_A2B;
-  scoped_ptr<Channel> _channel_B2A;
+  Channel* _channel_A2B;
+  Channel* _channel_B2A;
 
   PCMFile _inFileA;
   PCMFile _inFileB;
@@ -81,4 +77,4 @@ class ISACTest : public ACMTest {
 
 }  // namespace webrtc
 
-#endif  // WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_ISACTEST_H_
+#endif

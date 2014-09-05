@@ -214,27 +214,27 @@ function createDerivedRuleset()
   return newRuleset(gGlobalRuleset);
 }
 
-function addGlobalAllowedTag(aTag, aAttrs = true)
+function addGlobalAllowedTag(aTag, aAttrs)
 {
-  gGlobalRuleset.tags[aTag] = aAttrs;
+  gGlobalRuleset.tags[aTag] = aAttrs || true;
 }
 function removeGlobalAllowedTag(aTag)
 {
   delete gGlobalRuleset.tags[aTag];
 }
 
-function addGlobalAllowedAttribute(aAttr, aRule = true)
+function addGlobalAllowedAttribute(aAttr, aRule)
 {
-  gGlobalRuleset.attrs[aAttr] = aRule;
+  gGlobalRuleset.attrs[aAttr] = aRule || true;
 }
 function removeGlobalAllowedAttribute(aAttr)
 {
   delete gGlobalRuleset.attrs[aAttr];
 }
 
-function addGlobalAllowedStyleRule(aStyle, aRule = true)
+function addGlobalAllowedStyleRule(aStyle, aRule)
 {
-  gGlobalRuleset.styles[aStyle] = aRule;
+  gGlobalRuleset.styles[aStyle] = aRule || true;
 }
 function removeGlobalAllowedStyleRule(aStyle)
 {
@@ -337,7 +337,7 @@ function cleanupNode(aNode, aRules, aTextModifiers)
   }
 }
 
-function cleanupImMarkup(aText, aRuleset, aTextModifiers = [])
+function cleanupImMarkup(aText, aRuleset, aTextModifiers)
 {
   if (!gGlobalRuleset)
     initGlobalRuleset();
@@ -347,6 +347,6 @@ function cleanupImMarkup(aText, aRuleset, aTextModifiers = [])
   // Wrap the text to be parsed in a <span> to avoid losing leading whitespace.
   let doc = parser.parseFromString("<span>" + aText + "</span>", "text/html");
   let span = doc.querySelector("span");
-  cleanupNode(span, aRuleset || gGlobalRuleset, aTextModifiers);
+  cleanupNode(span, aRuleset || gGlobalRuleset, aTextModifiers || []);
   return span.innerHTML;
 }

@@ -863,8 +863,6 @@ protected:
   IndexedDBDeleteDatabaseRequestParent(IDBFactory* aFactory);
   virtual ~IndexedDBDeleteDatabaseRequestParent();
 
-  virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
-
   nsresult
   SetOpenRequest(IDBOpenDBRequest* aOpenRequest);
 

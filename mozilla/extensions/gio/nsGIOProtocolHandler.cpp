@@ -285,18 +285,18 @@ nsGIOInputStream::DoOpenDirectory()
   mDirListPtr = mDirList;
 
   // Write base URL (make sure it ends with a '/')
-  mDirBuf.AppendLiteral("300: ");
+  mDirBuf.Append("300: ");
   mDirBuf.Append(mSpec);
   if (mSpec.get()[mSpec.Length() - 1] != '/')
     mDirBuf.Append('/');
   mDirBuf.Append('\n');
 
   // Write column names
-  mDirBuf.AppendLiteral("200: filename content-length last-modified file-type\n");
+  mDirBuf.Append("200: filename content-length last-modified file-type\n");
 
   // Write charset (assume UTF-8)
   // XXX is this correct?
-  mDirBuf.AppendLiteral("301: UTF-8\n");
+  mDirBuf.Append("301: UTF-8\n");
   SetContentTypeOfChannel(APPLICATION_HTTP_INDEX_FORMAT);
   return NS_OK;
 }
@@ -473,7 +473,7 @@ nsGIOInputStream::DoRead(char *aBuf, uint32_t aCount, uint32_t *aCountRead)
           continue;
         }
 
-        mDirBuf.AssignLiteral("201: ");
+        mDirBuf.Assign("201: ");
 
         // The "filename" field
         nsCString escName;
@@ -512,13 +512,13 @@ nsGIOInputStream::DoRead(char *aBuf, uint32_t aCount, uint32_t *aCountRead)
         switch (g_file_info_get_file_type(info))
         {
           case G_FILE_TYPE_REGULAR:
-            mDirBuf.AppendLiteral("FILE ");
+            mDirBuf.Append("FILE ");
             break;
           case G_FILE_TYPE_DIRECTORY:
-            mDirBuf.AppendLiteral("DIRECTORY ");
+            mDirBuf.Append("DIRECTORY ");
             break;
           case G_FILE_TYPE_SYMBOLIC_LINK:
-            mDirBuf.AppendLiteral("SYMBOLIC-LINK ");
+            mDirBuf.Append("SYMBOLIC-LINK ");
             break;
           default:
             break;
@@ -788,7 +788,7 @@ mount_operation_ask_password (GMountOperation   *mount_op,
   nsAutoString key, realm;
 
   NS_ConvertUTF8toUTF16 dispHost(scheme);
-  dispHost.AppendLiteral("://");
+  dispHost.Append(NS_LITERAL_STRING("://"));
   dispHost.Append(NS_ConvertUTF8toUTF16(hostPort));
 
   key = dispHost;
@@ -932,7 +932,7 @@ nsGIOProtocolHandler::InitSupportedProtocolsPref(nsIPrefBranch *prefs)
     ToLowerCase(mSupportedProtocols);
   }
   else
-    mSupportedProtocols.AssignLiteral("smb:,sftp:"); // use defaults
+    mSupportedProtocols.Assign("smb:,sftp:"); // use defaults
 
   LOG(("gio: supported protocols \"%s\"\n", mSupportedProtocols.get()));
 }

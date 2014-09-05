@@ -101,19 +101,19 @@ protected:
  */
 class DataTextureSourceD3D9 : public DataTextureSource
                             , public TextureSourceD3D9
-                            , public BigImageIterator
+                            , public TileIterator
 {
 public:
   DataTextureSourceD3D9(gfx::SurfaceFormat aFormat,
                         CompositorD3D9* aCompositor,
-                        TextureFlags aFlags = TextureFlags::DEFAULT,
+                        TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT,
                         StereoMode aStereoMode = StereoMode::MONO);
 
   DataTextureSourceD3D9(gfx::SurfaceFormat aFormat,
                         gfx::IntSize aSize,
                         CompositorD3D9* aCompositor,
                         IDirect3DTexture9* aTexture,
-                        TextureFlags aFlags = TextureFlags::DEFAULT);
+                        TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
 
   virtual ~DataTextureSourceD3D9();
 
@@ -139,9 +139,9 @@ public:
 
   virtual void SetCompositor(Compositor* aCompositor) MOZ_OVERRIDE;
 
-  // BigImageIterator
+  // TileIterator
 
-  virtual BigImageIterator* AsBigImageIterator() MOZ_OVERRIDE { return mIsTiled ? this : nullptr; }
+  virtual TileIterator* AsTileIterator() MOZ_OVERRIDE { return mIsTiled ? this : nullptr; }
 
   virtual size_t GetTileCount() MOZ_OVERRIDE { return mTileTextures.size(); }
 
@@ -149,9 +149,9 @@ public:
 
   virtual nsIntRect GetTileRect() MOZ_OVERRIDE;
 
-  virtual void EndBigImageIteration() MOZ_OVERRIDE { mIterating = false; }
+  virtual void EndTileIteration() MOZ_OVERRIDE { mIterating = false; }
 
-  virtual void BeginBigImageIteration() MOZ_OVERRIDE
+  virtual void BeginTileIteration() MOZ_OVERRIDE
   {
     mIterating = true;
     mCurrentTile = 0;
@@ -207,6 +207,8 @@ public:
 
   virtual gfx::SurfaceFormat GetFormat() const { return mFormat; }
 
+  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
+
   virtual bool CanExposeDrawTarget() const MOZ_OVERRIDE { return true; }
 
   virtual TemporaryRef<gfx::DrawTarget> GetAsDrawTarget() MOZ_OVERRIDE;
@@ -255,6 +257,8 @@ public:
   virtual gfx::IntSize GetSize() const { return mSize; }
 
   virtual gfx::SurfaceFormat GetFormat() const { return mFormat; }
+
+  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
 
   virtual bool CanExposeDrawTarget() const MOZ_OVERRIDE { return true; }
 
@@ -309,6 +313,8 @@ public:
   {
     return gfx::IntSize(mDesc.Width, mDesc.Height);
   }
+
+  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
 
   virtual bool HasInternalBuffer() const MOZ_OVERRIDE { return true; }
 

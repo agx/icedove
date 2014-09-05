@@ -31,7 +31,7 @@ class PriorityQueue
 
   public:
 
-    explicit PriorityQueue(AllocPolicy ap = AllocPolicy())
+    PriorityQueue(AllocPolicy ap = AllocPolicy())
       : heap(ap)
     {}
 

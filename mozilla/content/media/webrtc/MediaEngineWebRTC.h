@@ -43,8 +43,6 @@
 #include "webrtc/voice_engine/include/voe_call_report.h"
 
 // Video Engine
-// conflicts with #include of scoped_ptr.h
-#undef FF
 #include "webrtc/video_engine/include/vie_base.h"
 #include "webrtc/video_engine/include/vie_codec.h"
 #include "webrtc/video_engine/include/vie_render.h"
@@ -104,7 +102,6 @@ public:
     , mMonitor("WebRTCCamera.Monitor")
     , mWidth(0)
     , mHeight(0)
-    , mHasDirectListeners(false)
     , mInitDone(false)
     , mInSnapshotMode(false)
     , mSnapshotPath(nullptr)
@@ -132,7 +129,6 @@ public:
     , mMonitor("WebRTCCamera.Monitor")
     , mWidth(0)
     , mHeight(0)
-    , mHasDirectListeners(false)
     , mInitDone(false)
     , mInSnapshotMode(false)
     , mSnapshotPath(nullptr) {
@@ -151,7 +147,6 @@ public:
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
-  virtual void SetDirectListeners(bool aHasListeners);
   virtual nsresult Snapshot(uint32_t aDuration, nsIDOMFile** aFile);
   virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
                           bool aAgcOn, uint32_t aAGC,
@@ -175,9 +170,8 @@ public:
   NS_DECL_ISUPPORTS_INHERITED
 
   void OnHardwareStateChange(HardwareState aState);
-  void GetRotation();
   bool OnNewPreviewFrame(layers::Image* aImage, uint32_t aWidth, uint32_t aHeight);
-  void OnUserError(UserContext aContext, nsresult aError);
+  void OnError(CameraErrorContext aContext, CameraError aError);
   void OnTakePictureComplete(uint8_t* aData, uint32_t aLength, const nsAString& aMimeType);
 
   void AllocImpl();
@@ -218,12 +212,9 @@ private:
 
   // Engine variables.
 #ifdef MOZ_B2G_CAMERA
-  mozilla::ReentrantMonitor mCallbackMonitor; // Monitor for camera callback handling
-  // This is only modified on MainThread (AllocImpl and DeallocImpl)
   nsRefPtr<ICameraControl> mCameraControl;
+  mozilla::ReentrantMonitor mCallbackMonitor; // Monitor for camera callback handling
   nsRefPtr<nsIDOMFile> mLastCapture;
-
-  // These are protected by mMonitor below
   int mRotation;
   int mCameraAngle; // See dom/base/ScreenOrientation.h
   bool mBackCamera;
@@ -247,7 +238,6 @@ private:
   int mWidth, mHeight;
   nsRefPtr<layers::Image> mImage;
   nsRefPtr<layers::ImageContainer> mImageContainer;
-  bool mHasDirectListeners;
 
   nsTArray<SourceMediaStream *> mSources; // When this goes empty, we shut down HW
 
@@ -269,11 +259,10 @@ class MediaEngineWebRTCAudioSource : public MediaEngineAudioSource,
                                      public webrtc::VoEMediaProcess
 {
 public:
-  MediaEngineWebRTCAudioSource(nsIThread *aThread, webrtc::VoiceEngine* aVoiceEnginePtr,
-                               int aIndex, const char* name, const char* uuid)
+  MediaEngineWebRTCAudioSource(webrtc::VoiceEngine* aVoiceEnginePtr, int aIndex,
+    const char* name, const char* uuid)
     : mVoiceEngine(aVoiceEnginePtr)
     , mMonitor("WebRTCMic.Monitor")
-    , mThread(aThread)
     , mCapIndex(aIndex)
     , mChannel(-1)
     , mInitDone(false)
@@ -301,7 +290,6 @@ public:
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
-  virtual void SetDirectListeners(bool aHasDirectListeners) {};
   virtual nsresult Snapshot(uint32_t aDuration, nsIDOMFile** aFile);
   virtual nsresult Config(bool aEchoOn, uint32_t aEcho,
                           bool aAgcOn, uint32_t aAGC,
@@ -344,7 +332,6 @@ private:
   // mSources[] is accessed from webrtc threads.
   Monitor mMonitor;
   nsTArray<SourceMediaStream *> mSources; // When this goes empty, we shut down HW
-  nsCOMPtr<nsIThread> mThread;
 
   int mCapIndex;
   int mChannel;
@@ -386,8 +373,6 @@ private:
     // XXX
     gFarendObserver = nullptr;
   }
-
-  nsCOMPtr<nsIThread> mThread;
 
   Mutex mMutex;
   // protected with mMutex:

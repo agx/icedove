@@ -48,7 +48,7 @@ nonStrictThisHook(JSContext *cx, JSAbstractFramePtr frame, bool isConstructing, 
         bool *allWrapped = (bool *) closure;
         JS::RootedValue thisv(cx);
         frame.getThisValue(cx, &thisv);
-        *allWrapped = *allWrapped && !thisv.isPrimitive();
+        *allWrapped = *allWrapped && !JSVAL_IS_PRIMITIVE(thisv);
     }
     return nullptr;
 }
@@ -87,7 +87,7 @@ strictThisHook(JSContext *cx, JSAbstractFramePtr frame, bool isConstructing, boo
         bool *anyWrapped = (bool *) closure;
         JS::RootedValue thisv(cx);
         frame.getThisValue(cx, &thisv);
-        *anyWrapped = *anyWrapped || !thisv.isPrimitive();
+        *anyWrapped = *anyWrapped || !JSVAL_IS_PRIMITIVE(thisv);
     }
     return nullptr;
 }
@@ -228,7 +228,7 @@ bool testIndirectEval(JS::HandleObject scope, const char *code)
         CHECK(codestr);
         JS::RootedValue arg(cx, JS::StringValue(codestr));
         JS::RootedValue v(cx);
-        CHECK(JS_CallFunctionName(cx, scope, "eval", HandleValueArray(arg), &v));
+        CHECK(JS_CallFunctionName(cx, scope, "eval", arg, &v));
     }
 
     JS::RootedValue hitsv(cx);

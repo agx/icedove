@@ -1231,10 +1231,7 @@ MetroInput::HandleFirstTouchStartEvent(WidgetTouchEvent* aEvent)
 
   WidgetTouchEvent transformedEvent(*aEvent);
   DUMP_TOUCH_IDS("APZC(1)", aEvent);
-  nsEventStatus result = mWidget->ApzReceiveInputEvent(&transformedEvent, &mTargetAPZCGuid);
-  if (result == nsEventStatus_eConsumeNoDefault) {
-    return;
-  }
+  mWidget->ApzReceiveInputEvent(&transformedEvent, &mTargetAPZCGuid);
 
   if (gTouchActionPropertyEnabled) {
     nsTArray<TouchBehaviorFlags> touchBehaviors;
@@ -1288,9 +1285,6 @@ MetroInput::HandleFirstTouchMoveEvent(WidgetTouchEvent* aEvent)
   WidgetTouchEvent transformedEvent(*aEvent);
   DUMP_TOUCH_IDS("APZC(2)", aEvent);
   apzcStatus = mWidget->ApzReceiveInputEvent(&transformedEvent, &mTargetAPZCGuid);
-  if (apzcStatus == nsEventStatus_eConsumeNoDefault) {
-    return;
-  }
 
   // We need to dispatch here only touch event, not pointer one.
   // That's because according to the spec pointer events doesn't imply pointermove event
@@ -1312,7 +1306,7 @@ MetroInput::HandleFirstTouchMoveEvent(WidgetTouchEvent* aEvent)
   if (nsEventStatus_eConsumeNoDefault == contentStatus) {
     // Touchmove handler consumed touch.
     mContentConsumingTouch = true;
-  } else if (nsEventStatus_eConsumeDoDefault == apzcStatus) {
+  } else if (nsEventStatus_eConsumeNoDefault == apzcStatus) {
     // Apzc triggered default behavior.
     mApzConsumingTouch = true;
   }
@@ -1424,9 +1418,6 @@ MetroInput::DeliverNextQueuedTouchEvent()
 
   DUMP_TOUCH_IDS("APZC(3)", event);
   status = mWidget->ApzReceiveInputEvent(event, nullptr);
-  if (status == nsEventStatus_eConsumeNoDefault) {
-    return;
-  }
 
   // If we're getting a new touch (touch start) after some touch start/move
   // events we need to reset touch behavior for touches.
@@ -1439,7 +1430,7 @@ MetroInput::DeliverNextQueuedTouchEvent()
 
   // Send the event to content unless APZC is consuming it.
   if (!mApzConsumingTouch) {
-    if (status == nsEventStatus_eConsumeDoDefault) {
+    if (status == nsEventStatus_eConsumeNoDefault) {
       mApzConsumingTouch = true;
       DispatchTouchCancel(event);
       return;

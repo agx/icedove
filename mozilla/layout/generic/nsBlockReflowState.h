@@ -92,14 +92,23 @@ public:
                       uint32_t aFlags = 0);
 
   bool IsAdjacentWithTop() const {
-    return mY == mBorderPadding.top;
+    return mY ==
+      ((mFlags & BRS_ISFIRSTINFLOW) ? mReflowState.ComputedPhysicalBorderPadding().top : 0);
   }
 
   /**
-   * Return mBlock's computed physical border+padding with GetSkipSides applied.
+   * Adjusts the border/padding to return 0 for the top if
+   * we are not the first in flow.
    */
-  const nsMargin& BorderPadding() const {
-    return mBorderPadding;
+  nsMargin BorderPadding() const {
+    nsMargin result = mReflowState.ComputedPhysicalBorderPadding();
+    if (!(mFlags & BRS_ISFIRSTINFLOW)) {
+      result.top = 0;
+      if (mFlags & BRS_ISOVERFLOWCONTAINER) {
+        result.bottom = 0;
+      }
+    }
+    return result;
   }
 
   /**
@@ -212,9 +221,6 @@ public:
 
   // The current Y coordinate in the block
   nscoord mY;
-
-  // mBlock's computed physical border+padding with GetSkipSides applied.
-  nsMargin mBorderPadding;
 
   // The overflow areas of all floats placed so far
   nsOverflowAreas mFloatOverflowAreas;

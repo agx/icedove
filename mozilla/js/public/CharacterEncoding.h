@@ -25,38 +25,35 @@ namespace JS {
  * byte is treated as a 2-byte character, and there is no way to pass in a
  * string containing characters beyond U+00FF.
  */
-class Latin1Chars : public mozilla::Range<Latin1Char>
+class Latin1Chars : public mozilla::Range<unsigned char>
 {
-    typedef mozilla::Range<Latin1Char> Base;
+    typedef mozilla::Range<unsigned char> Base;
 
   public:
     Latin1Chars() : Base() {}
-    Latin1Chars(char *aBytes, size_t aLength) : Base(reinterpret_cast<Latin1Char *>(aBytes), aLength) {}
-    Latin1Chars(const Latin1Char *aBytes, size_t aLength)
-      : Base(const_cast<Latin1Char *>(aBytes), aLength)
-    {}
+    Latin1Chars(char *aBytes, size_t aLength) : Base(reinterpret_cast<unsigned char *>(aBytes), aLength) {}
     Latin1Chars(const char *aBytes, size_t aLength)
-      : Base(reinterpret_cast<Latin1Char *>(const_cast<char *>(aBytes)), aLength)
+      : Base(reinterpret_cast<unsigned char *>(const_cast<char *>(aBytes)), aLength)
     {}
 };
 
 /*
  * A Latin1Chars, but with \0 termination for C compatibility.
  */
-class Latin1CharsZ : public mozilla::RangedPtr<Latin1Char>
+class Latin1CharsZ : public mozilla::RangedPtr<unsigned char>
 {
-    typedef mozilla::RangedPtr<Latin1Char> Base;
+    typedef mozilla::RangedPtr<unsigned char> Base;
 
   public:
     Latin1CharsZ() : Base(nullptr, 0) {}
 
     Latin1CharsZ(char *aBytes, size_t aLength)
-      : Base(reinterpret_cast<Latin1Char *>(aBytes), aLength)
+      : Base(reinterpret_cast<unsigned char *>(aBytes), aLength)
     {
         MOZ_ASSERT(aBytes[aLength] == '\0');
     }
 
-    Latin1CharsZ(Latin1Char *aBytes, size_t aLength)
+    Latin1CharsZ(unsigned char *aBytes, size_t aLength)
       : Base(aBytes, aLength)
     {
         MOZ_ASSERT(aBytes[aLength] == '\0');
@@ -154,7 +151,7 @@ class ConstTwoByteChars : public mozilla::RangedPtr<const jschar>
 {
   public:
     ConstTwoByteChars(const ConstTwoByteChars &s) : ConstCharPtr(s) {}
-    MOZ_IMPLICIT ConstTwoByteChars(const mozilla::RangedPtr<const jschar> &s) : ConstCharPtr(s) {}
+    ConstTwoByteChars(const mozilla::RangedPtr<const jschar> &s) : ConstCharPtr(s) {}
     ConstTwoByteChars(const jschar *s, size_t len) : ConstCharPtr(s, len) {}
     ConstTwoByteChars(const jschar *pos, const jschar *start, size_t len)
       : ConstCharPtr(pos, start, len)

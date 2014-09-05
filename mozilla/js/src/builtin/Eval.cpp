@@ -27,8 +27,11 @@ AssertInnerizedScopeChain(JSContext *cx, JSObject &scopeobj)
 {
 #ifdef DEBUG
     RootedObject obj(cx);
-    for (obj = &scopeobj; obj; obj = obj->enclosingScope())
-        JS_ASSERT(GetInnerObject(obj) == obj);
+    for (obj = &scopeobj; obj; obj = obj->enclosingScope()) {
+        if (JSObjectOp op = obj->getClass()->ext.innerObject) {
+            JS_ASSERT(op(cx, obj) == obj);
+        }
+    }
 #endif
 }
 
@@ -90,7 +93,7 @@ class EvalScriptGuard
     Rooted<JSLinearString*> lookupStr_;
 
   public:
-    explicit EvalScriptGuard(JSContext *cx)
+    EvalScriptGuard(JSContext *cx)
         : cx_(cx), script_(cx), lookup_(cx), lookupStr_(cx) {}
 
     ~EvalScriptGuard() {

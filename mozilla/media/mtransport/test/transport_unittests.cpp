@@ -366,7 +366,8 @@ class TransportTestPeer : public sigslot::has_slots<> {
     TransportLayer::State tstate;
 
     RUN_ON_THREAD(test_utils->sts_target(),
-                  WrapRunnableRet(flow_, &TransportFlow::state, &tstate));
+                  WrapRunnableRet(flow_, &TransportFlow::state, &tstate),
+                  NS_DISPATCH_SYNC);
 
     return tstate;
   }

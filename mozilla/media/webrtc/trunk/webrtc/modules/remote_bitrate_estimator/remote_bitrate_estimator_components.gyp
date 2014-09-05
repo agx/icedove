@@ -14,6 +14,9 @@
     {
       'target_name': 'rbe_components',
       'type': 'static_library',
+      'include_dirs': [
+        '<(webrtc_root)/modules/remote_bitrate_estimator',
+      ],
       'sources': [
         'overuse_detector.cc',
         'overuse_detector.h',

@@ -15,24 +15,24 @@ BEGIN_TEST(testConservativeGC)
     EVAL("({foo: 'bar'});", &v2);
     CHECK(v2.isObject());
     char objCopy[sizeof(JSObject)];
-    js_memcpy(&objCopy, v2.toObjectOrNull(), sizeof(JSObject));
+    js_memcpy(&objCopy, JSVAL_TO_OBJECT(v2), sizeof(JSObject));
 
     JS::RootedValue v3(cx);
     EVAL("String(Math.PI);", &v3);
-    CHECK(v3.isString());
+    CHECK(JSVAL_IS_STRING(v3));
     char strCopy[sizeof(JSString)];
-    js_memcpy(&strCopy, v3.toString(), sizeof(JSString));
+    js_memcpy(&strCopy, JSVAL_TO_STRING(v3), sizeof(JSString));
 
     JS::RootedValue tmp(cx);
     EVAL("({foo2: 'bar2'});", &tmp);
     CHECK(tmp.isObject());
-    JS::RootedObject obj2(cx, tmp.toObjectOrNull());
+    JS::RootedObject obj2(cx, JSVAL_TO_OBJECT(tmp));
     char obj2Copy[sizeof(JSObject)];
     js_memcpy(&obj2Copy, obj2, sizeof(JSObject));
 
     EVAL("String(Math.sqrt(3));", &tmp);
-    CHECK(tmp.isString());
-    JS::RootedString str2(cx, tmp.toString());
+    CHECK(JSVAL_IS_STRING(tmp));
+    JS::RootedString str2(cx, JSVAL_TO_STRING(tmp));
     char str2Copy[sizeof(JSString)];
     js_memcpy(&str2Copy, str2, sizeof(JSString));
 
@@ -47,8 +47,8 @@ BEGIN_TEST(testConservativeGC)
 
     JS_GC(rt);
 
-    checkObjectFields((JSObject *)objCopy, v2.toObjectOrNull());
-    CHECK(!memcmp(strCopy, v3.toString(), sizeof(strCopy)));
+    checkObjectFields((JSObject *)objCopy, JSVAL_TO_OBJECT(v2));
+    CHECK(!memcmp(strCopy, JSVAL_TO_STRING(v3), sizeof(strCopy)));
 
     checkObjectFields((JSObject *)obj2Copy, obj2);
     CHECK(!memcmp(str2Copy, str2, sizeof(str2Copy)));

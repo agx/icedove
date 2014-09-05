@@ -13,7 +13,7 @@
 
 #include "nsIIccProvider.h"
 #include "nsIMobileConnectionProvider.h"
-#include "nsITelephonyService.h"
+#include "nsITelephonyProvider.h"
 
 BEGIN_BLUETOOTH_NAMESPACE
 

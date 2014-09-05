@@ -731,10 +731,6 @@ nsEditorEventListener::CleanupDragDropCaret()
     nsCOMPtr<nsIPresShell> presShell = GetPresShell();
     if (presShell)
     {
-      nsCOMPtr<nsISelectionController> selCon(do_QueryInterface(presShell));
-      if (selCon) {
-        selCon->SetCaretEnabled(false);
-      }
       presShell->RestoreCaret();
     }
 

@@ -39,15 +39,16 @@ private:
   ~nsRangeStore();
 
 public:
-  void StoreRange(nsRange* aRange);
-  already_AddRefed<nsRange> GetRange();
+  nsresult StoreRange(nsIDOMRange *aRange);
+  nsresult GetRange(nsRange** outRange);
 
   NS_INLINE_DECL_REFCOUNTING(nsRangeStore)
         
-  nsCOMPtr<nsINode> startNode;
-  int32_t           startOffset;
-  nsCOMPtr<nsINode> endNode;
-  int32_t           endOffset;
+  nsCOMPtr<nsIDOMNode> startNode;
+  int32_t              startOffset;
+  nsCOMPtr<nsIDOMNode> endNode;
+  int32_t              endOffset;
+  // DEBUG:   static int32_t n;
 };
 
 class nsSelectionState
@@ -89,39 +90,22 @@ class nsRangeUpdater
     // if you move a node, that corresponds to deleting it and reinserting it.
     // DOM Range gravity will promote the selection out of the node on deletion,
     // which is not what you want if you know you are reinserting it.
-    nsresult SelAdjCreateNode(nsINode* aParent, int32_t aPosition);
     nsresult SelAdjCreateNode(nsIDOMNode *aParent, int32_t aPosition);
-    nsresult SelAdjInsertNode(nsINode* aParent, int32_t aPosition);
     nsresult SelAdjInsertNode(nsIDOMNode *aParent, int32_t aPosition);
-    void     SelAdjDeleteNode(nsINode* aNode);
     void     SelAdjDeleteNode(nsIDOMNode *aNode);
-    nsresult SelAdjSplitNode(nsINode* aOldRightNode, int32_t aOffset,
-                             nsINode* aNewLeftNode);
     nsresult SelAdjSplitNode(nsIDOMNode *aOldRightNode, int32_t aOffset, nsIDOMNode *aNewLeftNode);
-    nsresult SelAdjJoinNodes(nsINode* aLeftNode,
-                             nsINode* aRightNode,
-                             nsINode* aParent,
-                             int32_t aOffset,
-                             int32_t aOldLeftNodeLength);
     nsresult SelAdjJoinNodes(nsIDOMNode *aLeftNode, 
                              nsIDOMNode *aRightNode, 
                              nsIDOMNode *aParent, 
                              int32_t aOffset,
                              int32_t aOldLeftNodeLength);
-    nsresult SelAdjInsertText(nsIContent* aTextNode, int32_t aOffset,
-                              const nsAString &aString);
     nsresult SelAdjInsertText(nsIDOMCharacterData *aTextNode, int32_t aOffset, const nsAString &aString);
-    nsresult SelAdjDeleteText(nsIContent* aTextNode, int32_t aOffset,
-                              int32_t aLength);
     nsresult SelAdjDeleteText(nsIDOMCharacterData *aTextNode, int32_t aOffset, int32_t aLength);
     // the following gravity routines need will/did sandwiches, because the other gravity
     // routines will be called inside of these sandwiches, but should be ignored.
     nsresult WillReplaceContainer();
-    nsresult DidReplaceContainer(nsINode* aOriginalNode, nsINode* aNewNode);
     nsresult DidReplaceContainer(nsIDOMNode *aOriginalNode, nsIDOMNode *aNewNode);
     nsresult WillRemoveContainer();
-    nsresult DidRemoveContainer(nsINode* aNode, nsINode* aParent,
-                                int32_t aOffset, uint32_t aNodeOrigLen);
     nsresult DidRemoveContainer(nsIDOMNode *aNode, nsIDOMNode *aParent, int32_t aOffset, uint32_t aNodeOrigLen);
     nsresult WillInsertContainer();
     nsresult DidInsertContainer();
@@ -143,18 +127,14 @@ class MOZ_STACK_CLASS nsAutoTrackDOMPoint
 {
   private:
     nsRangeUpdater &mRU;
-    // Allow tracking either nsIDOMNode or nsINode until nsIDOMNode is gone
-    nsCOMPtr<nsINode>* mNode;
-    nsCOMPtr<nsIDOMNode>* mDOMNode;
-    int32_t* mOffset;
+    nsCOMPtr<nsIDOMNode> *mNode;
+    int32_t *mOffset;
     nsRefPtr<nsRangeStore> mRangeItem;
   public:
-    nsAutoTrackDOMPoint(nsRangeUpdater &aRangeUpdater,
-                        nsCOMPtr<nsINode>* aNode, int32_t* aOffset)
-      : mRU(aRangeUpdater)
-      , mNode(aNode)
-      , mDOMNode(nullptr)
-      , mOffset(aOffset)
+    nsAutoTrackDOMPoint(nsRangeUpdater &aRangeUpdater, nsCOMPtr<nsIDOMNode> *aNode, int32_t *aOffset) :
+    mRU(aRangeUpdater)
+    ,mNode(aNode)
+    ,mOffset(aOffset)
     {
       mRangeItem = new nsRangeStore();
       mRangeItem->startNode = *mNode;
@@ -163,30 +143,11 @@ class MOZ_STACK_CLASS nsAutoTrackDOMPoint
       mRangeItem->endOffset = *mOffset;
       mRU.RegisterRangeItem(mRangeItem);
     }
-
-    nsAutoTrackDOMPoint(nsRangeUpdater &aRangeUpdater,
-                        nsCOMPtr<nsIDOMNode>* aNode, int32_t* aOffset)
-      : mRU(aRangeUpdater)
-      , mNode(nullptr)
-      , mDOMNode(aNode)
-      , mOffset(aOffset)
-    {
-      mRangeItem = new nsRangeStore();
-      mRangeItem->startNode = do_QueryInterface(*mDOMNode);
-      mRangeItem->endNode = do_QueryInterface(*mDOMNode);
-      mRangeItem->startOffset = *mOffset;
-      mRangeItem->endOffset = *mOffset;
-      mRU.RegisterRangeItem(mRangeItem);
-    }
-
+    
     ~nsAutoTrackDOMPoint()
     {
       mRU.DropRangeItem(mRangeItem);
-      if (mNode) {
-        *mNode = mRangeItem->startNode;
-      } else {
-        *mDOMNode = GetAsDOMNode(mRangeItem->startNode);
-      }
+      *mNode  = mRangeItem->startNode;
       *mOffset = mRangeItem->startOffset;
     }
 };

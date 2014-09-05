@@ -17,13 +17,12 @@
 
 #include "jsatom.h"
 #include "jscntxt.h"
-#include "jscompartment.h"
 #include "jsexn.h"
 #include "jsnum.h"
+#include "jsworkers.h"
 
 #include "frontend/BytecodeCompiler.h"
 #include "js/CharacterEncoding.h"
-#include "vm/HelperThreads.h"
 #include "vm/Keywords.h"
 #include "vm/StringBuffer.h"
 
@@ -292,7 +291,7 @@ TokenStream::TokenStream(ExclusiveContext *cx, const ReadOnlyCompileOptions &opt
     // initial line's base must be included in the buffer. linebase and userbuf
     // were adjusted above, and if we are starting tokenization part way through
     // this line then adjust the next character.
-    userbuf.setAddressOfNextRawChar(base, /* allowPoisoned = */ true);
+    userbuf.setAddressOfNextRawChar(base);
 
     // Nb: the following tables could be static, but initializing them here is
     // much easier.  Don't worry, the time to initialize them for each
@@ -630,17 +629,6 @@ TokenStream::reportCompileErrorNumberVA(uint32_t offset, unsigned flags, unsigne
     } else {
         err.report.lineno = srcCoords.lineNum(offset);
         err.report.column = srcCoords.columnIndex(offset);
-    }
-
-    // If we have no location information, try to get one from the caller.
-    if (offset != NoOffset && !err.report.filename && cx->isJSContext()) {
-        NonBuiltinFrameIter iter(cx->asJSContext(),
-                                 FrameIter::ALL_CONTEXTS, FrameIter::GO_THROUGH_SAVED,
-                                 cx->compartment()->principals);
-        if (!iter.done() && iter.scriptFilename()) {
-            err.report.filename = iter.scriptFilename();
-            err.report.lineno = iter.computeLine(&err.report.column);
-        }
     }
 
     err.argumentsType = (flags & JSREPORT_UC) ? ArgumentsAreUnicode : ArgumentsAreASCII;

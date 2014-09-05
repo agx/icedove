@@ -56,9 +56,10 @@ nsLeafBoxFrame::GetBoxName(nsAutoString& aName)
  * Initialize us. This is a good time to get the alignment of the box
  */
 void
-nsLeafBoxFrame::Init(nsIContent*       aContent,
-                     nsContainerFrame* aParent,
-                     nsIFrame*         aPrevInFlow)
+nsLeafBoxFrame::Init(
+              nsIContent*      aContent,
+              nsIFrame*        aParent,
+              nsIFrame*        aPrevInFlow)
 {
   nsLeafFrame::Init(aContent, aParent, aPrevInFlow);
 
@@ -179,7 +180,7 @@ nsLeafBoxFrame::ComputeAutoSize(nsRenderingContext *aRenderingContext,
                                   aMargin, aBorder, aPadding, aShrinkWrap);
 }
 
-void
+nsresult
 nsLeafBoxFrame::Reflow(nsPresContext*   aPresContext,
                      nsHTMLReflowMetrics&     aDesiredSize,
                      const nsHTMLReflowState& aReflowState,
@@ -311,6 +312,8 @@ nsLeafBoxFrame::Reflow(nsPresContext*   aPresContext,
 
   }
 #endif
+
+  return NS_OK;
 }
 
 #ifdef DEBUG_FRAME_DUMP

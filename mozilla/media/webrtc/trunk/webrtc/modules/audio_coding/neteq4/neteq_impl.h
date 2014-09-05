@@ -48,10 +48,7 @@ class PreemptiveExpand;
 class RandomVector;
 class SyncBuffer;
 class TimestampScaler;
-struct AccelerateFactory;
 struct DtmfEvent;
-struct ExpandFactory;
-struct PreemptiveExpandFactory;
 
 class NetEqImpl : public webrtc::NetEq {
  public:
@@ -66,10 +63,7 @@ class NetEqImpl : public webrtc::NetEq {
             DtmfToneGenerator* dtmf_tone_generator,
             PacketBuffer* packet_buffer,
             PayloadSplitter* payload_splitter,
-            TimestampScaler* timestamp_scaler,
-            AccelerateFactory* accelerate_factory,
-            ExpandFactory* expand_factory,
-            PreemptiveExpandFactory* preemptive_expand_factory);
+            TimestampScaler* timestamp_scaler);
 
   virtual ~NetEqImpl();
 
@@ -81,18 +75,6 @@ class NetEqImpl : public webrtc::NetEq {
                            const uint8_t* payload,
                            int length_bytes,
                            uint32_t receive_timestamp);
-
-  // Inserts a sync-packet into packet queue. Sync-packets are decoded to
-  // silence and are intended to keep AV-sync intact in an event of long packet
-  // losses when Video NACK is enabled but Audio NACK is not. Clients of NetEq
-  // might insert sync-packet when they observe that buffer level of NetEq is
-  // decreasing below a certain threshold, defined by the application.
-  // Sync-packets should have the same payload type as the last audio payload
-  // type, i.e. they cannot have DTMF or CNG payload type, nor a codec change
-  // can be implied by inserting a sync-packet.
-  // Returns kOk on success, kFail on failure.
-  virtual int InsertSyncPacket(const WebRtcRTPHeader& rtp_header,
-                               uint32_t receive_timestamp);
 
   // Instructs NetEq to deliver 10 ms of audio data. The data is written to
   // |output_audio|, which can hold (at least) |max_length| elements.
@@ -191,12 +173,13 @@ class NetEqImpl : public webrtc::NetEq {
 
   // Get sequence number and timestamp of the latest RTP.
   // This method is to facilitate NACK.
-  virtual int DecodedRtpInfo(int* sequence_number, uint32_t* timestamp) const;
+  virtual int DecodedRtpInfo(int* sequence_number, uint32_t* timestamp);
 
-  // Sets background noise mode.
+  virtual int InsertSyncPacket(const WebRtcRTPHeader& rtp_header,
+                                 uint32_t receive_timestamp);
+
   virtual void SetBackgroundNoiseMode(NetEqBackgroundNoiseMode mode);
 
-  // Gets background noise mode.
   virtual NetEqBackgroundNoiseMode BackgroundNoiseMode() const;
 
  private:
@@ -211,8 +194,7 @@ class NetEqImpl : public webrtc::NetEq {
   int InsertPacketInternal(const WebRtcRTPHeader& rtp_header,
                            const uint8_t* payload,
                            int length_bytes,
-                           uint32_t receive_timestamp,
-                           bool is_sync_packet);
+                           uint32_t receive_timestamp);
 
 
   // Delivers 10 ms of audio data. The data is written to |output|, which can
@@ -318,16 +300,13 @@ class NetEqImpl : public webrtc::NetEq {
   scoped_ptr<TimestampScaler> timestamp_scaler_;
   scoped_ptr<DecisionLogic> decision_logic_;
   scoped_ptr<PostDecodeVad> vad_;
-  scoped_ptr<AudioMultiVector> algorithm_buffer_;
+  scoped_ptr<AudioMultiVector<int16_t> > algorithm_buffer_;
   scoped_ptr<SyncBuffer> sync_buffer_;
   scoped_ptr<Expand> expand_;
-  scoped_ptr<ExpandFactory> expand_factory_;
   scoped_ptr<Normal> normal_;
   scoped_ptr<Merge> merge_;
   scoped_ptr<Accelerate> accelerate_;
-  scoped_ptr<AccelerateFactory> accelerate_factory_;
   scoped_ptr<PreemptiveExpand> preemptive_expand_;
-  scoped_ptr<PreemptiveExpandFactory> preemptive_expand_factory_;
   RandomVector random_vector_;
   scoped_ptr<ComfortNoise> comfort_noise_;
   Rtcp rtcp_;

@@ -64,6 +64,12 @@ SVGAnimationElement::Init()
 
 //----------------------------------------------------------------------
 
+bool
+SVGAnimationElement::PassesConditionalProcessingTests()
+{
+  return SVGTests::PassesConditionalProcessingTests();
+}
+
 const nsAttrValue*
 SVGAnimationElement::GetAnimAttr(nsIAtom* aName) const
 {
@@ -306,13 +312,6 @@ SVGAnimationElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
   nsresult rv =
     SVGAnimationElementBase::AfterSetAttr(aNamespaceID, aName, aValue,
                                           aNotify);
-
-  if (SVGTests::IsConditionalProcessingAttribute(aName)) {
-    bool isDisabled = !SVGTests::PassesConditionalProcessingTests();
-    if (mTimedElement.SetIsDisabled(isDisabled)) {
-      AnimationNeedsResample();
-    }
-  }
 
   if (aNamespaceID != kNameSpaceID_XLink || aName != nsGkAtoms::href)
     return rv;

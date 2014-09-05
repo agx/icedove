@@ -64,14 +64,10 @@
 #include "GLContextCGL.h"
 #include "GLUploadHelpers.h"
 #include "ScopedGLHelpers.h"
-#include "HeapCopyOfStackArray.h"
-#include "mozilla/layers/APZCTreeManager.h"
 #include "mozilla/layers/GLManager.h"
 #include "mozilla/layers/CompositorOGL.h"
-#include "mozilla/layers/CompositorParent.h"
 #include "mozilla/layers/BasicCompositor.h"
 #include "gfxUtils.h"
-#include "gfxPrefs.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/BorrowedContext.h"
 #ifdef ACCESSIBILITY
@@ -91,9 +87,6 @@
 #include "GeckoProfiler.h"
 
 #include "nsIDOMWheelEvent.h"
-#include "mozilla/layers/APZCCallbackHelper.h"
-#include "nsLayoutUtils.h"
-#include "InputData.h"
 
 using namespace mozilla;
 using namespace mozilla::layers;
@@ -140,8 +133,6 @@ static void blinkRgn(RgnHandle rgn);
 bool gUserCancelledDrag = false;
 
 uint32_t nsChildView::sLastInputEventCount = 0;
-
-static uint32_t gNumberOfWidgetsNeedingEventThread = 0;
 
 @interface ChildView(Private)
 
@@ -196,21 +187,7 @@ static uint32_t gNumberOfWidgetsNeedingEventThread = 0;
 - (id<mozAccessible>)accessible;
 #endif
 
-- (nsIntPoint)convertWindowCoordinates:(NSPoint)aPoint;
-- (APZCTreeManager*)apzctm;
-
 - (BOOL)inactiveWindowAcceptsMouseEvent:(NSEvent*)aEvent;
-
-@end
-
-@interface EventThreadRunner : NSObject
-{
-  NSThread* mThread;
-}
-- (id)init;
-
-+ (void)start;
-+ (void)stop;
 
 @end
 
@@ -368,9 +345,7 @@ public:
   {
     return mProjMatrix;
   }
-  virtual void BindAndDrawQuad(ShaderProgramOGL *aProg,
-                               const gfx::Rect& aLayerRect,
-                               const gfx::Rect& aTextureRect) MOZ_OVERRIDE;
+  virtual void BindAndDrawQuad(ShaderProgramOGL *aProg) MOZ_OVERRIDE;
 
   void BeginFrame(nsIntSize aRenderSize);
   void EndFrame();
@@ -385,69 +360,6 @@ protected:
   nsAutoPtr<mozilla::layers::ShaderProgramOGL> mRGBARectProgram;
   gfx::Matrix4x4 mProjMatrix;
   GLuint mQuadVBO;
-};
-
-class APZCTMController : public mozilla::layers::GeckoContentController
-{
-  typedef mozilla::layers::FrameMetrics FrameMetrics;
-  typedef mozilla::layers::ScrollableLayerGuid ScrollableLayerGuid;
-
-  class RequestContentRepaintEvent : public nsRunnable
-  {
-  public:
-    RequestContentRepaintEvent(const FrameMetrics& aFrameMetrics)
-      : mFrameMetrics(aFrameMetrics)
-    {
-    }
-
-    NS_IMETHOD Run()
-    {
-      MOZ_ASSERT(NS_IsMainThread());
-
-      nsCOMPtr<nsIContent> targetContent = nsLayoutUtils::FindContentFor(mFrameMetrics.GetScrollId());
-      if (targetContent) {
-        APZCCallbackHelper::UpdateSubFrame(targetContent, mFrameMetrics);
-      }
-
-      return NS_OK;
-    }
-  protected:
-    FrameMetrics mFrameMetrics;
-  };
-
-public:
-  // GeckoContentController interface
-  virtual void RequestContentRepaint(const FrameMetrics& aFrameMetrics)
-  {
-    nsCOMPtr<nsIRunnable> r1 = new RequestContentRepaintEvent(aFrameMetrics);
-    if (!NS_IsMainThread()) {
-      NS_DispatchToMainThread(r1);
-    } else {
-      r1->Run();
-    }
-  }
-
-  virtual void PostDelayedTask(Task* aTask, int aDelayMs) MOZ_OVERRIDE
-  {
-    MessageLoop::current()->PostDelayedTask(FROM_HERE, aTask, aDelayMs);
-  }
-
-  virtual void AcknowledgeScrollUpdate(const FrameMetrics::ViewID& aScrollId,
-                                       const uint32_t& aScrollGeneration) MOZ_OVERRIDE
-  {
-    APZCCallbackHelper::AcknowledgeScrollUpdate(aScrollId, aScrollGeneration);
-  }
-
-  virtual void HandleDoubleTap(const mozilla::CSSPoint& aPoint, int32_t aModifiers,
-                               const ScrollableLayerGuid& aGuid) MOZ_OVERRIDE {}
-  virtual void HandleSingleTap(const mozilla::CSSPoint& aPoint, int32_t aModifiers,
-                               const ScrollableLayerGuid& aGuid) MOZ_OVERRIDE {}
-  virtual void HandleLongTap(const mozilla::CSSPoint& aPoint, int32_t aModifiers,
-                               const ScrollableLayerGuid& aGuid) MOZ_OVERRIDE {}
-  virtual void HandleLongTapUp(const CSSPoint& aPoint, int32_t aModifiers,
-                               const ScrollableLayerGuid& aGuid) MOZ_OVERRIDE {}
-  virtual void SendAsyncScrollDOMEvent(bool aIsRoot, const mozilla::CSSRect &aContentRect,
-                                       const mozilla::CSSSize &aScrollableSize) MOZ_OVERRIDE {}
 };
 
 } // unnamed namespace
@@ -493,13 +405,6 @@ nsChildView::~nsChildView()
   NS_WARN_IF_FALSE(mOnDestroyCalled, "nsChildView object destroyed without calling Destroy()");
 
   DestroyCompositor();
-
-  if (mAPZCTreeManager) {
-    gNumberOfWidgetsNeedingEventThread--;
-    if (gNumberOfWidgetsNeedingEventThread == 0) {
-      [EventThreadRunner stop];
-    }
-  }
 
   // An nsChildView object that was in use can be destroyed without Destroy()
   // ever being called on it.  So we also need to do a quick, safe cleanup
@@ -2114,27 +2019,6 @@ nsChildView::CreateCompositor()
   }
 }
 
-CompositorParent*
-nsChildView::NewCompositorParent(int aSurfaceWidth, int aSurfaceHeight)
-{
-  CompositorParent *compositor = nsBaseWidget::NewCompositorParent(aSurfaceWidth, aSurfaceHeight);
-
-  if (gfxPrefs::AsyncPanZoomEnabled()) {
-    uint64_t rootLayerTreeId = compositor->RootLayerTreeId();
-    nsRefPtr<APZCTMController> controller = new APZCTMController();
-    CompositorParent::SetControllerForLayerTree(rootLayerTreeId, controller);
-    mAPZCTreeManager = CompositorParent::GetAPZCTreeManager(rootLayerTreeId);
-    mAPZCTreeManager->SetDPI(GetDPI());
-
-    if (gNumberOfWidgetsNeedingEventThread == 0) {
-      [EventThreadRunner start];
-    }
-    gNumberOfWidgetsNeedingEventThread++;
-  }
-
-  return compositor;
-}
-
 gfxASurface*
 nsChildView::GetThebesSurface()
 {
@@ -2336,7 +2220,7 @@ DrawTitlebarHighlight(NSSize aWindowSize, CGFloat aRadius, CGFloat aDevicePixelW
   for (CGFloat y = 0; y < aRadius; y += aDevicePixelWidth) {
     CGFloat t = y / aRadius;
     [[NSColor colorWithDeviceWhite:1.0 alpha:0.4 * (1.0 - t)] set];
-    NSRectFillUsingOperation(NSMakeRect(0, y, aWindowSize.width, aDevicePixelWidth), NSCompositeSourceOver);
+    NSRectFill(NSMakeRect(0, y, aWindowSize.width, aDevicePixelWidth));
   }
 
   [NSGraphicsContext restoreGraphicsState];
@@ -2868,6 +2752,7 @@ RectTextureImage::Draw(GLManager* aManager,
 
   program->Activate();
   program->SetProjectionMatrix(aManager->GetProjMatrix());
+  program->SetLayerQuadRect(nsIntRect(nsIntPoint(0, 0), mUsedSize));
   gfx::Matrix4x4 transform;
   gfx::ToMatrix4x4(aTransform, transform);
   program->SetLayerTransform(transform * gfx::Matrix4x4().Translate(aLocation.x, aLocation.y, 0));
@@ -2876,9 +2761,7 @@ RectTextureImage::Draw(GLManager* aManager,
   program->SetTexCoordMultiplier(mUsedSize.width, mUsedSize.height);
   program->SetTextureUnit(0);
 
-  aManager->BindAndDrawQuad(program,
-                            gfx::Rect(0.0, 0.0, mUsedSize.width, mUsedSize.height),
-                            gfx::Rect(0.0, 0.0, 1.0f, 1.0f));
+  aManager->BindAndDrawQuad(program);
 
   aManager->gl()->fBindTexture(LOCAL_GL_TEXTURE_RECTANGLE_ARB, 0);
 }
@@ -2898,21 +2781,14 @@ GLPresenter::GLPresenter(GLContext* aContext)
   mGLContext->fGenBuffers(1, &mQuadVBO);
   mGLContext->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, mQuadVBO);
 
-  // 1 quad, with the number of the quad (vertexID) encoded in w.
   GLfloat vertices[] = {
-    0.0f, 0.0f, 0.0f, 0.0f,
-    1.0f, 0.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f, 0.0f,
-    1.0f, 0.0f, 0.0f, 0.0f,
-    0.0f, 1.0f, 0.0f, 0.0f,
-    1.0f, 1.0f, 0.0f, 0.0f,
+    /* First quad vertices */
+    0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+    /* Then quad texcoords */
+    0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
   };
-  HeapCopyOfStackArray<GLfloat> verticesOnHeap(vertices);
-  mGLContext->fBufferData(LOCAL_GL_ARRAY_BUFFER,
-                          verticesOnHeap.ByteLength(),
-                          verticesOnHeap.Data(),
-                          LOCAL_GL_STATIC_DRAW);
-   mGLContext->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, 0);
+  mGLContext->fBufferData(LOCAL_GL_ARRAY_BUFFER, sizeof(vertices), vertices, LOCAL_GL_STATIC_DRAW);
+  mGLContext->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, 0);
 }
 
 GLPresenter::~GLPresenter()
@@ -2925,30 +2801,25 @@ GLPresenter::~GLPresenter()
 }
 
 void
-GLPresenter::BindAndDrawQuad(ShaderProgramOGL *aProgram,
-                             const gfx::Rect& aLayerRect,
-                             const gfx::Rect& aTextureRect)
+GLPresenter::BindAndDrawQuad(ShaderProgramOGL *aProgram)
 {
   mGLContext->MakeCurrent();
 
-  gfx::Rect layerRects[4];
-  gfx::Rect textureRects[4];
-
-  layerRects[0] = aLayerRect;
-  textureRects[0] = aTextureRect;
-
-  aProgram->SetLayerRects(layerRects);
-  aProgram->SetTextureRects(textureRects);
-
-  const GLuint coordAttribIndex = 0;
+  GLuint vertAttribIndex = aProgram->AttribLocation(ShaderProgramOGL::VertexCoordAttrib);
+  GLuint texCoordAttribIndex = aProgram->AttribLocation(ShaderProgramOGL::TexCoordAttrib);
 
   mGLContext->fBindBuffer(LOCAL_GL_ARRAY_BUFFER, mQuadVBO);
-  mGLContext->fVertexAttribPointer(coordAttribIndex, 4,
+  mGLContext->fVertexAttribPointer(vertAttribIndex, 2,
                                    LOCAL_GL_FLOAT, LOCAL_GL_FALSE, 0,
                                    (GLvoid*)0);
-  mGLContext->fEnableVertexAttribArray(coordAttribIndex);
-  mGLContext->fDrawArrays(LOCAL_GL_TRIANGLES, 0, 6);
-  mGLContext->fDisableVertexAttribArray(coordAttribIndex);
+  mGLContext->fEnableVertexAttribArray(vertAttribIndex);
+  mGLContext->fVertexAttribPointer(texCoordAttribIndex, 2,
+                                   LOCAL_GL_FLOAT, LOCAL_GL_FALSE, 0,
+                                   (GLvoid*) (sizeof(float)*4*2));
+  mGLContext->fEnableVertexAttribArray(texCoordAttribIndex);
+  mGLContext->fDrawArrays(LOCAL_GL_TRIANGLE_STRIP, 0, 4);
+  mGLContext->fDisableVertexAttribArray(vertAttribIndex);
+  mGLContext->fDisableVertexAttribArray(texCoordAttribIndex);
 }
 
 void
@@ -3665,8 +3536,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
     return;
   }
 
-  PROFILER_LABEL("ChildView", "drawRect",
-    js::ProfileEntry::Category::GRAPHICS);
+  PROFILER_LABEL("widget", "ChildView::drawRect");
 
   // The CGContext that drawRect supplies us with comes with a transform that
   // scales one user space unit to one Cocoa point, which can consist of
@@ -3684,29 +3554,27 @@ NSEvent* gLastDragMouseDownEvent = nil;
   nsIntRegion region = [self nativeDirtyRegionWithBoundingRect:aRect];
 
   // Create Cairo objects.
-  nsRefPtr<gfxQuartzSurface> targetSurface;
+  nsRefPtr<gfxQuartzSurface> targetSurface =
+    new gfxQuartzSurface(aContext, backingSize);
+  targetSurface->SetAllowUseAsSource(false);
 
   nsRefPtr<gfxContext> targetContext;
-  if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::COREGRAPHICS)) {
-    RefPtr<gfx::DrawTarget> dt =
-      gfx::Factory::CreateDrawTargetForCairoCGContext(aContext,
-                                                      gfx::IntSize(backingSize.width,
-                                                                   backingSize.height));
-    dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
-    targetContext = new gfxContext(dt);
-  } else if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::CAIRO)) {
-    // This is dead code unless you mess with prefs, but keep it around for
-    // debugging.
-    targetSurface = new gfxQuartzSurface(aContext, backingSize);
-    targetSurface->SetAllowUseAsSource(false);
+  if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::CAIRO)) {
     RefPtr<gfx::DrawTarget> dt =
       gfxPlatform::GetPlatform()->CreateDrawTargetForSurface(targetSurface,
                                                              gfx::IntSize(backingSize.width,
                                                                           backingSize.height));
     dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
     targetContext = new gfxContext(dt);
+  } else if (gfxPlatform::GetPlatform()->SupportsAzureContentForType(gfx::BackendType::COREGRAPHICS)) {
+    RefPtr<gfx::DrawTarget> dt =
+      gfx::Factory::CreateDrawTargetForCairoCGContext(aContext,
+                                                      gfx::IntSize(backingSize.width,
+                                                                   backingSize.height));
+    dt->AddUserData(&gfxContext::sDontUseAsSourceKey, dt, nullptr);
+    targetContext = new gfxContext(dt);
   } else {
-    MOZ_ASSERT_UNREACHABLE("COREGRAPHICS is the only supported backed");
+    targetContext = new gfxContext(targetSurface);
   }
 
   // Set up the clip region.
@@ -3787,8 +3655,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
 - (void)drawUsingOpenGL
 {
-  PROFILER_LABEL("ChildView", "drawUsingOpenGL",
-    js::ProfileEntry::Category::GRAPHICS);
+  PROFILER_LABEL("widget", "ChildView::drawUsingOpenGL");
 
   if (![self isUsingOpenGL] || !mGeckoChild->IsVisible())
     return;
@@ -4451,10 +4318,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
     return;
   }
 
-  NSEventPhase eventPhase = nsCocoaUtils::EventPhase(anEvent);
   // Verify that this is a scroll wheel event with proper phase to be tracked
   // by the OS.
-  if ([anEvent type] != NSScrollWheel || eventPhase == NSEventPhaseNone) {
+  if ([anEvent type] != NSScrollWheel || [anEvent phase] == NSEventPhaseNone) {
     return;
   }
 
@@ -4489,7 +4355,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
     // Only initiate horizontal tracking for gestures that have just begun --
     // otherwise a scroll to one side of the page can have a swipe tacked on
     // to it.
-    if (eventPhase != NSEventPhaseBegan) {
+    if ([anEvent phase] != NSEventPhaseBegan) {
       return;
     }
 
@@ -5096,11 +4962,6 @@ static int32_t RoundUp(double aDouble)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
 
-  if ([self apzctm]) {
-    // Disable main-thread scrolling completely when using APZC.
-    return;
-  }
-
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
 
   ChildViewMouseTracker::MouseScrolled(theEvent);
@@ -5113,16 +4974,18 @@ static int32_t RoundUp(double aDouble)
     return;
   }
 
-  NSEventPhase phase = nsCocoaUtils::EventPhase(theEvent);
-  // Fire NS_WHEEL_START/STOP events when 2 fingers touch/release the touchpad.
-  if (phase & NSEventPhaseMayBegin) {
-    [self sendWheelCondition:YES first:NS_WHEEL_STOP second:NS_WHEEL_START forEvent:theEvent];
-    return;
-  }
+  if (nsCocoaFeatures::OnLionOrLater()) {
+    NSEventPhase phase = [theEvent phase];
+    // Fire NS_WHEEL_START/STOP events when 2 fingers touch/release the touchpad.
+    if (phase & NSEventPhaseMayBegin) {
+      [self sendWheelCondition:YES first:NS_WHEEL_STOP second:NS_WHEEL_START forEvent:theEvent];
+      return;
+    }
 
-  if (phase & (NSEventPhaseEnded | NSEventPhaseCancelled)) {
-    [self sendWheelCondition:NO first:NS_WHEEL_START second:NS_WHEEL_STOP forEvent:theEvent];
-    return;
+    if (phase & (NSEventPhaseEnded | NSEventPhaseCancelled)) {
+      [self sendWheelCondition:NO first:NS_WHEEL_START second:NS_WHEEL_STOP forEvent:theEvent];
+      return;
+    }
   }
 
   WidgetWheelEvent wheelEvent(true, NS_WHEEL_WHEEL, mGeckoChild);
@@ -5131,14 +4994,19 @@ static int32_t RoundUp(double aDouble)
   wheelEvent.lineOrPageDeltaX = RoundUp(-[theEvent deltaX]);
   wheelEvent.lineOrPageDeltaY = RoundUp(-[theEvent deltaY]);
 
-  // wheelEvent.deltaMode was set by convertCocoaMouseWheelEvent:toGeckoEvent:
-  // and depends on whether the current scrolling device supports pixel deltas.
   if (wheelEvent.deltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL) {
+    // Some scrolling devices supports pixel scrolling, e.g. a Macbook
+    // touchpad or a Mighty Mouse. On those devices, [theEvent deviceDeltaX/Y]
+    // contains the amount of pixels to scroll. Since Lion this has changed
+    // to [theEvent scrollingDeltaX/Y].
     double scale = mGeckoChild->BackingScaleFactor();
-    CGFloat pixelDeltaX = 0, pixelDeltaY = 0;
-    nsCocoaUtils::GetScrollingDeltas(theEvent, &pixelDeltaX, &pixelDeltaY);
-    wheelEvent.deltaX = -pixelDeltaX * scale;
-    wheelEvent.deltaY = -pixelDeltaY * scale;
+    if ([theEvent respondsToSelector:@selector(scrollingDeltaX)]) {
+      wheelEvent.deltaX = -[theEvent scrollingDeltaX] * scale;
+      wheelEvent.deltaY = -[theEvent scrollingDeltaY] * scale;
+    } else {
+      wheelEvent.deltaX = -[theEvent deviceDeltaX] * scale;
+      wheelEvent.deltaY = -[theEvent deviceDeltaY] * scale;
+    }
   } else {
     wheelEvent.deltaX = -[theEvent deltaX];
     wheelEvent.deltaY = -[theEvent deltaY];
@@ -5176,101 +5044,6 @@ static int32_t RoundUp(double aDouble)
 #endif // #ifdef __LP64__
 
   NS_OBJC_END_TRY_ABORT_BLOCK;
-}
-
-- (void)handleAsyncScrollEvent:(CGEventRef)cgEvent ofType:(CGEventType)type
-{
-  APZCTreeManager* apzctm = [self apzctm];
-  if (!apzctm) {
-    return;
-  }
-
-  CGPoint loc = CGEventGetLocation(cgEvent);
-  loc.y = nsCocoaUtils::FlippedScreenY(loc.y);
-  NSPoint locationInWindow = [[self window] convertScreenToBase:NSPointFromCGPoint(loc)];
-  ScreenIntPoint location = ScreenPixel::FromUntyped([self convertWindowCoordinates:locationInWindow]);
-
-  static NSTimeInterval sStartTime = [NSDate timeIntervalSinceReferenceDate];
-  static TimeStamp sStartTimeStamp = TimeStamp::Now();
-
-  if (type == kCGEventScrollWheel) {
-    NSEvent* event = [NSEvent eventWithCGEvent:cgEvent];
-    NSEventPhase phase = nsCocoaUtils::EventPhase(event);
-    NSEventPhase momentumPhase = nsCocoaUtils::EventMomentumPhase(event);
-    CGFloat pixelDeltaX = 0, pixelDeltaY = 0;
-    nsCocoaUtils::GetScrollingDeltas(event, &pixelDeltaX, &pixelDeltaY);
-    uint32_t eventTime = ([event timestamp] - sStartTime) * 1000;
-    TimeStamp eventTimeStamp = sStartTimeStamp +
-      TimeDuration::FromSeconds([event timestamp] - sStartTime);
-    NSPoint locationInWindowMoved = NSMakePoint(
-      locationInWindow.x + pixelDeltaX,
-      locationInWindow.y - pixelDeltaY);
-    ScreenIntPoint locationMoved = ScreenPixel::FromUntyped(
-      [self convertWindowCoordinates:locationInWindowMoved]);
-    ScreenPoint delta = ScreenPoint(locationMoved - location);
-    ScrollableLayerGuid guid;
-
-    // MayBegin and Cancelled are dispatched when the fingers start or stop
-    // touching the touchpad before any scrolling has occurred. These events
-    // can be used to control scrollbar visibility or interrupt scroll
-    // animations. They are only dispatched on 10.8 or later, and only by
-    // relatively modern devices.
-    if (phase == NSEventPhaseMayBegin) {
-      apzctm->ReceiveInputEvent(PanGestureInput(PanGestureInput::PANGESTURE_MAYSTART,
-                                                eventTime, eventTimeStamp, location,
-                                                ScreenPoint(0, 0), 0), &guid);
-      return;
-    }
-    if (phase == NSEventPhaseCancelled) {
-      apzctm->ReceiveInputEvent(PanGestureInput(PanGestureInput::PANGESTURE_CANCELLED,
-                                                eventTime, eventTimeStamp, location,
-                                                ScreenPoint(0, 0), 0), &guid);
-      return;
-    }
-
-    // Legacy scroll events are dispatched by devices that do not have a
-    // concept of a scroll gesture, for example by USB mice with
-    // traditional mouse wheels.
-    // For these kinds of scrolls, we want to surround every single scroll
-    // event with a PANGESTURE_START and a PANGESTURE_END event. The APZC
-    // needs to know that the real scroll gesture can end abruptly after any
-    // one of these events.
-    bool isLegacyScroll = (phase == NSEventPhaseNone &&
-      momentumPhase == NSEventPhaseNone && delta != ScreenPoint(0, 0));
-
-    if (phase == NSEventPhaseBegan || isLegacyScroll) {
-      apzctm->ReceiveInputEvent(PanGestureInput(PanGestureInput::PANGESTURE_START,
-                                                eventTime, eventTimeStamp, location,
-                                                ScreenPoint(0, 0), 0), &guid);
-    }
-    if (momentumPhase == NSEventPhaseNone && delta != ScreenPoint(0, 0)) {
-      apzctm->ReceiveInputEvent(PanGestureInput(PanGestureInput::PANGESTURE_PAN,
-                                                eventTime, eventTimeStamp, location,
-                                                delta, 0), &guid);
-    }
-    if (phase == NSEventPhaseEnded || isLegacyScroll) {
-      apzctm->ReceiveInputEvent(PanGestureInput(PanGestureInput::PANGESTURE_END,
-                                                eventTime, eventTimeStamp, location,
-                                                ScreenPoint(0, 0), 0), &guid);
-    }
-
-    // Any device that can dispatch momentum events supports all three momentum phases.
-    if (momentumPhase == NSEventPhaseBegan) {
-      apzctm->ReceiveInputEvent(PanGestureInput(PanGestureInput::PANGESTURE_MOMENTUMSTART,
-                                                eventTime, eventTimeStamp, location,
-                                                ScreenPoint(0, 0), 0), &guid);
-    }
-    if (momentumPhase == NSEventPhaseChanged && delta != ScreenPoint(0, 0)) {
-      apzctm->ReceiveInputEvent(PanGestureInput(PanGestureInput::PANGESTURE_MOMENTUMPAN,
-                                                eventTime, eventTimeStamp, location,
-                                                delta, 0), &guid);
-    }
-    if (momentumPhase == NSEventPhaseEnded) {
-      apzctm->ReceiveInputEvent(PanGestureInput(PanGestureInput::PANGESTURE_MOMENTUMEND,
-                                                eventTime, eventTimeStamp, location,
-                                                ScreenPoint(0, 0), 0), &guid);
-    }
-  }
 }
 
 -(NSMenu*)menuForEvent:(NSEvent*)theEvent
@@ -5329,12 +5102,22 @@ static int32_t RoundUp(double aDouble)
                         toGeckoEvent:(WidgetWheelEvent*)outWheelEvent
 {
   [self convertCocoaMouseEvent:aMouseEvent toGeckoEvent:outWheelEvent];
+  outWheelEvent->deltaMode =
+    Preferences::GetBool("mousewheel.enable_pixel_scrolling", true) ?
+      nsIDOMWheelEvent::DOM_DELTA_PIXEL : nsIDOMWheelEvent::DOM_DELTA_LINE;
 
-  bool usePreciseDeltas = nsCocoaUtils::HasPreciseScrollingDeltas(aMouseEvent) &&
-    Preferences::GetBool("mousewheel.enable_pixel_scrolling", true);
-
-  outWheelEvent->deltaMode = usePreciseDeltas ? nsIDOMWheelEvent::DOM_DELTA_PIXEL
-                                              : nsIDOMWheelEvent::DOM_DELTA_LINE;
+  // Calling deviceDeltaX or deviceDeltaY on theEvent will trigger a Cocoa
+  // assertion and an Objective-C NSInternalInconsistencyException if the
+  // underlying "Carbon" event doesn't contain pixel scrolling information.
+  // For these events, carbonEventKind is kEventMouseWheelMoved instead of
+  // kEventMouseScroll.
+  if (outWheelEvent->deltaMode == nsIDOMWheelEvent::DOM_DELTA_PIXEL) {
+    EventRef theCarbonEvent = [aMouseEvent _eventRef];
+    UInt32 carbonEventKind = theCarbonEvent ? ::GetEventKind(theCarbonEvent) : 0;
+    if (carbonEventKind != kEventMouseScroll) {
+      outWheelEvent->deltaMode = nsIDOMWheelEvent::DOM_DELTA_LINE;
+    }
+  }
   outWheelEvent->isMomentum = nsCocoaUtils::IsMomentumScrollEvent(aMouseEvent);
 }
 
@@ -5351,9 +5134,10 @@ static int32_t RoundUp(double aDouble)
 
   // convert point to view coordinate system
   NSPoint locationInWindow = nsCocoaUtils::EventLocationForWindow(aMouseEvent, [self window]);
+  NSPoint localPoint = [self convertPoint:locationInWindow fromView:nil];
 
   outGeckoEvent->refPoint = LayoutDeviceIntPoint::FromUntyped(
-    [self convertWindowCoordinates:locationInWindow]);
+    mGeckoChild->CocoaPointsToDevPixels(localPoint));
 
   WidgetMouseEventBase* mouseEvent = outGeckoEvent->AsMouseEventBase();
   mouseEvent->buttons = 0;
@@ -5888,21 +5672,6 @@ static int32_t RoundUp(double aDouble)
   return NSDragOperationNone;
 }
 
-- (nsIntPoint)convertWindowCoordinates:(NSPoint)aPoint
-{
-  if (!mGeckoChild) {
-    return nsIntPoint(0, 0);
-  }
-
-  NSPoint localPoint = [self convertPoint:aPoint fromView:nil];
-  return mGeckoChild->CocoaPointsToDevPixels(localPoint);
-}
-
-- (APZCTreeManager*)apzctm
-{
-  return mGeckoChild ? mGeckoChild->APZCTM() : nullptr;
-}
-
 // This is a utility function used by NSView drag event methods
 // to send events. It contains all of the logic needed for Gecko
 // dragging to work. Returns the appropriate cocoa drag operation code.
@@ -5969,9 +5738,10 @@ static int32_t RoundUp(double aDouble)
   // Use our own coordinates in the gecko event.
   // Convert event from gecko global coords to gecko view coords.
   NSPoint draggingLoc = [aSender draggingLocation];
+  NSPoint localPoint = [self convertPoint:draggingLoc fromView:nil];
 
   geckoEvent.refPoint = LayoutDeviceIntPoint::FromUntyped(
-    [self convertWindowCoordinates:draggingLoc]);
+    mGeckoChild->CocoaPointsToDevPixels(localPoint));
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
   mGeckoChild->DispatchWindowEvent(geckoEvent);
@@ -6708,106 +6478,6 @@ ChildViewMouseTracker::WindowAcceptsEvent(NSWindow* aWindow, NSEvent* aEvent,
 }
 
 #pragma mark -
-
-@interface EventThreadRunner(Private)
-- (void)runEventThread;
-- (void)shutdownAndReleaseCalledOnEventThread;
-- (void)shutdownAndReleaseCalledOnAnyThread;
-- (void)handleEvent:(CGEventRef)cgEvent type:(CGEventType)type;
-@end
-
-static EventThreadRunner* sEventThreadRunner = nil;
-
-@implementation EventThreadRunner
-
-+ (void)start
-{
-  sEventThreadRunner = [[EventThreadRunner alloc] init];
-}
-
-+ (void)stop
-{
-  if (sEventThreadRunner) {
-    [sEventThreadRunner shutdownAndReleaseCalledOnAnyThread];
-    sEventThreadRunner = nil;
-  }
-}
-
-- (id)init
-{
-  if ((self = [super init])) {
-    mThread = nil;
-    [NSThread detachNewThreadSelector:@selector(runEventThread)
-                             toTarget:self
-                           withObject:nil];
-  }
-  return self;
-}
-
-static CGEventRef
-HandleEvent(CGEventTapProxy aProxy, CGEventType aType,
-            CGEventRef aEvent, void* aClosure)
-{
-  [(EventThreadRunner*)aClosure handleEvent:aEvent type:aType];
-  return aEvent;
-}
-
-- (void)runEventThread
-{
-  char aLocal;
-  profiler_register_thread("APZC Event Thread", &aLocal);
-  PR_SetCurrentThreadName("APZC Event Thread");
-
-  mThread = [NSThread currentThread];
-  ProcessSerialNumber currentProcess;
-  GetCurrentProcess(&currentProcess);
-  CFMachPortRef eventPort =
-    CGEventTapCreateForPSN(&currentProcess,
-                           kCGHeadInsertEventTap,
-                           kCGEventTapOptionListenOnly,
-                           CGEventMaskBit(kCGEventScrollWheel),
-                           HandleEvent,
-                           self);
-  CFRunLoopSourceRef eventPortSource =
-    CFMachPortCreateRunLoopSource(kCFAllocatorSystemDefault, eventPort, 0);
-  CFRunLoopAddSource(CFRunLoopGetCurrent(), eventPortSource, kCFRunLoopCommonModes);
-  CFRunLoopRun();
-  CFRunLoopRemoveSource(CFRunLoopGetCurrent(), eventPortSource, kCFRunLoopCommonModes);
-  CFRelease(eventPortSource);
-  CFRelease(eventPort);
-  [self release];
-}
-
-- (void)shutdownAndReleaseCalledOnEventThread
-{
-  CFRunLoopStop(CFRunLoopGetCurrent());
-}
-
-- (void)shutdownAndReleaseCalledOnAnyThread
-{
-  [self performSelector:@selector(shutdownAndReleaseCalledOnEventThread) onThread:mThread withObject:nil waitUntilDone:NO];
-}
-
-static const CGEventField kCGWindowNumberField = 51;
-
-// Called on scroll thread
-- (void)handleEvent:(CGEventRef)cgEvent type:(CGEventType)type
-{
-  if (type != kCGEventScrollWheel) {
-    return;
-  }
-
-  int windowNumber = CGEventGetIntegerValueField(cgEvent, kCGWindowNumberField);
-  NSWindow* window = [NSApp windowWithWindowNumber:windowNumber];
-  if (!window || ![window isKindOfClass:[BaseWindow class]]) {
-    return;
-  }
-
-  ChildView* childView = [(BaseWindow*)window mainChildView];
-  [childView handleAsyncScrollEvent:cgEvent ofType:type];
-}
-
-@end
 
 @interface NSView (MethodSwizzling)
 - (BOOL)nsChildView_NSView_mouseDownCanMoveWindow;

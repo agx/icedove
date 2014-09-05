@@ -137,7 +137,7 @@ var MigrationWizard = {
       if (sourceProfiles && sourceProfiles.length == 1)
         this._selectedProfile = sourceProfiles[0];
       else
-        this._selectedProfile = null;
+        this._selectedProfile = "";
     }
   },
   
@@ -157,33 +157,28 @@ var MigrationWizard = {
     // and we canceled the dialog.  When that happens, _migrator will be null.
     if (this._migrator) {
       var sourceProfiles = this._migrator.sourceProfiles;
-
-      for (let profile of sourceProfiles) {
+      for (var i = 0; i < sourceProfiles.length; ++i) {
         var item = document.createElement("radio");
-        item.id = profile.id;
-        item.setAttribute("label", profile.name);
+        item.id = sourceProfiles[i];
+        item.setAttribute("label", sourceProfiles[i]);
         profiles.appendChild(item);
       }
     }
     
-    profiles.selectedItem = this._selectedProfile ? document.getElementById(this._selectedProfile.id) : profiles.firstChild;
+    profiles.selectedItem = this._selectedProfile ? document.getElementById(this._selectedProfile) : profiles.firstChild;
   },
   
   onSelectProfilePageRewound: function ()
   {
     var profiles = document.getElementById("profiles");
-    this._selectedProfile = this._migrator.sourceProfiles.find(
-      profile => profile.id == profiles.selectedItem.id
-    ) || null;
+    this._selectedProfile = profiles.selectedItem.id;
   },
   
   onSelectProfilePageAdvanced: function ()
   {
     var profiles = document.getElementById("profiles");
-    this._selectedProfile = this._migrator.sourceProfiles.find(
-      profile => profile.id == profiles.selectedItem.id
-    ) || null;
-
+    this._selectedProfile = profiles.selectedItem.id;
+    
     // If we're automigrating or just doing bookmarks don't show the item selection page
     if (this._autoMigrate)
       this._wiz.currentPage.next = "homePageImport";

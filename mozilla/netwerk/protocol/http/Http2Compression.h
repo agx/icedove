@@ -67,7 +67,6 @@ protected:
   virtual void UpdateReferenceSet(int32_t delta);
   virtual void IncrementReferenceSetIndices();
   virtual void MakeRoom(uint32_t amount) = 0;
-  virtual void DumpState();
 
   nsAutoTArray<uint32_t, 64> mReferenceSet; // list of indicies
 
@@ -118,9 +117,7 @@ private:
   nsresult DoIndexed();
   nsresult DoLiteralWithoutIndex();
   nsresult DoLiteralWithIncremental();
-  nsresult DoLiteralInternal(nsACString &, nsACString &, uint32_t);
-  nsresult DoLiteralNeverIndexed();
-  nsresult DoContextUpdate();
+  nsresult DoLiteralInternal(nsACString &, nsACString &);
 
   nsresult DecodeInteger(uint32_t prefixLen, uint32_t &result);
   nsresult OutputHeader(uint32_t index);
@@ -153,11 +150,7 @@ private:
 class Http2Compressor MOZ_FINAL : public Http2BaseCompressor
 {
 public:
-  Http2Compressor() : mParsedContentLength(-1),
-                      mMaxBufferSetting(kDefaultMaxBuffer),
-                      mBufferSizeChangeWaiting(false),
-                      mLowestBufferSizeWaiting(0)
-  { };
+  Http2Compressor() : mParsedContentLength(-1) { };
   virtual ~Http2Compressor() { }
 
   // HTTP/1 formatted header block as input - HTTP/2 formatted
@@ -165,7 +158,7 @@ public:
   nsresult EncodeHeaderBlock(const nsCString &nvInput,
                              const nsACString &method, const nsACString &path,
                              const nsACString &host, const nsACString &scheme,
-                             bool connectForm, nsACString &output);
+                             nsACString &output);
 
   int64_t GetParsedContentLength() { return mParsedContentLength; } // -1 on not found
 
@@ -177,11 +170,9 @@ protected:
   virtual void UpdateReferenceSet(int32_t delta) MOZ_OVERRIDE;
   virtual void IncrementReferenceSetIndices() MOZ_OVERRIDE;
   virtual void MakeRoom(uint32_t amount) MOZ_OVERRIDE;
-  virtual void DumpState() MOZ_OVERRIDE;
 
 private:
   enum outputCode {
-    kNeverIndexedLiteral,
     kPlainLiteral,
     kIndexedLiteral,
     kToggleOff,
@@ -192,14 +183,11 @@ private:
   void DoOutput(Http2Compressor::outputCode code,
                 const class nvPair *pair, uint32_t index);
   void EncodeInteger(uint32_t prefixLen, uint32_t val);
-  void ProcessHeader(const nvPair inputPair, bool neverIndex);
+  void ProcessHeader(const nvPair inputPair);
   void HuffmanAppend(const nsCString &value);
-  void EncodeTableSizeChange(uint32_t newMaxSize);
 
   int64_t mParsedContentLength;
   uint32_t mMaxBufferSetting;
-  bool mBufferSizeChangeWaiting;
-  uint32_t mLowestBufferSizeWaiting;
 
   nsAutoTArray<uint32_t, 64> mImpliedReferenceSet;
 };

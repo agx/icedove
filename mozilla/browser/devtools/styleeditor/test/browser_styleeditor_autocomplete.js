@@ -123,7 +123,7 @@ function testState() {
 
   if (key == 'Ctrl+Space') {
     key = " ";
-    mods.ctrlKey = true;
+    mods.accelKey = true;
   }
   else if (key == "VK_RETURN" && entered) {
     evt = "popup-hidden";

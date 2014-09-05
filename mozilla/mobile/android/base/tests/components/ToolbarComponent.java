@@ -80,10 +80,6 @@ public class ToolbarComponent extends BaseComponent {
         return (ImageButton) getToolbarView().findViewById(R.id.forward);
     }
 
-    private ImageButton getReloadButton() {
-        DeviceHelper.assertIsTablet();
-        return (ImageButton) getToolbarView().findViewById(R.id.reload);
-    }
     /**
      * Returns the View for the edit cancel button in the browser toolbar.
      */
@@ -192,11 +188,6 @@ public class ToolbarComponent extends BaseComponent {
     public ToolbarComponent pressForwardButton() {
         final ImageButton forwardButton = getForwardButton();
         return pressButton(forwardButton, "forward");
-    }
-
-    public ToolbarComponent pressReloadButton() {
-        final ImageButton reloadButton = getReloadButton();
-        return pressButton(reloadButton, "reload");
     }
 
     private ToolbarComponent pressButton(final View view, final String buttonName) {

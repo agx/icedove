@@ -13,18 +13,15 @@ namespace mozilla {
 namespace dom {
 
 bool
-CallbackInterface::GetCallableProperty(JSContext* cx, JS::Handle<jsid> aPropId,
+CallbackInterface::GetCallableProperty(JSContext* cx, const char* aPropName,
                                        JS::MutableHandle<JS::Value> aCallable)
 {
-  if (!JS_GetPropertyById(cx, CallbackPreserveColor(), aPropId, aCallable)) {
+  if (!JS_GetProperty(cx, CallbackPreserveColor(), aPropName, aCallable)) {
     return false;
   }
   if (!aCallable.isObject() ||
       !JS_ObjectIsCallable(cx, &aCallable.toObject())) {
-    char* propName =
-      JS_EncodeString(cx, JS_FORGET_STRING_FLATNESS(JSID_TO_FLAT_STRING(aPropId)));
-    nsPrintfCString description("Property '%s'", propName);
-    JS_free(cx, propName);
+    nsPrintfCString description("Property '%s'", aPropName);
     ThrowErrorMessage(cx, MSG_NOT_CALLABLE, description.get());
     return false;
   }

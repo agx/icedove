@@ -563,34 +563,33 @@ exports.testDestroyEdgeCaseBug = function(assert, done) {
 
       sidebar.show();
       assert.pass('showing the sidebar');
+
     });
   });
 }
 
 exports.testClickingACheckedMenuitem = function(assert, done) {
   const { Sidebar } = require('sdk/ui/sidebar');
-  const testName = 'testClickingACheckedMenuitem';
+  let testName = 'testClickingACheckedMenuitem';
+  let window = getMostRecentBrowserWindow();
   let sidebar = Sidebar({
     id: testName,
     title: testName,
     url: 'data:text/html;charset=utf-8,'+testName,
   });
-  assert.pass('sidebar was created');
 
-  open().then(focus).then(window => {
-    return sidebar.show().then(_ => {
-      assert.pass('the show callback works');
+  sidebar.show().then(function() {
+    assert.pass('the show callback works');
 
-      sidebar.once('hide', _ => {
-        assert.pass('clicking the menuitem after the sidebar has shown hides it.');
-        sidebar.destroy();
-        close(window).then(done, assert.fail);
-      });
-
-      let menuitem = window.document.getElementById(makeID(sidebar.id));
-      simulateCommand(menuitem);
+    sidebar.once('hide', function() {
+      assert.pass('clicking the menuitem after the sidebar has shown hides it.');
+      sidebar.destroy();
+      done();
     });
-  }).catch(assert.fail);
+
+    let menuitem = window.document.getElementById(makeID(sidebar.id));
+    simulateCommand(menuitem);
+  });
 };
 
 exports.testTitleSetter = function(assert, done) {

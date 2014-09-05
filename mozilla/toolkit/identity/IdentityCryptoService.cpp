@@ -16,7 +16,6 @@
 #include "mozilla/ArrayUtils.h" // ArrayLength
 #include "mozilla/Base64.h"
 #include "ScopedNSSTypes.h"
-#include "NSSErrorsService.h"
 
 #include "nss.h"
 #include "pk11pub.h"
@@ -354,7 +353,7 @@ GenerateKeyPair(PK11SlotInfo * slot,
                                      nullptr /*&pwdata*/);
   if (!*privateKey) {
     MOZ_ASSERT(!*publicKey);
-    return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
+    return PRErrorCode_to_nsresult(PR_GetError());
   }
   if (!*publicKey) {
 	  SECKEY_DestroyPrivateKey(*privateKey);
@@ -512,9 +511,9 @@ SignRunnable::Run()
       SECItem sig = { siBuffer, nullptr, 0 };
       int sigLength = PK11_SignatureLen(mPrivateKey);
       if (sigLength <= 0) {
-        mRv = mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
+        mRv = PRErrorCode_to_nsresult(PR_GetError());
       } else if (!SECITEM_AllocItem(nullptr, &sig, sigLength)) {
-        mRv = mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
+        mRv = PRErrorCode_to_nsresult(PR_GetError());
       } else {
         uint8_t hash[32]; // big enough for SHA-1 or SHA-256
         SECOidTag hashAlg = mPrivateKey->keyType == dsaKey ? SEC_OID_SHA1

@@ -9,14 +9,14 @@
 #include "nsCOMPtr.h"
 #include "mozilla/dom/telephony/TelephonyCommon.h"
 
-class nsITelephonyService;
+class nsITelephonyProvider;
 
 BEGIN_TELEPHONY_NAMESPACE
 
 class TelephonyFactory
 {
 public:
-  static already_AddRefed<nsITelephonyService> CreateTelephonyService();
+  static already_AddRefed<nsITelephonyProvider> CreateTelephonyProvider();
 };
 
 END_TELEPHONY_NAMESPACE

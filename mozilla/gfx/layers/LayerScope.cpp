@@ -223,9 +223,7 @@ private:
             return false;
         }
 
-        if (!(version.EqualsLiteral("7") ||
-              version.EqualsLiteral("8") ||
-              version.EqualsLiteral("13"))) {
+        if (!(version.Equals("7") || version.Equals("8") || version.Equals("13"))) {
             return false;
         }
 
@@ -245,10 +243,10 @@ private:
         Base64Encode(newString, res);
 
         nsCString response("HTTP/1.1 101 Switching Protocols\r\n");
-        response.AppendLiteral("Upgrade: websocket\r\n");
-        response.AppendLiteral("Connection: Upgrade\r\n");
+        response.Append("Upgrade: websocket\r\n");
+        response.Append("Connection: Upgrade\r\n");
         response.Append(nsCString("Sec-WebSocket-Accept: ") + res + nsCString("\r\n"));
-        response.AppendLiteral("Sec-WebSocket-Protocol: binary\r\n\r\n");
+        response.Append("Sec-WebSocket-Protocol: binary\r\n\r\n");
         uint32_t written = 0;
         uint32_t size = response.Length();
         while (written < size) {
@@ -780,20 +778,20 @@ LayerScope::SendEffectChain(GLContext* aGLContext,
 
     const Effect* primaryEffect = aEffectChain.mPrimaryEffect;
     switch (primaryEffect->mType) {
-    case EffectTypes::RGB:
+    case EFFECT_RGB:
     {
         const TexturedEffect* texturedEffect =
             static_cast<const TexturedEffect*>(primaryEffect);
         SendTexturedEffect(aGLContext, aEffectChain.mLayerRef, texturedEffect);
     }
     break;
-    case EffectTypes::YCBCR:
+    case EFFECT_YCBCR:
     {
         const EffectYCbCr* yCbCrEffect =
             static_cast<const EffectYCbCr*>(primaryEffect);
         SendYCbCrEffect(aGLContext, aEffectChain.mLayerRef, yCbCrEffect);
     }
-    case EffectTypes::SOLID_COLOR:
+    case EFFECT_SOLID_COLOR:
     {
         const EffectSolidColor* solidColorEffect =
             static_cast<const EffectSolidColor*>(primaryEffect);
@@ -804,13 +802,13 @@ LayerScope::SendEffectChain(GLContext* aGLContext,
         SendColor(aEffectChain.mLayerRef, color, aWidth, aHeight);
     }
     break;
-    case EffectTypes::COMPONENT_ALPHA:
-    case EffectTypes::RENDER_TARGET:
+    case EFFECT_COMPONENT_ALPHA:
+    case EFFECT_RENDER_TARGET:
     default:
         break;
     }
 
-    //const Effect* secondaryEffect = aEffectChain.mSecondaryEffects[EffectTypes::MASK];
+    //const Effect* secondaryEffect = aEffectChain.mSecondaryEffects[EFFECT_MASK];
     // TODO:
 }
 

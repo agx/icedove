@@ -259,9 +259,9 @@ NS_IMETHODIMP_(void)
 nsParser::SetCommand(const char* aCommand)
 {
   mCommandStr.Assign(aCommand);
-  if (mCommandStr.EqualsLiteral("view-source")) {
+  if (mCommandStr.Equals("view-source")) {
     mCommand = eViewSource;
-  } else if (mCommandStr.EqualsLiteral("view-fragment")) {
+  } else if (mCommandStr.Equals("view-fragment")) {
     mCommand = eViewFragment;
   } else {
     mCommand = eViewNormal;
@@ -662,7 +662,7 @@ DetermineHTMLParseMode(const nsString& aBuffer,
 
       // Special hack for IBM's custom DOCTYPE.
       if (!(resultFlags & PARSE_DTD_HAVE_INTERNAL_SUBSET) &&
-          sysIDUCS2.EqualsLiteral(
+          sysIDUCS2 == NS_LITERAL_STRING(
                "http://www.ibm.com/data/dtd/v11/ibmxhtml1-transitional.dtd")) {
         aParseMode = eDTDMode_quirks;
         aDocType = eHTML_Quirks;
@@ -1328,15 +1328,15 @@ nsParser::ParseFragment(const nsAString& aSourceBuffer,
   mFlags &= ~NS_PARSER_FLAG_OBSERVERS_ENABLED;
 
   for (theIndex = 0; theIndex < theCount; theIndex++) {
-    theContext.Append('<');
+    theContext.AppendLiteral("<");
     theContext.Append(aTagStack[theCount - theIndex - 1]);
-    theContext.Append('>');
+    theContext.AppendLiteral(">");
   }
 
   if (theCount == 0) {
     // Ensure that the buffer is not empty. Because none of the DTDs care
     // about leading whitespace, this doesn't change the result.
-    theContext.Assign(' ');
+    theContext.AssignLiteral(" ");
   }
 
   // First, parse the context to build up the DTD's tag stack. Note that we
@@ -1392,7 +1392,7 @@ nsParser::ParseFragment(const nsAString& aSourceBuffer,
           endContext.Append(Substring(thisTag,0,endOfTag));
         }
 
-        endContext.Append('>');
+        endContext.AppendLiteral(">");
       }
 
       result = Parse(endContext,

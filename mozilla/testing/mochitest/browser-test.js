@@ -24,15 +24,11 @@ XPCOMUtils.defineLazyModuleGetter(this, "CustomizationTabPreloader",
 const SIMPLETEST_OVERRIDES =
   ["ok", "is", "isnot", "ise", "todo", "todo_is", "todo_isnot", "info", "expectAssertions"];
 
-window.addEventListener("load", function testOnLoad() {
-  window.removeEventListener("load", testOnLoad);
-  window.addEventListener("MozAfterPaint", function testOnMozAfterPaint() {
-    window.removeEventListener("MozAfterPaint", testOnMozAfterPaint);
-    setTimeout(testInit, 0);
-  });
-});
+window.addEventListener("load", testOnLoad, false);
 
-function testInit() {
+function testOnLoad() {
+  window.removeEventListener("load", testOnLoad, false);
+
   gConfig = readConfig();
   if (gConfig.testRoot == "browser" ||
       gConfig.testRoot == "metro" ||
@@ -147,6 +143,15 @@ Tester.prototype = {
   },
 
   start: function Tester_start() {
+    // Check whether this window is ready to run tests.
+    if (window.BrowserChromeTest) {
+      BrowserChromeTest.runWhenReady(this.actuallyStart.bind(this));
+      return;
+    }
+    this.actuallyStart();
+  },
+
+  actuallyStart: function Tester_actuallyStart() {
     //if testOnLoad was not called, then gConfig is not defined
     if (!gConfig)
       gConfig = readConfig();

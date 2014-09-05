@@ -17,9 +17,7 @@
 #include "nsCSSRuleProcessor.h"
 #include "nsStyleSet.h"
 #include "mozilla/dom/URL.h"
-#include "mozilla/DebugOnly.h"
 
-using namespace mozilla;
 using mozilla::dom::IsChromeURI;
 
 nsXBLPrototypeResources::nsXBLPrototypeResources(nsXBLPrototypeBinding* aBinding)
@@ -80,13 +78,13 @@ nsXBLPrototypeResources::FlushSkinSheets()
   // they'll still be in the chrome cache.
   mRuleProcessor = nullptr;
 
-  nsTArray<nsRefPtr<nsCSSStyleSheet>> oldSheets;
-
-  oldSheets.SwapElements(mStyleSheetList);
+  sheet_array_type oldSheets(mStyleSheetList);
+  mStyleSheetList.Clear();
 
   mozilla::css::Loader* cssLoader = doc->CSSLoader();
 
-  for (size_t i = 0, count = oldSheets.Length(); i < count; ++i) {
+  for (sheet_array_type::size_type i = 0, count = oldSheets.Length();
+       i < count; ++i) {
     nsCSSStyleSheet* oldSheet = oldSheets[i];
 
     nsIURI* uri = oldSheet->GetSheetURI();
@@ -102,8 +100,9 @@ nsXBLPrototypeResources::FlushSkinSheets()
 
     mStyleSheetList.AppendElement(newSheet);
   }
-
-  GatherRuleProcessor();
+  mRuleProcessor = new nsCSSRuleProcessor(mStyleSheetList,
+                                          nsStyleSet::eDocSheet,
+                                          nullptr);
 
   return NS_OK;
 }
@@ -117,75 +116,14 @@ nsXBLPrototypeResources::Write(nsIObjectOutputStream* aStream)
 }
 
 void
-nsXBLPrototypeResources::Traverse(nsCycleCollectionTraversalCallback &cb)
+nsXBLPrototypeResources::Traverse(nsCycleCollectionTraversalCallback &cb) const
 {
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "proto mResources mLoader");
   cb.NoteXPCOMChild(mLoader);
-
-  CycleCollectionNoteChild(cb, mRuleProcessor.get(), "mRuleProcessor");
-  ImplCycleCollectionTraverse(cb, mStyleSheetList, "mStyleSheetList");
-}
-
-void
-nsXBLPrototypeResources::Unlink()
-{
-  mStyleSheetList.Clear();
-  mRuleProcessor = nullptr;
 }
 
 void
 nsXBLPrototypeResources::ClearLoader()
 {
   mLoader = nullptr;
-}
-
-void
-nsXBLPrototypeResources::GatherRuleProcessor()
-{
-  mRuleProcessor = new nsCSSRuleProcessor(mStyleSheetList,
-                                          nsStyleSet::eDocSheet,
-                                          nullptr);
-}
-
-void
-nsXBLPrototypeResources::AppendStyleSheet(nsCSSStyleSheet* aSheet)
-{
-  mStyleSheetList.AppendElement(aSheet);
-}
-
-void
-nsXBLPrototypeResources::RemoveStyleSheet(nsCSSStyleSheet* aSheet)
-{
-  mStyleSheetList.RemoveElement(aSheet);
-}
-
-void
-nsXBLPrototypeResources::InsertStyleSheetAt(size_t aIndex, nsCSSStyleSheet* aSheet)
-{
-  mStyleSheetList.InsertElementAt(aIndex, aSheet);
-}
-
-nsCSSStyleSheet*
-nsXBLPrototypeResources::StyleSheetAt(size_t aIndex) const
-{
-  return mStyleSheetList[aIndex];
-}
-
-size_t
-nsXBLPrototypeResources::SheetCount() const
-{
-  return mStyleSheetList.Length();
-}
-
-bool
-nsXBLPrototypeResources::HasStyleSheets() const
-{
-  return !mStyleSheetList.IsEmpty();
-}
-
-void
-nsXBLPrototypeResources::AppendStyleSheetsTo(
-                                      nsTArray<nsCSSStyleSheet*>& aResult) const
-{
-  aResult.AppendElements(mStyleSheetList);
 }

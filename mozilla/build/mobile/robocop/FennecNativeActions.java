@@ -72,7 +72,7 @@ public class FennecNativeActions implements Actions {
                 }
             };
 
-            EventDispatcher.getInstance().registerGeckoThreadListener(mListener, mGeckoEvent);
+            GeckoAppShell.registerEventListener(mGeckoEvent, mListener);
             mIsRegistered = true;
         }
 
@@ -158,7 +158,7 @@ public class FennecNativeActions implements Actions {
             FennecNativeDriver.log(LogLevel.INFO,
                     "EventExpecter: no longer listening for " + mGeckoEvent);
 
-            EventDispatcher.getInstance().unregisterGeckoThreadListener(mListener, mGeckoEvent);
+            GeckoAppShell.unregisterEventListener(mGeckoEvent, mListener);
             mIsRegistered = false;
         }
 

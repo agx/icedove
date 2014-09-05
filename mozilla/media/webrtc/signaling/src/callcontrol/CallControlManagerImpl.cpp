@@ -18,8 +18,6 @@
 #include "CallControlManagerImpl.h"
 #include "csf_common.h"
 
-#include "base/platform_thread.h"
-
 extern "C"
 {
 #include "config_api.h"

@@ -30,8 +30,8 @@ XPCNativeMember::GetCallInfo(JSObject* funobj,
     jsval ifaceVal = js::GetFunctionNativeReserved(funobj, 0);
     jsval memberVal = js::GetFunctionNativeReserved(funobj, 1);
 
-    *pInterface = (XPCNativeInterface*) ifaceVal.toPrivate();
-    *pMember = (XPCNativeMember*) memberVal.toPrivate();
+    *pInterface = (XPCNativeInterface*) JSVAL_TO_PRIVATE(ifaceVal);
+    *pMember = (XPCNativeMember*) JSVAL_TO_PRIVATE(memberVal);
 
     return true;
 }
@@ -51,10 +51,21 @@ XPCNativeMember::Resolve(XPCCallContext& ccx, XPCNativeInterface* iface,
                          HandleObject parent, jsval *vp)
 {
     if (IsConstant()) {
+        const nsXPTConstant* constant;
+        if (NS_FAILED(iface->GetInterfaceInfo()->GetConstant(mIndex, &constant)))
+            return false;
+
+        const nsXPTCMiniVariant& mv = *constant->GetValue();
+
+        // XXX Big Hack!
+        nsXPTCVariant v;
+        v.flags = 0;
+        v.type = constant->GetType();
+        memcpy(&v.val, &mv.val, sizeof(mv.val));
+
         RootedValue resultVal(ccx);
-        nsXPIDLCString name;
-        if (NS_FAILED(iface->GetInterfaceInfo()->GetConstant(mIndex, &resultVal,
-                                                             getter_Copies(name))))
+
+        if (!XPCConvert::NativeData2JS(&resultVal, &v.val, v.type, nullptr, nullptr))
             return false;
 
         *vp = resultVal;
@@ -299,14 +310,13 @@ XPCNativeInterface::NewInstance(nsIInterfaceInfo* aInfo)
 
     if (!failed) {
         for (i = 0; i < constCount; i++) {
-            RootedValue constant(cx);
-            nsXPIDLCString namestr;
-            if (NS_FAILED(aInfo->GetConstant(i, &constant, getter_Copies(namestr)))) {
+            const nsXPTConstant* constant;
+            if (NS_FAILED(aInfo->GetConstant(i, &constant))) {
                 failed = true;
                 break;
             }
 
-            str = JS_InternString(cx, namestr);
+            str = JS_InternString(cx, constant->GetName());
             if (!str) {
                 NS_ERROR("bad constant name");
                 failed = true;

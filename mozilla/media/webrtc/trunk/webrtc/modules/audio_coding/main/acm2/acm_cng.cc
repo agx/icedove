@@ -17,8 +17,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 ACMCNG::ACMCNG(int16_t codec_id) {
   encoder_inst_ptr_ = NULL;
   codec_id_ = codec_id;
@@ -77,7 +75,5 @@ void ACMCNG::InternalDestructEncoderInst(void* ptr_inst) {
   }
   return;
 }
-
-}  // namespace acm2
 
 }  // namespace webrtc

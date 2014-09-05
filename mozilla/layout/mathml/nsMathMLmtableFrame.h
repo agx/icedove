@@ -21,15 +21,14 @@ class nsMathMLmtableOuterFrame : public nsTableOuterFrame,
                                  public nsMathMLFrame
 {
 public:
-  friend nsContainerFrame* NS_NewMathMLmtableOuterFrame(nsIPresShell* aPresShell,
-                                                        nsStyleContext* aContext);
+  friend nsIFrame* NS_NewMathMLmtableOuterFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
 
   // overloaded nsTableOuterFrame methods
 
-  virtual void
+  virtual nsresult
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,
@@ -64,38 +63,40 @@ class nsMathMLmtableFrame : public nsTableFrame
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  friend nsContainerFrame* NS_NewMathMLmtableFrame(nsIPresShell* aPresShell,
-                                                   nsStyleContext* aContext);
+  friend nsIFrame* NS_NewMathMLmtableFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   // Overloaded nsTableFrame methods
 
-  virtual void
+  virtual nsresult
   SetInitialChildList(ChildListID  aListID,
                       nsFrameList& aChildList) MOZ_OVERRIDE;
 
-  virtual void
+  virtual nsresult
   AppendFrames(ChildListID  aListID,
                nsFrameList& aFrameList) MOZ_OVERRIDE
   {
-    nsTableFrame::AppendFrames(aListID, aFrameList);
+    nsresult rv = nsTableFrame::AppendFrames(aListID, aFrameList);
     RestyleTable();
+    return rv;
   }
 
-  virtual void
+  virtual nsresult
   InsertFrames(ChildListID aListID,
                nsIFrame* aPrevFrame,
                nsFrameList& aFrameList) MOZ_OVERRIDE
   {
-    nsTableFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
+    nsresult rv = nsTableFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
     RestyleTable();
+    return rv;
   }
 
-  virtual void
+  virtual nsresult
   RemoveFrame(ChildListID aListID,
               nsIFrame* aOldFrame) MOZ_OVERRIDE
   {
-    nsTableFrame::RemoveFrame(aListID, aOldFrame);
+    nsresult rv = nsTableFrame::RemoveFrame(aListID, aOldFrame);
     RestyleTable();
+    return rv;
   }
 
   virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
@@ -120,8 +121,7 @@ class nsMathMLmtrFrame : public nsTableRowFrame
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  friend nsContainerFrame* NS_NewMathMLmtrFrame(nsIPresShell* aPresShell,
-                                                nsStyleContext* aContext);
+  friend nsIFrame* NS_NewMathMLmtrFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   // overloaded nsTableRowFrame methods
 
@@ -130,29 +130,32 @@ public:
                    nsIAtom* aAttribute,
                    int32_t  aModType) MOZ_OVERRIDE;
 
-  virtual void
+  virtual nsresult
   AppendFrames(ChildListID  aListID,
                nsFrameList& aFrameList) MOZ_OVERRIDE
   {
-    nsTableRowFrame::AppendFrames(aListID, aFrameList);
+    nsresult rv = nsTableRowFrame::AppendFrames(aListID, aFrameList);
     RestyleTable();
+    return rv;
   }
 
-  virtual void
+  virtual nsresult
   InsertFrames(ChildListID aListID,
                nsIFrame* aPrevFrame,
                nsFrameList& aFrameList) MOZ_OVERRIDE
   {
-    nsTableRowFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
+    nsresult rv = nsTableRowFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
     RestyleTable();
+    return rv;
   }
 
-  virtual void
+  virtual nsresult
   RemoveFrame(ChildListID aListID,
               nsIFrame* aOldFrame) MOZ_OVERRIDE
   {
-    nsTableRowFrame::RemoveFrame(aListID, aOldFrame);
+    nsresult rv = nsTableRowFrame::RemoveFrame(aListID, aOldFrame);
     RestyleTable();
+    return rv;
   }
 
   virtual bool IsFrameOfType(uint32_t aFlags) const MOZ_OVERRIDE
@@ -182,8 +185,7 @@ class nsMathMLmtdFrame : public nsTableCellFrame
 public:
   NS_DECL_FRAMEARENA_HELPERS
 
-  friend nsContainerFrame* NS_NewMathMLmtdFrame(nsIPresShell* aPresShell,
-                                                nsStyleContext* aContext);
+  friend nsIFrame* NS_NewMathMLmtdFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   // overloaded nsTableCellFrame methods
 
@@ -216,7 +218,7 @@ protected:
 class nsMathMLmtdInnerFrame : public nsBlockFrame,
                               public nsMathMLFrame {
 public:
-  friend nsContainerFrame* NS_NewMathMLmtdInnerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
+  friend nsIFrame* NS_NewMathMLmtdInnerFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
   NS_DECL_QUERYFRAME
   NS_DECL_FRAMEARENA_HELPERS
@@ -234,7 +236,7 @@ public:
     return NS_OK;
   }
 
-  virtual void
+  virtual nsresult
   Reflow(nsPresContext*          aPresContext,
          nsHTMLReflowMetrics&     aDesiredSize,
          const nsHTMLReflowState& aReflowState,

@@ -46,10 +46,6 @@ SessionStore.prototype = {
   _maxTabsUndo: 1,
   _pendingWrite: 0,
 
-  // The index where the most recently closed tab was in the tabs array
-  // when it was closed.
-  _lastClosedTabIndex: -1,
-
   init: function ss_init() {
     // Get file references
     this._sessionFile = Services.dirsvc.get("ProfD", Ci.nsILocalFile);
@@ -101,8 +97,6 @@ SessionStore.prototype = {
         // Clear all data about closed tabs
         for (let [ssid, win] in Iterator(this._windows))
           win.closedTabs = [];
-
-        this._lastClosedTabIndex = -1;
 
         if (this._loadState == STATE_RUNNING) {
           // Save the purged state immediately
@@ -170,7 +164,7 @@ SessionStore.prototype = {
       }
       case "TabClose": {
         let browser = aEvent.target;
-        this.onTabClose(window, browser, aEvent.detail);
+        this.onTabClose(window, browser);
         this.onTabRemove(window, browser);
         break;
       }
@@ -275,7 +269,7 @@ SessionStore.prototype = {
       this.saveStateDelayed();
   },
 
-  onTabClose: function ss_onTabClose(aWindow, aBrowser, aTabIndex) {
+  onTabClose: function ss_onTabClose(aWindow, aBrowser) {
     if (this._maxTabsUndo == 0)
       return;
 
@@ -289,8 +283,6 @@ SessionStore.prototype = {
       let length = this._windows[aWindow.__SSID].closedTabs.length;
       if (length > this._maxTabsUndo)
         this._windows[aWindow.__SSID].closedTabs.splice(this._maxTabsUndo, length - this._maxTabsUndo);
-
-      this._lastClosedTabIndex = aTabIndex;
     }
   },
 
@@ -826,11 +818,11 @@ SessionStore.prototype = {
     return this._windows[aWindow.__SSID].closedTabs.length;
   },
 
-  getClosedTabs: function ss_getClosedTabs(aWindow) {
+  getClosedTabData: function ss_getClosedTabData(aWindow) {
     if (!aWindow.__SSID)
       throw (Components.returnCode = Cr.NS_ERROR_INVALID_ARG);
 
-    return this._windows[aWindow.__SSID].closedTabs;
+    return JSON.stringify(this._windows[aWindow.__SSID].closedTabs);
   },
 
   undoCloseTab: function ss_undoCloseTab(aWindow, aIndex) {
@@ -850,16 +842,9 @@ SessionStore.prototype = {
     let closedTab = closedTabs.splice(aIndex, 1).shift();
 
     // create a new tab and bring to front
-    let params = {
-      selected: true,
-      isPrivate: closedTab.isPrivate,
-      desktopMode: closedTab.desktopMode,
-      tabIndex: this._lastClosedTabIndex
-    };
+    let params = { selected: true };
     let tab = aWindow.BrowserApp.addTab(closedTab.entries[closedTab.index - 1].url, params);
     this._restoreHistory(closedTab, tab.browser.sessionHistory);
-
-    this._lastClosedTabIndex = -1;
 
     // Put back the extra data
     tab.browser.__SS_extdata = closedTab.extData;
@@ -880,11 +865,6 @@ SessionStore.prototype = {
 
     // remove closed tab from the array
     closedTabs.splice(aIndex, 1);
-
-    // Forget the last closed tab index if we're forgetting the last closed tab.
-    if (aIndex == 0) {
-      this._lastClosedTabIndex = -1;
-    }
   },
 
   getTabValue: function ss_getTabValue(aTab, aKey) {

@@ -69,7 +69,7 @@ void WindowCapturerNull::Capture(const DesktopRegion& region) {
 }  // namespace
 
 // static
-WindowCapturer* WindowCapturer::Create(const DesktopCaptureOptions& options) {
+WindowCapturer* WindowCapturer::Create() {
   return new WindowCapturerNull();
 }
 

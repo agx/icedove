@@ -7,7 +7,6 @@
 #define MOZILLA_SVGANIMATEDPATHSEGLIST_H__
 
 #include "mozilla/Attributes.h"
-#include "mozilla/MemoryReporting.h"
 #include "nsAutoPtr.h"
 #include "nsISMILAttr.h"
 #include "SVGPathData.h"
@@ -36,7 +35,7 @@ class SVGAnimationElement;
  * DOMSVGPathSegList::InternalListWillChangeTo) and frees consumers from having
  * to know or worry about wrappers (or forget about them!) for the most part.
  */
-class SVGAnimatedPathSegList MOZ_FINAL
+class SVGAnimatedPathSegList
 {
   // friends so that they can get write access to mBaseVal and mAnimVal
   friend class DOMSVGPathSeg;
@@ -88,8 +87,6 @@ public:
 
   /// Callers own the returned nsISMILAttr
   nsISMILAttr* ToSMILAttr(nsSVGElement* aElement);
-
-  size_t SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const;
 
 private:
 

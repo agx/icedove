@@ -862,7 +862,7 @@ nsCertOverrideService::GetHostWithPort(const nsACString & aHostName, int32_t aPo
     aPort = 443;
   }
   if (!hostPort.IsEmpty()) {
-    hostPort.Append(':');
+    hostPort.AppendLiteral(":");
     hostPort.AppendInt(aPort);
   }
   _retval.Assign(hostPort);

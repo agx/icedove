@@ -281,12 +281,8 @@ public:
 #endif
   }
 
-  ~IOInterposerInit()
-  {
-#if defined(MOZ_ENABLE_PROFILER_SPS)
-    IOInterposer::Clear();
-#endif
-  }
+  // No destructor needed at the moment -- this stuff stays active for the
+  // life of the process. This may change in the future.
 };
 
 } // namespace mozilla

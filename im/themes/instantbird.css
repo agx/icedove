@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-@import url("chrome://chat/skin/status.css");
+@import url("chrome://instantbird/skin/status.css");
 
 tabbox {
   margin: 0 0;
@@ -48,22 +48,22 @@ notification > hbox {
 /* Tab colors */
 tab[unread],
 .alltabs-item[unread] {
-  color: #d22d2d !important
+  color: red !important;
 }
 
 tab[typing],
 .alltabs-item[typing] {
-  color: #2dd238 !important;
+  color: green !important;
 }
 
 tab[typed],
 .alltabs-item[typed] {
-  color: #d2772d !important;
+  color: orange !important;
 }
 
 tab[attention],
 .alltabs-item[attention] {
-  color: #2d43d2 !important;
+  color: blue !important;
 }
 
 /* Tab icons */
@@ -95,11 +95,6 @@ tab[attention],
 .tabbrowser-tab[chat],
 .alltabs-item[chat] > .menu-iconic-left > .menu-iconic-icon {
   list-style-image: url("chrome://chat/skin/chat-16.png") !important;
-}
-.tabbrowser-tab[chat][status="joining"],
-.alltabs-item[chat][status="joining"] > .menu-iconic-left > .menu-iconic-icon {
-  list-style-image: url("chrome://chat/skin/loading.png") !important;
-  -moz-image-region: auto;
 }
 .tabbrowser-tab[chat][status="left"],
 .alltabs-item[chat][status="left"] > .menu-iconic-left > .menu-iconic-icon {

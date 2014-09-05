@@ -99,7 +99,7 @@ nsSVGElement::WrapNode(JSContext *aCx)
 
 /* readonly attribute SVGAnimatedString className; */
 NS_IMETHODIMP
-nsSVGElement::GetSVGClassName(nsISupports** aClassName)
+nsSVGElement::GetClassName(nsISupports** aClassName)
 {
   *aClassName = ClassName().take();
   return NS_OK;
@@ -239,6 +239,15 @@ NS_IMPL_ISUPPORTS_INHERITED(nsSVGElement, nsSVGElementBase,
 
 //----------------------------------------------------------------------
 // nsIContent methods
+
+const nsAttrValue*
+nsSVGElement::DoGetClasses() const
+{
+  if (mClassAttribute.IsAnimated()) {
+    return mClassAnimAttr;
+  }
+  return nsSVGElementBase::DoGetClasses();
+}
 
 nsresult
 nsSVGElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
@@ -1085,6 +1094,19 @@ nsSVGElement::sMaskMap[] = {
 
 //----------------------------------------------------------------------
 // nsIDOMSVGElement methods
+
+/* attribute DOMString id; */
+NS_IMETHODIMP nsSVGElement::GetId(nsAString & aId)
+{
+  GetAttr(kNameSpaceID_None, nsGkAtoms::id, aId);
+
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsSVGElement::SetId(const nsAString & aId)
+{
+  return SetAttr(kNameSpaceID_None, nsGkAtoms::id, aId, true);
+}
 
 /* readonly attribute nsIDOMSVGSVGElement ownerSVGElement; */
 NS_IMETHODIMP

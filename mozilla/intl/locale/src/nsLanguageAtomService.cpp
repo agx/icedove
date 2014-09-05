@@ -4,12 +4,12 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsLanguageAtomService.h"
+#include "nsICharsetConverterManager.h"
 #include "nsILocaleService.h"
 #include "nsUnicharUtils.h"
 #include "nsIAtom.h"
 #include "mozilla/Services.h"
 #include "nsServiceManagerUtils.h"
-#include "mozilla/dom/EncodingUtils.h"
 
 NS_IMPL_ISUPPORTS(nsLanguageAtomService, nsILanguageAtomService)
 
@@ -44,11 +44,31 @@ nsLanguageAtomService::LookupLanguage(const nsACString &aLanguage,
 }
 
 already_AddRefed<nsIAtom>
-nsLanguageAtomService::LookupCharSet(const nsACString& aCharSet)
+nsLanguageAtomService::LookupCharSet(const char *aCharSet, nsresult *aError)
 {
-  nsAutoCString group;
-  mozilla::dom::EncodingUtils::LangGroupForEncoding(aCharSet, group);
-  return do_GetAtom(group);
+  if (!mCharSets) {
+    mCharSets = do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID);
+    if (!mCharSets) {
+      if (aError)
+        *aError = NS_ERROR_FAILURE;
+
+      return nullptr;
+    }
+  }
+
+  nsCOMPtr<nsIAtom> langGroup;
+  mCharSets->GetCharsetLangGroup(aCharSet, getter_AddRefs(langGroup));
+  if (!langGroup) {
+    if (aError)
+      *aError = NS_ERROR_FAILURE;
+
+    return nullptr;
+  }
+
+  if (aError)
+    *aError = NS_OK;
+
+  return langGroup.forget();
 }
 
 nsIAtom*

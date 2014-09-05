@@ -36,9 +36,10 @@ function uninstallExperimentAddons() {
 
 function testCleanup(experimentsInstance) {
   return Task.spawn(function* () {
-    yield promiseRestartManager();
-    yield uninstallExperimentAddons();
+    yield experimentsInstance.uninit();
     yield removeCacheFile();
+    yield uninstallExperimentAddons();
+    restartManager();
   });
 }
 
@@ -75,7 +76,7 @@ add_task(function* test_setup() {
 
   gReporter = yield getReporter("json_payload_simple");
   yield gReporter.collectMeasurements();
-  let payload = yield gReporter.getJSONPayload(false);
+  let payload = yield gReporter.getJSONPayload(true);
   do_register_cleanup(() => gReporter._shutdown());
 
   gPolicy = new Experiments.Policy();
@@ -187,7 +188,7 @@ add_task(function* test_getExperiments() {
   yield experiments.updateManifest();
   Assert.equal(observerFireCount, ++expectedObserverFireCount,
                "Experiments observer should have been called.");
-
+               
   Assert.equal(experiments.getActiveExperimentID(), EXPERIMENT1_ID,
                "getActiveExperimentID should return the active experiment1");
 
@@ -348,7 +349,7 @@ add_task(function* test_getActiveExperimentID() {
   Assert.equal(experiments.getActiveExperimentID(), EXPERIMENT1_ID,
                "getActiveExperimentID should return the active experiment1");
 
-  yield promiseRestartManager();
+  yield experiments.uninit();
   Assert.equal(experiments.getActiveExperimentID(), EXPERIMENT1_ID,
                "getActiveExperimentID should return the active experiment1 after uninit()");
 
@@ -1525,8 +1526,9 @@ add_task(function* testEnabledAfterRestart() {
   Assert.ok(addons[0].isActive, "That experiment is active.");
 
   dump("Restarting Addon Manager\n");
-  yield promiseRestartManager();
-  experiments = new Experiments.Experiments(gPolicy);
+  experiments._unregisterWithAddonManager();
+  restartManager();
+  experiments._registerWithAddonManager();
 
   addons = yield getExperimentAddons();
   Assert.equal(addons.length, 1, "The experiment is still there after restart.");
@@ -1583,7 +1585,8 @@ add_task(function* test_foreignUninstallAndRestart() {
   Assert.ok(!experimentList[0].active, "Experiment 1 should not be active anymore.");
 
   // Fake restart behaviour.
-  yield promiseRestartManager();
+  experiments.uninit();
+  restartManager();
   experiments = new Experiments.Experiments(gPolicy);
   yield experiments.updateManifest();
 

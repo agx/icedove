@@ -344,7 +344,6 @@ public:
   gfxFloat Determinant() const;
 
   void NudgeToIntegers(void);
-  void NudgeToIntegersFixedEpsilon();
 
 private:
 

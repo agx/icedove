@@ -31,12 +31,12 @@
     </hbox>
     
     <separator class="thin"/>
-
-    <groupbox style="width: 20em !important;" flex="1">
+    
+    <groupbox style="width: 20em !important;">
       <caption label="&identityTitle.label;"/>
       <description>&identityDesc.label;</description>
       <separator class="thin"/>
-      <grid>
+      <grid flex="1">
         <columns>
           <column/>
           <column flex="1"/>
@@ -77,7 +77,7 @@
         </rows>
       </grid>
 
-      <hbox class="indent" flex="1">
+      <hbox align="center" class="indent">
         <textbox wsm_persist="true" id="identity.htmlSigText" multiline="true" wrap="off" rows="4" flex="1"
                  prefstring="mail.identity.%identitykey%.htmlSigText" class="signatureBox"/>
       </hbox>
@@ -132,7 +132,7 @@
       </hbox>
     </groupbox>
 
-    <separator class="thin"/>
+      <separator class="thin"/>
 
     <hbox align="center">
       <spacer flex="1"/>
@@ -140,8 +140,6 @@
               accesskey="&manageIdentities.accesskey;"
               wsm_persist="true" id="identity.manageIdentitiesbutton"/>
     </hbox>
-
-    <spacer flex="1"/>
   </vbox>
 
 </page>

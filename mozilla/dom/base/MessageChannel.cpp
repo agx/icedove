@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "MessageChannel.h"
-
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/MessageChannelBinding.h"
 #include "mozilla/dom/MessagePort.h"
@@ -14,7 +13,7 @@
 namespace mozilla {
 namespace dom {
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(MessageChannel, mWindow, mPort1, mPort2)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_3(MessageChannel, mWindow, mPort1, mPort2)
 NS_IMPL_CYCLE_COLLECTING_ADDREF(MessageChannel)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(MessageChannel)
 
@@ -29,38 +28,16 @@ namespace {
 
 }
 
+
 /* static */ bool
-MessageChannel::Enabled(JSContext* aCx, JSObject* aObj)
+MessageChannel::PrefEnabled()
 {
   if (!gPrefInitialized) {
     Preferences::AddBoolVarCache(&gPrefEnabled, "dom.messageChannel.enabled");
     gPrefInitialized = true;
   }
 
-  // Enabled by pref
-  if (gPrefEnabled) {
-    return true;
-  }
-
-  // Chrome callers are allowed.
-  if (nsContentUtils::ThreadsafeIsCallerChrome()) {
-    return true;
-  }
-
-  nsCOMPtr<nsIPrincipal> principal = nsContentUtils::SubjectPrincipal();
-  MOZ_ASSERT(principal);
-
-  nsCOMPtr<nsIURI> uri;
-  if (NS_FAILED(principal->GetURI(getter_AddRefs(uri))) || !uri) {
-    return false;
-  }
-
-  bool isResource = false;
-  if (NS_FAILED(uri->SchemeIs("resource", &isResource))) {
-    return false;
-  }
-
-  return isResource;
+  return gPrefEnabled;
 }
 
 MessageChannel::MessageChannel(nsPIDOMWindow* aWindow)

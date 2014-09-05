@@ -12,7 +12,6 @@ import java.util.GregorianCalendar;
 import org.json.JSONObject;
 import org.mozilla.gecko.widget.AllCapsTextView;
 import org.mozilla.gecko.widget.DateTimePicker;
-import org.mozilla.gecko.widget.FloatingHintEditText;
 
 import android.content.Context;
 import android.content.res.Configuration;
@@ -63,7 +62,7 @@ public class PromptInput {
         }
 
         public View getView(final Context context) throws UnsupportedOperationException {
-            EditText input = new FloatingHintEditText(context);
+            EditText input = new EditText(context);
             input.setInputType(InputType.TYPE_CLASS_TEXT);
             input.setText(mValue);
 

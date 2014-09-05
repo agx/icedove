@@ -111,7 +111,7 @@ StatementParams::NewEnumerate(nsIXPConnectWrappedNative *aWrapper,
       NS_ASSERTION(*_statep != JSVAL_NULL, "Internal state is null!");
 
       // Make sure we are in range first.
-      uint32_t index = static_cast<uint32_t>(_statep->toInt32());
+      uint32_t index = static_cast<uint32_t>(JSVAL_TO_INT(*_statep));
       if (index >= mParamCount) {
         *_statep = JSVAL_NULL;
         return NS_OK;
@@ -177,7 +177,8 @@ StatementParams::NewResolve(nsIXPConnectWrappedNative *aWrapper,
     if (idx >= mParamCount)
       return NS_ERROR_INVALID_ARG;
 
-    ok = ::JS_DefineElement(aCtx, scope, idx, JS::UndefinedHandleValue, JSPROP_ENUMERATE);
+    ok = ::JS_DefineElement(aCtx, scope, idx, JSVAL_VOID, nullptr,
+                            nullptr, JSPROP_ENUMERATE);
     resolved = true;
   }
   else if (JSID_IS_STRING(id)) {
@@ -192,7 +193,8 @@ StatementParams::NewResolve(nsIXPConnectWrappedNative *aWrapper,
     uint32_t idx;
     nsresult rv = mStatement->GetParameterIndex(name, &idx);
     if (NS_SUCCEEDED(rv)) {
-      ok = ::JS_DefinePropertyById(aCtx, scope, id, JS::UndefinedHandleValue, JSPROP_ENUMERATE);
+      ok = ::JS_DefinePropertyById(aCtx, scope, id, JSVAL_VOID, nullptr,
+                                   nullptr, JSPROP_ENUMERATE);
       resolved = true;
     }
   }

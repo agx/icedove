@@ -19,13 +19,12 @@ printStatus (summary);
 status = inSection(1) + ' check for overflow in quantifier';
 
 actual = 'undefined'; 
-expect0 = 'no exception thrown false';
-expect1 = 'error';
+expect = 'error';
 
 try
 {
   var result = eval('/a{21474836481}/.test("a")');
-  actual = 'no exception thrown ' + result;
+  actual = 'no exception thrown';
   status += ' result: ' + result;
 }
 catch(e)
@@ -33,8 +32,5 @@ catch(e)
   actual = 'error';
 }
 
-// The result we get depends on the regexp engine.
-if (actual != 'error')
-  reportCompare(expect0, actual, status);
-else
-  reportCompare(expect1, actual, status);
+reportCompare(expect, actual, status);
+

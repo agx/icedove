@@ -17,7 +17,7 @@ namespace webrtc {
 
 class RemoteRateControl {
  public:
-  explicit RemoteRateControl(uint32_t min_bitrate_bps);
+  RemoteRateControl();
   ~RemoteRateControl() {}
 
   void Reset();

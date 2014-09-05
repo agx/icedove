@@ -16,7 +16,7 @@ BEGIN_TEST(testRegExpInstanceProperties)
     jsval regexpProtoVal;
     EVAL("RegExp.prototype", &regexpProtoVal);
 
-    JSObject *regexpProto = regexpProtoVal.toObjectOrNull();
+    JSObject *regexpProto = JSVAL_TO_OBJECT(regexpProtoVal);
 
     if (!helper(regexpProto))
         return false;
@@ -27,7 +27,7 @@ BEGIN_TEST(testRegExpInstanceProperties)
 
     jsval regexp;
     EVAL("/foopy/", &regexp);
-    JSObject *robj = regexp.toObjectOrNull();
+    JSObject *robj = JSVAL_TO_OBJECT(regexp);
 
     CHECK(robj->lastProperty());
     CHECK_EQUAL(robj->compartment()->initialRegExpShape, robj->lastProperty());

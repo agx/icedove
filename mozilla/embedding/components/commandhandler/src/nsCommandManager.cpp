@@ -14,7 +14,6 @@
 #include "nsServiceManagerUtils.h"
 #include "nsIScriptSecurityManager.h"
 
-#include "nsContentUtils.h"
 #include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIWindowRoot.h"
@@ -238,6 +237,22 @@ nsCommandManager::DoCommand(const char *aCommandName,
 }
 
 nsresult
+nsCommandManager::IsCallerChrome(bool *is_caller_chrome)
+{
+  *is_caller_chrome = false;
+  nsresult rv = NS_OK;
+  nsCOMPtr<nsIScriptSecurityManager> secMan = 
+      do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+  if (NS_FAILED(rv))
+    return rv;
+  if (!secMan)
+    return NS_ERROR_FAILURE;
+
+  rv = secMan->SubjectPrincipalIsSystem(is_caller_chrome);
+  return rv;
+}
+
+nsresult
 nsCommandManager::GetControllerForCommand(const char *aCommand, 
                                           nsIDOMWindow *aTargetWindow,
                                           nsIController** outController)
@@ -247,7 +262,12 @@ nsCommandManager::GetControllerForCommand(const char *aCommand,
 
   // check if we're in content or chrome
   // if we're not chrome we must have a target window or we bail
-  if (!nsContentUtils::IsCallerChrome()) {
+  bool isChrome = false;
+  rv = IsCallerChrome(&isChrome);
+  if (NS_FAILED(rv))
+    return rv;
+
+  if (!isChrome) {
     if (!aTargetWindow)
       return rv;
 

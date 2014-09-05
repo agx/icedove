@@ -37,7 +37,6 @@ class nsPresContext;
 class nsRenderingContext;
 class nsStyleContext;
 class nsStyleCoord;
-class nsSVGClipPathFrame;
 class nsSVGDisplayContainerFrame;
 class nsSVGElement;
 class nsSVGEnum;
@@ -77,7 +76,6 @@ class SourceSurface;
 
 bool NS_SVGDisplayListHitTestingEnabled();
 bool NS_SVGDisplayListPaintingEnabled();
-bool NS_SVGNewGetBBoxEnabled();
 
 /**
  * Sometimes we need to distinguish between an empty box and a box
@@ -110,19 +108,6 @@ public:
     }
     mBBox = mIsEmpty ? aSVGBBox.mBBox : mBBox.UnionEdges(aSVGBBox.mBBox);
     mIsEmpty = false;
-  }
-
-  void Intersect(const SVGBBox& aSVGBBox) {
-    if (!mIsEmpty && !aSVGBBox.mIsEmpty) {
-      mBBox = mBBox.Intersect(aSVGBBox.mBBox);
-      if (mBBox.IsEmpty()) {
-        mIsEmpty = true;
-        mBBox = Rect(0, 0, 0, 0);
-      }
-    } else {
-      mIsEmpty = true;
-      mBBox = Rect(0, 0, 0, 0);
-    }
   }
 
 private:
@@ -411,8 +396,7 @@ public:
     eBBoxIncludeFillGeometry   = 1 << 1,
     eBBoxIncludeStroke         = 1 << 2,
     eBBoxIncludeStrokeGeometry = 1 << 3,
-    eBBoxIncludeMarkers        = 1 << 4,
-    eBBoxIncludeClipped        = 1 << 5
+    eBBoxIncludeMarkers        = 1 << 4
   };
   /**
    * Get the SVG bbox (the SVG spec's simplified idea of bounds) of aFrame in

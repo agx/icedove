@@ -11,6 +11,7 @@
 #include "nscore.h"
 #include "nsIFactory.h"
 #include "nsISupports.h"
+#include "comi18n.h"
 #include "prmem.h"
 #include "plstr.h"
 #include "nsIComponentManager.h"

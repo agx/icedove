@@ -8,8 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_VIDEO_PROCESSING_MAIN_SOURCE_SPATIAL_RESAMPLER_H
-#define WEBRTC_MODULES_VIDEO_PROCESSING_MAIN_SOURCE_SPATIAL_RESAMPLER_H
+/*
+ * spatial_resampler.h
+ */
+
+#ifndef VPM_SPATIAL_RESAMPLER_H
+#define VPM_SPATIAL_RESAMPLER_H
 
 #include "webrtc/typedefs.h"
 
@@ -21,12 +25,13 @@
 
 namespace webrtc {
 
-class VPMSpatialResampler {
- public:
+class VPMSpatialResampler
+{
+public:
   virtual ~VPMSpatialResampler() {};
   virtual int32_t SetTargetFrameSize(int32_t width, int32_t height) = 0;
   virtual void SetInputFrameResampleMode(VideoFrameResampling
-                                         resampling_mode) = 0;
+                                         resamplingMode) = 0;
   virtual void Reset() = 0;
   virtual int32_t ResampleFrame(const I420VideoFrame& inFrame,
                                 I420VideoFrame* outFrame) = 0;
@@ -35,12 +40,13 @@ class VPMSpatialResampler {
   virtual bool ApplyResample(int32_t width, int32_t height) = 0;
 };
 
-class VPMSimpleSpatialResampler : public VPMSpatialResampler {
- public:
+class VPMSimpleSpatialResampler : public VPMSpatialResampler
+{
+public:
   VPMSimpleSpatialResampler();
   ~VPMSimpleSpatialResampler();
   virtual int32_t SetTargetFrameSize(int32_t width, int32_t height);
-  virtual void SetInputFrameResampleMode(VideoFrameResampling resampling_mode);
+  virtual void SetInputFrameResampleMode(VideoFrameResampling resamplingMode);
   virtual void Reset();
   virtual int32_t ResampleFrame(const I420VideoFrame& inFrame,
                                 I420VideoFrame* outFrame);
@@ -48,14 +54,14 @@ class VPMSimpleSpatialResampler : public VPMSpatialResampler {
   virtual int32_t TargetHeight();
   virtual bool ApplyResample(int32_t width, int32_t height);
 
- private:
+private:
 
-  VideoFrameResampling        resampling_mode_;
-  int32_t                     target_width_;
-  int32_t                     target_height_;
-  Scaler                      scaler_;
+  VideoFrameResampling        _resamplingMode;
+  int32_t                     _targetWidth;
+  int32_t                     _targetHeight;
+  Scaler                      _scaler;
 };
 
-}  // namespace webrtc
+}  // namespace
 
-#endif  // WEBRTC_MODULES_VIDEO_PROCESSING_MAIN_SOURCE_SPATIAL_RESAMPLER_H
+#endif

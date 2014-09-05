@@ -12,7 +12,9 @@
 #include "mozilla/TypeTraits.h"
 #include "mozilla/Vector.h"
 
+#include <algorithm>
 #include <stddef.h>
+#include <stdint.h>
 
 namespace mozilla {
 
@@ -39,7 +41,7 @@ class RollingMean
                   "floating-point types are unsupported due to rounding "
                   "errors");
 
-    explicit RollingMean(size_t aMaxValues)
+    RollingMean(size_t aMaxValues)
       : mInsertIndex(0),
         mMaxValues(aMaxValues),
         mTotal(0)

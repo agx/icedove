@@ -37,14 +37,14 @@ namespace layers {
 class GrallocTextureClientOGL : public BufferTextureClient
 {
 public:
-  GrallocTextureClientOGL(MaybeMagicGrallocBufferHandle buffer,
+  GrallocTextureClientOGL(GrallocBufferActor* aActor,
                           gfx::IntSize aSize,
                           gfx::BackendType aMoz2dBackend,
-                          TextureFlags aFlags = TextureFlags::DEFAULT);
+                          TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
   GrallocTextureClientOGL(ISurfaceAllocator* aAllocator,
                           gfx::SurfaceFormat aFormat,
                           gfx::BackendType aMoz2dBackend,
-                          TextureFlags aFlags = TextureFlags::DEFAULT);
+                          TextureFlags aFlags = TEXTURE_FLAGS_DEFAULT);
 
   ~GrallocTextureClientOGL();
 
@@ -60,11 +60,13 @@ public:
 
   virtual bool ToSurfaceDescriptor(SurfaceDescriptor& aOutDescriptor) MOZ_OVERRIDE;
 
-  virtual void SetRemoveFromCompositableTracker(AsyncTransactionTracker* aTracker) MOZ_OVERRIDE;
+  virtual TextureClientData* DropTextureData() MOZ_OVERRIDE;
 
-  virtual void WaitForBufferOwnership() MOZ_OVERRIDE;
+  virtual void SetReleaseFenceHandle(FenceHandle aReleaseFenceHandle) MOZ_OVERRIDE;
 
-  void InitWith(MaybeMagicGrallocBufferHandle aDesc, gfx::IntSize aSize);
+  virtual void WaitReleaseFence() MOZ_OVERRIDE;
+
+  void InitWith(GrallocBufferActor* aActor, gfx::IntSize aSize);
 
   void SetTextureFlags(TextureFlags aFlags) { AddFlags(aFlags); }
 
@@ -118,9 +120,7 @@ protected:
   /**
    * Unfortunately, until bug 879681 is fixed we need to use a GrallocBufferActor.
    */
-  MaybeMagicGrallocBufferHandle mGrallocHandle;
-
-  RefPtr<AsyncTransactionTracker> mRemoveFromCompositableTracker;
+  GrallocBufferActor* mGrallocActor;
 
   android::sp<android::GraphicBuffer> mGraphicBuffer;
 

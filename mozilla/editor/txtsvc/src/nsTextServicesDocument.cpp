@@ -80,6 +80,8 @@ public:
 
 nsTextServicesDocument::nsTextServicesDocument()
 {
+  mRefCnt         = 0;
+
   mSelStartIndex  = -1;
   mSelStartOffset = -1;
   mSelEndIndex    = -1;

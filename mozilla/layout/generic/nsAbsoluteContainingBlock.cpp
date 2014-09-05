@@ -34,7 +34,7 @@ static void PrettyUC(nscoord aSize, char* aBuf)
 }
 #endif
 
-void
+nsresult
 nsAbsoluteContainingBlock::SetInitialChildList(nsIFrame*       aDelegatingFrame,
                                                ChildListID     aListID,
                                                nsFrameList&    aChildList)
@@ -44,9 +44,10 @@ nsAbsoluteContainingBlock::SetInitialChildList(nsIFrame*       aDelegatingFrame,
   nsFrame::VerifyDirtyBitSet(aChildList);
 #endif
   mAbsoluteFrames.SetFrames(aChildList);
+  return NS_OK;
 }
 
-void
+nsresult
 nsAbsoluteContainingBlock::AppendFrames(nsIFrame*      aDelegatingFrame,
                                         ChildListID    aListID,
                                         nsFrameList&   aFrameList)
@@ -64,9 +65,11 @@ nsAbsoluteContainingBlock::AppendFrames(nsIFrame*      aDelegatingFrame,
   aDelegatingFrame->PresContext()->PresShell()->
     FrameNeedsReflow(aDelegatingFrame, nsIPresShell::eResize,
                      NS_FRAME_HAS_DIRTY_CHILDREN);
+
+  return NS_OK;
 }
 
-void
+nsresult
 nsAbsoluteContainingBlock::InsertFrames(nsIFrame*      aDelegatingFrame,
                                         ChildListID    aListID,
                                         nsIFrame*      aPrevFrame,
@@ -86,6 +89,8 @@ nsAbsoluteContainingBlock::InsertFrames(nsIFrame*      aDelegatingFrame,
   aDelegatingFrame->PresContext()->PresShell()->
     FrameNeedsReflow(aDelegatingFrame, nsIPresShell::eResize,
                      NS_FRAME_HAS_DIRTY_CHILDREN);
+
+  return NS_OK;
 }
 
 void
@@ -96,13 +101,14 @@ nsAbsoluteContainingBlock::RemoveFrame(nsIFrame*       aDelegatingFrame,
   NS_ASSERTION(mChildListID == aListID, "unexpected child list");
   nsIFrame* nif = aOldFrame->GetNextInFlow();
   if (nif) {
-    nif->GetParent()->DeleteNextInFlowChild(nif, false);
+    static_cast<nsContainerFrame*>(nif->GetParent())
+      ->DeleteNextInFlowChild(nif, false);
   }
 
   mAbsoluteFrames.DestroyFrame(aOldFrame);
 }
 
-void
+nsresult
 nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
                                   nsPresContext*           aPresContext,
                                   const nsHTMLReflowState& aReflowState,
@@ -148,7 +154,8 @@ nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
         // Delete any continuations
         if (nextFrame) {
           nsOverflowContinuationTracker::AutoFinish fini(&tracker, kidFrame);
-          nextFrame->GetParent()->DeleteNextInFlowChild(nextFrame, true);
+          static_cast<nsContainerFrame*>(nextFrame->GetParent())
+            ->DeleteNextInFlowChild(nextFrame, true);
         }
       }
     }
@@ -186,6 +193,7 @@ nsAbsoluteContainingBlock::Reflow(nsContainerFrame*        aDelegatingFrame,
     NS_FRAME_SET_OVERFLOW_INCOMPLETE(reflowStatus);
 
   NS_MergeReflowStatusInto(&aReflowStatus, reflowStatus);
+  return NS_OK;
 }
 
 static inline bool IsFixedPaddingSize(const nsStyleCoord& aCoord)
@@ -335,7 +343,7 @@ nsAbsoluteContainingBlock::DoMarkFramesDirty(bool aMarkAllDirty)
 // mChildListID == kFixedList, the height is unconstrained.
 // since we don't allow replicated frames to split.
 
-void
+nsresult
 nsAbsoluteContainingBlock::ReflowAbsoluteFrame(nsIFrame*                aDelegatingFrame,
                                                nsPresContext*           aPresContext,
                                                const nsHTMLReflowState& aReflowState,
@@ -404,7 +412,7 @@ nsAbsoluteContainingBlock::ReflowAbsoluteFrame(nsIFrame*                aDelegat
   }
 
   // Do the reflow
-  aKidFrame->Reflow(aPresContext, kidDesiredSize, kidReflowState, aStatus);
+  nsresult rv = aKidFrame->Reflow(aPresContext, kidDesiredSize, kidReflowState, aStatus);
 
   // If we're solving for 'left' or 'top', then compute it now that we know the
   // width/height
@@ -489,4 +497,6 @@ nsAbsoluteContainingBlock::ReflowAbsoluteFrame(nsIFrame*                aDelegat
   if (aOverflowAreas) {
     aOverflowAreas->UnionWith(kidDesiredSize.mOverflowAreas + rect.TopLeft());
   }
+
+  return rv;
 }

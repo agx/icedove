@@ -9,7 +9,6 @@
 
 #include "mozilla/MemoryReporting.h"
 
-#include "builtin/RegExp.h"
 #include "builtin/TypedObject.h"
 #include "gc/Zone.h"
 #include "vm/GlobalObject.h"
@@ -75,15 +74,15 @@ struct CrossCompartmentKey
 
     CrossCompartmentKey()
       : kind(ObjectWrapper), debugger(nullptr), wrapped(nullptr) {}
-    explicit CrossCompartmentKey(JSObject *wrapped)
+    CrossCompartmentKey(JSObject *wrapped)
       : kind(ObjectWrapper), debugger(nullptr), wrapped(wrapped) {}
-    explicit CrossCompartmentKey(JSString *wrapped)
+    CrossCompartmentKey(JSString *wrapped)
       : kind(StringWrapper), debugger(nullptr), wrapped(wrapped) {}
-    explicit CrossCompartmentKey(Value wrapped)
+    CrossCompartmentKey(Value wrapped)
       : kind(wrapped.isString() ? StringWrapper : ObjectWrapper),
         debugger(nullptr),
         wrapped((js::gc::Cell *)wrapped.toGCThing()) {}
-    explicit CrossCompartmentKey(const RootedValue &wrapped)
+    CrossCompartmentKey(const RootedValue &wrapped)
       : kind(wrapped.get().isString() ? StringWrapper : ObjectWrapper),
         debugger(nullptr),
         wrapped((js::gc::Cell *)wrapped.get().toGCThing()) {}
@@ -142,7 +141,7 @@ struct JSCompartment
     friend struct JSRuntime;
     friend struct JSContext;
     friend class js::ExclusiveContext;
-    js::ReadBarrieredGlobalObject global_;
+    js::ReadBarriered<js::GlobalObject> global_;
 
     unsigned                     enterCompartmentDepth;
 
@@ -266,7 +265,7 @@ struct JSCompartment
      * Lazily initialized script source object to use for scripts cloned
      * from the self-hosting global.
      */
-    js::ReadBarrieredScriptSourceObject selfHostingScriptSource;
+    js::ReadBarriered<js::ScriptSourceObject> selfHostingScriptSource;
 
     /* During GC, stores the index of this compartment in rt->compartments. */
     unsigned                     gcIndex;
@@ -318,12 +317,11 @@ struct JSCompartment
     bool wrap(JSContext *cx, js::StrictPropertyOp *op);
     bool wrap(JSContext *cx, JS::MutableHandle<js::PropertyDescriptor> desc);
     bool wrap(JSContext *cx, js::AutoIdVector &props);
-    bool wrap(JSContext *cx, JS::MutableHandle<js::PropDesc> desc);
 
     bool putWrapper(JSContext *cx, const js::CrossCompartmentKey& wrapped, const js::Value& wrapper);
 
     js::WrapperMap::Ptr lookupWrapper(const js::Value& wrapped) {
-        return crossCompartmentWrappers.lookup(js::CrossCompartmentKey(wrapped));
+        return crossCompartmentWrappers.lookup(wrapped);
     }
 
     void removeWrapper(js::WrapperMap::Ptr p) {
@@ -331,7 +329,7 @@ struct JSCompartment
     }
 
     struct WrapperEnum : public js::WrapperMap::Enum {
-        explicit WrapperEnum(JSCompartment *c) : js::WrapperMap::Enum(c->crossCompartmentWrappers) {}
+        WrapperEnum(JSCompartment *c) : js::WrapperMap::Enum(c->crossCompartmentWrappers) {}
     };
 
     void trace(JSTracer *trc);
@@ -542,8 +540,8 @@ ExclusiveContext::global() const
 class AssertCompartmentUnchanged
 {
   public:
-    explicit AssertCompartmentUnchanged(JSContext *cx
-                                        MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    AssertCompartmentUnchanged(JSContext *cx
+                                MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : cx(cx), oldCompartment(cx->compartment())
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
@@ -651,11 +649,11 @@ class AutoWrapperVector : public AutoVectorRooter<WrapperValue>
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-class AutoWrapperRooter : private JS::AutoGCRooter {
+class AutoWrapperRooter : private AutoGCRooter {
   public:
     AutoWrapperRooter(JSContext *cx, WrapperValue v
                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : JS::AutoGCRooter(cx, WRAPPER), value(v)
+      : AutoGCRooter(cx, WRAPPER), value(v)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
@@ -664,7 +662,7 @@ class AutoWrapperRooter : private JS::AutoGCRooter {
         return value.get().toObjectOrNull();
     }
 
-    friend void JS::AutoGCRooter::trace(JSTracer *trc);
+    friend void AutoGCRooter::trace(JSTracer *trc);
 
   private:
     WrapperValue value;

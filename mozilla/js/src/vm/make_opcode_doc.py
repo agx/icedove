@@ -19,7 +19,7 @@ SOURCE_BASE = 'http://mxr.mozilla.org/mozilla-central/source'
 
 def error(message):
     print("Error: {message}".format(message=message), file=sys.stderr)
-    sys.exit(1)
+    #sys.exit(1) # uncomment when all opcodes documented
 
 def get_xdr_version(dir):
     version_pat = re.compile('XDR_BYTECODE_VERSION = uint32_t\(0xb973c0de - (\d+)\);')

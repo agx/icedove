@@ -15,7 +15,8 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSISTATUSREPORTER
 
-  nsStatusReporter(nsACString& aProcess, nsACString& aDesc);
+  nsStatusReporter(nsACString& process,
+                   nsACString& desc);
 
   virtual ~nsStatusReporter();
 
@@ -36,5 +37,5 @@ public:
   virtual ~nsStatusReporterManager();
 
 private:
-  nsCOMArray<nsIStatusReporter> mReporters;
+  nsCOMArray<nsIStatusReporter>      mReporters;
 };

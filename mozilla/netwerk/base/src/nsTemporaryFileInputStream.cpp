@@ -74,9 +74,10 @@ nsTemporaryFileInputStream::ReadSegments(nsWriteSegmentFun writer,
     nsresult rv = writer(this, closure, buf,
                          count - remainBufCount, bufCount, &write_result);
     remainBufCount -= bufCount;
-    NS_ENSURE_SUCCESS(rv, rv);
-    NS_ASSERTION(write_result <= bufCount,
-                 "writer should not write more than we asked it to write");
+    if (NS_SUCCEEDED(rv)) {
+      NS_ASSERTION(write_result <= bufCount,
+                   "writer should not write more than we asked it to write");
+    }
     mStartPos += bufCount;
   }
   *result = count;

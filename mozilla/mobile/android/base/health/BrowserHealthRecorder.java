@@ -22,18 +22,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.mozilla.gecko.AppConstants;
+import org.mozilla.gecko.Distribution;
+import org.mozilla.gecko.Distribution.DistributionDescriptor;
 import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
-import org.mozilla.gecko.background.healthreport.AndroidConfigurationProvider;
 import org.mozilla.gecko.background.healthreport.EnvironmentBuilder;
-import org.mozilla.gecko.background.healthreport.EnvironmentBuilder.ConfigurationProvider;
 import org.mozilla.gecko.background.healthreport.HealthReportDatabaseStorage;
 import org.mozilla.gecko.background.healthreport.HealthReportStorage.Field;
 import org.mozilla.gecko.background.healthreport.HealthReportStorage.MeasurementFields;
 import org.mozilla.gecko.background.healthreport.ProfileInformationCache;
-import org.mozilla.gecko.distribution.Distribution;
-import org.mozilla.gecko.distribution.Distribution.DistributionDescriptor;
 import org.mozilla.gecko.util.GeckoEventListener;
 import org.mozilla.gecko.util.ThreadUtils;
 
@@ -91,7 +89,6 @@ public class BrowserHealthRecorder implements HealthRecorder, GeckoEventListener
     private ContentProviderClient client;
     private volatile HealthReportDatabaseStorage storage;
     private final ProfileInformationCache profileCache;
-    private final ConfigurationProvider configProvider;
     private final EventDispatcher dispatcher;
     private final SharedPreferences prefs;
 
@@ -158,8 +155,6 @@ public class BrowserHealthRecorder implements HealthRecorder, GeckoEventListener
             Log.e(LOG_TAG, "Exception initializing.", e);
         }
 
-        this.configProvider = new AndroidConfigurationProvider(context);
-
         this.prefs = appPrefs;
     }
 
@@ -198,13 +193,12 @@ public class BrowserHealthRecorder implements HealthRecorder, GeckoEventListener
         if (state != State.INITIALIZED) {
             return;
         }
-        dispatcher.unregisterGeckoThreadListener(this,
-            EVENT_SNAPSHOT,
-            EVENT_ADDONS_CHANGE,
-            EVENT_ADDONS_UNINSTALLING,
-            EVENT_PREF_CHANGE,
-            EVENT_KEYWORD_SEARCH,
-            EVENT_SEARCH);
+        this.dispatcher.unregisterEventListener(EVENT_SNAPSHOT, this);
+        this.dispatcher.unregisterEventListener(EVENT_ADDONS_CHANGE, this);
+        this.dispatcher.unregisterEventListener(EVENT_ADDONS_UNINSTALLING, this);
+        this.dispatcher.unregisterEventListener(EVENT_PREF_CHANGE, this);
+        this.dispatcher.unregisterEventListener(EVENT_KEYWORD_SEARCH, this);
+        this.dispatcher.unregisterEventListener(EVENT_SEARCH, this);
     }
 
     public void onAppLocaleChanged(String to) {
@@ -295,8 +289,7 @@ public class BrowserHealthRecorder implements HealthRecorder, GeckoEventListener
             return -1;
         }
         return this.env = EnvironmentBuilder.registerCurrentEnvironment(this.storage,
-                                                                        this.profileCache,
-                                                                        this.configProvider);
+                                                                        this.profileCache);
     }
 
     private static final String getTimesPath(final String profilePath) {
@@ -466,10 +459,9 @@ public class BrowserHealthRecorder implements HealthRecorder, GeckoEventListener
 
                     try {
                         // Listen for add-ons and prefs changes.
-                        dispatcher.registerGeckoThreadListener(self,
-                            EVENT_ADDONS_UNINSTALLING,
-                            EVENT_ADDONS_CHANGE,
-                            EVENT_PREF_CHANGE);
+                        dispatcher.registerEventListener(EVENT_ADDONS_UNINSTALLING, self);
+                        dispatcher.registerEventListener(EVENT_ADDONS_CHANGE, self);
+                        dispatcher.registerEventListener(EVENT_PREF_CHANGE, self);
 
                         // Initialize each provider here.
                         initializeSessionsProvider();
@@ -525,17 +517,16 @@ public class BrowserHealthRecorder implements HealthRecorder, GeckoEventListener
 
         // Because the distribution lookup can take some time, do it at the end of
         // our background startup work, along with the Gecko snapshot fetch.
-        final Distribution distribution = Distribution.getInstance(context);
-        distribution.addOnDistributionReadyCallback(new Runnable() {
+        final GeckoEventListener self = this;
+        ThreadUtils.postToBackgroundThread(new Runnable() {
             @Override
             public void run() {
-                Log.d(LOG_TAG, "Running post-distribution task: health recorder.");
-                final DistributionDescriptor desc = distribution.getDescriptor();
+                final DistributionDescriptor desc = new Distribution(context).getDescriptor();
                 if (desc != null && desc.valid) {
                     profileCache.setDistributionString(desc.id, desc.version);
                 }
                 Log.d(LOG_TAG, "Requesting all add-ons and FHR prefs from Gecko.");
-                dispatcher.registerGeckoThreadListener(BrowserHealthRecorder.this, EVENT_SNAPSHOT);
+                dispatcher.registerEventListener(EVENT_SNAPSHOT, self);
                 GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("HealthReport:RequestSnapshot", null));
             }
         });
@@ -678,9 +669,8 @@ public class BrowserHealthRecorder implements HealthRecorder, GeckoEventListener
         // Do this here, rather than in a centralized registration spot, in
         // case the above throws and we wind up handling events that we can't
         // store.
-        this.dispatcher.registerGeckoThreadListener(this,
-            EVENT_KEYWORD_SEARCH,
-            EVENT_SEARCH);
+        this.dispatcher.registerEventListener(EVENT_KEYWORD_SEARCH, this);
+        this.dispatcher.registerEventListener(EVENT_SEARCH, this);
     }
 
     /**

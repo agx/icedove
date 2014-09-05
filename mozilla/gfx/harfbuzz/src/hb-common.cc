@@ -234,7 +234,6 @@ struct hb_language_item_t {
 
 static hb_language_item_t *langs;
 
-#ifdef HAVE_ATEXIT
 static inline
 void free_langs (void)
 {
@@ -245,7 +244,6 @@ void free_langs (void)
     langs = next;
   }
 }
-#endif
 
 static hb_language_item_t *
 lang_find_or_insert (const char *key)

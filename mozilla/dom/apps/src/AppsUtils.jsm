@@ -126,11 +126,6 @@ this.AppsUtils = {
     return null;
   },
 
-  getManifestFor: function getManifestFor(aManifestURL) {
-    debug("getManifestFor(" + aManifestURL + ")");
-    return DOMApplicationRegistry.getManifestFor(aManifestURL);
-  },
-
   getAppLocalIdByManifestURL: function getAppLocalIdByManifestURL(aApps, aManifestURL) {
     debug("getAppLocalIdByManifestURL " + aManifestURL);
     for (let id in aApps) {

@@ -154,15 +154,6 @@ public:
 
   /**
    * Parse aBuffer into a nsCSSValue |aValue|. Will return false
-   * if aBuffer is not a valid font family list.
-   */
-  bool ParseFontFamilyListString(const nsSubstring& aBuffer,
-                                 nsIURI*            aURL,
-                                 uint32_t           aLineNumber,
-                                 nsCSSValue&        aValue);
-
-  /**
-   * Parse aBuffer into a nsCSSValue |aValue|. Will return false
    * if aBuffer is not a valid CSS color specification.
    * One can use nsRuleNode::ComputeColor to compute an nscolor from
    * the returned nsCSSValue.

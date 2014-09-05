@@ -382,7 +382,7 @@ NS_IMPL_ISUPPORTS(nsMIMEInfoAndroid::SystemChooser, nsIHandlerApp)
 
 
 nsresult nsMIMEInfoAndroid::SystemChooser::GetName(nsAString & aName) {
-  aName.AssignLiteral(MOZ_UTF16("Android chooser"));
+  aName.Assign(NS_LITERAL_STRING("Android chooser"));
   return NS_OK;
 }
 
@@ -393,7 +393,7 @@ nsMIMEInfoAndroid::SystemChooser::SetName(const nsAString&) {
 
 nsresult
 nsMIMEInfoAndroid::SystemChooser::GetDetailedDescription(nsAString & aDesc) {
-  aDesc.AssignLiteral(MOZ_UTF16("Android's default handler application chooser"));
+  aDesc.Assign(NS_LITERAL_STRING("Android's default handler application chooser"));
   return NS_OK;
 }
 
@@ -401,13 +401,6 @@ nsresult
 nsMIMEInfoAndroid::SystemChooser::SetDetailedDescription(const nsAString&) {
   return NS_OK;
 }
-
-// XXX Workaround for bug 986975 to maintain the existing broken semantics
-template<>
-struct nsIHandlerApp::COMTypeInfo<nsMIMEInfoAndroid::SystemChooser, void> {
-  static const nsIID kIID;
-};
-const nsIID nsIHandlerApp::COMTypeInfo<nsMIMEInfoAndroid::SystemChooser, void>::kIID = NS_IHANDLERAPP_IID;
 
 nsresult
 nsMIMEInfoAndroid::SystemChooser::Equals(nsIHandlerApp *aHandlerApp, bool *aRetVal) {

@@ -37,6 +37,6 @@ add_task(function* test_main_process_crash() {
   let crashes = yield cm.getCrashes();
   Assert.equal(crashes.length, 1);
   let crash = crashes[0];
-  Assert.ok(crash.isOfType(cm.PROCESS_TYPE_MAIN, cm.CRASH_TYPE_CRASH));
+  Assert.ok(crash.isMainProcessCrash);
   Assert.equal(crash.id + ".dmp", basename, "ID recorded properly");
 });

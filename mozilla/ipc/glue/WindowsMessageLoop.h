@@ -18,8 +18,6 @@ namespace mozilla {
 namespace ipc {
 namespace windows {
 
-void InitUIThread();
-
 class DeferredMessage
 {
 public:

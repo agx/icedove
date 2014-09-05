@@ -18,6 +18,7 @@
 #include "webrtc/video_engine/include/vie_base.h"
 #include "webrtc/video_engine/include/vie_capture.h"
 #include "webrtc/video_engine/include/vie_codec.h"
+#include "webrtc/video_engine/include/vie_encryption.h"
 #include "webrtc/video_engine/include/vie_image_process.h"
 #include "webrtc/video_engine/include/vie_network.h"
 #include "webrtc/video_engine/include/vie_render.h"
@@ -42,6 +43,7 @@ public:
     webrtc::ViECodec* codec;
     webrtc::ViENetwork* network;
     webrtc::ViEImageProcess* image_process;
+    webrtc::ViEEncryption* encryption;
 
     int LastError() {
         return base->LastError();

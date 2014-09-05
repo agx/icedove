@@ -504,32 +504,35 @@ static btrc_callbacks_t sBtAvrcpCallbacks = {
  * It is required to register a2dp callbacks before a2dp media task
  * starts up.
  */
-// static
-void
-BluetoothA2dpManager::InitA2dpInterface()
+bool
+BluetoothA2dpManager::Init()
 {
   const bt_interface_t* btInf = GetBluetoothInterface();
-  NS_ENSURE_TRUE_VOID(btInf);
+  NS_ENSURE_TRUE(btInf, false);
 
   sBtA2dpInterface = (btav_interface_t *)btInf->
     get_profile_interface(BT_PROFILE_ADVANCED_AUDIO_ID);
-  NS_ENSURE_TRUE_VOID(sBtA2dpInterface);
+  NS_ENSURE_TRUE(sBtA2dpInterface, false);
 
   int ret = sBtA2dpInterface->init(&sBtA2dpCallbacks);
   if (ret != BT_STATUS_SUCCESS) {
     BT_LOGR("Warning: failed to init a2dp module");
+    return false;
   }
 
 #if ANDROID_VERSION > 17
   sBtAvrcpInterface = (btrc_interface_t *)btInf->
     get_profile_interface(BT_PROFILE_AV_RC_ID);
-  NS_ENSURE_TRUE_VOID(sBtAvrcpInterface);
+  NS_ENSURE_TRUE(sBtAvrcpInterface, false);
 
   ret = sBtAvrcpInterface->init(&sBtAvrcpCallbacks);
   if (ret != BT_STATUS_SUCCESS) {
     BT_LOGR("Warning: failed to init avrcp module");
+    return false;
   }
 #endif
+
+  return true;
 }
 
 BluetoothA2dpManager::~BluetoothA2dpManager()
@@ -599,26 +602,10 @@ BluetoothA2dpManager::Get()
 
   // Create a new instance, register, and return
   BluetoothA2dpManager* manager = new BluetoothA2dpManager();
+  NS_ENSURE_TRUE(manager->Init(), nullptr);
+
   sBluetoothA2dpManager = manager;
   return sBluetoothA2dpManager;
-}
-
-// static
-void
-BluetoothA2dpManager::DeinitA2dpInterface()
-{
-  MOZ_ASSERT(NS_IsMainThread());
-
-  if (sBtA2dpInterface) {
-    sBtA2dpInterface->cleanup();
-    sBtA2dpInterface = nullptr;
-  }
-#if ANDROID_VERSION > 17
-  if (sBtAvrcpInterface) {
-    sBtAvrcpInterface->cleanup();
-    sBtAvrcpInterface = nullptr;
-  }
-#endif
 }
 
 void
@@ -636,7 +623,7 @@ BluetoothA2dpManager::Connect(const nsAString& aDeviceAddress,
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!aDeviceAddress.IsEmpty());
-  MOZ_ASSERT(aController);
+  MOZ_ASSERT(aController && !mController);
 
   BluetoothService* bs = BluetoothService::Get();
   if (!bs || sInShutdown) {

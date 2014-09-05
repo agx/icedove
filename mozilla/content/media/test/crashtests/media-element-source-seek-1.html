@@ -6,15 +6,14 @@ audioElement.autoplay = true;
 audioElement.src = "sound.ogg";
 audioElement.onplaying =
   function() {
-    audioElement.onplaying = null;
-    setTimeout(
+    audioElement.onseeked =
       function() {
-        audioElement.onseeked =
+        setTimeout(
           function() {
             document.documentElement.removeAttribute("class");
-          };
-        audioElement.currentTime = 0;
-      }, 100);
+          }, 100);
+      };
+    audioElement.currentTime = 0;
   };
 
 var context = new window.AudioContext();

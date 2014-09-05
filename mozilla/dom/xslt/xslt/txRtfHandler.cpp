@@ -4,13 +4,10 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "txRtfHandler.h"
-#include "mozilla/Move.h"
 
-using mozilla::Move;
-
-txResultTreeFragment::txResultTreeFragment(nsAutoPtr<txResultBuffer>&& aBuffer)
+txResultTreeFragment::txResultTreeFragment(nsAutoPtr<txResultBuffer>& aBuffer)
     : txAExprResult(nullptr),
-      mBuffer(Move(aBuffer))
+      mBuffer(aBuffer)
 {
 }
 
@@ -61,7 +58,7 @@ nsresult txResultTreeFragment::flushToHandler(txAXMLEventHandler* aHandler)
 nsresult
 txRtfHandler::getAsRTF(txAExprResult** aResult)
 {
-    *aResult = new txResultTreeFragment(Move(mBuffer));
+    *aResult = new txResultTreeFragment(mBuffer);
     NS_ENSURE_TRUE(*aResult, NS_ERROR_OUT_OF_MEMORY);
 
     NS_ADDREF(*aResult);

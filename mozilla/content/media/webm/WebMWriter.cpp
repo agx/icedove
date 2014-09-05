@@ -14,11 +14,6 @@ WebMWriter::WebMWriter(uint32_t aTrackTypes) : ContainerWriter()
   mEbmlComposer = new EbmlComposer();
 }
 
-WebMWriter::~WebMWriter()
-{
-  // Out-of-line dtor so mEbmlComposer nsAutoPtr can delete a complete type.
-}
-
 nsresult
 WebMWriter::WriteEncodedTrack(const EncodedFrameContainer& aData,
                               uint32_t aFlags)

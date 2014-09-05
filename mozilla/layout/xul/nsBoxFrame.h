@@ -71,9 +71,9 @@ public:
 
   // ----- public methods -------
   
-  virtual void Init(nsIContent*       aContent,
-                    nsContainerFrame* aParent,
-                    nsIFrame*         aPrevInFlow) MOZ_OVERRIDE;
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        asPrevInFlow) MOZ_OVERRIDE;
 
  
   virtual nsresult AttributeChanged(int32_t         aNameSpaceID,
@@ -84,22 +84,25 @@ public:
   virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
 
-  virtual void Reflow(nsPresContext*           aPresContext,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
-                      nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*          aPresContext,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
-  virtual void SetInitialChildList(ChildListID  aListID,
-                                   nsFrameList& aChildList) MOZ_OVERRIDE;
-  virtual void AppendFrames(ChildListID     aListID,
-                            nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  virtual void InsertFrames(ChildListID     aListID,
-                            nsIFrame*       aPrevFrame,
-                            nsFrameList&    aFrameList) MOZ_OVERRIDE;
-  virtual void RemoveFrame(ChildListID     aListID,
-                           nsIFrame*       aOldFrame) MOZ_OVERRIDE;
+  virtual nsresult  AppendFrames(ChildListID     aListID,
+                                 nsFrameList&    aFrameList) MOZ_OVERRIDE;
 
-  virtual nsContainerFrame* GetContentInsertionFrame() MOZ_OVERRIDE;
+  virtual nsresult  InsertFrames(ChildListID     aListID,
+                                 nsIFrame*       aPrevFrame,
+                                 nsFrameList&    aFrameList) MOZ_OVERRIDE;
+
+  virtual nsresult  RemoveFrame(ChildListID     aListID,
+                                nsIFrame*       aOldFrame) MOZ_OVERRIDE;
+
+  virtual nsIFrame* GetContentInsertionFrame() MOZ_OVERRIDE;
+
+  virtual nsresult  SetInitialChildList(ChildListID  aListID,
+                                        nsFrameList& aChildList) MOZ_OVERRIDE;
 
   virtual void DidSetStyleContext(nsStyleContext* aOldStyleContext) MOZ_OVERRIDE;
 
@@ -126,9 +129,9 @@ public:
   virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
 
-  virtual void DidReflow(nsPresContext*           aPresContext,
-                         const nsHTMLReflowState* aReflowState,
-                         nsDidReflowStatus        aStatus) MOZ_OVERRIDE;
+  virtual nsresult DidReflow(nsPresContext*           aPresContext,
+                             const nsHTMLReflowState*  aReflowState,
+                             nsDidReflowStatus         aStatus) MOZ_OVERRIDE;
 
   virtual bool HonorPrintBackgroundSettings() MOZ_OVERRIDE;
 
@@ -205,7 +208,7 @@ protected:
 protected:
     void RegUnregAccessKey(bool aDoReg);
 
-  void CheckBoxOrder();
+  NS_HIDDEN_(void) CheckBoxOrder();
 
 private: 
 

@@ -99,7 +99,7 @@ public:
     DataLabelPtr loadDouble(const void* address, FPRegisterID dest)
     {
         DataLabelPtr label = moveWithPatch(ImmPtr(address), scratchRegister);
-        loadDouble(ImplicitAddress(scratchRegister), dest);
+        loadDouble(scratchRegister, dest);
         return label;
     }
 

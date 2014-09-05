@@ -12,7 +12,6 @@
 #include "nsCSSRuleProcessor.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/dom/Element.h"
-#include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/dom/MediaListBinding.h"
 #include "mozilla/css/NameSpaceRule.h"
 #include "mozilla/css/GroupRule.h"
@@ -56,7 +55,7 @@ class CSSRuleListImpl : public nsICSSRuleList
 public:
   CSSRuleListImpl(nsCSSStyleSheet *aStyleSheet);
 
-  virtual nsCSSStyleSheet* GetParentObject() MOZ_OVERRIDE;
+  NS_DECL_ISUPPORTS
 
   virtual nsIDOMCSSRule*
   IndexedGetter(uint32_t aIndex, bool& aFound) MOZ_OVERRIDE;
@@ -82,11 +81,20 @@ CSSRuleListImpl::~CSSRuleListImpl()
 {
 }
 
-nsCSSStyleSheet*
-CSSRuleListImpl::GetParentObject()
-{
-  return mStyleSheet;
-}
+DOMCI_DATA(CSSRuleList, CSSRuleListImpl)
+
+// QueryInterface implementation for CSSRuleList
+NS_INTERFACE_MAP_BEGIN(CSSRuleListImpl)
+  NS_INTERFACE_MAP_ENTRY(nsICSSRuleList)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMCSSRuleList)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CSSRuleList)
+NS_INTERFACE_MAP_END
+
+
+NS_IMPL_ADDREF(CSSRuleListImpl)
+NS_IMPL_RELEASE(CSSRuleListImpl)
+
 
 uint32_t
 CSSRuleListImpl::Length()
@@ -354,7 +362,7 @@ nsMediaQuery::AppendToString(nsAString& aString) const
   for (uint32_t i = 0, i_end = mExpressions.Length(); i < i_end; ++i) {
     if (i > 0 || !mTypeOmitted)
       aString.AppendLiteral(" and ");
-    aString.Append('(');
+    aString.AppendLiteral("(");
 
     const nsMediaExpression &expr = mExpressions[i];
     if (expr.mRange == nsMediaExpression::eMin) {
@@ -407,7 +415,7 @@ nsMediaQuery::AppendToString(nsAString& aString) const
                          "bad unit");
             array->Item(0).AppendToString(eCSSProperty_z_index, aString,
                                           nsCSSValue::eNormalized);
-            aString.Append('/');
+            aString.AppendLiteral("/");
             array->Item(1).AppendToString(eCSSProperty_z_index, aString,
                                           nsCSSValue::eNormalized);
           }
@@ -442,7 +450,7 @@ nsMediaQuery::AppendToString(nsAString& aString) const
       }
     }
 
-    aString.Append(')');
+    aString.AppendLiteral(")");
   }
 }
 
@@ -1121,6 +1129,8 @@ nsCSSStyleSheet::TraverseInner(nsCycleCollectionTraversalCallback &cb)
   }
 }
 
+DOMCI_DATA(CSSStyleSheet, nsCSSStyleSheet)
+
 // QueryInterface implementation for nsCSSStyleSheet
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCSSStyleSheet)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
@@ -1129,6 +1139,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCSSStyleSheet)
   NS_INTERFACE_MAP_ENTRY(nsIDOMCSSStyleSheet)
   NS_INTERFACE_MAP_ENTRY(nsICSSLoaderObserver)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIStyleSheet)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CSSStyleSheet)
   if (aIID.Equals(NS_GET_IID(nsCSSStyleSheet)))
     foundInterface = reinterpret_cast<nsISupports*>(this);
   else
@@ -1293,13 +1304,6 @@ nsCSSStyleSheet::SetComplete()
     mDocument->BeginUpdate(UPDATE_STYLE);
     mDocument->SetStyleSheetApplicableState(this, true);
     mDocument->EndUpdate(UPDATE_STYLE);
-  }
-
-  if (mOwningNode && !mDisabled &&
-      mOwningNode->HasFlag(NODE_IS_IN_SHADOW_TREE) &&
-      mOwningNode->IsContent()) {
-    ShadowRoot* shadowRoot = mOwningNode->AsContent()->GetContainingShadow();
-    shadowRoot->StyleSheetChanged();
   }
 }
 
@@ -1620,30 +1624,47 @@ nsCSSStyleSheet::DidDirty()
 nsresult
 nsCSSStyleSheet::SubjectSubsumesInnerPrincipal()
 {
-  nsCOMPtr<nsIPrincipal> subjectPrincipal = nsContentUtils::SubjectPrincipal();
-  if (subjectPrincipal->Subsumes(mInner->mPrincipal)) {
-    return NS_OK;
-  }
+  // Get the security manager and do the subsumes check
+  nsIScriptSecurityManager *securityManager =
+    nsContentUtils::GetSecurityManager();
 
-  // Allow access only if CORS mode is not NONE
-  if (GetCORSMode() == CORS_NONE) {
+  nsCOMPtr<nsIPrincipal> subjectPrincipal;
+  nsresult rv = securityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (!subjectPrincipal) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
-  // Now make sure we set the principal of our inner to the
-  // subjectPrincipal.  That means we need a unique inner, of
-  // course.  But we don't want to do that if we're not complete
-  // yet.  Luckily, all the callers of this method throw anyway if
-  // not complete, so we can just do that here too.
-  if (!mInner->mComplete) {
-    return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+  bool subsumes;
+  rv = subjectPrincipal->Subsumes(mInner->mPrincipal, &subsumes);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (subsumes) {
+    return NS_OK;
   }
+  
+  if (!nsContentUtils::IsCallerChrome()) {
+    // Allow access only if CORS mode is not NONE
+    if (GetCORSMode() == CORS_NONE) {
+      return NS_ERROR_DOM_SECURITY_ERR;
+    }
 
-  WillDirty();
+    // Now make sure we set the principal of our inner to the
+    // subjectPrincipal.  That means we need a unique inner, of
+    // course.  But we don't want to do that if we're not complete
+    // yet.  Luckily, all the callers of this method throw anyway if
+    // not complete, so we can just do that here too.
+    if (!mInner->mComplete) {
+      return NS_ERROR_DOM_INVALID_ACCESS_ERR;
+    }
 
-  mInner->mPrincipal = subjectPrincipal;
+    WillDirty();
 
-  DidDirty();
+    mInner->mPrincipal = subjectPrincipal;
+
+    DidDirty();
+  }
 
   return NS_OK;
 }
@@ -1769,7 +1790,7 @@ nsCSSStyleSheet::GetCssRules(nsIDOMCSSRuleList** aCssRules)
   return rv.ErrorCode();
 }
 
-nsICSSRuleList*
+nsIDOMCSSRuleList*
 nsCSSStyleSheet::GetCssRules(ErrorResult& aRv)
 {
   // No doing this on incomplete sheets!

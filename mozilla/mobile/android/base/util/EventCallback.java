@@ -1,7 +1,5 @@
 package org.mozilla.gecko.util;
 
-import org.mozilla.gecko.mozglue.RobocopTarget;
-
 /**
  * Callback interface for Gecko requests.
  *
@@ -9,7 +7,6 @@ import org.mozilla.gecko.mozglue.RobocopTarget;
  * must be called to prevent observer leaks. If more than one send* method is called, or if a
  * single send method is called multiple times, an {@link IllegalStateException} will be thrown.
  */
-@RobocopTarget
 public interface EventCallback {
     /**
      * Sends a success response with the given data.

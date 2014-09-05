@@ -38,7 +38,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMParser)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
 NS_INTERFACE_MAP_END
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(DOMParser, mOwner)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(DOMParser, mOwner)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMParser)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMParser)
@@ -388,10 +388,29 @@ DOMParser::Constructor(const GlobalObject& aOwner,
 DOMParser::Constructor(const GlobalObject& aOwner,
                        ErrorResult& rv)
 {
+  nsCOMPtr<nsIPrincipal> prin;
+  nsCOMPtr<nsIURI> documentURI;
+  nsCOMPtr<nsIURI> baseURI;
+  // No arguments; use the subject principal
+  nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
+  if (!secMan) {
+    rv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  rv = secMan->GetSubjectPrincipal(getter_AddRefs(prin));
+  if (rv.Failed()) {
+    return nullptr;
+  }
+
+  // We're called from JS; there better be a subject principal, really.
+  if (!prin) {
+    rv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
   nsRefPtr<DOMParser> domParser = new DOMParser(aOwner.GetAsSupports());
-  rv = domParser->InitInternal(aOwner.GetAsSupports(),
-                               nsContentUtils::SubjectPrincipal(),
-                               nullptr, nullptr);
+  rv = domParser->InitInternal(aOwner.GetAsSupports(), prin, documentURI, baseURI);
   if (rv.Failed()) {
     return nullptr;
   }
@@ -447,8 +466,24 @@ DOMParser::Init(nsIPrincipal* aPrincipal, nsIURI* aDocumentURI,
   nsIScriptContext* scriptContext = GetScriptContextFromJSContext(cx);
 
   nsCOMPtr<nsIPrincipal> principal = aPrincipal;
+
   if (!principal && !aDocumentURI) {
-    principal = nsContentUtils::SubjectPrincipal();
+    nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
+    if (!secMan) {
+      rv.Throw(NS_ERROR_UNEXPECTED);
+      return;
+    }
+
+    rv = secMan->GetSubjectPrincipal(getter_AddRefs(principal));
+    if (rv.Failed()) {
+      return;
+    }
+
+    // We're called from JS; there better be a subject principal, really.
+    if (!principal) {
+      rv.Throw(NS_ERROR_UNEXPECTED);
+      return;
+    }
   }
 
   rv = Init(principal, aDocumentURI, aBaseURI,

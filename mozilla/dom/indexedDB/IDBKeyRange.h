@@ -99,7 +99,7 @@ public:
         clause.Append(andStr + aKeyColumnName);
         clause.AppendLiteral(" >");
         if (!IsLowerOpen()) {
-          clause.Append('=');
+          clause.AppendLiteral("=");
         }
         clause.Append(spacecolon + lowerKey);
       }
@@ -109,7 +109,7 @@ public:
         clause.Append(andStr + aKeyColumnName);
         clause.AppendLiteral(" <");
         if (!IsUpperOpen()) {
-          clause.Append('=');
+          clause.AppendLiteral("=");
         }
         clause.Append(spacecolon + NS_LITERAL_CSTRING("upper_key"));
       }

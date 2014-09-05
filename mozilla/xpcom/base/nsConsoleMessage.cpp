@@ -1,5 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -14,27 +13,27 @@
 NS_IMPL_ISUPPORTS(nsConsoleMessage, nsIConsoleMessage)
 
 nsConsoleMessage::nsConsoleMessage()
-  : mTimeStamp(0)
-  , mMessage()
+    :  mTimeStamp(0),
+       mMessage()
 {
 }
 
-nsConsoleMessage::nsConsoleMessage(const char16_t* aMessage)
+nsConsoleMessage::nsConsoleMessage(const char16_t *message)
 {
   mTimeStamp = JS_Now() / 1000;
-  mMessage.Assign(aMessage);
+  mMessage.Assign(message);
 }
 
 NS_IMETHODIMP
-nsConsoleMessage::GetMessageMoz(char16_t** aResult)
+nsConsoleMessage::GetMessageMoz(char16_t **result)
 {
-  *aResult = ToNewUnicode(mMessage);
+  *result = ToNewUnicode(mMessage);
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsConsoleMessage::GetTimeStamp(int64_t* aTimeStamp)
+nsConsoleMessage::GetTimeStamp(int64_t *aTimeStamp)
 {
   *aTimeStamp = mTimeStamp;
   return NS_OK;

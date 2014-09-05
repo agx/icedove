@@ -27,6 +27,14 @@
 namespace mozilla {
 namespace dom {
 
+namespace telephony {
+
+enum {
+  kOutgoingPlaceholderCallIndex = UINT32_MAX
+};
+
+} // namespace telephony
+
 class CallsList;
 class Telephony;
 class TelephonyCall;

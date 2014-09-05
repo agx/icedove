@@ -92,10 +92,7 @@ this.MigratorPrototype = {
   /**
    * OVERRIDE IF AND ONLY IF the source supports multiple profiles.
    *
-   * Returns array of profile objects from which data may be imported. The object
-   * should have the following keys:
-   *   id - a unique string identifier for the profile
-   *   name - a pretty name to display to the user in the UI
+   * Returns array of profiles (by names) from which data may be imported.
    *
    * Only profiles from which data can be imported should be listed.  Otherwise
    * the behavior of the migration wizard isn't well-defined.
@@ -316,15 +313,14 @@ this.MigratorPrototype = {
 
   /*** PRIVATE STUFF - DO NOT OVERRIDE ***/
   _getMaybeCachedResources: function PMB__getMaybeCachedResources(aProfile) {
-    let profileKey = aProfile ? aProfile.id : "";
     if (this._resourcesByProfile) {
-      if (profileKey in this._resourcesByProfile)
-        return this._resourcesByProfile[profileKey];
+      if (aProfile in this._resourcesByProfile)
+        return this._resourcesByProfile[aProfile];
     }
     else {
       this._resourcesByProfile = { };
     }
-    return this._resourcesByProfile[profileKey] = this.getResources(aProfile);
+    return this._resourcesByProfile[aProfile] = this.getResources(aProfile);
   }
 };
 

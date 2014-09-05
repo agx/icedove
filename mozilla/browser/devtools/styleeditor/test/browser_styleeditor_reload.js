@@ -27,11 +27,7 @@ function test()
 function runTests()
 {
   let count = 0;
-  gUI.on("editor-selected", function editorSelected(event, editor) {
-    if (editor.styleSheet != gUI.editors[1].styleSheet) {
-      return;
-    }
-    gUI.off("editor-selected", editorSelected);
+  gUI.once("editor-selected", (event, editor) => {
     editor.getSourceEditor().then(() => {
       info("selected second editor, about to reload page");
       reloadPage();
@@ -45,7 +41,7 @@ function runTests()
       })
     });
   });
-  gUI.selectStyleSheet(gUI.editors[1].styleSheet, LINE_NO, COL_NO);
+  gUI.selectStyleSheet(gUI.editors[1].styleSheet.href, LINE_NO, COL_NO);
 }
 
 function testRemembered()

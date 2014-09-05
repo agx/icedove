@@ -8,7 +8,6 @@
 #include "gfxPlatform.h"
 #include "mozilla/gfx/2D.h"
 #include "imgIContainer.h"
-#include "nsContainerFrame.h"
 #include "nsIImageLoadingContent.h"
 #include "nsLayoutUtils.h"
 #include "nsRenderingContext.h"
@@ -73,9 +72,9 @@ public:
   virtual nsresult  AttributeChanged(int32_t         aNameSpaceID,
                                      nsIAtom*        aAttribute,
                                      int32_t         aModType) MOZ_OVERRIDE;
-  virtual void Init(nsIContent*       aContent,
-                    nsContainerFrame* aParent,
-                    nsIFrame*         aPrevInFlow) MOZ_OVERRIDE;
+  virtual void Init(nsIContent*      aContent,
+                    nsIFrame*        aParent,
+                    nsIFrame*        aPrevInFlow) MOZ_OVERRIDE;
   virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
 
   /**
@@ -140,9 +139,9 @@ nsSVGImageFrame::~nsSVGImageFrame()
 }
 
 void
-nsSVGImageFrame::Init(nsIContent*       aContent,
-                      nsContainerFrame* aParent,
-                      nsIFrame*         aPrevInFlow)
+nsSVGImageFrame::Init(nsIContent* aContent,
+                      nsIFrame* aParent,
+                      nsIFrame* aPrevInFlow)
 {
   NS_ASSERTION(aContent->IsSVG(nsGkAtoms::image),
                "Content is not an SVG image!");

@@ -18,14 +18,13 @@
 
 #define A_RAW_AUDIO_ASSEMBLER_H_
 
-#include "mozilla/Types.h"
 #include "ARTPAssembler.h"
 
 namespace android {
 
-struct MOZ_EXPORT AMessage;
-struct MOZ_EXPORT AString;
-struct MOZ_EXPORT MetaData;
+struct AMessage;
+struct AString;
+struct MetaData;
 
 struct ARawAudioAssembler : public ARTPAssembler {
     ARawAudioAssembler(

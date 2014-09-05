@@ -711,17 +711,23 @@ function HandleDeleteOrMoveMessageCompleted(folder)
 
 function MoveMessageInSearch(destFolder)
 {
-  if (destFolder._folder)
-  {
     try {
-      SetNextMessageAfterDelete();
-      gDBView.doCommandWithFolder(nsMsgViewCommandType.moveMessages,
-                                  destFolder._folder);
+        // get the msg folder we're moving messages into
+        // if the id (uri) is not set, use file-uri which is set for
+        // "File Here"
+        var destUri = destFolder.getAttribute('id');
+        if (destUri.length == 0) { 
+          destUri = destFolder.getAttribute('file-uri')
+        }
+
+        var destMsgFolder = GetMsgFolderFromUri(destUri).QueryInterface(Components.interfaces.nsIMsgFolder);
+
+        SetNextMessageAfterDelete();
+        gDBView.doCommandWithFolder(nsMsgViewCommandType.moveMessages, destMsgFolder);
     }
     catch (ex) {
-      dump("MoveMessageInSearch failed: " + ex + "\n");
-    }
-  }
+        dump("MsgMoveMessage failed: " + ex + "\n");
+    }   
 }
 
 function GoToFolder()

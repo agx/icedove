@@ -83,29 +83,27 @@ StyleEditorPanel.prototype = {
    *
    * @param  {string} event
    *         Type of event
-   * @param  {string} data
-   *         The parameters to customize the error message
+   * @param  {string} code
+   *         Error code of error to report
+   * @param  {string} message
+   *         Extra message to append to error message
    */
-  _showError: function(event, data) {
+  _showError: function(event, code, message) {
     if (!this._toolbox) {
       // could get an async error after we've been destroyed
       return;
     }
 
-    let errorMessage = _(data.key);
-    if (data.append) {
-      errorMessage += " " + data.append;
+    let errorMessage = _(code);
+    if (message) {
+      errorMessage += " " + message;
     }
 
     let notificationBox = this._toolbox.getNotificationBox();
     let notification = notificationBox.getNotificationWithValue("styleeditor-error");
-    let level = (data.level === "info") ?
-                notificationBox.PRIORITY_INFO_LOW :
-                notificationBox.PRIORITY_CRITICAL_LOW;
-
     if (!notification) {
-      notificationBox.appendNotification(errorMessage, "styleeditor-error",
-                                         "", level);
+      notificationBox.appendNotification(errorMessage,
+        "styleeditor-error", "", notificationBox.PRIORITY_CRITICAL_LOW);
     }
   },
 

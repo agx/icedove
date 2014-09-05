@@ -3,8 +3,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import print_function, unicode_literals
-
 import math, os, posixpath, shlex, shutil, subprocess, sys, traceback
 
 def add_libdir_to_path():
@@ -42,10 +40,8 @@ def main(argv):
                   help='show output from js shell')
     op.add_option('-x', '--exclude', dest='exclude', action='append',
                   help='exclude given test dir or path')
-    op.add_option('--slow', dest='run_slow', action='store_true',
-                  help='also run tests marked as slow')
     op.add_option('--no-slow', dest='run_slow', action='store_false',
-                  help='do not run tests marked as slow (the default)')
+                  help='do not run tests marked as slow')
     op.add_option('-t', '--timeout', dest='timeout',  type=float, default=150.0,
                   help='set test timeout in seconds')
     op.add_option('--no-progress', dest='hide_progress', action='store_true',
@@ -160,7 +156,7 @@ def main(argv):
         test_list = [ test for test in test_list if test not in set(exclude_list) ]
 
     if not test_list:
-        print("No tests found matching command line arguments.", file=sys.stderr)
+        print >> sys.stderr, "No tests found matching command line arguments."
         sys.exit(0)
 
     test_list = [jittests.Test.from_file(_, options) for _ in test_list]
@@ -220,9 +216,9 @@ def main(argv):
 
     if options.debug:
         if len(job_list) > 1:
-            print('Multiple tests match command line arguments, debugger can only run one')
+            print 'Multiple tests match command line arguments, debugger can only run one'
             for tc in job_list:
-                print('    %s' % tc.path)
+                print '    %s' % tc.path
             sys.exit(1)
 
         tc = job_list[0]
@@ -242,7 +238,7 @@ def main(argv):
             sys.exit(2)
     except OSError:
         if not os.path.exists(prefix[0]):
-            print("JS shell argument: file does not exist: '%s'" % prefix[0], file=sys.stderr)
+            print >> sys.stderr, "JS shell argument: file does not exist: '%s'" % prefix[0]
             sys.exit(1)
         else:
             raise

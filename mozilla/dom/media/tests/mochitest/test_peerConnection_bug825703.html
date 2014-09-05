@@ -4,7 +4,6 @@
   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
   <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
   <script type="application/javascript" src="head.js"></script>
-  <script type="application/javascript" src="pc.js"></script>
 </head>
 <body>
 <pre id="test">
@@ -39,7 +38,7 @@
 
   // This is a test of the iceServers parsing code + readable errors
 
-  runNetworkTest(function () {
+  runTest(function () {
     var pcs = null;
     var exception = null;
     var config;
@@ -87,7 +86,7 @@
     }
     pcs = null;
 
-    networkTestFinished();
+    SimpleTest.finish();
   });
 </script>
 </pre>

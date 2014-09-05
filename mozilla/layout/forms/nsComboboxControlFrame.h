@@ -46,9 +46,7 @@ class nsComboboxControlFrame : public nsBlockFrame,
                                public nsIStatefulFrame
 {
 public:
-  friend nsContainerFrame* NS_NewComboboxControlFrame(nsIPresShell* aPresShell,
-                                                      nsStyleContext* aContext,
-                                                      nsFrameState aFlags);
+  friend nsIFrame* NS_NewComboboxControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrameState aFlags);
   friend class nsComboboxDisplayFrame;
 
   nsComboboxControlFrame(nsStyleContext* aContext);
@@ -71,10 +69,10 @@ public:
 
   virtual nscoord GetPrefWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
 
-  virtual void Reflow(nsPresContext*           aCX,
-                      nsHTMLReflowMetrics&     aDesiredSize,
-                      const nsHTMLReflowState& aReflowState,
-                      nsReflowStatus&          aStatus) MOZ_OVERRIDE;
+  virtual nsresult Reflow(nsPresContext*           aCX,
+                          nsHTMLReflowMetrics&     aDesiredSize,
+                          const nsHTMLReflowState& aReflowState,
+                          nsReflowStatus&          aStatus) MOZ_OVERRIDE;
 
   virtual nsresult HandleEvent(nsPresContext* aPresContext,
                                mozilla::WidgetGUIEvent* aEvent,
@@ -105,12 +103,12 @@ public:
   virtual nsresult GetFrameName(nsAString& aResult) const MOZ_OVERRIDE;
 #endif
   virtual void DestroyFrom(nsIFrame* aDestructRoot) MOZ_OVERRIDE;
-  virtual void SetInitialChildList(ChildListID     aListID,
-                                   nsFrameList&    aChildList) MOZ_OVERRIDE;
+  virtual nsresult SetInitialChildList(ChildListID     aListID,
+                                       nsFrameList&    aChildList) MOZ_OVERRIDE;
   virtual const nsFrameList& GetChildList(ChildListID aListID) const MOZ_OVERRIDE;
   virtual void GetChildLists(nsTArray<ChildList>* aLists) const MOZ_OVERRIDE;
 
-  virtual nsContainerFrame* GetContentInsertionFrame() MOZ_OVERRIDE;
+  virtual nsIFrame* GetContentInsertionFrame() MOZ_OVERRIDE;
 
   // nsIFormControlFrame
   virtual nsresult SetFormProperty(nsIAtom* aName, const nsAString& aValue) MOZ_OVERRIDE;
@@ -203,8 +201,8 @@ protected:
   friend class nsResizeDropdownAtFinalPosition;
 
   // Utilities
-  void ReflowDropdown(nsPresContext*          aPresContext, 
-                      const nsHTMLReflowState& aReflowState);
+  nsresult ReflowDropdown(nsPresContext*          aPresContext, 
+                          const nsHTMLReflowState& aReflowState);
 
   enum DropDownPositionState {
     // can't show the dropdown at its current position
@@ -257,7 +255,7 @@ protected:
   nsFrameList              mPopupFrames;             // additional named child list
   nsCOMPtr<nsIContent>     mDisplayContent;          // Anonymous content used to display the current selection
   nsCOMPtr<nsIContent>     mButtonContent;           // Anonymous content for the button
-  nsContainerFrame*        mDisplayFrame;            // frame to display selection
+  nsIFrame*                mDisplayFrame;            // frame to display selection
   nsIFrame*                mButtonFrame;             // button frame
   nsIFrame*                mDropdownFrame;           // dropdown list frame
   nsIListControlFrame *    mListControlFrame;        // ListControl Interface for the dropdown frame

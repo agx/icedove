@@ -10,11 +10,12 @@
  * liability, trademark and document use rules apply.
  */
 
+[Pref="layout.css.supports-rule.enabled"]
 interface CSS {
-  [Throws]
+  [Throws, Pref="layout.css.supports-rule.enabled"]
   static boolean supports(DOMString property, DOMString value);
 
-  [Throws]
+  [Throws, Pref="layout.css.supports-rule.enabled"]
   static boolean supports(DOMString conditionText);
 };
 

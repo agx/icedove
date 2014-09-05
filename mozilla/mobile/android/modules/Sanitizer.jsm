@@ -146,8 +146,8 @@ Sanitizer.prototype = {
         catch (e) { }
 
         try {
-          var predictor = Cc["@mozilla.org/network/predictor;1"].getService(Ci.nsINetworkPredictor);
-          predictor.reset();
+          var seer = Cc["@mozilla.org/network/seer;1"].getService(Ci.nsINetworkSeer);
+          seer.reset();
         } catch (e) { }
       },
 

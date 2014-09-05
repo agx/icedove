@@ -56,15 +56,15 @@ public:
    *                   rules that any element, pseudo-element, or
    *                   anonymous box that this style context is for
    *                   matches.  See |nsRuleNode| and |nsIStyleRule|.
-   * @param aSkipFlexOrGridItemStyleFixup
+   * @param aSkipFlexItemStyleFixup
    *                 If set, this flag indicates that we should skip
    *                 the chunk of ApplyStyleFixups() that modifies flex
-   *                 and grid items' display values.
+   *                 items' display values.
    */
   nsStyleContext(nsStyleContext* aParent, nsIAtom* aPseudoTag,
                  nsCSSPseudoElements::Type aPseudoType,
                  nsRuleNode* aRuleNode,
-                 bool aSkipFlexOrGridItemStyleFixup);
+                 bool aSkipFlexItemStyleFixup);
   ~nsStyleContext();
 
   void* operator new(size_t sz, nsPresContext* aPresContext) CPP_THROW_NEW;
@@ -348,7 +348,7 @@ protected:
   void AddChild(nsStyleContext* aChild);
   void RemoveChild(nsStyleContext* aChild);
 
-  void ApplyStyleFixups(bool aSkipFlexOrGridItemStyleFixup);
+  void ApplyStyleFixups(bool aSkipFlexItemStyleFixup);
 
   void FreeAllocations(nsPresContext* aPresContext);
 
@@ -442,5 +442,5 @@ NS_NewStyleContext(nsStyleContext* aParentContext,
                    nsIAtom* aPseudoTag,
                    nsCSSPseudoElements::Type aPseudoType,
                    nsRuleNode* aRuleNode,
-                   bool aSkipFlexOrGridItemStyleFixup);
+                   bool aSkipFlexItemStyleFixup);
 #endif

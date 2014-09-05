@@ -67,9 +67,9 @@ nsTableCellFrame::GetNextCell() const
 }
 
 void
-nsTableCellFrame::Init(nsIContent*       aContent,
-                       nsContainerFrame* aParent,
-                       nsIFrame*         aPrevInFlow)
+nsTableCellFrame::Init(nsIContent*      aContent,
+                       nsIFrame*        aParent,
+                       nsIFrame*        aPrevInFlow)
 {
   // Let the base class do its initialization
   nsContainerFrame::Init(aContent, aParent, aPrevInFlow);
@@ -240,29 +240,31 @@ nsTableCellFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
   }
 }
 
-#ifdef DEBUG
-void
+
+nsresult
 nsTableCellFrame::AppendFrames(ChildListID     aListID,
                                nsFrameList&    aFrameList)
 {
-  MOZ_CRASH("unsupported operation");
+  NS_PRECONDITION(false, "unsupported operation");
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-void
+nsresult
 nsTableCellFrame::InsertFrames(ChildListID     aListID,
                                nsIFrame*       aPrevFrame,
                                nsFrameList&    aFrameList)
 {
-  MOZ_CRASH("unsupported operation");
+  NS_PRECONDITION(false, "unsupported operation");
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
 
-void
+nsresult
 nsTableCellFrame::RemoveFrame(ChildListID     aListID,
                               nsIFrame*       aOldFrame)
 {
-  MOZ_CRASH("unsupported operation");
+  NS_PRECONDITION(false, "unsupported operation");
+  return NS_ERROR_NOT_IMPLEMENTED;
 }
-#endif
 
 void nsTableCellFrame::SetColIndex(int32_t aColIndex)
 {
@@ -548,11 +550,6 @@ nsTableCellFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 int
 nsTableCellFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) const
 {
-  if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
-                     NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
-    return 0;
-  }
-
   int skip = 0;
   if (nullptr != GetPrevInFlow()) {
     skip |= LOGICAL_SIDE_B_START;
@@ -843,8 +840,7 @@ CalcUnpaginagedHeight(nsPresContext*        aPresContext,
   return computedHeight;
 }
 
-void
-nsTableCellFrame::Reflow(nsPresContext*           aPresContext,
+nsresult nsTableCellFrame::Reflow(nsPresContext*           aPresContext,
                                    nsHTMLReflowMetrics&     aDesiredSize,
                                    const nsHTMLReflowState& aReflowState,
                                    nsReflowStatus&          aStatus)
@@ -1013,6 +1009,7 @@ nsTableCellFrame::Reflow(nsPresContext*           aPresContext,
   SetDesiredSize(aDesiredSize);
 
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  return NS_OK;
 }
 
 /* ----- global methods ----- */
@@ -1045,7 +1042,7 @@ nsTableCellFrame::GetCellIndexes(int32_t &aRowIndex, int32_t &aColIndex)
   return  NS_OK;
 }
 
-nsTableCellFrame*
+nsIFrame*
 NS_NewTableCellFrame(nsIPresShell*   aPresShell,
                      nsStyleContext* aContext,
                      bool            aIsBorderCollapse)
@@ -1106,10 +1103,7 @@ nsBCTableCellFrame::GetUsedBorder() const
 }
 
 /* virtual */ bool
-nsBCTableCellFrame::GetBorderRadii(const nsSize& aFrameSize,
-                                   const nsSize& aBorderArea,
-                                   int aSkipSides,
-                                   nscoord aRadii[8]) const
+nsBCTableCellFrame::GetBorderRadii(nscoord aRadii[8]) const
 {
   NS_FOR_CSS_HALF_CORNERS(corner) {
     aRadii[corner] = 0;

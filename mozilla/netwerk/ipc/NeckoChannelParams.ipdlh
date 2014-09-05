@@ -40,7 +40,6 @@ struct HttpChannelOpenArgs
   uint16_t                    priority;
   uint8_t                     redirectionLimit;
   bool                        allowPipelining;
-  bool                        allowSTS;
   bool                        forceAllowThirdPartyCookie;
   bool                        resumeAt;
   uint64_t                    startPos;

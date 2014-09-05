@@ -100,15 +100,15 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsJSScriptTimeoutHandler)
           name.AppendLiteral(" [");
           name.Append(funIdName);
           delete[] funIdName;
-          name.Append(']');
+          name.AppendLiteral("]");
         }
       }
     } else {
       name.AppendLiteral(" [");
       name.Append(tmp->mFileName);
-      name.Append(':');
+      name.AppendLiteral(":");
       name.AppendInt(tmp->mLineNo);
-      name.Append(']');
+      name.AppendLiteral("]");
     }
     cb.DescribeRefCountedNode(tmp->mRefCnt.get(), name.get());
   }
@@ -419,7 +419,7 @@ NS_CreateJSTimeoutHandler(nsGlobalWindow *aWindow, Function& aFunction,
   FallibleTArray<JS::Heap<JS::Value> > args;
   if (!args.AppendElements(aArguments)) {
     aError.Throw(NS_ERROR_OUT_OF_MEMORY);
-    return nullptr;
+    return 0;
   }
 
   nsRefPtr<nsJSScriptTimeoutHandler> handler =

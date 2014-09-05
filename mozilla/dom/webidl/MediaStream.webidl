@@ -18,7 +18,6 @@ dictionary MediaStreamConstraints {
     (boolean or MediaTrackConstraints) video = false;
     boolean picture = false; // Mozilla legacy
     boolean fake = false;    // for testing
-    DOMString? peerIdentity = null;
 };
 
 interface MediaStream {

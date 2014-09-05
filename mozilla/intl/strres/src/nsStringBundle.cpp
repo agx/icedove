@@ -13,6 +13,7 @@
 #include "nsIMutableArray.h"
 #include "nsArrayEnumerator.h"
 #include "nscore.h"
+#include "nsHashtable.h"
 #include "nsMemory.h"
 #include "nsNetUtil.h"
 #include "nsIObserverService.h"

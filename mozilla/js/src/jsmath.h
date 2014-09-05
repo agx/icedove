@@ -42,26 +42,17 @@ typedef double (*UnaryFunType)(double);
 
 class MathCache
 {
-  public:
-    enum MathFuncId {
-        Zero,
-        Sin, Cos, Tan, Sinh, Cosh, Tanh, Asin, Acos, Atan, Asinh, Acosh, Atanh,
-        Sqrt, Log, Log10, Log2, Log1p, Exp, Expm1, Cbrt, Trunc, Sign
-    };
-
-  private:
     static const unsigned SizeLog2 = 12;
     static const unsigned Size = 1 << SizeLog2;
-    struct Entry { double in; MathFuncId id; double out; };
+    struct Entry { double in; UnaryFunType f; double out; };
     Entry table[Size];
 
   public:
     MathCache();
 
-    unsigned hash(double x, MathFuncId id) {
+    unsigned hash(double x) {
         union { double d; struct { uint32_t one, two; } s; } u = { x };
         uint32_t hash32 = u.s.one ^ u.s.two;
-        hash32 += uint32_t(id) << 8;
         uint16_t hash16 = uint16_t(hash32 ^ (hash32 >> 16));
         return (hash16 & (Size - 1)) ^ (hash16 >> (16 - SizeLog2));
     }
@@ -70,13 +61,13 @@ class MathCache
      * N.B. lookup uses double-equality. This is only safe if hash() maps +0
      * and -0 to different table entries, which is asserted in MathCache().
      */
-    double lookup(UnaryFunType f, double x, MathFuncId id) {
-        unsigned index = hash(x, id);
+    double lookup(UnaryFunType f, double x) {
+        unsigned index = hash(x);
         Entry &e = table[index];
-        if (e.in == x && e.id == id)
+        if (e.in == x && e.f == f)
             return e.out;
         e.in = x;
-        e.id = id;
+        e.f = f;
         return e.out = f(x);
     }
 
@@ -119,10 +110,7 @@ extern bool
 math_imul(JSContext *cx, unsigned argc, js::Value *vp);
 
 extern bool
-RoundFloat32(JSContext *cx, HandleValue v, float *out);
-
-extern bool
-RoundFloat32(JSContext *cx, HandleValue arg, MutableHandleValue res);
+RoundFloat32(JSContext *cx, Handle<Value> v, float *out);
 
 extern bool
 math_fround(JSContext *cx, unsigned argc, js::Value *vp);

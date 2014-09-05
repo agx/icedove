@@ -301,7 +301,7 @@ struct ClosureInfo
 
   // Anything conditionally freed in the destructor should be initialized to
   // nullptr here.
-  explicit ClosureInfo(JSRuntime* runtime)
+  ClosureInfo(JSRuntime* runtime)
     : rt(runtime)
     , errResult(nullptr)
     , closure(nullptr)

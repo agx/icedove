@@ -103,15 +103,6 @@ dictionary DataStoreTask {
   DOMString revisionId;
 
   DataStoreOperation operation;
-
-  // When |operation| is "clear" or "done", this must return null.
-  DataStoreKey? id;
+  DataStoreKey id;
   any data;
-};
-
-// For internal use.
-dictionary DataStoreRevisionData {
-  DOMString revisionId = "";
-  unsigned long objectId = 0;
-  DOMString operation = "";
 };

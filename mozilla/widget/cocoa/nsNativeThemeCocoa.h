@@ -129,7 +129,6 @@ protected:
   void GetScrollbarDrawInfo (HIThemeTrackDrawInfo& aTdi, nsIFrame *aFrame, 
                              const CGSize& aSize, bool aShouldGetButtonStates);
   nsIFrame* GetParentScrollbarFrame(nsIFrame *aFrame);
-  bool IsParentScrollbarRolledOver(nsIFrame* aFrame);
 
 private:
   NSButtonCell* mHelpButtonCell;

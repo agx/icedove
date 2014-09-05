@@ -74,12 +74,6 @@ class ExpandArgsMore(ExpandArgs):
         '''
         ar_extract = conf.AR_EXTRACT.split()
         newlist = []
-
-        def lookup(base, f):
-            for root, dirs, files in os.walk(base):
-                if f in files:
-                    return os.path.join(root, f)
-
         for arg in args:
             if os.path.splitext(arg)[1] == conf.LIB_SUFFIX:
                 if os.path.exists(arg + conf.LIBS_DESC_SUFFIX):
@@ -101,19 +95,8 @@ class ExpandArgsMore(ExpandArgs):
                     else:
                         subprocess.call(ar_extract + [os.path.abspath(arg)], cwd=tmp)
                     objs = []
-                    basedir = os.path.dirname(arg)
                     for root, dirs, files in os.walk(tmp):
-                        for f in files:
-                            if isObject(f):
-                                # If the file extracted from the library also
-                                # exists in the directory containing the
-                                # library, or one of its subdirectories, use
-                                # that instead.
-                                maybe_obj = lookup(os.path.join(basedir, os.path.relpath(root, tmp)), f)
-                                if maybe_obj:
-                                    objs.append(relativize(maybe_obj))
-                                else:
-                                    objs.append(relativize(os.path.join(root, f)))
+                        objs += [relativize(os.path.join(root, f)) for f in files if isObject(f)]
                     newlist += sorted(objs)
                     continue
             newlist += [arg]

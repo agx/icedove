@@ -114,6 +114,9 @@ public:
                       const nsACString& aGenericFamily,
                       nsTArray<nsString>& aListOfFonts);
 
+    virtual bool ResolveFontName(const nsAString& aFontName,
+                                   nsAString& aResolvedFontName);
+
     void UpdateFontList();
 
     void ClearPrefFonts() { mPrefFonts.Clear(); }
@@ -260,6 +263,9 @@ protected:
 
     // load the bad underline blacklist from pref.
     void LoadBadUnderlineList();
+
+    // explicitly set fixed-pitch flag for all faces
+    void SetFixedPitch(const nsAString& aFamilyName);
 
     void GenerateFontListKey(const nsAString& aKeyName, nsAString& aResult);
 

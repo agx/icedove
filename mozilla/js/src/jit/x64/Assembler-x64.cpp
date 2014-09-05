@@ -215,7 +215,7 @@ class RelocationIterator
     uint32_t extOffset_;
 
   public:
-    explicit RelocationIterator(CompactBufferReader &reader)
+    RelocationIterator(CompactBufferReader &reader)
       : reader_(reader)
     {
         tableStart_ = reader_.readFixedUint32_t();

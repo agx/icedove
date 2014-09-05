@@ -13,9 +13,8 @@
 #include "gfxXlibSurface.h"
 #include "gfx2DGlue.h"
 
-namespace mozilla {
-namespace layers {
-
+using namespace mozilla;
+using namespace mozilla::layers;
 using namespace mozilla::gfx;
 
 X11TextureHost::X11TextureHost(TextureFlags aFlags,
@@ -25,9 +24,9 @@ X11TextureHost::X11TextureHost(TextureFlags aFlags,
   nsRefPtr<gfxXlibSurface> surface = aDescriptor.OpenForeign();
   mSurface = surface.get();
 
-  if (!(aFlags & TextureFlags::DEALLOCATE_CLIENT)) {
-    mSurface->TakePixmap();
-  }
+  // The host always frees the pixmap.
+  MOZ_ASSERT(!(aFlags & TEXTURE_DEALLOCATE_CLIENT));
+  mSurface->TakePixmap();
 }
 
 bool
@@ -84,7 +83,4 @@ IntSize
 X11TextureHost::GetSize() const
 {
   return ToIntSize(mSurface->GetSize());
-}
-
-}
 }

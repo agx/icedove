@@ -14,7 +14,6 @@
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 #include "mozilla/dom/BluetoothAdapterBinding.h"
 #include "mozilla/dom/BluetoothDeviceEvent.h"
-#include "mozilla/dom/BluetoothDiscoveryStateChangedEvent.h"
 #include "mozilla/dom/BluetoothStatusChangedEvent.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/LazyIdleThread.h"
@@ -104,7 +103,7 @@ public:
     }
 
     AutoPushJSContext cx(sc->GetNativeContext());
-    JS::Rooted<JSObject*> JsDevices(cx);
+    JSObject* JsDevices = nullptr;
     rv = nsTArrayToJSArray(cx, devices, &JsDevices);
     if (!JsDevices) {
       BT_WARNING("Cannot create JS array!");
@@ -260,7 +259,7 @@ BluetoothAdapter::SetPropertyByValue(const BluetoothNamedValue& aValue)
 
     AutoPushJSContext cx(sc->GetNativeContext());
     JS::Rooted<JSObject*> uuids(cx);
-    if (NS_FAILED(nsTArrayToJSArray(cx, mUuids, &uuids))) {
+    if (NS_FAILED(nsTArrayToJSArray(cx, mUuids, uuids.address()))) {
       BT_WARNING("Cannot set JS UUIDs object!");
       return;
     }
@@ -276,7 +275,8 @@ BluetoothAdapter::SetPropertyByValue(const BluetoothNamedValue& aValue)
 
     AutoPushJSContext cx(sc->GetNativeContext());
     JS::Rooted<JSObject*> deviceAddresses(cx);
-    if (NS_FAILED(nsTArrayToJSArray(cx, mDeviceAddresses, &deviceAddresses))) {
+    if (NS_FAILED(nsTArrayToJSArray(cx, mDeviceAddresses,
+                                    deviceAddresses.address()))) {
       BT_WARNING("Cannot set JS Devices object!");
       return;
     }
@@ -330,16 +330,6 @@ BluetoothAdapter::Notify(const BluetoothSignal& aData)
     for (uint32_t i = 0, propCount = arr.Length(); i < propCount; ++i) {
       SetPropertyByValue(arr[i]);
     }
-  } else if (aData.name().EqualsLiteral(DISCOVERY_STATE_CHANGED_ID)) {
-    MOZ_ASSERT(v.type() == BluetoothValue::Tbool);
-
-    BluetoothDiscoveryStateChangedEventInit init;
-    init.mDiscovering = v.get_bool();
-
-    nsRefPtr<BluetoothDiscoveryStateChangedEvent> event =
-      BluetoothDiscoveryStateChangedEvent::Constructor(
-        this, NS_LITERAL_STRING(DISCOVERY_STATE_CHANGED_ID), init);
-    DispatchTrustedEvent(event);
   } else if (aData.name().EqualsLiteral(PAIRED_STATUS_CHANGED_ID) ||
              aData.name().EqualsLiteral(HFP_STATUS_CHANGED_ID) ||
              aData.name().EqualsLiteral(SCO_STATUS_CHANGED_ID) ||

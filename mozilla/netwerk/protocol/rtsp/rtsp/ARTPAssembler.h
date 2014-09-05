@@ -18,13 +18,12 @@
 
 #define A_RTP_ASSEMBLER_H_
 
-#include "mozilla/Types.h"
 #include <media/stagefright/foundation/ABase.h>
 #include <utils/RefBase.h>
 
 namespace android {
 
-struct MOZ_EXPORT ABuffer;
+struct ABuffer;
 struct ARTPSource;
 
 struct ARTPAssembler : public RefBase {

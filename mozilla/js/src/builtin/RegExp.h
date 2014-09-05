@@ -19,8 +19,6 @@ js_InitRegExpClass(JSContext *cx, js::HandleObject obj);
 
 namespace js {
 
-class MatchConduit;
-
 // Whether RegExp statics should be updated with the input and results of a
 // regular expression execution.
 enum RegExpStaticsUpdate { UpdateRegExpStatics, DontUpdateRegExpStatics };

@@ -203,14 +203,4 @@ SVGAnimatedPathSegList::SMILAnimatedPathSegList::ClearAnimValue()
   }
 }
 
-size_t
-SVGAnimatedPathSegList::SizeOfExcludingThis(MallocSizeOf aMallocSizeOf) const
-{
-  size_t total = mBaseVal.SizeOfExcludingThis(aMallocSizeOf);
-  if (mAnimVal) {
-    mAnimVal->SizeOfIncludingThis(aMallocSizeOf);
-  }
-  return total;
-}
-
 } // namespace mozilla

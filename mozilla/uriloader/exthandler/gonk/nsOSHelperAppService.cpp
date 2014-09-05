@@ -22,7 +22,7 @@ public:
     nsGonkMIMEInfo(const nsACString& aMIMEType) : nsMIMEInfoImpl(aMIMEType) { }
 
 protected:
-    virtual nsresult LoadUriInternal(nsIURI *aURI) {
+    virtual NS_HIDDEN_(nsresult) LoadUriInternal(nsIURI *aURI) {
         return NS_ERROR_NOT_IMPLEMENTED;
     }
 };

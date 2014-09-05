@@ -238,10 +238,6 @@ function installCache(app) {
       }
 
       let itemType = nsIApplicationCache.ITEM_EXPLICIT;
-      if (entries.fallbacks.indexOf(url) > -1) {
-        debug('add fallback: ' + url + '\n');
-        itemType |= nsIApplicationCache.ITEM_FALLBACK;
-      }
       storeCache(applicationCache, url, file, itemType);
     });
 
@@ -251,6 +247,12 @@ function installCache(app) {
       array.appendElement(new Namespace(type, spec, data), false);
     });
     applicationCache.addNamespaces(array);
+
+    entries.fallbacks.forEach(function processFallback(url) {
+      debug('add fallback: ' + url + '\n');
+      let type = nsIApplicationCache.ITEM_FALLBACK;
+      applicationCache.markEntry(url, type);
+    });
 
     storeCache(applicationCache, appcacheURL, cacheManifest,
                nsIApplicationCache.ITEM_MANIFEST);

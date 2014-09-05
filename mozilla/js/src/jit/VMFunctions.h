@@ -242,7 +242,7 @@ struct VMFunction
 // A collection of VM functions for each execution mode.
 struct VMFunctionsModal
 {
-    explicit VMFunctionsModal(const VMFunction &info) {
+    VMFunctionsModal(const VMFunction &info) {
         add(info);
     }
     VMFunctionsModal(const VMFunction &info1, const VMFunction &info2) {
@@ -445,7 +445,7 @@ template <> struct MatchContext<ThreadSafeContext *> {
     static inline uint64_t argumentRootTypes() {                                        \
         return ForEachNb(COMPUTE_ARG_ROOT, SEP_OR, NOTHING);                            \
     }                                                                                   \
-    explicit FunctionInfo(pf fun, PopValues extraValuesToPop = PopValues(0))            \
+    FunctionInfo(pf fun, PopValues extraValuesToPop = PopValues(0))                     \
         : VMFunction(JS_FUNC_TO_DATA_PTR(void *, fun), explicitArgs(),                  \
                      argumentProperties(), argumentPassedInFloatRegs(),                 \
                      argumentRootTypes(), outParam(), outParamRootType(),               \
@@ -486,7 +486,7 @@ struct FunctionInfo<R (*)(Context)> : public VMFunction {
     static inline uint64_t argumentRootTypes() {
         return 0;
     }
-    explicit FunctionInfo(pf fun)
+    FunctionInfo(pf fun)
       : VMFunction(JS_FUNC_TO_DATA_PTR(void *, fun), explicitArgs(),
                    argumentProperties(), argumentPassedInFloatRegs(),
                    argumentRootTypes(), outParam(), outParamRootType(),
@@ -556,8 +556,6 @@ class AutoDetectInvalidation
     Value *rval_;
     bool disabled_;
 
-    void setReturnOverride();
-
   public:
     AutoDetectInvalidation(JSContext *cx, Value *rval, IonScript *ionScript = nullptr);
 
@@ -568,7 +566,7 @@ class AutoDetectInvalidation
 
     ~AutoDetectInvalidation() {
         if (!disabled_ && ionScript_->invalidated())
-            setReturnOverride();
+            cx_->runtime()->setIonReturnOverride(*rval_);
     }
 };
 
@@ -619,9 +617,9 @@ bool SetProperty(JSContext *cx, HandleObject obj, HandlePropertyName name, Handl
 
 bool InterruptCheck(JSContext *cx);
 
-void *MallocWrapper(JSRuntime *rt, size_t nbytes);
-JSObject *NewCallObject(JSContext *cx, HandleShape shape, HandleTypeObject type);
-JSObject *NewSingletonCallObject(JSContext *cx, HandleShape shape);
+HeapSlot *NewSlots(JSRuntime *rt, unsigned nslots);
+JSObject *NewCallObject(JSContext *cx, HandleShape shape, HandleTypeObject type, HeapSlot *slots);
+JSObject *NewSingletonCallObject(JSContext *cx, HandleShape shape, HeapSlot *slots);
 JSObject *NewStringObject(JSContext *cx, HandleString str);
 
 bool SPSEnter(JSContext *cx, HandleScript script);
@@ -689,8 +687,6 @@ void AssertValidObjectPtr(JSContext *cx, JSObject *obj);
 void AssertValidStringPtr(JSContext *cx, JSString *str);
 void AssertValidValue(JSContext *cx, Value *v);
 #endif
-
-JSObject *TypedObjectProto(JSObject *obj);
 
 } // namespace jit
 } // namespace js

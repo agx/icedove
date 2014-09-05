@@ -1,4 +1,3 @@
-/* -*- Mode: js; tab-width: 2; indent-tabs-mode: nil; js-indent-level: 2; fill-column: 80 -*- */
 /*
  * Copyright 2013 Mozilla Foundation and contributors
  * Licensed under the New BSD license. See LICENSE.md or:
@@ -325,7 +324,7 @@
 
       var ltk = lastToken.type.keyword;
       if (ltk != null) {
-        if (ltk == "break" || ltk == "continue" || ltk == "return") {
+        if (ltk == "break" || ltk == "continue") {
           return token.type.type != ";";
         }
         if (ltk != "debugger"
@@ -341,8 +340,7 @@
       if (ltt == ")" && (token.type.type != ")"
                          && token.type.type != "]"
                          && token.type.type != ";"
-                         && token.type.type != ","
-                         && token.type.type != ".")) {
+                         && token.type.type != ",")) {
         return true;
       }
     }
@@ -559,7 +557,6 @@
       || ttt == "["
       || ttt == "?"
       || ttk == "do"
-      || ttk == "switch"
       || ttk == "case"
       || ttk == "default";
   }
@@ -592,9 +589,7 @@
    * level.
    */
   function incrementsIndent(token) {
-    return token.type.type == "{"
-      || token.isArrayLiteral
-      || token.type.keyword == "switch";
+    return token.type.type == "{" || token.isArrayLiteral;
   }
 
   /**
@@ -729,7 +724,6 @@
     //   - "[\n"
     //   - "do"
     //   - "?"
-    //   - "switch"
     //   - "case"
     //   - "default"
     //
@@ -762,8 +756,7 @@
             block: block,
             text: text,
             line: startLoc.line,
-            column: startLoc.column,
-            trailing: lastToken.endLoc.line == startLoc.line
+            column: startLoc.column
           });
         } else {
           addComment(write, indentLevel, options, block, text, startLoc.line,
@@ -798,26 +791,15 @@
 
       if (decrementsIndent(ttt, stack)) {
         indentLevel--;
-        if (ttt == "}"
-            && stack.length > 1
-            && stack[stack.length - 2] == "switch") {
-          indentLevel--;
-        }
       }
 
       prependWhiteSpace(token, lastToken, addedNewline, write, options,
                         indentLevel, stack);
       addToken(token, write, options);
-      if (commentQueue.length == 0 || !commentQueue[0].trailing) {
-        addedNewline = appendNewline(token, write, stack);
-      }
+      addedNewline = appendNewline(token, write, stack);
 
       if (shouldStackPop(token, stack)) {
         stack.pop();
-        if (token == "}" && stack.length
-            && stack[stack.length - 1] == "switch") {
-          stack.pop();
-        }
       }
 
       if (incrementsIndent(token)) {
@@ -843,17 +825,13 @@
 
       // Apply all the comments that have been queued up.
       if (commentQueue.length) {
-        if (!addedNewline && !commentQueue[0].trailing) {
+        if (!addedNewline) {
           write("\n");
-        }
-        if (commentQueue[0].trailing) {
-          write(" ");
         }
         for (var i = 0, n = commentQueue.length; i < n; i++) {
           var comment = commentQueue[i];
-          var commentIndentLevel = commentQueue[i].trailing ? 0 : indentLevel;
-          addComment(write, commentIndentLevel, options, comment.block,
-                     comment.text, comment.line, comment.column);
+          addComment(write, indentLevel, options, comment.block, comment.text,
+                     comment.line, comment.column);
         }
         addedNewline = true;
         commentQueue.splice(0, commentQueue.length);

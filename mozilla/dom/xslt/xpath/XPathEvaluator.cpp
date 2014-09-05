@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/XPathEvaluator.h"
-#include "mozilla/Move.h"
 #include "nsCOMPtr.h"
 #include "nsIAtom.h"
 #include "nsXPathExpression.h"
@@ -130,7 +129,7 @@ XPathEvaluator::CreateExpression(const nsAString & aExpression,
 
     nsCOMPtr<nsIDOMDocument> document = do_QueryReferent(mDocument);
 
-    *aResult = new nsXPathExpression(Move(expression), mRecycler, document);
+    *aResult = new nsXPathExpression(expression, mRecycler, document);
     if (!*aResult) {
         return NS_ERROR_OUT_OF_MEMORY;
     }

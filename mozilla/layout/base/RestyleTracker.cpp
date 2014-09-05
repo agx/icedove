@@ -40,7 +40,7 @@ CollectLaterSiblings(nsISupports* aElement,
   // haven't, for example, already been restyled).
   // It's important to not mess with the flags on entries not in our
   // document.
-  if (element->GetCrossShadowCurrentDoc() == collector->tracker->Document() &&
+  if (element->GetCurrentDoc() == collector->tracker->Document() &&
       element->HasFlag(collector->tracker->RestyleBit()) &&
       (aData.mRestyleHint & eRestyle_LaterSiblings)) {
     collector->elements->AppendElement(element);
@@ -67,7 +67,7 @@ CollectRestyles(nsISupports* aElement,
   // haven't, for example, already been restyled).
   // It's important to not mess with the flags on entries not in our
   // document.
-  if (element->GetCrossShadowCurrentDoc() != collector->tracker->Document() ||
+  if (element->GetCurrentDoc() != collector->tracker->Document() ||
       !element->HasFlag(collector->tracker->RestyleBit())) {
     return PL_DHASH_NEXT;
   }
@@ -113,7 +113,7 @@ RestyleTracker::ProcessOneRestyle(Element* aElement,
   NS_PRECONDITION((aRestyleHint & eRestyle_LaterSiblings) == 0,
                   "Someone should have handled this before calling us");
   NS_PRECONDITION(Document(), "Must have a document");
-  NS_PRECONDITION(aElement->GetCrossShadowCurrentDoc() == Document(),
+  NS_PRECONDITION(aElement->GetCurrentDoc() == Document(),
                   "Element has unexpected document");
 
   nsIFrame* primaryFrame = aElement->GetPrimaryFrame();
@@ -134,8 +134,7 @@ RestyleTracker::ProcessOneRestyle(Element* aElement,
 void
 RestyleTracker::DoProcessRestyles()
 {
-  PROFILER_LABEL("RestyleTracker", "ProcessRestyles",
-    js::ProfileEntry::Category::CSS);
+  PROFILER_LABEL("CSS", "ProcessRestyles");
 
   mRestyleManager->BeginProcessingRestyles();
 
@@ -192,7 +191,7 @@ RestyleTracker::DoProcessRestyles()
       // Do the document check before calling GetRestyleData, since we
       // don't want to do the sibling-processing GetRestyleData does if
       // the node is no longer relevant.
-      if (element->GetCrossShadowCurrentDoc() != Document()) {
+      if (element->GetCurrentDoc() != Document()) {
         // Content node has been removed from our document; nothing else
         // to do here
         continue;
@@ -243,7 +242,7 @@ RestyleTracker::DoProcessRestyles()
 bool
 RestyleTracker::GetRestyleData(Element* aElement, RestyleData* aData)
 {
-  NS_PRECONDITION(aElement->GetCrossShadowCurrentDoc() == Document(),
+  NS_PRECONDITION(aElement->GetCurrentDoc() == Document(),
                   "Unexpected document; this will lead to incorrect behavior!");
 
   if (!aElement->HasFlag(RestyleBit())) {

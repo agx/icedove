@@ -19,7 +19,6 @@
 #include "nsISimpleEnumerator.h"
 #include "nsIDirectoryEnumerator.h"
 #include "nsIObserverService.h"
-#include "nsICacheStorageVisitor.h"
 #include "nsISizeOf.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/DebugOnly.h"
@@ -29,7 +28,6 @@
 #include "private/pprio.h"
 #include "mozilla/VisualEventTracer.h"
 #include "mozilla/Preferences.h"
-#include "nsNetUtil.h"
 
 // include files for ftruncate (or equivalent)
 #if defined(XP_UNIX)
@@ -114,7 +112,6 @@ CacheFileHandle::CacheFileHandle(const SHA1Sum::Hash *aHash, bool aPriority)
   , mIsDoomed(false)
   , mPriority(aPriority)
   , mClosed(false)
-  , mSpecialFile(false)
   , mInvalid(false)
   , mFileExists(false)
   , mFileSize(-1)
@@ -129,7 +126,6 @@ CacheFileHandle::CacheFileHandle(const nsACString &aKey, bool aPriority)
   , mIsDoomed(false)
   , mPriority(aPriority)
   , mClosed(false)
-  , mSpecialFile(true)
   , mInvalid(false)
   , mFileExists(false)
   , mFileSize(-1)
@@ -147,7 +143,7 @@ CacheFileHandle::~CacheFileHandle()
   MOZ_ASSERT(CacheFileIOManager::IsOnIOThreadOrCeased());
 
   nsRefPtr<CacheFileIOManager> ioMan = CacheFileIOManager::gInstance;
-  if (!IsClosed() && ioMan) {
+  if (ioMan) {
     ioMan->CloseHandleInternal(this);
   }
 }
@@ -160,17 +156,19 @@ CacheFileHandle::Log()
     mFile->GetNativeLeafName(leafName);
   }
 
-  if (mSpecialFile) {
-    LOG(("CacheFileHandle::Log() - special file [this=%p, isDoomed=%d, "
-         "priority=%d, closed=%d, invalid=%d, fileExists=%d, fileSize=%lld, "
-         "leafName=%s, key=%s]", this, mIsDoomed, mPriority, mClosed, mInvalid,
+  if (!mHash) {
+    // special file
+    LOG(("CacheFileHandle::Log() [this=%p, hash=nullptr, isDoomed=%d, "
+         "priority=%d, closed=%d, invalid=%d, "
+         "fileExists=%d, fileSize=%lld, leafName=%s, key=%s]",
+         this, mIsDoomed, mPriority, mClosed, mInvalid,
          mFileExists, mFileSize, leafName.get(), mKey.get()));
   } else {
-    LOG(("CacheFileHandle::Log() - entry file [this=%p, hash=%08x%08x%08x%08x"
-         "%08x, isDoomed=%d, priority=%d, closed=%d, invalid=%d, fileExists=%d,"
-         " fileSize=%lld, leafName=%s, key=%s]", this, LOGSHA1(mHash),
-         mIsDoomed, mPriority, mClosed, mInvalid, mFileExists, mFileSize,
-         leafName.get(), mKey.get()));
+    LOG(("CacheFileHandle::Log() [this=%p, hash=%08x%08x%08x%08x%08x, "
+         "isDoomed=%d, priority=%d, closed=%d, invalid=%d, "
+         "fileExists=%d, fileSize=%lld, leafName=%s, key=%s]",
+         this, LOGSHA1(mHash), mIsDoomed, mPriority, mClosed,
+         mInvalid, mFileExists, mFileSize, leafName.get(), mKey.get()));
   }
 }
 
@@ -869,7 +867,7 @@ public:
       if (!mIOMan) {
         mRV = NS_ERROR_NOT_INITIALIZED;
       } else {
-        mRV = mIOMan->DoomFileByKeyInternal(&mHash, false);
+        mRV = mIOMan->DoomFileByKeyInternal(&mHash);
         mIOMan = nullptr;
       }
 
@@ -1245,7 +1243,6 @@ CacheFileIOManager::Shutdown()
   CacheIndex::Shutdown();
 
   if (CacheObserver::ClearCacheOnShutdown()) {
-    Telemetry::AutoTimer<Telemetry::NETWORK_DISK_CACHE2_SHUTDOWN_CLEAR_PRIVATE> totalTimer;
     gInstance->SyncRemoveAllCacheFiles();
   }
 
@@ -1298,13 +1295,6 @@ CacheFileIOManager::ShutdownInternal()
     } else {
       mHandles.RemoveHandle(h);
     }
-
-    // Pointer to the hash is no longer valid once the last handle with the
-    // given hash is released. Null out the pointer so that we crash if there
-    // is a bug in this code and we dereference the pointer after this point.
-    if (!h->IsSpecialFile()) {
-      h->mHash = nullptr;
-    }
   }
 
   // Assert the table is empty. When we are here, no new handles can be added
@@ -1342,33 +1332,10 @@ CacheFileIOManager::OnProfile()
   CacheObserver::ParentDirOverride(getter_AddRefs(directory));
 
 #if defined(MOZ_WIDGET_ANDROID)
-  nsCOMPtr<nsIFile> profilelessDirectory;
   char* cachePath = getenv("CACHE_DIRECTORY");
   if (!directory && cachePath && *cachePath) {
     rv = NS_NewNativeLocalFile(nsDependentCString(cachePath),
                                true, getter_AddRefs(directory));
-    if (NS_SUCCEEDED(rv)) {
-      // Save this directory as the profileless path.
-      rv = directory->Clone(getter_AddRefs(profilelessDirectory));
-      NS_ENSURE_SUCCESS(rv, rv);
-
-      // Add profile leaf name to the directory name to distinguish
-      // multiple profiles Fennec supports.
-      nsCOMPtr<nsIFile> profD;
-      rv = NS_GetSpecialDirectory(NS_APP_USER_PROFILE_50_DIR,
-                                  getter_AddRefs(profD));
-
-      nsAutoCString leafName;
-      if (NS_SUCCEEDED(rv)) {
-        rv = profD->GetNativeLeafName(leafName);
-      }
-      if (NS_SUCCEEDED(rv)) {
-        rv = directory->AppendNative(leafName);
-      }
-      if (NS_FAILED(rv)) {
-        directory = nullptr;
-      }
-    }
   }
 #endif
 
@@ -1389,15 +1356,6 @@ CacheFileIOManager::OnProfile()
 
   // All functions return a clone.
   ioMan->mCacheDirectory.swap(directory);
-
-#if defined(MOZ_WIDGET_ANDROID)
-  if (profilelessDirectory) {
-    rv = profilelessDirectory->Append(NS_LITERAL_STRING("cache2"));
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  ioMan->mCacheProfilelessDirectory.swap(profilelessDirectory);
-#endif
 
   if (ioMan->mCacheDirectory) {
     CacheIndex::Init(ioMan->mCacheDirectory);
@@ -1825,9 +1783,6 @@ nsresult
 CacheFileIOManager::CloseHandleInternal(CacheFileHandle *aHandle)
 {
   LOG(("CacheFileIOManager::CloseHandleInternal() [handle=%p]", aHandle));
-
-  MOZ_ASSERT(!aHandle->IsClosed());
-
   aHandle->Log();
 
   MOZ_ASSERT(CacheFileIOManager::IsOnIOThreadOrCeased());
@@ -2122,11 +2077,10 @@ CacheFileIOManager::DoomFileByKey(const nsACString &aKey,
 }
 
 nsresult
-CacheFileIOManager::DoomFileByKeyInternal(const SHA1Sum::Hash *aHash,
-                                          bool aFailIfAlreadyDoomed)
+CacheFileIOManager::DoomFileByKeyInternal(const SHA1Sum::Hash *aHash)
 {
-  LOG(("CacheFileIOManager::DoomFileByKeyInternal() [hash=%08x%08x%08x%08x%08x,"
-        " failIfAlreadyDoomed=%d]", LOGSHA1(aHash), aFailIfAlreadyDoomed));
+  LOG(("CacheFileIOManager::DoomFileByKeyInternal() [hash=%08x%08x%08x%08x%08x]"
+       , LOGSHA1(aHash)));
 
   MOZ_ASSERT(CacheFileIOManager::IsOnIOThreadOrCeased());
 
@@ -2148,7 +2102,7 @@ CacheFileIOManager::DoomFileByKeyInternal(const SHA1Sum::Hash *aHash,
     handle->Log();
 
     if (handle->IsDoomed()) {
-      return aFailIfAlreadyDoomed ? NS_ERROR_NOT_AVAILABLE : NS_OK;
+      return NS_OK;
     }
 
     return DoomFileInternal(handle);
@@ -2254,110 +2208,8 @@ void CacheFileIOManager::GetCacheDirectory(nsIFile** result)
     return;
   }
 
-  ioMan->mCacheDirectory->Clone(result);
-}
-
-#if defined(MOZ_WIDGET_ANDROID)
-
-// static
-void CacheFileIOManager::GetProfilelessCacheDirectory(nsIFile** result)
-{
-  *result = nullptr;
-
-  nsRefPtr<CacheFileIOManager> ioMan = gInstance;
-  if (!ioMan || !ioMan->mCacheProfilelessDirectory) {
-    return;
-  }
-
-  ioMan->mCacheProfilelessDirectory->Clone(result);
-}
-
-#endif
-
-// static
-nsresult
-CacheFileIOManager::GetEntryInfo(const SHA1Sum::Hash *aHash,
-                                 CacheStorageService::EntryInfoCallback *aCallback)
-{
-  MOZ_ASSERT(CacheFileIOManager::IsOnIOThread());
-
-  nsresult rv;
-
-  nsRefPtr<CacheFileIOManager> ioMan = gInstance;
-  if (!ioMan) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  nsAutoCString enhanceId;
-  nsAutoCString uriSpec;
-
-  nsRefPtr<CacheFileHandle> handle;
-  ioMan->mHandles.GetHandle(aHash, false, getter_AddRefs(handle));
-  if (handle) {
-    nsRefPtr<nsILoadContextInfo> info =
-      CacheFileUtils::ParseKey(handle->Key(), &enhanceId, &uriSpec);
-
-    MOZ_ASSERT(info);
-    if (!info) {
-      return NS_OK; // ignore
-    }
-
-    nsRefPtr<CacheStorageService> service = CacheStorageService::Self();
-    if (!service) {
-      return NS_ERROR_NOT_INITIALIZED;
-    }
-
-    // Invokes OnCacheEntryInfo when an existing entry is found
-    if (service->GetCacheEntryInfo(info, enhanceId, uriSpec, aCallback)) {
-      return NS_OK;
-    }
-
-    // When we are here, there is no existing entry and we need
-    // to synchrnously load metadata from a disk file.
-  }
-
-  // Locate the actual file
-  nsCOMPtr<nsIFile> file;
-  ioMan->GetFile(aHash, getter_AddRefs(file));
-
-  // Read metadata from the file synchronously
-  nsRefPtr<CacheFileMetadata> metadata = new CacheFileMetadata();
-  rv = metadata->SyncReadMetadata(file);
-  if (NS_FAILED(rv)) {
-    return NS_OK;
-  }
-
-  // Now get the context + enhance id + URL from the key.
-  nsAutoCString key;
-  metadata->GetKey(key);
-
-  nsRefPtr<nsILoadContextInfo> info =
-    CacheFileUtils::ParseKey(key, &enhanceId, &uriSpec);
-  MOZ_ASSERT(info);
-  if (!info) {
-    return NS_OK;
-  }
-
-  // Pick all data to pass to the callback.
-  int64_t dataSize = metadata->Offset();
-  uint32_t fetchCount;
-  if (NS_FAILED(metadata->GetFetchCount(&fetchCount))) {
-    fetchCount = 0;
-  }
-  uint32_t expirationTime;
-  if (NS_FAILED(metadata->GetExpirationTime(&expirationTime))) {
-    expirationTime = 0;
-  }
-  uint32_t lastModified;
-  if (NS_FAILED(metadata->GetLastModified(&lastModified))) {
-    lastModified = 0;
-  }
-
-  // Call directly on the callback.
-  aCallback->OnEntryInfo(uriSpec, enhanceId, dataSize, fetchCount,
-                         lastModified, expirationTime);
-
-  return NS_OK;
+  nsCOMPtr<nsIFile> file = ioMan->mCacheDirectory;
+  file.forget(result);
 }
 
 static nsresult
@@ -2632,23 +2484,13 @@ CacheFileIOManager::OverLimitEvictionInternal()
     rv = CacheIndex::GetEntryForEviction(&hash, &cnt);
     NS_ENSURE_SUCCESS(rv, rv);
 
-    rv = DoomFileByKeyInternal(&hash, true);
+    rv = DoomFileByKeyInternal(&hash);
     if (NS_SUCCEEDED(rv)) {
       consecutiveFailures = 0;
     } else if (rv == NS_ERROR_NOT_AVAILABLE) {
       LOG(("CacheFileIOManager::OverLimitEvictionInternal() - "
            "DoomFileByKeyInternal() failed. [rv=0x%08x]", rv));
       // TODO index is outdated, start update
-
-#ifdef DEBUG
-      // Dooming should never fail due to already doomed handle, but bug 1028415
-      // shows that this unexpected state can happen. Assert in debug build so
-      // we can find the cause if we ever find a way to reproduce it with NSPR
-      // logging enabled.
-      nsRefPtr<CacheFileHandle> handle;
-      mHandles.GetHandle(&hash, true, getter_AddRefs(handle));
-      MOZ_ASSERT(!handle || !handle->IsDoomed());
-#endif
 
       // Make sure index won't return the same entry again
       CacheIndex::RemoveEntry(&hash);
@@ -3358,7 +3200,7 @@ CacheFileIOManager::CreateFile(CacheFileHandle *aHandle)
 void
 CacheFileIOManager::HashToStr(const SHA1Sum::Hash *aHash, nsACString &_retval)
 {
-  _retval.Truncate();
+  _retval.Assign("");
   const char hexChars[] = {'0', '1', '2', '3', '4', '5', '6', '7',
                            '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
   for (uint32_t i=0 ; i<sizeof(SHA1Sum::Hash) ; i++) {

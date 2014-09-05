@@ -18,10 +18,10 @@
 
 int ViEAutoTestAndroid::RunAutotest(int testSelection, int subTestSelection,
                                     void* window1, void* window2,
-                                    JavaVM* javaVM, void* env, void* context) {
+                                    void* javaVM, void* env, void* context) {
   ViEAutoTest vieAutoTest(window1, window2);
   ViETest::Log("RunAutoTest(%d, %d)", testSelection, subTestSelection);
-  webrtc::VideoEngine::SetAndroidObjects(javaVM);
+  webrtc::VideoEngine::SetAndroidObjects(javaVM, context);
 #ifndef WEBRTC_ANDROID_OPENSLES
   // voice engine calls into ADM directly
   webrtc::VoiceEngine::SetAndroidObjects(javaVM, env, context);
@@ -62,6 +62,10 @@ int ViEAutoTestAndroid::RunAutotest(int testSelection, int subTestSelection,
           vieAutoTest.ViECodecStandardTest();
           break;
 
+        case 5: //encryption
+          vieAutoTest.ViEEncryptionStandardTest();
+          break;
+
         case 6: // image process
           vieAutoTest.ViEImageProcessStandardTest();
           break;
@@ -95,6 +99,10 @@ int ViEAutoTestAndroid::RunAutotest(int testSelection, int subTestSelection,
 
         case 3: // codec
           vieAutoTest.ViECodecAPITest();
+          break;
+
+        case 5: //encryption
+          vieAutoTest.ViEEncryptionAPITest();
           break;
 
         case 6: // image process
@@ -132,6 +140,10 @@ int ViEAutoTestAndroid::RunAutotest(int testSelection, int subTestSelection,
 
         case 3: // codec
           vieAutoTest.ViECodecExtendedTest();
+          break;
+
+        case 5: //encryption
+          vieAutoTest.ViEEncryptionExtendedTest();
           break;
 
         case 6: // image process

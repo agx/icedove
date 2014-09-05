@@ -4,15 +4,6 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "CameraPreviewMediaStream.h"
-#include "CameraCommon.h"
-
-/**
- * Maximum number of outstanding invalidates before we start to drop frames;
- * if we hit this threshold, it is an indicator that the main thread is
- * either very busy or the device is busy elsewhere (e.g. encoding or
- * persisting video data).
- */
-#define MAX_INVALIDATE_PENDING 4
 
 using namespace mozilla::layers;
 using namespace mozilla::dom;
@@ -22,9 +13,7 @@ namespace mozilla {
 CameraPreviewMediaStream::CameraPreviewMediaStream(DOMMediaStream* aWrapper)
   : MediaStream(aWrapper)
   , mMutex("mozilla::camera::CameraPreviewMediaStream")
-  , mInvalidatePending(0)
-  , mDiscardedFrames(0)
-  , mRateLimit(false)
+  , mFrameCallback(nullptr)
 {
   SetGraphImpl(MediaStreamGraph::GetInstance());
   mIsConsumed = false;
@@ -103,7 +92,7 @@ CameraPreviewMediaStream::RemoveListener(MediaStreamListener* aListener)
   MediaStreamGraph* gm = MediaStreamGraph::GetInstance();
   nsRefPtr<MediaStreamListener> listener(aListener);
   mListeners.RemoveElement(aListener);
-  listener->NotifyEvent(gm, MediaStreamListener::EVENT_REMOVED);
+  listener->NotifyRemoved(gm);
 }
 
 void
@@ -114,53 +103,22 @@ CameraPreviewMediaStream::Destroy()
 }
 
 void
-CameraPreviewMediaStream::Invalidate()
-{
-  MutexAutoLock lock(mMutex);
-  --mInvalidatePending;
-  for (nsTArray<nsRefPtr<VideoFrameContainer> >::size_type i = 0; i < mVideoOutputs.Length(); ++i) {
-    VideoFrameContainer* output = mVideoOutputs[i];
-    output->Invalidate();
-  }
-}
-
-void
-CameraPreviewMediaStream::RateLimit(bool aLimit)
-{
-  mRateLimit = aLimit;
-}
-
-void
 CameraPreviewMediaStream::SetCurrentFrame(const gfxIntSize& aIntrinsicSize, Image* aImage)
 {
-  {
-    MutexAutoLock lock(mMutex);
+  MutexAutoLock lock(mMutex);
 
-    if (mInvalidatePending > 0) {
-      if (mRateLimit || mInvalidatePending > MAX_INVALIDATE_PENDING) {
-        ++mDiscardedFrames;
-        DOM_CAMERA_LOGW("Discard preview frame %d, %d invalidation(s) pending",
-          mDiscardedFrames, mInvalidatePending);
-        return;
-      }
-
-      DOM_CAMERA_LOGI("Update preview frame, %d invalidation(s) pending",
-        mInvalidatePending);
-    }
-    mDiscardedFrames = 0;
-
-    TimeStamp now = TimeStamp::Now();
-    for (nsTArray<nsRefPtr<VideoFrameContainer> >::size_type i = 0; i < mVideoOutputs.Length(); ++i) {
-      VideoFrameContainer* output = mVideoOutputs[i];
-      output->SetCurrentFrame(aIntrinsicSize, aImage, now);
-    }
-
-    ++mInvalidatePending;
+  TimeStamp now = TimeStamp::Now();
+  for (uint32_t i = 0; i < mVideoOutputs.Length(); ++i) {
+    VideoFrameContainer* output = mVideoOutputs[i];
+    output->SetCurrentFrame(aIntrinsicSize, aImage, now);
+    nsCOMPtr<nsIRunnable> event =
+      NS_NewRunnableMethod(output, &VideoFrameContainer::Invalidate);
+    NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
   }
 
-  nsCOMPtr<nsIRunnable> event =
-    NS_NewRunnableMethod(this, &CameraPreviewMediaStream::Invalidate);
-  NS_DispatchToMainThread(event);
+  if (mFrameCallback) {
+    mFrameCallback->OnNewFrame(aIntrinsicSize, aImage);
+  }
 }
 
 void
@@ -168,12 +126,12 @@ CameraPreviewMediaStream::ClearCurrentFrame()
 {
   MutexAutoLock lock(mMutex);
 
-  for (nsTArray<nsRefPtr<VideoFrameContainer> >::size_type i = 0; i < mVideoOutputs.Length(); ++i) {
+  for (uint32_t i = 0; i < mVideoOutputs.Length(); ++i) {
     VideoFrameContainer* output = mVideoOutputs[i];
     output->ClearCurrentFrame();
     nsCOMPtr<nsIRunnable> event =
       NS_NewRunnableMethod(output, &VideoFrameContainer::Invalidate);
-    NS_DispatchToMainThread(event);
+    NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
   }
 }
 

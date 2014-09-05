@@ -91,12 +91,11 @@ function runTest(testNum) {
 
     case 2:
         // Context menu for plain text
-        plainTextItems = ["context-navigation", null,
-                              ["context-back",         false,
-                               "context-forward",      false,
-                               "context-reload",       true,
-                               "context-bookmarkpage", true], null,
+        plainTextItems = ["context-back",         false,
+                          "context-forward",      false,
+                          "context-reload",       true,
                           "---",                  null,
+                          "context-bookmarkpage", true,
                           "context-savepage",     true,
                           "---",                  null,
                           "context-viewbgimage",  false,
@@ -164,6 +163,7 @@ function runTest(testNum) {
         // Context menu for a canvas
         checkContextMenu(["context-viewimage",    true,
                           "context-saveimage",    true,
+                          "context-bookmarkpage", true,
                           "context-selectall",    true
                          ].concat(inspectItems));
         closeContextMenu();
@@ -264,12 +264,11 @@ function runTest(testNum) {
 
     case 11:
         // Context menu for an iframe
-        checkContextMenu(["context-navigation", null,
-                              ["context-back",         false,
-                               "context-forward",      false,
-                               "context-reload",       true,
-                               "context-bookmarkpage", true], null,
+        checkContextMenu(["context-back",         false,
+                          "context-forward",      false,
+                          "context-reload",       true,
                           "---",                  null,
+                          "context-bookmarkpage", true,
                           "context-savepage",     true,
                           "---",                  null,
                           "context-viewbgimage",  false,
@@ -449,13 +448,7 @@ function runTest(testNum) {
 
     case 19:
         // Context menu for element with assigned content context menu
-        checkContextMenu(["context-navigation", null,
-                              ["context-back",         false,
-                               "context-forward",      false,
-                               "context-reload",       true,
-                               "context-bookmarkpage", true], null,
-                          "---",                  null,
-                          "+Plain item",          {type: "", icon: "", checked: false, disabled: false},
+        checkContextMenu(["+Plain item",          {type: "", icon: "", checked: false, disabled: false},
                           "+Disabled item",       {type: "", icon: "", checked: false, disabled: true},
                           "+Item w/ textContent", {type: "", icon: "", checked: false, disabled: false},
                           "---",                  null,
@@ -475,6 +468,11 @@ function runTest(testNum) {
                                "---",                 null,
                                "+Checkbox",           {type: "checkbox", icon: "", checked: false, disabled: false}], null,
                           "---",                  null,
+                          "context-back",         false,
+                          "context-forward",      false,
+                          "context-reload",       true,
+                          "---",                  null,
+                          "context-bookmarkpage", true,
                           "context-savepage",     true,
                           "---",                  null,
                           "context-viewbgimage",  false,
@@ -501,14 +499,13 @@ function runTest(testNum) {
 
     case 20:
         // Context menu for DOM Fullscreen mode (NOTE: this is *NOT* on an img)
-        checkContextMenu(["context-navigation", null,
-                              ["context-back",            false,
-                               "context-forward",         false,
-                               "context-reload",          true,
-                               "context-bookmarkpage",    true], null,
+        checkContextMenu(["context-leave-dom-fullscreen", true,
                           "---",                          null,
-                          "context-leave-dom-fullscreen", true,
+                          "context-back",                 false,
+                          "context-forward",              false,
+                          "context-reload",               true,
                           "---",                          null,
+                          "context-bookmarkpage",         true,
                           "context-savepage",             true,
                           "---",                          null,
                           "context-viewbgimage",          false,
@@ -532,12 +529,11 @@ function runTest(testNum) {
     case 21:
         // Context menu for element with assigned content context menu
         // The shift key should bypass content context menu processing
-        checkContextMenu(["context-navigation", null,
-                              ["context-back",         false,
-                               "context-forward",      false,
-                               "context-reload",       true,
-                               "context-bookmarkpage", true], null,
+        checkContextMenu(["context-back",         false,
+                          "context-forward",      false,
+                          "context-reload",       true,
                           "---",                  null,
+                          "context-bookmarkpage", true,
                           "context-savepage",     true,
                           "---",                  null,
                           "context-viewbgimage",  false,
@@ -694,15 +690,14 @@ function runTest(testNum) {
 
     case 27:
         // Context menu for click-to-play blocked plugin
-        checkContextMenu(["context-navigation", null,
-                              ["context-back",         false,
-                               "context-forward",      false,
-                               "context-reload",       true,
-                               "context-bookmarkpage", true], null,
-                          "---",                  null,
-                          "context-ctp-play",     true,
+        checkContextMenu(["context-ctp-play",     true,
                           "context-ctp-hide",     true,
                           "---",                  null,
+                          "context-back",         false,
+                          "context-forward",      false,
+                          "context-reload",       true,
+                          "---",                  null,
+                          "context-bookmarkpage", true,
                           "context-savepage",     true,
                           "---",                  null,
                           "context-viewbgimage",  false,
@@ -735,12 +730,11 @@ function runTest(testNum) {
 
     case 29:
         // Context menu for an iframe with srcdoc attribute set
-        checkContextMenu(["context-navigation", null,
-                              ["context-back",         false,
-                               "context-forward",      false,
-                               "context-reload",       true,
-                               "context-bookmarkpage", true], null,
+        checkContextMenu(["context-back",         false,
+                          "context-forward",      false,
+                          "context-reload",       true,
                           "---",                  null,
+                          "context-bookmarkpage", true,
                           "context-savepage",     true,
                           "---",                  null,
                           "context-viewbgimage",  false,

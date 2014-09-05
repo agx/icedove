@@ -21,9 +21,9 @@ public:
 protected:
   NS_IMETHOD GetHasDefaultHandler(bool *_retval);
 
-  virtual nsresult LoadUriInternal(nsIURI *aURI);
+  virtual NS_HIDDEN_(nsresult) LoadUriInternal(nsIURI *aURI);
 
-  virtual nsresult LaunchDefaultWithFile(nsIFile *aFile);
+  virtual NS_HIDDEN_(nsresult) LaunchDefaultWithFile(nsIFile *aFile);
 #if defined(MOZ_ENABLE_CONTENTACTION)
   NS_IMETHOD GetPossibleApplicationHandlers(nsIMutableArray * *aPossibleAppHandlers);
 #endif

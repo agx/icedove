@@ -79,8 +79,6 @@ if CONFIG['MOZ_WEBGL']:
         'WebGLTexture.cpp',
         'WebGLUniformLocation.cpp',
         'WebGLVertexArray.cpp',
-        'WebGLVertexArrayFake.cpp',
-        'WebGLVertexArrayGL.cpp',
     ]
     LOCAL_INCLUDES += [
         '/js/xpconnect/wrappers',

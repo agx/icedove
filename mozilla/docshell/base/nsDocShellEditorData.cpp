@@ -8,7 +8,7 @@
 #include "nsDocShellEditorData.h"
 #include "nsIInterfaceRequestorUtils.h"
 #include "nsComponentManagerUtils.h"
-#include "nsPIDOMWindow.h"
+#include "nsIDOMWindow.h"
 #include "nsIDOMDocument.h"
 #include "nsIEditor.h"
 #include "nsIEditingSession.h"
@@ -102,9 +102,8 @@ nsDocShellEditorData::CreateEditor()
   nsCOMPtr<nsIEditingSession>   editingSession;    
   nsresult rv = GetEditingSession(getter_AddRefs(editingSession));
   if (NS_FAILED(rv)) return rv;
- 
-  nsCOMPtr<nsIDOMWindow>    domWindow =
-    mDocShell ? mDocShell->GetWindow() : nullptr;
+  
+  nsCOMPtr<nsIDOMWindow>    domWindow = do_GetInterface(mDocShell);
   rv = editingSession->SetupEditorOnWindow(domWindow);
   if (NS_FAILED(rv)) return rv;
   
@@ -202,8 +201,7 @@ nsDocShellEditorData::DetachFromWindow()
   NS_ASSERTION(mEditingSession,
                "Can't detach when we don't have a session to detach!");
   
-  nsCOMPtr<nsIDOMWindow> domWindow =
-    mDocShell ? mDocShell->GetWindow() : nullptr;
+  nsCOMPtr<nsIDOMWindow> domWindow = do_GetInterface(mDocShell);
   nsresult rv = mEditingSession->DetachFromWindow(domWindow);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -227,8 +225,7 @@ nsDocShellEditorData::ReattachToWindow(nsIDocShell* aDocShell)
 {
   mDocShell = aDocShell;
 
-  nsCOMPtr<nsIDOMWindow> domWindow =
-    mDocShell ? mDocShell->GetWindow() : nullptr;
+  nsCOMPtr<nsIDOMWindow> domWindow = do_GetInterface(mDocShell);
   nsresult rv = mEditingSession->ReattachToWindow(domWindow);
   NS_ENSURE_SUCCESS(rv, rv);
 

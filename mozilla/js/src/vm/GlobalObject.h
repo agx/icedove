@@ -19,6 +19,15 @@
 #include "vm/ErrorObject.h"
 
 extern JSObject *
+js_InitObjectClass(JSContext *cx, js::HandleObject obj);
+
+extern JSObject *
+js_InitFunctionClass(JSContext *cx, js::HandleObject obj);
+
+extern JSObject *
+js_InitTypedArrayClasses(JSContext *cx, js::HandleObject obj);
+
+extern JSObject *
 js_InitSharedArrayBufferClass(JSContext *cx, js::HandleObject obj);
 
 namespace js {
@@ -60,7 +69,7 @@ class TypedObjectModuleObject;
 class GlobalObject : public JSObject
 {
     /* Count of slots set aside for application use. */
-    static const unsigned APPLICATION_SLOTS = JSCLASS_GLOBAL_APPLICATION_SLOTS;
+    static const unsigned APPLICATION_SLOTS = 3;
 
     /*
      * Count of slots to store built-in constructors, prototypes, and initial
@@ -72,12 +81,13 @@ class GlobalObject : public JSObject
     static const unsigned EVAL                    = APPLICATION_SLOTS + STANDARD_CLASS_SLOTS;
     static const unsigned CREATE_DATAVIEW_FOR_THIS = EVAL + 1;
     static const unsigned THROWTYPEERROR          = CREATE_DATAVIEW_FOR_THIS + 1;
+    static const unsigned PROTO_GETTER            = THROWTYPEERROR + 1;
 
     /*
      * Instances of the internal createArrayFromBuffer function used by the
      * typed array code, one per typed array element type.
      */
-    static const unsigned FROM_BUFFER_UINT8 = THROWTYPEERROR + 1;
+    static const unsigned FROM_BUFFER_UINT8 = PROTO_GETTER + 1;
     static const unsigned FROM_BUFFER_INT8 = FROM_BUFFER_UINT8 + 1;
     static const unsigned FROM_BUFFER_UINT16 = FROM_BUFFER_INT8 + 1;
     static const unsigned FROM_BUFFER_INT16 = FROM_BUFFER_UINT16 + 1;
@@ -118,15 +128,10 @@ class GlobalObject : public JSObject
     static_assert(JSCLASS_GLOBAL_SLOT_COUNT == RESERVED_SLOTS,
                   "global object slot counts are inconsistent");
 
-    // Emit the specified warning if the given slot in |obj|'s global isn't
-    // true, then set the slot to true.  Thus calling this method warns once
-    // for each global object it's called on, and every other call does
-    // nothing.
-    static bool
-    warnOnceAbout(JSContext *cx, HandleObject obj, uint32_t slot, unsigned errorNumber);
+    /* Initialize the Function and Object classes.  Must only be called once! */
+    JSObject *
+    initFunctionAndObjectClasses(JSContext *cx);
 
-
-  public:
     void setThrowTypeError(JSFunction *fun) {
         JS_ASSERT(getSlotRef(THROWTYPEERROR).isUndefined());
         setSlot(THROWTYPEERROR, ObjectValue(*fun));
@@ -137,11 +142,24 @@ class GlobalObject : public JSObject
         setSlot(EVAL, ObjectValue(*evalobj));
     }
 
+    void setProtoGetter(JSFunction *protoGetter) {
+        JS_ASSERT(getSlotRef(PROTO_GETTER).isUndefined());
+        setSlot(PROTO_GETTER, ObjectValue(*protoGetter));
+    }
+
     void setIntrinsicsHolder(JSObject *obj) {
         JS_ASSERT(getSlotRef(INTRINSICS).isUndefined());
         setSlot(INTRINSICS, ObjectValue(*obj));
     }
 
+    // Emit the specified warning if the given slot in |obj|'s global isn't
+    // true, then set the slot to true.  Thus calling this method warns once
+    // for each global object it's called on, and every other call does
+    // nothing.
+    static bool
+    warnOnceAbout(JSContext *cx, HandleObject obj, uint32_t slot, unsigned errorNumber);
+
+  public:
     Value getConstructor(JSProtoKey key) const {
         JS_ASSERT(key <= JSProto_LIMIT);
         return getSlot(APPLICATION_SLOTS + key);
@@ -214,6 +232,23 @@ class GlobalObject : public JSObject
     }
 
   private:
+    void setDetailsForKey(JSProtoKey key, JSObject *ctor, JSObject *proto) {
+        JS_ASSERT(getConstructor(key).isUndefined());
+        JS_ASSERT(getPrototype(key).isUndefined());
+        JS_ASSERT(getConstructorPropertySlot(key).isUndefined());
+        setConstructor(key, ObjectValue(*ctor));
+        setPrototype(key, ObjectValue(*proto));
+        setConstructorPropertySlot(key, ObjectValue(*ctor));
+    }
+
+    void setObjectClassDetails(JSFunction *ctor, JSObject *proto) {
+        setDetailsForKey(JSProto_Object, ctor, proto);
+    }
+
+    void setFunctionClassDetails(JSFunction *ctor, JSObject *proto) {
+        setDetailsForKey(JSProto_Function, ctor, proto);
+    }
+
     bool arrayClassInitialized() const {
         return classIsInitialized(JSProto_Array);
     }
@@ -242,10 +277,15 @@ class GlobalObject : public JSObject
     bool dataViewClassInitialized() const {
         return classIsInitialized(JSProto_DataView);
     }
+    bool typedArrayClassesInitialized() const {
+        // This alias exists only for clarity: in reality all the typed array
+        // classes constitute a (semi-)coherent whole.
+        return classIsInitialized(JSProto_DataView);
+    }
 
     Value createArrayFromBufferHelper(uint32_t slot) const {
+        JS_ASSERT(typedArrayClassesInitialized());
         JS_ASSERT(FROM_BUFFER_UINT8 <= slot && slot <= FROM_BUFFER_UINT8CLAMPED);
-        JS_ASSERT(!getSlot(slot).isUndefined());
         return getSlot(slot);
     }
 
@@ -295,7 +335,7 @@ class GlobalObject : public JSObject
         if (functionObjectClassesInitialized())
             return &getPrototype(JSProto_Object).toObject();
         Rooted<GlobalObject*> self(cx, this);
-        if (!ensureConstructor(cx, self, JSProto_Object))
+        if (!initFunctionAndObjectClasses(cx))
             return nullptr;
         return &self->getPrototype(JSProto_Object).toObject();
     }
@@ -304,7 +344,7 @@ class GlobalObject : public JSObject
         if (functionObjectClassesInitialized())
             return &getPrototype(JSProto_Function).toObject();
         Rooted<GlobalObject*> self(cx, this);
-        if (!ensureConstructor(cx, self, JSProto_Object))
+        if (!initFunctionAndObjectClasses(cx))
             return nullptr;
         return &self->getPrototype(JSProto_Function).toObject();
     }
@@ -552,9 +592,10 @@ class GlobalObject : public JSObject
     bool getSelfHostedFunction(JSContext *cx, HandleAtom selfHostedName, HandleAtom name,
                                unsigned nargs, MutableHandleValue funVal);
 
-    bool hasRegExpStatics() const;
-    RegExpStatics *getRegExpStatics(ExclusiveContext *cx) const;
-    RegExpStatics *getAlreadyCreatedRegExpStatics() const;
+    RegExpStatics *getRegExpStatics() const {
+        JSObject &resObj = getSlot(REGEXP_STATICS).toObject();
+        return static_cast<RegExpStatics *>(resObj.getPrivate(/* nfixed = */ 1));
+    }
 
     JSObject *getThrowTypeError() const {
         JS_ASSERT(functionObjectClassesInitialized());
@@ -568,6 +609,11 @@ class GlobalObject : public JSObject
 
     template<typename T>
     inline Value createArrayFromBuffer() const;
+
+    Value protoGetter() const {
+        JS_ASSERT(functionObjectClassesInitialized());
+        return getSlot(PROTO_GETTER);
+    }
 
     static bool isRuntimeCodeGenEnabled(JSContext *cx, Handle<GlobalObject*> global);
 

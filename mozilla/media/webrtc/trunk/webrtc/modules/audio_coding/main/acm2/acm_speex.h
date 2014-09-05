@@ -19,8 +19,6 @@ struct SPEEX_decinst_t_;
 
 namespace webrtc {
 
-namespace acm2 {
-
 class ACMSPEEX : public ACMGenericCodec {
  public:
   explicit ACMSPEEX(int16_t codec_id);
@@ -61,8 +59,6 @@ class ACMSPEEX : public ACMGenericCodec {
   int16_t sampling_frequency_;
   uint16_t samples_in_20ms_audio_;
 };
-
-}  // namespace acm2
 
 }  // namespace webrtc
 

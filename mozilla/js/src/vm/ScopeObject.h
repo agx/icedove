@@ -71,7 +71,7 @@ class StaticScopeIter
                      obj->is<JSFunction>());
     }
 
-    explicit StaticScopeIter(JSObject *obj)
+    StaticScopeIter(JSObject *obj)
       : obj((ExclusiveContext *) nullptr, obj), onNamedLambda(false)
     {
         JS_STATIC_ASSERT(allowGC == NoGC);
@@ -92,7 +92,6 @@ class StaticScopeIter
     StaticBlockObject &block() const;
     StaticWithObject &staticWith() const;
     JSScript *funScript() const;
-    JSFunction &fun() const;
 };
 
 /*****************************************************************************/
@@ -117,7 +116,7 @@ class ScopeCoordinate
     static_assert(SCOPECOORD_SLOT_BITS <= 32, "We have enough bits below");
 
   public:
-    explicit inline ScopeCoordinate(jsbytecode *pc)
+    inline ScopeCoordinate(jsbytecode *pc)
       : hops_(GET_SCOPECOORD_HOPS(pc)), slot_(GET_SCOPECOORD_SLOT(pc + SCOPECOORD_HOPS_LEN))
     {
         JS_ASSERT(JOF_OPTYPE(*pc) == JOF_SCOPECOORD);
@@ -239,18 +238,20 @@ class CallObject : public ScopeObject
     /* These functions are internal and are exposed only for JITs. */
 
     /*
-     * Construct a bare-bones call object given a shape and a non-singleton
-     * type.  The call object must be further initialized to be usable.
+     * Construct a bare-bones call object given a shape, a non-singleton type,
+     * and slots pointer.  The call object must be further initialized to be
+     * usable.
      */
     static CallObject *
-    create(JSContext *cx, HandleShape shape, HandleTypeObject type);
+    create(JSContext *cx, HandleShape shape, HandleTypeObject type, HeapSlot *slots);
 
     /*
-     * Construct a bare-bones call object given a shape and make it have
-     * singleton type.  The call object must be initialized to be usable.
+     * Construct a bare-bones call object given a shape and slots pointer, and
+     * make it have singleton type.  The call object must be initialized to be
+     * usable.
      */
     static CallObject *
-    createSingleton(JSContext *cx, HandleShape shape);
+    createSingleton(JSContext *cx, HandleShape shape, HeapSlot *slots);
 
     static CallObject *
     createTemplateObject(JSContext *cx, HandleScript script, gc::InitialHeap heap);
@@ -692,7 +693,7 @@ class ScopeIterKey
     bool hasScopeObject_;
 
   public:
-    explicit ScopeIterKey(const ScopeIter &si)
+    ScopeIterKey(const ScopeIter &si)
       : frame_(si.frame()), cur_(si.cur_), staticScope_(si.staticScope_), type_(si.type_),
         hasScopeObject_(si.hasScopeObject_) {}
 
@@ -725,15 +726,15 @@ class ScopeIterVal
     friend class DebugScopes;
 
     AbstractFramePtr frame_;
-    RelocatablePtrObject cur_;
-    RelocatablePtrNestedScopeObject staticScope_;
+    RelocatablePtr<JSObject> cur_;
+    RelocatablePtr<NestedScopeObject> staticScope_;
     ScopeIter::Type type_;
     bool hasScopeObject_;
 
     static void staticAsserts();
 
   public:
-    explicit ScopeIterVal(const ScopeIter &si)
+    ScopeIterVal(const ScopeIter &si)
       : frame_(si.frame()), cur_(si.cur_), staticScope_(si.staticScope_), type_(si.type_),
         hasScopeObject_(si.hasScopeObject_) {}
 
@@ -810,17 +811,17 @@ class DebugScopeObject : public ProxyObject
 class DebugScopes
 {
     /* The map from (non-debug) scopes to debug scopes. */
-    typedef WeakMap<PreBarrieredObject, RelocatablePtrObject> ObjectWeakMap;
+    typedef WeakMap<EncapsulatedPtrObject, RelocatablePtrObject> ObjectWeakMap;
     ObjectWeakMap proxiedScopes;
     static MOZ_ALWAYS_INLINE void proxiedScopesPostWriteBarrier(JSRuntime *rt, ObjectWeakMap *map,
-                                                               const PreBarrieredObject &key);
+                                                               const EncapsulatedPtrObject &key);
 
     /*
      * The map from live frames which have optimized-away scopes to the
      * corresponding debug scopes.
      */
     typedef HashMap<ScopeIterKey,
-                    ReadBarrieredDebugScopeObject,
+                    ReadBarriered<DebugScopeObject>,
                     ScopeIterKey,
                     RuntimeAllocPolicy> MissingScopeMap;
     MissingScopeMap missingScopes;
@@ -844,7 +845,7 @@ class DebugScopes
                                                             ScopeObject *key);
 
   public:
-    explicit DebugScopes(JSContext *c);
+    DebugScopes(JSContext *c);
     ~DebugScopes();
 
   private:

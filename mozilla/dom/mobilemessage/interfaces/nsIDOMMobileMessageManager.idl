@@ -78,5 +78,4 @@ interface nsIDOMMozMobileMessageManager : nsIDOMEventTarget
   [implicit_jscontext] attribute jsval ondeliveryerror;
   [implicit_jscontext] attribute jsval onreadsuccess;
   [implicit_jscontext] attribute jsval onreaderror;
-  [implicit_jscontext] attribute jsval ondeleted;
 };

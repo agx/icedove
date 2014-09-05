@@ -25,22 +25,22 @@ struct DataType
 template<>
 struct DataType<JSObject*>
 {
-    typedef PreBarrieredObject PreBarriered;
+    typedef EncapsulatedPtrObject Encapsulated;
     static JSObject *NullValue() { return nullptr; }
 };
 
 template<>
 struct DataType<JS::Value>
 {
-    typedef PreBarrieredValue PreBarriered;
+    typedef EncapsulatedValue Encapsulated;
     static JS::Value NullValue() { return JS::UndefinedValue(); }
 };
 
 template <typename K, typename V>
 struct Utils
 {
-    typedef typename DataType<K>::PreBarriered KeyType;
-    typedef typename DataType<V>::PreBarriered ValueType;
+    typedef typename DataType<K>::Encapsulated KeyType;
+    typedef typename DataType<V>::Encapsulated ValueType;
     typedef WeakMap<KeyType, ValueType> Type;
     typedef Type* PtrType;
     static PtrType cast(void *ptr) { return static_cast<PtrType>(ptr); }
@@ -58,6 +58,7 @@ JS::WeakMapPtr<K, V>::destroy()
     // of known live weakmaps. If we are, remove ourselves before deleting.
     if (map->isInList())
         WeakMapBase::removeWeakMapFromList(map);
+    map->check();
     js_delete(map);
     ptr = nullptr;
 }

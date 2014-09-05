@@ -15,8 +15,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 class ACMRED : public ACMGenericCodec {
  public:
   explicit ACMRED(int16_t codec_id);
@@ -36,8 +34,6 @@ class ACMRED : public ACMGenericCodec {
 
   void InternalDestructEncoderInst(void* ptr_inst);
 };
-
-}  // namespace acm2
 
 }  // namespace webrtc
 

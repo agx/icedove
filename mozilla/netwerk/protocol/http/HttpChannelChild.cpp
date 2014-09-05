@@ -1261,7 +1261,6 @@ HttpChannelChild::AsyncOpen(nsIStreamListener *listener, nsISupports *aContext)
   openArgs.priority() = mPriority;
   openArgs.redirectionLimit() = mRedirectionLimit;
   openArgs.allowPipelining() = mAllowPipelining;
-  openArgs.allowSTS() = mAllowSTS;
   openArgs.forceAllowThirdPartyCookie() = mForceAllowThirdPartyCookie;
   openArgs.resumeAt() = mSendResumeAt;
   openArgs.startPos() = mStartPos;

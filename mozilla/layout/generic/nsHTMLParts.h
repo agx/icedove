@@ -48,8 +48,7 @@ class nsTableColFrame;
 // Factory methods for creating html layout objects
 
 // Create a frame that supports "display: block" layout behavior
-class nsBlockFrame;
-nsBlockFrame*
+nsIFrame*
 NS_NewBlockFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrameState aFlags = nsFrameState(0));
 
 // Special Generated Content Node. It contains text taken from an
@@ -63,12 +62,12 @@ NS_NewAttributeContent(nsNodeInfoManager *aNodeInfoManager,
 // return the option frame 
 // By default, area frames will extend
 // their height to cover any children that "stick out".
-nsContainerFrame*
+nsIFrame*
 NS_NewSelectsAreaFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrameState aFlags);
 
 // Create a block formatting context blockframe
-inline nsBlockFrame* NS_NewBlockFormattingContext(nsIPresShell* aPresShell,
-                                                  nsStyleContext* aStyleContext)
+inline nsIFrame* NS_NewBlockFormattingContext(nsIPresShell* aPresShell,
+                                              nsStyleContext* aStyleContext)
 {
   return NS_NewBlockFrame(aPresShell, aStyleContext,
                           NS_BLOCK_FLOAT_MGR | NS_BLOCK_MARGIN_ROOT);
@@ -87,16 +86,13 @@ NS_NewSubDocumentFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame*
 NS_NewHTMLFramesetFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
-class ViewportFrame;
-ViewportFrame*
+nsIFrame*
 NS_NewViewportFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsCanvasFrame;
-nsCanvasFrame*
+nsIFrame*
 NS_NewCanvasFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame*
 NS_NewImageFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsInlineFrame;
-nsInlineFrame*
+nsIFrame*
 NS_NewInlineFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame*
 NS_NewObjectFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
@@ -111,41 +107,36 @@ NS_NewWBRFrame(nsIPresShell* aPresShell, nsStyleContext* aContext) {
   return NS_NewEmptyFrame(aPresShell, aContext);
 }
 
-nsContainerFrame*
+nsIFrame*
 NS_NewColumnSetFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrameState aStateFlags);
 
-class nsSimplePageSequenceFrame;
-nsSimplePageSequenceFrame*
+nsIFrame*
 NS_NewSimplePageSequenceFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsPageFrame;
-nsPageFrame*
+nsIFrame*
 NS_NewPageFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsPageContentFrame;
-nsPageContentFrame*
+nsIFrame*
 NS_NewPageContentFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame*
 NS_NewPageBreakFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsFirstLetterFrame;
-nsFirstLetterFrame*
+nsIFrame*
 NS_NewFirstLetterFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsFirstLineFrame;
-nsFirstLineFrame*
+nsIFrame*
 NS_NewFirstLineFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
 // forms
-nsContainerFrame*
+nsIFrame*
 NS_NewGfxButtonControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame*
 NS_NewNativeButtonControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame*
 NS_NewImageControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-nsContainerFrame*
+nsIFrame*
 NS_NewHTMLButtonControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame*
 NS_NewGfxCheckboxControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame*
 NS_NewNativeCheckboxControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-nsContainerFrame*
+nsIFrame*
 NS_NewFieldSetFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame*
 NS_NewFileControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
@@ -165,9 +156,9 @@ nsIFrame*
 NS_NewNativeRadioControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsIFrame*
 NS_NewNativeSelectControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-nsContainerFrame*
+nsIFrame*
 NS_NewListControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-nsContainerFrame*
+nsIFrame*
 NS_NewComboboxControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, nsFrameState aFlags);
 nsIFrame*
 NS_NewProgressFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
@@ -179,28 +170,21 @@ nsIFrame*
 NS_NewNumberControlFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 
 // Table frame factories
-class nsTableOuterFrame;
-nsTableOuterFrame*
+nsIFrame*
 NS_NewTableOuterFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsTableFrame;
-nsTableFrame*
+nsIFrame*
 NS_NewTableFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsTableCaptionFrame;
-nsTableCaptionFrame*
+nsIFrame*
 NS_NewTableCaptionFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
 nsTableColFrame*
 NS_NewTableColFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsTableColGroupFrame;
-nsTableColGroupFrame*
+nsIFrame*
 NS_NewTableColGroupFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsTableRowFrame;
-nsTableRowFrame*
+nsIFrame*
 NS_NewTableRowFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsTableRowGroupFrame;
-nsTableRowGroupFrame*
+nsIFrame*
 NS_NewTableRowGroupFrame(nsIPresShell* aPresShell, nsStyleContext* aContext);
-class nsTableCellFrame;
-nsTableCellFrame*
+nsIFrame*
 NS_NewTableCellFrame(nsIPresShell* aPresShell, nsStyleContext* aContext, bool aIsBorderCollapse);
 
 nsresult

@@ -23,7 +23,6 @@ public:
   friend class GrallocTextureHostOGL;
 
   GrallocTextureSourceOGL(CompositorOGL* aCompositor,
-                          GrallocTextureHostOGL* aTextureHost,
                           android::GraphicBuffer* aGraphicBuffer,
                           gfx::SurfaceFormat aFormat);
 
@@ -57,20 +56,16 @@ public:
   void ForgetBuffer()
   {
     mGraphicBuffer = nullptr;
-    mTextureHost = nullptr;
   }
 
   TemporaryRef<gfx::DataSourceSurface> GetAsSurface();
 
   GLuint GetGLTexture();
 
-  void BindEGLImage();
-
   void Lock();
 
 protected:
   CompositorOGL* mCompositor;
-  GrallocTextureHostOGL* mTextureHost;
   android::sp<android::GraphicBuffer> mGraphicBuffer;
   EGLImage mEGLImage;
   GLuint mTexture;
@@ -130,8 +125,14 @@ public:
 
   virtual const char* Name() MOZ_OVERRIDE { return "GrallocTextureHostOGL"; }
 
+  // Forget buffer actor. Used only for hacky fix for bug 966446. 
+  virtual void ForgetBufferActor()
+  {
+    mGrallocActor = nullptr;
+  }
+
 private:
-  NewSurfaceDescriptorGralloc mGrallocHandle;
+  GrallocBufferActor* mGrallocActor;
   RefPtr<GrallocTextureSourceOGL> mTextureSource;
   gfx::IntSize mSize; // See comment in textureClientOGL.h
 };

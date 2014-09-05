@@ -22,6 +22,8 @@ XPCContext::XPCContext(XPCJSRuntime* aRuntime,
 {
     MOZ_COUNT_CTOR(XPCContext);
 
+    PR_INIT_CLIST(&mScopes);
+
     MOZ_ASSERT(!JS_GetSecondContextPrivate(mJSContext), "Must be null");
     JS_SetSecondContextPrivate(mJSContext, this);
 }
@@ -31,6 +33,15 @@ XPCContext::~XPCContext()
     MOZ_COUNT_DTOR(XPCContext);
     MOZ_ASSERT(JS_GetSecondContextPrivate(mJSContext) == this, "Must match this");
     JS_SetSecondContextPrivate(mJSContext, nullptr);
+
+    // Iterate over our scopes and tell them that we have been destroyed
+    for (PRCList *scopeptr = PR_NEXT_LINK(&mScopes);
+         scopeptr != &mScopes;
+         scopeptr = PR_NEXT_LINK(scopeptr)) {
+        XPCWrappedNativeScope *scope =
+            static_cast<XPCWrappedNativeScope*>(scopeptr);
+        scope->ClearContext();
+    }
 }
 
 void

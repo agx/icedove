@@ -92,8 +92,9 @@ HTMLContentElement::UnbindFromTree(bool aDeep, bool aNullParent)
     if (containingShadow) {
       containingShadow->RemoveInsertionPoint(this);
 
-      // Remove all the matched nodes now that the
-      // insertion point is no longer an insertion point.
+      // Remove all the assigned nodes now that the
+      // insertion point now that the insertion point is
+      // no longer a descendant of a ShadowRoot.
       ClearMatchedNodes();
       containingShadow->SetInsertionPointChanged();
     }
@@ -105,70 +106,12 @@ HTMLContentElement::UnbindFromTree(bool aDeep, bool aNullParent)
 }
 
 void
-HTMLContentElement::AppendMatchedNode(nsIContent* aContent)
-{
-  mMatchedNodes.AppendElement(aContent);
-  nsTArray<nsIContent*>& destInsertionPoint = aContent->DestInsertionPoints();
-  destInsertionPoint.AppendElement(this);
-
-  if (mMatchedNodes.Length() == 1) {
-    // Fallback content gets dropped so we need to updated fallback
-    // content distribution.
-    UpdateFallbackDistribution();
-  }
-}
-
-void
-HTMLContentElement::UpdateFallbackDistribution()
-{
-  for (nsIContent* child = nsINode::GetFirstChild();
-       child;
-       child = child->GetNextSibling()) {
-    nsTArray<nsIContent*>& destInsertionPoint = child->DestInsertionPoints();
-    destInsertionPoint.Clear();
-    if (mMatchedNodes.IsEmpty()) {
-      destInsertionPoint.AppendElement(this);
-    }
-  }
-}
-
-void
-HTMLContentElement::RemoveMatchedNode(nsIContent* aContent)
-{
-  mMatchedNodes.RemoveElement(aContent);
-  ShadowRoot::RemoveDestInsertionPoint(this, aContent->DestInsertionPoints());
-
-  if (mMatchedNodes.IsEmpty()) {
-    // Fallback content is activated so we need to update fallback
-    // content distribution.
-    UpdateFallbackDistribution();
-  }
-}
-
-void
-HTMLContentElement::InsertMatchedNode(uint32_t aIndex, nsIContent* aContent)
-{
-  mMatchedNodes.InsertElementAt(aIndex, aContent);
-  nsTArray<nsIContent*>& destInsertionPoint = aContent->DestInsertionPoints();
-  destInsertionPoint.AppendElement(this);
-
-  if (mMatchedNodes.Length() == 1) {
-    // Fallback content gets dropped so we need to updated fallback
-    // content distribution.
-    UpdateFallbackDistribution();
-  }
-}
-
-void
 HTMLContentElement::ClearMatchedNodes()
 {
   for (uint32_t i = 0; i < mMatchedNodes.Length(); i++) {
-    ShadowRoot::RemoveDestInsertionPoint(this, mMatchedNodes[i]->DestInsertionPoints());
+    mMatchedNodes[i]->SetXBLInsertionParent(nullptr);
   }
-
   mMatchedNodes.Clear();
-
-  UpdateFallbackDistribution();
 }
 
 static bool

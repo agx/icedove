@@ -7,6 +7,8 @@
 #ifndef __FFmpegDataDecoder_h__
 #define __FFmpegDataDecoder_h__
 
+#include "mp4_demuxer/mp4_demuxer.h"
+
 #include "FFmpegDecoderModule.h"
 #include "FFmpegRuntimeLinker.h"
 #include "FFmpegCompat.h"

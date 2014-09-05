@@ -103,8 +103,8 @@ public class CodeGenerator {
         Class<?> returnType = theMethod.getReturnType();
 
         // Get the C++ method signature for this method.
-        String implementationSignature = Utils.getCImplementationMethodSignature(parameterTypes, returnType, CMethodName, mCClassName, aMethodTuple.mAnnotationInfo.narrowChars);
-        String headerSignature = Utils.getCHeaderMethodSignature(parameterTypes, theMethod.getParameterAnnotations(), returnType, CMethodName, mCClassName, shallGenerateStatic, aMethodTuple.mAnnotationInfo.narrowChars);
+        String implementationSignature = Utils.getCImplementationMethodSignature(parameterTypes, returnType, CMethodName, mCClassName);
+        String headerSignature = Utils.getCHeaderMethodSignature(parameterTypes, theMethod.getParameterAnnotations(), returnType, CMethodName, mCClassName, shallGenerateStatic);
 
         // Add the header signature to the header file.
         writeSignatureToHeader(headerSignature);
@@ -113,11 +113,10 @@ public class CodeGenerator {
         writeMethodBody(implementationSignature, CMethodName, theMethod, mClassToWrap,
             aMethodTuple.mAnnotationInfo.isStatic,
             aMethodTuple.mAnnotationInfo.isMultithreaded,
-            aMethodTuple.mAnnotationInfo.noThrow,
-            aMethodTuple.mAnnotationInfo.narrowChars);
+            aMethodTuple.mAnnotationInfo.noThrow);
     }
 
-    private void generateGetterOrSetterBody(Class<?> aFieldType, String aFieldName, boolean aIsFieldStatic, boolean isSetter, boolean aNarrowChars) {
+    private void generateGetterOrSetterBody(Class<?> aFieldType, String aFieldName, boolean aIsFieldStatic, boolean isSetter) {
         StringBuilder argumentContent = null;
 
         if (isSetter) {
@@ -134,7 +133,7 @@ public class CodeGenerator {
             wrapperMethodBodies.append("return ");
 
             if (isObjectReturningMethod) {
-                wrapperMethodBodies.append("static_cast<").append(Utils.getCReturnType(aFieldType, aNarrowChars)).append(">(");
+                wrapperMethodBodies.append("static_cast<").append(Utils.getCReturnType(aFieldType)).append(">(");
             }
 
             wrapperMethodBodies.append("env->Get");
@@ -185,14 +184,14 @@ public class CodeGenerator {
         boolean shallGenerateStatic = isFieldStatic || aFieldTuple.mAnnotationInfo.isStatic;
 
         String getterName = "get" + CFieldName;
-        String getterSignature = Utils.getCImplementationMethodSignature(EMPTY_CLASS_ARRAY, fieldType, getterName, mCClassName, aFieldTuple.mAnnotationInfo.narrowChars);
-        String getterHeaderSignature = Utils.getCHeaderMethodSignature(EMPTY_CLASS_ARRAY, GETTER_ARGUMENT_ANNOTATIONS, fieldType, getterName, mCClassName, shallGenerateStatic, aFieldTuple.mAnnotationInfo.narrowChars);
+        String getterSignature = Utils.getCImplementationMethodSignature(EMPTY_CLASS_ARRAY, fieldType, getterName, mCClassName);
+        String getterHeaderSignature = Utils.getCHeaderMethodSignature(EMPTY_CLASS_ARRAY, GETTER_ARGUMENT_ANNOTATIONS, fieldType, getterName, mCClassName, shallGenerateStatic);
 
         writeSignatureToHeader(getterHeaderSignature);
 
         writeFunctionStartupBoilerPlate(getterSignature, fieldType, isFieldStatic, true);
 
-        generateGetterOrSetterBody(fieldType, CFieldName, isFieldStatic, false, aFieldTuple.mAnnotationInfo.narrowChars);
+        generateGetterOrSetterBody(fieldType, CFieldName, isFieldStatic, false);
 
         // If field not final, also generate a setter function.
         if (!isFieldFinal) {
@@ -200,14 +199,14 @@ public class CodeGenerator {
 
             Class<?>[] setterArguments = new Class<?>[]{fieldType};
 
-            String setterSignature = Utils.getCImplementationMethodSignature(setterArguments, Void.class, setterName, mCClassName, aFieldTuple.mAnnotationInfo.narrowChars);
-            String setterHeaderSignature = Utils.getCHeaderMethodSignature(setterArguments, SETTER_ARGUMENT_ANNOTATIONS, Void.class, setterName, mCClassName, shallGenerateStatic, aFieldTuple.mAnnotationInfo.narrowChars);
+            String setterSignature = Utils.getCImplementationMethodSignature(setterArguments, Void.class, setterName, mCClassName);
+            String setterHeaderSignature = Utils.getCHeaderMethodSignature(setterArguments, SETTER_ARGUMENT_ANNOTATIONS, Void.class, setterName, mCClassName, shallGenerateStatic);
 
             writeSignatureToHeader(setterHeaderSignature);
 
             writeFunctionStartupBoilerPlate(setterSignature, Void.class, isFieldStatic, true);
 
-            generateGetterOrSetterBody(fieldType, CFieldName, isFieldStatic, true, aFieldTuple.mAnnotationInfo.narrowChars);
+            generateGetterOrSetterBody(fieldType, CFieldName, isFieldStatic, true);
         }
     }
 
@@ -218,8 +217,8 @@ public class CodeGenerator {
 
         generateMemberCommon(theCtor, mCClassName, mClassToWrap);
 
-        String implementationSignature = Utils.getCImplementationMethodSignature(theCtor.getParameterTypes(), Void.class, CMethodName, mCClassName, aCtorTuple.mAnnotationInfo.narrowChars);
-        String headerSignature = Utils.getCHeaderMethodSignature(theCtor.getParameterTypes(), theCtor.getParameterAnnotations(), Void.class, CMethodName, mCClassName, false, aCtorTuple.mAnnotationInfo.narrowChars);
+        String implementationSignature = Utils.getCImplementationMethodSignature(theCtor.getParameterTypes(), Void.class, CMethodName, mCClassName);
+        String headerSignature = Utils.getCHeaderMethodSignature(theCtor.getParameterTypes(), theCtor.getParameterAnnotations(), Void.class, CMethodName, mCClassName, false);
 
         // Slice off the "void " from the start of the constructor declaration.
         headerSignature = headerSignature.substring(5);
@@ -329,7 +328,7 @@ public class CodeGenerator {
         if (!aNoThrow) {
             wrapperMethodBodies.append(
                 "        AndroidBridge::HandleUncaughtException(env);\n" +
-                "        MOZ_CRASH(\"Exception should have caused crash.\");\n");
+                "        MOZ_ASSUME_UNREACHABLE(\"Exception should have caused crash.\");\n");
         } else {
             wrapperMethodBodies.append(
                 "        return").append(Utils.getFailureReturnForType(returnType)).append(";\n");
@@ -427,7 +426,7 @@ public class CodeGenerator {
      */
     private void writeMethodBody(String methodSignature, String aCMethodName, Method aMethod,
             Class<?> aClass, boolean aIsStaticBridgeMethod, boolean aIsMultithreaded,
-				 boolean aNoThrow, boolean aNarrowChars) {
+            boolean aNoThrow) {
         Class<?>[] argumentTypes = aMethod.getParameterTypes();
         Class<?> returnType = aMethod.getReturnType();
 
@@ -456,7 +455,7 @@ public class CodeGenerator {
             if (isObjectReturningMethod) {
                 wrapperMethodBodies.append("jobject");
             } else {
-                wrapperMethodBodies.append(Utils.getCReturnType(returnType, aNarrowChars));
+                wrapperMethodBodies.append(Utils.getCReturnType(returnType));
             }
             wrapperMethodBodies.append(" temp = ");
         }
@@ -495,8 +494,8 @@ public class CodeGenerator {
         // value.
         if (isObjectReturningMethod) {
             wrapperMethodBodies.append("    ")
-		.append(Utils.getCReturnType(returnType, aNarrowChars))
-		.append(" ret = static_cast<").append(Utils.getCReturnType(returnType, aNarrowChars)).append(">(env->PopLocalFrame(temp));\n" +
+                               .append(Utils.getCReturnType(returnType))
+                               .append(" ret = static_cast<").append(Utils.getCReturnType(returnType)).append(">(env->PopLocalFrame(temp));\n" +
                                        "    return ret;\n");
         } else if (!returnType.getCanonicalName().equals("void")) {
             // If we're a primitive-returning function, just return the directly-obtained primative

@@ -21,8 +21,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 namespace {
 
 const int kNackThreshold = 3;
@@ -480,7 +478,5 @@ TEST(NackTest, RoudTripTimeIsApplied) {
   EXPECT_EQ(4, nack_list[0]);
   EXPECT_EQ(5, nack_list[1]);
 }
-
-}  // namespace acm2
 
 }  // namespace webrtc

@@ -122,13 +122,12 @@ nsFontMetrics::Init(const nsFont& aFont, nsIAtom* aLanguage,
                        aFont.sizeAdjust,
                        aFont.systemFont,
                        mDeviceContext->IsPrinterSurface(),
-                       aFont.variant == NS_STYLE_FONT_VARIANT_SMALL_CAPS,
                        aFont.languageOverride);
 
     aFont.AddFontFeaturesToStyle(&style);
 
     mFontGroup = gfxPlatform::GetPlatform()->
-        CreateFontGroup(aFont.fontlist, &style, aUserFontSet);
+        CreateFontGroup(aFont.name, &style, aUserFontSet);
     mFontGroup->SetTextPerfMetrics(aTextPerf);
     if (mFontGroup->FontListLength() < 1)
         return NS_ERROR_UNEXPECTED;

@@ -11,7 +11,6 @@
 #include "CSFVideoTermination.h"
 #include "MediaConduitErrors.h"
 #include "MediaConduitInterface.h"
-#include "GmpVideoCodec.h"
 #include "MediaPipeline.h"
 #include "MediaPipelineFilter.h"
 #include "VcmSIPCCBinding.h"
@@ -31,11 +30,6 @@
 #include "nsServiceManagerUtils.h"
 #include "nsIPrefService.h"
 #include "nsIPrefBranch.h"
-#ifdef MOZILLA_INTERNAL_API
-#include "nsIPrincipal.h"
-#include "nsIDocument.h"
-#include "mozilla/Preferences.h"
-#endif
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -45,7 +39,6 @@
 
 #ifdef MOZ_WEBRTC_OMX
 #include "OMXVideoCodec.h"
-#include "OMXCodecWrapper.h"
 #endif
 
 extern "C" {
@@ -91,7 +84,6 @@ using namespace CSF;
 VcmSIPCCBinding * VcmSIPCCBinding::gSelf = nullptr;
 int VcmSIPCCBinding::gAudioCodecMask = 0;
 int VcmSIPCCBinding::gVideoCodecMask = 0;
-int VcmSIPCCBinding::gVideoCodecGmpMask = 0;
 nsIThread *VcmSIPCCBinding::gMainThread = nullptr;
 nsIEventTarget *VcmSIPCCBinding::gSTSThread = nullptr;
 nsCOMPtr<nsIPrefBranch> VcmSIPCCBinding::gBranch = nullptr;
@@ -137,13 +129,16 @@ VcmSIPCCBinding::VcmSIPCCBinding ()
 
 class VcmIceOpaque : public NrIceOpaque {
  public:
-  VcmIceOpaque(cc_call_handle_t call_handle,
+  VcmIceOpaque(cc_streamid_t stream_id,
+               cc_call_handle_t call_handle,
                uint16_t level) :
+      stream_id_(stream_id),
       call_handle_(call_handle),
       level_(level) {}
 
   virtual ~VcmIceOpaque() {}
 
+  cc_streamid_t stream_id_;
   cc_call_handle_t call_handle_;
   uint16_t level_;
 };
@@ -173,45 +168,45 @@ void VcmSIPCCBinding::CandidateReady(NrIceMediaStream* stream,
     MOZ_ASSERT(opaque);
 
     VcmIceOpaque *vcm_opaque = static_cast<VcmIceOpaque *>(opaque);
-    CSFLogDebug(logTag, "Candidate ready on call %u, level %u: %s",
-                vcm_opaque->call_handle_, vcm_opaque->level_, candidate.c_str());
+    CSFLogDebug(logTag, "Candidate ready on call %u, level %u",
+                vcm_opaque->call_handle_, vcm_opaque->level_);
 
     char *candidate_tmp = (char *)malloc(candidate.size() + 1);
     if (!candidate_tmp)
-        return;
+	return;
     sstrncpy(candidate_tmp, candidate.c_str(), candidate.size() + 1);
     // Send a message to the GSM thread.
     CC_CallFeature_FoundICECandidate(vcm_opaque->call_handle_,
-                                     candidate_tmp,
-                                     nullptr,
-                                     vcm_opaque->level_,
-                                     nullptr);
+				     candidate_tmp,
+				     nullptr,
+				     vcm_opaque->level_,
+				     nullptr);
 }
 
 void VcmSIPCCBinding::setStreamObserver(StreamObserver* obs)
 {
-        streamObserver = obs;
+	streamObserver = obs;
 }
 
 /* static */
 StreamObserver * VcmSIPCCBinding::getStreamObserver()
 {
     if (gSelf != nullptr)
-        return gSelf->streamObserver;
+    	return gSelf->streamObserver;
 
     return nullptr;
 }
 
 void VcmSIPCCBinding::setMediaProviderObserver(MediaProviderObserver* obs)
 {
-        mediaProviderObserver = obs;
+	mediaProviderObserver = obs;
 }
 
 
 MediaProviderObserver * VcmSIPCCBinding::getMediaProviderObserver()
 {
     if (gSelf != nullptr)
-        return gSelf->mediaProviderObserver;
+    	return gSelf->mediaProviderObserver;
 
     return nullptr;
 }
@@ -228,12 +223,6 @@ void VcmSIPCCBinding::setVideoCodecs(int codecMask)
   VcmSIPCCBinding::gVideoCodecMask = codecMask;
 }
 
-void VcmSIPCCBinding::addVideoCodecsGmp(int codecMask)
-{
-  CSFLogDebug(logTag, "ADDING VIDEO: %d", codecMask);
-  VcmSIPCCBinding::gVideoCodecGmpMask |= codecMask;
-}
-
 int VcmSIPCCBinding::getAudioCodecs()
 {
   return VcmSIPCCBinding::gAudioCodecMask;
@@ -242,41 +231,6 @@ int VcmSIPCCBinding::getAudioCodecs()
 int VcmSIPCCBinding::getVideoCodecs()
 {
   return VcmSIPCCBinding::gVideoCodecMask;
-}
-
-int VcmSIPCCBinding::getVideoCodecsGmp()
-{
-  return VcmSIPCCBinding::gVideoCodecGmpMask;
-}
-
-int VcmSIPCCBinding::getVideoCodecsHw()
-{
-  // Check to see if what HW codecs are available (not in use) at this moment.
-  // Note that streaming video decode can reserve a decoder
-
-  // XXX See bug 1018791 Implement W3 codec reservation policy
-  // Note that currently, OMXCodecReservation needs to be held by an sp<> because it puts
-  // 'this' into an sp<EventListener> to talk to the resource reservation code
-#ifdef MOZ_WEBRTC_OMX
-#ifdef MOZILLA_INTERNAL_API
-  if (Preferences::GetBool("media.peerconnection.video.h264_enabled")) {
-#endif
-    android::sp<android::OMXCodecReservation> encode = new android::OMXCodecReservation(true);
-    android::sp<android::OMXCodecReservation> decode = new android::OMXCodecReservation(false);
-
-    // Currently we just check if they're available right now, which will fail if we're
-    // trying to call ourself, for example.  It will work for most real-world cases, like
-    // if we try to add a person to a 2-way call to make a 3-way mesh call
-    if (encode->ReserveOMXCodec() && decode->ReserveOMXCodec()) {
-      CSFLogDebug( logTag, "%s: H264 hardware codec available", __FUNCTION__);
-      return VCM_CODEC_RESOURCE_H264;
-    }
-#if defined( MOZILLA_INTERNAL_API)
-   }
-#endif
-#endif
-
-  return 0;
 }
 
 void VcmSIPCCBinding::setMainThread(nsIThread *thread)
@@ -385,7 +339,22 @@ extern "C" {
 #define CREATE_MT_MAP(a,b)        ((a << 16) | b)
 #define DYNAMIC_PAYLOAD_TYPE(x)    ((x >> 16) & 0xFFFF)
 
+#define    MAX_SPROP_LEN    32
+
 #define VCM_ERROR -1
+
+struct h264_video
+{
+    char       sprop_parameter_set[MAX_SPROP_LEN];
+    int        packetization_mode;
+    int        profile_level_id;
+    int        max_mbps;
+    int        max_fs;
+    int        max_cpb;
+    int        max_dpb;
+    int        max_br;
+    int        tias_bw;
+};
 
 /**
  *  start/stop ringing
@@ -602,7 +571,7 @@ static short vcmGetIceStream_m(cc_mcapid_t mcap_id,
  *
  */
 static short vcmRxAllocICE_s(TemporaryRef<NrIceCtx> ctx_in,
-                             TemporaryRef<NrIceMediaStream> stream_in,
+			     TemporaryRef<NrIceMediaStream> stream_in,
                              cc_call_handle_t  call_handle,
                              cc_streamid_t stream_id,
                              uint16_t level,
@@ -622,15 +591,11 @@ static short vcmRxAllocICE_s(TemporaryRef<NrIceCtx> ctx_in,
   *candidatesp = nullptr;
   *candidate_ctp = 0;
 
-  // This can be called multiple times; don't connect to the signal more than
-  // once (see bug 1018473 for an explanation).
-  if (!stream->opaque()) {
-    // Set the opaque so we can correlate events.
-    stream->SetOpaque(new VcmIceOpaque(call_handle, level));
+  // Set the opaque so we can correlate events.
+  stream->SetOpaque(new VcmIceOpaque(stream_id, call_handle, level));
 
-    // Attach ourself to the candidate signal.
-    VcmSIPCCBinding::connectCandidateSignal(stream);
-  }
+  // Attach ourself to the candidate signal.
+  VcmSIPCCBinding::connectCandidateSignal(stream);
 
   std::vector<std::string> candidates = stream->GetCandidates();
   CSFLogDebug( logTag, "%s: Got %lu candidates", __FUNCTION__, (unsigned long) candidates.size());
@@ -831,14 +796,12 @@ short vcmGetIceParams(const char *peerconnection,
  *  @param[in]  peerconnection - the peerconnection in use
  *  @param[in]  ufrag - the ufrag
  *  @param[in]  pwd - the pwd
- *  @param[in]  icelite - is peer ice lite
  *
  *  @return 0 for success; VCM_ERROR for failure
  */
 static short vcmSetIceSessionParams_m(const char *peerconnection,
                                       char *ufrag,
-                                      char *pwd,
-                                      cc_boolean icelite)
+                                      char *pwd)
 {
   CSFLogDebug( logTag, "%s: PC = %s", __FUNCTION__, peerconnection);
 
@@ -851,9 +814,7 @@ static short vcmSetIceSessionParams_m(const char *peerconnection,
     attributes.push_back(ufrag);
   if (pwd)
     attributes.push_back(pwd);
-  if (icelite) {
-    attributes.push_back("ice-lite");
-  }
+
   nsresult res = pc.impl()->media()->ice_ctx()->
     ParseGlobalAttributes(attributes);
 
@@ -872,14 +833,12 @@ static short vcmSetIceSessionParams_m(const char *peerconnection,
  *  @param[in]  peerconnection - the peerconnection in use
  *  @param[in]  ufrag - the ufrag
  *  @param[in]  pwd - the pwd
- *  @param[in]  icelite - is peer using ice-lite
  *
  *  @return 0 success, error failure
  */
 short vcmSetIceSessionParams(const char *peerconnection,
                              char *ufrag,
-                             char *pwd,
-                             cc_boolean icelite)
+                             char *pwd)
 {
   short ret;
 
@@ -888,7 +847,6 @@ short vcmSetIceSessionParams(const char *peerconnection,
                         peerconnection,
                         ufrag,
                         pwd,
-                        icelite,
                         &ret));
 
   return ret;
@@ -1382,7 +1340,7 @@ short vcmRxOpen(cc_mcapid_t mcap_id,
     *port_allocated = -1;
     if(listen_ip)
     {
-        csf_sprintf(dottedIP, sizeof(dottedIP), "%u.%u.%u.%u",
+    	csf_sprintf(dottedIP, sizeof(dottedIP), "%u.%u.%u.%u",
                 (listen_ip->u.ip4 >> 24) & 0xff, (listen_ip->u.ip4 >> 16) & 0xff,
                 (listen_ip->u.ip4 >> 8) & 0xff, listen_ip->u.ip4 & 0xff );
     }
@@ -1684,7 +1642,8 @@ static int vcmRxStartICE_m(cc_mcapid_t mcap_id,
         payloads[i].audio.frequency,
         payloads[i].audio.packet_size,
         payloads[i].audio.channels,
-        payloads[i].audio.bitrate);
+        payloads[i].audio.bitrate,
+        pc.impl()->load_manager());
       configs.push_back(config_raw);
     }
 
@@ -1692,7 +1651,7 @@ static int vcmRxStartICE_m(cc_mcapid_t mcap_id,
       return VCM_ERROR;
 
     // Now we have all the pieces, create the pipeline
-    mozilla::RefPtr<mozilla::MediaPipelineReceiveAudio> pipeline =
+    mozilla::RefPtr<mozilla::MediaPipeline> pipeline =
       new mozilla::MediaPipelineReceiveAudio(
         pc.impl()->GetHandle(),
         pc.impl()->GetMainThread().get(),
@@ -1741,7 +1700,8 @@ static int vcmRxStartICE_m(cc_mcapid_t mcap_id,
       config_raw = new mozilla::VideoCodecConfig(
         payloads[i].remote_rtp_pt,
         ccsdpCodecName(payloads[i].codec_type),
-        payloads[i].video.rtcp_fb_types);
+        payloads[i].video.rtcp_fb_types,
+        pc.impl()->load_manager());
       if (vcmEnsureExternalCodec(conduit, config_raw, false)) {
         continue;
       }
@@ -1752,7 +1712,7 @@ static int vcmRxStartICE_m(cc_mcapid_t mcap_id,
       return VCM_ERROR;
 
     // Now we have all the pieces, create the pipeline
-    mozilla::RefPtr<mozilla::MediaPipelineReceiveVideo> pipeline =
+    mozilla::RefPtr<mozilla::MediaPipeline> pipeline =
         new mozilla::MediaPipelineReceiveVideo(
             pc.impl()->GetHandle(),
             pc.impl()->GetMainThread().get(),
@@ -1927,7 +1887,7 @@ void vcmRxReleasePort  (cc_mcapid_t mcap_id,
 
     StreamObserver* obs = VcmSIPCCBinding::getStreamObserver();
     if(obs != nullptr)
-        obs->deregisterStream(call_handle, stream_id);
+    	obs->deregisterStream(call_handle, stream_id);
 }
 
 /*
@@ -2163,7 +2123,8 @@ static int vcmEnsureExternalCodec(
   if (config->mName == "VP8") {
     // whitelist internal codecs; I420 will be here once we resolve bug 995884
     return 0;
-  } else if (config->mName == "H264_P0" || config->mName == "H264_P1") {
+#ifdef MOZ_WEBRTC_OMX
+  } else if (config->mName == "I420") {
     // Here we use "I420" to register H.264 because WebRTC.org code has a
     // whitelist of supported video codec in |webrtc::ViECodecImpl::CodecValid()|
     // and will reject registration of those not in it.
@@ -2171,32 +2132,25 @@ static int vcmEnsureExternalCodec(
 
     // Register H.264 codec.
     if (send) {
-	VideoEncoder* encoder = nullptr;
-#ifdef MOZ_WEBRTC_OMX
-	encoder = OMXVideoCodec::CreateEncoder(
-	    OMXVideoCodec::CodecType::CODEC_H264);
-#else
-	encoder = mozilla::GmpVideoCodec::CreateEncoder();
-#endif
+      VideoEncoder* encoder = OMXVideoCodec::CreateEncoder(OMXVideoCodec::CodecType::CODEC_H264);
       if (encoder) {
-        return conduit->SetExternalSendCodec(config, encoder);
+        return conduit->SetExternalSendCodec(config->mType, encoder);
       } else {
         return kMediaConduitInvalidSendCodec;
       }
     } else {
-      VideoDecoder* decoder;
-#ifdef MOZ_WEBRTC_OMX
-      decoder = OMXVideoCodec::CreateDecoder(OMXVideoCodec::CodecType::CODEC_H264);
-#else
-      decoder = mozilla::GmpVideoCodec::CreateDecoder();
-#endif
+      VideoDecoder* decoder = OMXVideoCodec::CreateDecoder(OMXVideoCodec::CodecType::CODEC_H264);
       if (decoder) {
-        return conduit->SetExternalRecvCodec(config, decoder);
+        return conduit->SetExternalRecvCodec(config->mType, decoder);
       } else {
         return kMediaConduitInvalidReceiveCodec;
       }
     }
     NS_NOTREACHED("Shouldn't get here!");
+#else
+  } else if (config->mName == "I420") {
+    return 0;
+#endif
   } else {
     CSFLogError( logTag, "%s: Invalid video codec configured: %s", __FUNCTION__, config->mName.c_str());
     return send ? kMediaConduitInvalidSendCodec : kMediaConduitInvalidReceiveCodec;
@@ -2318,110 +2272,6 @@ int vcmTxStart(cc_mcapid_t mcap_id,
     return VCM_ERROR;
 }
 
-/**
- * Create a conduit for audio transmission.
- *
- *  @param[in]   level        - the m-line index
- *  @param[in]   payload      - codec info
- *  @param[in]   pc           - the peer connection
- *  @param [in]  attrs        - additional audio attributes
- *  @param[out]  conduit      - the conduit to create
- */
-static int vcmTxCreateAudioConduit(int level,
-                                   const vcm_payload_info_t *payload,
-                                   sipcc::PeerConnectionWrapper &pc,
-                                   const vcm_mediaAttrs_t *attrs,
-                                   mozilla::RefPtr<mozilla::MediaSessionConduit> &conduit)
-{
-  mozilla::AudioCodecConfig *config_raw =
-    new mozilla::AudioCodecConfig(
-      payload->remote_rtp_pt,
-      ccsdpCodecName(payload->codec_type),
-      payload->audio.frequency,
-      payload->audio.packet_size,
-      payload->audio.channels,
-      payload->audio.bitrate);
-
-  // Take possession of this pointer
-  mozilla::ScopedDeletePtr<mozilla::AudioCodecConfig> config(config_raw);
-
-  // Instantiate an appropriate conduit
-  mozilla::RefPtr<mozilla::MediaSessionConduit> rx_conduit =
-    pc.impl()->media()->GetConduit(level, true);
-  MOZ_ASSERT_IF(rx_conduit, rx_conduit->type() == MediaSessionConduit::AUDIO);
-
-  // The two sides of a send/receive pair of conduits each keep a raw pointer to the other,
-  // and are responsible for cleanly shutting down.
-  mozilla::RefPtr<mozilla::AudioSessionConduit> tx_conduit =
-    mozilla::AudioSessionConduit::Create(
-      static_cast<AudioSessionConduit *>(rx_conduit.get()));
-
-  if (!tx_conduit || tx_conduit->ConfigureSendMediaCodec(config) ||
-      tx_conduit->EnableAudioLevelExtension(attrs->audio_level,
-                                            attrs->audio_level_id)) {
-    return VCM_ERROR;
-  }
-  CSFLogError(logTag, "Created audio pipeline audio level %d %d",
-              attrs->audio_level, attrs->audio_level_id);
-
-  conduit = tx_conduit;
-  return 0;
-}
-
-/**
- * Create a conduit for video transmission.
- *
- *  @param[in]   level        - the m-line index
- *  @param[in]   payload      - codec info
- *  @param[in]   pc           - the peer connection
- *  @param[out]  conduit      - the conduit to create
- */
-static int vcmTxCreateVideoConduit(int level,
-                                   const vcm_payload_info_t *payload,
-                                   sipcc::PeerConnectionWrapper &pc,
-                                   const vcm_mediaAttrs_t *attrs,
-                                   mozilla::RefPtr<mozilla::MediaSessionConduit> &conduit)
-{
-  mozilla::VideoCodecConfig *config_raw;
-  struct VideoCodecConfigH264 *negotiated = nullptr;
-
-  if (attrs->video.opaque &&
-      (payload->codec_type == RTP_H264_P0 || payload->codec_type == RTP_H264_P1)) {
-    negotiated = static_cast<struct VideoCodecConfigH264 *>(attrs->video.opaque);
-  }
-
-  config_raw = new mozilla::VideoCodecConfig(
-    payload->remote_rtp_pt,
-    ccsdpCodecName(payload->codec_type),
-    payload->video.rtcp_fb_types,
-    payload->video.max_fs,
-    payload->video.max_fr,
-    negotiated);
-
-  // Take possession of this pointer
-  mozilla::ScopedDeletePtr<mozilla::VideoCodecConfig> config(config_raw);
-
-  // Instantiate an appropriate conduit
-  mozilla::RefPtr<mozilla::MediaSessionConduit> rx_conduit =
-    pc.impl()->media()->GetConduit(level, true);
-  MOZ_ASSERT_IF(rx_conduit, rx_conduit->type() == MediaSessionConduit::VIDEO);
-
-  // The two sides of a send/receive pair of conduits each keep a raw pointer to the other,
-  // and are responsible for cleanly shutting down.
-  mozilla::RefPtr<mozilla::VideoSessionConduit> tx_conduit =
-    mozilla::VideoSessionConduit::Create(static_cast<VideoSessionConduit *>(rx_conduit.get()));
-  if (!tx_conduit) {
-    return VCM_ERROR;
-  }
-  if (vcmEnsureExternalCodec(tx_conduit, config, true)) {
-    return VCM_ERROR;
-  }
-  if (tx_conduit->ConfigureSendMediaCodec(config)) {
-    return VCM_ERROR;
-  }
-  conduit = tx_conduit;
-  return 0;
-}
 
 /**
  *  start tx stream
@@ -2432,7 +2282,7 @@ static int vcmTxCreateVideoConduit(int level,
  *  @param[in]   stream_id    - stream id of the given media type.
  *  @param[in]   level        - the m-line index
  *  @param[in]   pc_stream_id - the media stream index (from PC.addStream())
- *  @param[in]   pc_track_id  - the track within the media stream
+ *  @param[i]n   pc_track_id  - the track within the media stream
  *  @param[in]   call_handle  - call handle
  *  @param[in]   peerconnection - the peerconnection in use
  *  @param[in]   payload      - payload information
@@ -2448,21 +2298,21 @@ static int vcmTxCreateVideoConduit(int level,
 #define EXTRACT_DYNAMIC_PAYLOAD_TYPE(PTYPE) ((PTYPE)>>16)
 
 static int vcmTxStartICE_m(cc_mcapid_t mcap_id,
-                           cc_groupid_t group_id,
-                           cc_streamid_t stream_id,
-                           int level,
-                           int pc_stream_id,
-                           int pc_track_id,
-                           cc_call_handle_t  call_handle,
-                           const char *peerconnection,
-                           const vcm_payload_info_t *payload,
-                           short tos,
-                           sdp_setup_type_e setup_type,
-                           const char *fingerprint_alg,
-                           const char *fingerprint,
-                           vcm_mediaAttrs_t *attrs)
+        cc_groupid_t group_id,
+        cc_streamid_t stream_id,
+        int level,
+        int pc_stream_id,
+        int pc_track_id,
+        cc_call_handle_t  call_handle,
+        const char *peerconnection,
+        const vcm_payload_info_t *payload,
+        short tos,
+        sdp_setup_type_e setup_type,
+        const char *fingerprint_alg,
+        const char *fingerprint,
+        vcm_mediaAttrs_t *attrs)
 {
-  CSFLogDebug(logTag, "%s(%s) track = %d, stream = %d, level = %d",
+  CSFLogDebug( logTag, "%s(%s) track = %d, stream = %d, level = %d",
               __FUNCTION__,
               peerconnection,
               pc_track_id,
@@ -2472,20 +2322,19 @@ static int vcmTxStartICE_m(cc_mcapid_t mcap_id,
   // Find the PC and get the stream
   sipcc::PeerConnectionWrapper pc(peerconnection);
   ENSURE_PC(pc, VCM_ERROR);
-  nsRefPtr<sipcc::LocalSourceStreamInfo> stream =
-    pc.impl()->media()->GetLocalStream(pc_stream_id);
+  nsRefPtr<sipcc::LocalSourceStreamInfo> stream = pc.impl()->media()->
+    GetLocalStream(pc_stream_id);
 
   // Create the transport flows
   mozilla::RefPtr<TransportFlow> rtp_flow =
-    vcmCreateTransportFlow(pc.impl(), level, false, setup_type,
-                           fingerprint_alg, fingerprint);
+      vcmCreateTransportFlow(pc.impl(), level, false, setup_type,
+                             fingerprint_alg, fingerprint);
   if (!rtp_flow) {
-    CSFLogError(logTag, "Could not create RTP flow");
-    return VCM_ERROR;
+      CSFLogError( logTag, "Could not create RTP flow");
+      return VCM_ERROR;
   }
-
   mozilla::RefPtr<TransportFlow> rtcp_flow = nullptr;
-  if (!attrs->rtcp_mux) {
+  if(!attrs->rtcp_mux) {
     rtcp_flow = vcmCreateTransportFlow(pc.impl(), level, true, setup_type,
                                        fingerprint_alg, fingerprint);
     if (!rtcp_flow) {
@@ -2494,55 +2343,121 @@ static int vcmTxStartICE_m(cc_mcapid_t mcap_id,
     }
   }
 
-  const char *mediaType;
-  mozilla::RefPtr<mozilla::MediaSessionConduit> conduit;
-  int err = VCM_ERROR;
+
   if (CC_IS_AUDIO(mcap_id)) {
-    mediaType = "audio";
-    err = vcmTxCreateAudioConduit(level, payload, pc, attrs, conduit);
+    mozilla::AudioCodecConfig *config_raw;
+    config_raw = new mozilla::AudioCodecConfig(
+      payload->remote_rtp_pt,
+      ccsdpCodecName(payload->codec_type),
+      payload->audio.frequency,
+      payload->audio.packet_size,
+      payload->audio.channels,
+      payload->audio.bitrate,
+      pc.impl()->load_manager());
+
+    // Take possession of this pointer
+    mozilla::ScopedDeletePtr<mozilla::AudioCodecConfig> config(config_raw);
+
+    // Instantiate an appropriate conduit
+    mozilla::RefPtr<mozilla::MediaSessionConduit> rx_conduit =
+      pc.impl()->media()->GetConduit(level, true);
+    MOZ_ASSERT_IF(rx_conduit, rx_conduit->type() == MediaSessionConduit::AUDIO);
+
+    // The two sides of a send/receive pair of conduits each keep a raw pointer to the other,
+    // and are responsible for cleanly shutting down.
+    mozilla::RefPtr<mozilla::AudioSessionConduit> conduit =
+      mozilla::AudioSessionConduit::Create(static_cast<AudioSessionConduit *>(rx_conduit.get()));
+    if (!conduit || conduit->ConfigureSendMediaCodec(config))
+      return VCM_ERROR;
+    CSFLogError(logTag, "Created audio pipeline audio level %d %d",
+                attrs->audio_level, attrs->audio_level_id);
+
+    if (!conduit || conduit->EnableAudioLevelExtension(attrs->audio_level, attrs->audio_level_id))
+      return VCM_ERROR;
+
+    pc.impl()->media()->AddConduit(level, false, conduit);
+    mozilla::RefPtr<mozilla::MediaPipeline> pipeline =
+        new mozilla::MediaPipelineTransmit(
+            pc.impl()->GetHandle(),
+            pc.impl()->GetMainThread().get(),
+            pc.impl()->GetSTSThread(),
+            stream->GetMediaStream(),
+            pc_track_id,
+            level,
+            conduit, rtp_flow, rtcp_flow);
+
+    nsresult res = pipeline->Init();
+    if (NS_FAILED(res)) {
+      CSFLogError(logTag, "Failure initializing audio pipeline");
+      return VCM_ERROR;
+    }
+    CSFLogDebug(logTag, "Created audio pipeline %p, conduit=%p, pc_stream=%d pc_track=%d",
+                pipeline.get(), conduit.get(), pc_stream_id, pc_track_id);
+
+
+    // Now we have all the pieces, create the pipeline
+    stream->StorePipeline(pc_track_id, pipeline);
+
   } else if (CC_IS_VIDEO(mcap_id)) {
-    mediaType = "video";
-    err = vcmTxCreateVideoConduit(level, payload, pc, attrs, conduit);
+    mozilla::VideoCodecConfig *config_raw;
+    config_raw = new mozilla::VideoCodecConfig(
+      payload->remote_rtp_pt,
+      ccsdpCodecName(payload->codec_type),
+      payload->video.rtcp_fb_types,
+      payload->video.max_fs,
+      payload->video.max_fr,
+      pc.impl()->load_manager());
+
+    // Take possession of this pointer
+    mozilla::ScopedDeletePtr<mozilla::VideoCodecConfig> config(config_raw);
+
+    // Instantiate an appropriate conduit
+    mozilla::RefPtr<mozilla::MediaSessionConduit> rx_conduit =
+      pc.impl()->media()->GetConduit(level, true);
+    MOZ_ASSERT_IF(rx_conduit, rx_conduit->type() == MediaSessionConduit::VIDEO);
+
+    // The two sides of a send/receive pair of conduits each keep a raw pointer to the other,
+    // and are responsible for cleanly shutting down.
+    mozilla::RefPtr<mozilla::VideoSessionConduit> conduit =
+      mozilla::VideoSessionConduit::Create(static_cast<VideoSessionConduit *>(rx_conduit.get()));
+
+    // Find the appropriate media conduit config
+    if (!conduit)
+      return VCM_ERROR;
+
+    if (vcmEnsureExternalCodec(conduit, config_raw, true))
+      return VCM_ERROR;
+
+    if (conduit->ConfigureSendMediaCodec(config))
+      return VCM_ERROR;
+
+    pc.impl()->media()->AddConduit(level, false, conduit);
+
+    // Now we have all the pieces, create the pipeline
+    mozilla::RefPtr<mozilla::MediaPipeline> pipeline =
+        new mozilla::MediaPipelineTransmit(
+            pc.impl()->GetHandle(),
+            pc.impl()->GetMainThread().get(),
+            pc.impl()->GetSTSThread(),
+            stream->GetMediaStream(),
+            pc_track_id,
+            level,
+            conduit, rtp_flow, rtcp_flow);
+
+    nsresult res = pipeline->Init();
+    if (NS_FAILED(res)) {
+      CSFLogError(logTag, "Failure initializing video pipeline");
+      return VCM_ERROR;
+    }
+
+    CSFLogDebug(logTag, "Created video pipeline %p, conduit=%p, pc_stream=%d pc_track=%d",
+                pipeline.get(), conduit.get(), pc_stream_id, pc_track_id);
+
+    stream->StorePipeline(pc_track_id, pipeline);
   } else {
     CSFLogError(logTag, "%s: mcap_id unrecognized", __FUNCTION__);
-  }
-  if (err) {
-    return err;
-  }
-
-  pc.impl()->media()->AddConduit(level, false, conduit);
-
-  // Now we have all the pieces, create the pipeline
-  mozilla::RefPtr<mozilla::MediaPipelineTransmit> pipeline =
-    new mozilla::MediaPipelineTransmit(
-      pc.impl()->GetHandle(),
-      pc.impl()->GetMainThread().get(),
-      pc.impl()->GetSTSThread(),
-      stream->GetMediaStream(),
-      pc_track_id,
-      level,
-      conduit, rtp_flow, rtcp_flow);
-
-  nsresult res = pipeline->Init();
-  if (NS_FAILED(res)) {
-    CSFLogError(logTag, "Failure initializing %s pipeline", mediaType);
     return VCM_ERROR;
   }
-#ifdef MOZILLA_INTERNAL_API
-  // implement checking for peerIdentity (where failure == black/silence)
-  nsIDocument* doc = pc.impl()->GetWindow()->GetExtantDoc();
-  if (doc) {
-    pipeline->UpdateSinkIdentity_m(doc->NodePrincipal(), pc.impl()->GetPeerIdentity());
-  } else {
-    CSFLogError(logTag, "Initializing pipeline without attached doc");
-  }
-#endif
-
-  CSFLogDebug(logTag,
-              "Created %s pipeline %p, conduit=%p, pc_stream=%d pc_track=%d",
-              mediaType, pipeline.get(), conduit.get(),
-              pc_stream_id, pc_track_id);
-  stream->StorePipeline(pc_track_id, pipeline);
 
   // This tells the receive MediaPipeline (if there is one) whether we are
   // doing bundle, and if so, updates the filter. Once the filter is finalized,
@@ -2766,53 +2681,23 @@ int vcmGetVideoCodecList(int request_type)
     CSFLogDebug( logTag, "%s(codec_mask = %X)", fname, codecMask);
 
     //return codecMask;
-    return VCM_CODEC_RESOURCE_H264;
+	return VCM_CODEC_RESOURCE_H264;
 #else
-  // Control if H264 is available and priority:
-  // If hardware codecs are available (VP8 or H264), use those as a preferred codec
-  // (question: on all platforms?)
-  // If OpenH264 is available, use that at lower priority to VP8
-  // (question: platform software or OS-unknown-impl codecs?  (Win8.x, etc)
-  // Else just use VP8 software
+  int codecMask = VcmSIPCCBinding::getVideoCodecs();
+  CSFLogDebug(logTag, "GetVideoCodecList returning %X", codecMask);
 
-    int codecMask;
-    switch (request_type) {
-      case VCM_DSP_FULLDUPLEX_HW:
-        codecMask = VcmSIPCCBinding::getVideoCodecsHw();
-        break;
-      case VCM_DSP_FULLDUPLEX_GMP:
-        codecMask = VcmSIPCCBinding::getVideoCodecsGmp();
-        break;
-      default: // VCM_DSP_FULLDUPLEX
-        codecMask = VcmSIPCCBinding::getVideoCodecs();
-        break;
-    }
-    CSFLogDebug(logTag, "GetVideoCodecList returning %X", codecMask);
-    return codecMask;
+  return codecMask;
 #endif
 }
 
 /**
- * Get supported H.264 video packetization modes
- * @return mask of supported video packetization modes for H.264. Value returned
- * must be 1 to 3 (bit 0 is mode 0, bit 1 is mode 1.
- * Bit 2 (Mode 2) is not supported yet.
+ * Get max supported H.264 video packetization mode.
+ * @return maximum supported video packetization mode for H.264. Value returned
+ * must be 0 or 1. Value 2 is not supported yet.
  */
-int vcmGetH264SupportedPacketizationModes()
+int vcmGetVideoMaxSupportedPacketizationMode()
 {
-  // We support mode 1 packetization only in webrtc currently
-  return VCM_H264_MODE_1;
-}
-
-/**
- * Get supported H.264 profile-level-id
- * @return supported profile-level-id value
- */
-uint32_t vcmGetVideoH264ProfileLevelID()
-{
-  // constrained baseline level 1.2
-  // XXX make variable based on openh264 and OMX support
-  return 0x42E00C;
+    return 0;
 }
 
 /**
@@ -2830,11 +2715,11 @@ void vcmMediaControl(cc_call_handle_t  call_handle, vcm_media_control_to_encoder
 {
     if ( to_encoder == VCM_MEDIA_CONTROL_PICTURE_FAST_UPDATE )
     {
-        StreamObserver* obs = VcmSIPCCBinding::getStreamObserver();
-        if (obs != nullptr)
-        {
-                obs->sendIFrame(call_handle);
-        }
+    	StreamObserver* obs = VcmSIPCCBinding::getStreamObserver();
+    	if (obs != nullptr)
+    	{
+    		obs->sendIFrame(call_handle);
+    	}
     }
 }
 
@@ -2952,51 +2837,45 @@ void vcmFreeMediaPtr(void *ptr)
  * @return cc_boolean - true if attributes are accepted false otherwise
  */
 
-cc_boolean vcmCheckAttribs(cc_uint32_t media_type, void *sdp_p, int level,
-                           int remote_pt, void **rcapptr)
+cc_boolean vcmCheckAttribs(cc_uint32_t media_type, void *sdp_p, int level, void **rcapptr)
 {
     CSFLogDebug( logTag, "vcmCheckAttribs(): media=%d", media_type);
 
     cc_uint16_t     temp;
     const char      *ptr;
     uint32_t        t_uint;
-    struct VideoCodecConfigH264 *rcap;
+    struct h264_video *rcap;
 
     *rcapptr = nullptr;
-
-    int fmtp_inst = ccsdpAttrGetFmtpInst(sdp_p, level, remote_pt);
-    if (fmtp_inst < 0) {
-      return TRUE;
-    }
 
     switch (media_type)
     {
     case RTP_VP8:
-        return TRUE;
+    	return TRUE;
 
     case RTP_H264_P0:
     case RTP_H264_P1:
 
-        rcap = (struct VideoCodecConfigH264 *) cpr_malloc( sizeof(struct VideoCodecConfigH264) );
+        rcap = (struct h264_video *) cpr_malloc( sizeof(struct h264_video) );
         if ( rcap == nullptr )
         {
             CSFLogDebug( logTag, "vcmCheckAttribs(): Malloc Failed for rcap");
             return FALSE;
         }
-        memset( rcap, 0, sizeof(struct VideoCodecConfigH264) );
+        memset( rcap, 0, sizeof(struct h264_video) );
 
-        if ( (ptr = ccsdpAttrGetFmtpParamSets(sdp_p, level, 0, fmtp_inst)) != nullptr )
+        if ( (ptr = ccsdpAttrGetFmtpParamSets(sdp_p, level, 0, 1)) != nullptr )
         {
-            memset(rcap->sprop_parameter_sets, 0, csf_countof(rcap->sprop_parameter_sets));
-            sstrncpy(rcap->sprop_parameter_sets, ptr, csf_countof(rcap->sprop_parameter_sets));
+            memset(rcap->sprop_parameter_set, 0, csf_countof(rcap->sprop_parameter_set));
+            sstrncpy(rcap->sprop_parameter_set, ptr, csf_countof(rcap->sprop_parameter_set));
         }
 
-        if ( ccsdpAttrGetFmtpPackMode(sdp_p, level, 0, fmtp_inst, &temp) == SDP_SUCCESS )
+        if ( ccsdpAttrGetFmtpPackMode(sdp_p, level, 0, 1, &temp) == SDP_SUCCESS )
         {
             rcap->packetization_mode = temp;
         }
 
-        if ( (ptr = ccsdpAttrGetFmtpProfileLevelId(sdp_p, level, 0, fmtp_inst)) != nullptr )
+        if ( (ptr = ccsdpAttrGetFmtpProfileLevelId(sdp_p, level, 0, 1)) != nullptr )
         {
 #ifdef _WIN32
             sscanf_s(ptr, "%x", &rcap->profile_level_id, sizeof(int*));
@@ -3005,32 +2884,32 @@ cc_boolean vcmCheckAttribs(cc_uint32_t media_type, void *sdp_p, int level,
 #endif
         }
 
-        if ( ccsdpAttrGetFmtpMaxMbps(sdp_p, level, 0, fmtp_inst, &t_uint) == SDP_SUCCESS )
+        if ( ccsdpAttrGetFmtpMaxMbps(sdp_p, level, 0, 1, &t_uint) == SDP_SUCCESS )
         {
             rcap->max_mbps = t_uint;
         }
 
-        if ( ccsdpAttrGetFmtpMaxFs(sdp_p, level, 0, fmtp_inst, &t_uint) == SDP_SUCCESS )
+        if ( ccsdpAttrGetFmtpMaxFs(sdp_p, level, 0, 1, &t_uint) == SDP_SUCCESS )
         {
             rcap->max_fs = t_uint;
         }
 
-        if ( ccsdpAttrGetFmtpMaxCpb(sdp_p, level, 0, fmtp_inst, &t_uint) == SDP_SUCCESS )
+        if ( ccsdpAttrGetFmtpMaxCpb(sdp_p, level, 0, 1, &t_uint) == SDP_SUCCESS )
         {
             rcap->max_cpb = t_uint;
         }
 
-        if ( ccsdpAttrGetFmtpMaxCpb(sdp_p, level, 0, fmtp_inst, &t_uint) == SDP_SUCCESS )
+        if ( ccsdpAttrGetFmtpMaxCpb(sdp_p, level, 0, 1, &t_uint) == SDP_SUCCESS )
         {
             rcap->max_dpb = t_uint;
         }
 
-        if ( ccsdpAttrGetFmtpMaxCpb(sdp_p, level, 0, fmtp_inst, &t_uint) == SDP_SUCCESS )
+        if ( ccsdpAttrGetFmtpMaxCpb(sdp_p, level, 0, 1, &t_uint) == SDP_SUCCESS )
         {
             rcap->max_br = t_uint;
         }
 
-        rcap->tias_bw = ccsdpGetBandwidthValue(sdp_p, level, fmtp_inst);
+        rcap->tias_bw = ccsdpGetBandwidthValue(sdp_p, level, 1);
         if ( rcap->tias_bw == 0 )
         {
             // received bandwidth of 0 reject this
@@ -3044,7 +2923,7 @@ cc_boolean vcmCheckAttribs(cc_uint32_t media_type, void *sdp_p, int level,
         }
 
         CSFLogDebug( logTag, "vcmCheckAttribs(): Negotiated media attrs\nsprop=%s\npack_mode=%d\nprofile_level_id=%X\nmbps=%d\nmax_fs=%d\nmax_cpb=%d\nmax_dpb=%d\nbr=%d bw=%d\n",
-            rcap->sprop_parameter_sets,
+            rcap->sprop_parameter_set,
             rcap->packetization_mode,
             rcap->profile_level_id,
             rcap->max_mbps,
@@ -3059,6 +2938,60 @@ cc_boolean vcmCheckAttribs(cc_uint32_t media_type, void *sdp_p, int level,
 
     default:
         return FALSE;
+    }
+}
+
+/**
+ * Add Video attributes in the offer/answer SDP
+ *
+ * This method is called for video codecs only. This method should populate the
+ * Video SDP attributes using the SDP helper API
+ *
+ * @param [in] sdp_p - opaque SDP pointer to be used via SDP helper APIs
+ * @param [in] level - Parameter to be used with SDP helper APIs
+ * @param [in] media_type - codec for which the SDP attributes are to be populated
+ * @param [in] payload_number - RTP payload type used for the SDP
+ * @param [in] isOffer - cc_boolean indicating we are encoding an offer or an aswer
+ *
+ * @return void
+ */
+void vcmPopulateAttribs(void *sdp_p, int level, cc_uint32_t media_type,
+                          cc_uint16_t payload_number, cc_boolean isOffer)
+{
+    CSFLogDebug( logTag, "vcmPopulateAttribs(): media=%d PT=%d, isOffer=%d", media_type, payload_number, isOffer);
+    uint16_t a_inst;//, a_inst2, a_inst3, a_inst4;
+    int profile;
+    char profile_level_id[MAX_SPROP_LEN];
+
+    switch (media_type)
+    {
+    case RTP_H264_P0:
+    case RTP_H264_P1:
+
+        if ( ccsdpAddNewAttr(sdp_p, level, 0, SDP_ATTR_FMTP, &a_inst) != SDP_SUCCESS ) return;
+
+        (void) ccsdpAttrSetFmtpPayloadType(sdp_p, level, 0, a_inst, payload_number);
+
+        //(void) sdp_attr_set_fmtp_pack_mode(sdp_p, level, 0, a_inst, 1 /*packetization_mode*/);
+        //(void) sdp_attr_set_fmtp_parameter_sets(sdp_p, level, 0, a_inst, "J0KAFJWgUH5A,KM4H8n==");    // NAL units 27 42 80 14 95 a0 50 7e 40 28 ce 07 f2
+
+        //profile = 0x42E000 + H264ToSDPLevel( vt_GetClientProfileLevel() );
+        profile = 0x42E00C;
+        csf_sprintf(profile_level_id, MAX_SPROP_LEN, "%X", profile);
+        (void) ccsdpAttrSetFmtpProfileLevelId(sdp_p, level, 0, a_inst, profile_level_id);
+
+        //(void) sdp_attr_set_fmtp_max_mbps(sdp_p, level, 0, a_inst, max_mbps);
+        //(void) sdp_attr_set_fmtp_max_fs(sdp_p, level, 0, a_inst, max_fs);
+        //(void) sdp_attr_set_fmtp_max_cpb(sdp_p, level, 0, a_inst, max_cpb);
+        //(void) sdp_attr_set_fmtp_max_dpb(sdp_p, level, 0, a_inst, max_dpb);
+        //(void) sdp_attr_set_fmtp_max_br(sdp_p, level, 0, a_inst, max_br);
+        //(void) sdp_add_new_bw_line(sdp_p, level, &a_inst);
+        //(void) sdp_set_bw(sdp_p, level, a_inst, SDP_BW_MODIFIER_TIAS, tias_bw);
+
+        break;
+
+    default:
+        break;
     }
 }
 
@@ -3078,7 +3011,7 @@ int vcmDtmfBurst(int digit, int duration, int direction)
     CSFLogDebug( logTag, "vcmDtmfBurst(): digit=%d duration=%d, direction=%d", digit, duration, direction);
     StreamObserver* obs = VcmSIPCCBinding::getStreamObserver();
     if(obs != nullptr)
-        obs->dtmfBurst(digit, duration, direction);
+    	obs->dtmfBurst(digit, duration, direction);
     return 0;
 }
 

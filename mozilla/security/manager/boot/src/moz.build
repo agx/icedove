@@ -10,17 +10,11 @@ UNIFIED_SOURCES += [
     'nsSecurityHeaderParser.cpp',
     'nsSecurityWarningDialogs.cpp',
     'nsSiteSecurityService.cpp',
-    'PublicKeyPinningService.cpp',
 ]
 
 # nsSecureBrowserUIImpl.cpp cannot be built in unified mode because it forces NSPR logging.
 SOURCES += [
     'nsSecureBrowserUIImpl.cpp',
-]
-
-
-LOCAL_INCLUDES += [
-    '../../../pkix/include',
 ]
 
 FAIL_ON_WARNINGS = True

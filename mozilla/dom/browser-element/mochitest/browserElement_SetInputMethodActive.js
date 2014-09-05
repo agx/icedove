@@ -41,7 +41,7 @@ function runTest() {
       appId: SpecialPowers.Ci.nsIScriptSecurityManager.NO_APP_ID,
       isInBrowserElement: true
     }
-  }], SimpleTest.waitForFocus.bind(SimpleTest, createFrames));
+  }], createFrames);
 }
 
 var gFrames = [];
@@ -51,55 +51,29 @@ function createFrames() {
   // Create two input method iframes.
   let loadendCount = 0;
   let countLoadend = function() {
+    ok(this.setInputMethodActive, 'Can access setInputMethodActive.');
+
     if (this === gInputFrame) {
       // The frame script running in the frame where the input is hosted.
       let appFrameScript = function appFrameScript() {
         let input = content.document.body.firstElementChild;
         input.oninput = function() {
-          sendAsyncMessage('test:InputMethod:oninput', {
-            from: 'input',
-            value: this.value
-          });
+          sendAsyncMessage('test:InputMethod:oninput', this.value);
         };
 
-        input.onblur = function() {
-          // "Expected" lost of focus since the test is finished.
-          if (input.value === '#0#1hello') {
-            return;
-          }
-
-          sendAsyncMessage('test:InputMethod:oninput', {
-            from: 'input',
-            error: true,
-            value: 'Unexpected lost of focus on the input frame!'
-          });
-        };
-
-        input.focus();
+        /*
+         * Bug 957213. Sometimes we need to refocus the input field to avoid
+         * intermittent test failure.
+         */
+        content.setInterval(function() {
+          input.focus();
+        }, 500);
       }
 
       // Inject frame script to receive input.
       let mm = SpecialPowers.getBrowserFrameMessageManager(gInputFrame);
-      mm.loadFrameScript('data:,(' + encodeURIComponent(appFrameScript.toString()) + ')();', false);
-      mm.addMessageListener("test:InputMethod:oninput", next);
-    } else {
-      ok(this.setInputMethodActive, 'Can access setInputMethodActive.');
-
-      // The frame script running in the input method frames.
-
-      let appFrameScript = function appFrameScript() {
-        content.addEventListener("message", function(evt) {
-          sendAsyncMessage('test:InputMethod:imFrameMessage', {
-            from: 'im',
-            value: evt.data
-          });
-        });
-      }
-
-      // Inject frame script to receive message.
-      let mm = SpecialPowers.getBrowserFrameMessageManager(this);
       mm.loadFrameScript('data:,(' + appFrameScript.toString() + ')();', false);
-      mm.addMessageListener("test:InputMethod:imFrameMessage", next);
+      mm.addMessageListener("test:InputMethod:oninput", next);
     }
 
     loadendCount++;
@@ -143,42 +117,19 @@ function startTest() {
   };
 }
 
+var gTimerId = null;
 var gCount = 0;
 
 function next(msg) {
-  let wrappedMsg = SpecialPowers.wrap(msg);
-  let from = wrappedMsg.data.from;
-  let value = wrappedMsg.data.value;
-
-  if (wrappedMsg.data.error) {
-    ok(false, wrappedMsg.data.value);
-
-    return;
-  }
-
   gCount++;
-
+  let wrappedMsg = SpecialPowers.wrap(msg);
+  let value = wrappedMsg.data;
   // The texts sent from the first and the second input method are '#0' and
   // '#1' respectively.
   switch (gCount) {
     case 1:
-      is(from, 'im', 'Message sequence unexpected (1).');
-      is(value, '#0true', 'First frame should get the context first.');
-      // Do nothing and wait for the input to show up in input frame.
-      break;
-
-    case 2:
-      is(from, 'input', 'Message sequence unexpected (2).');
       is(value, '#0hello',
          'Failed to get correct input from the first iframe.');
-
-      let req0 = gFrames[0].setInputMethodActive(false);
-      req0.onsuccess = function() {
-        ok(true, 'setInputMethodActive succeeded (0).');
-      };
-      req0.onerror = function() {
-        ok(false, 'setInputMethodActive failed (0): ' + this.error.name);
-      };
       let req1 = gFrames[1].setInputMethodActive(true);
       req1.onsuccess = function() {
        ok(true, 'setInputMethodActive succeeded (1).');
@@ -188,23 +139,15 @@ function next(msg) {
       };
       break;
 
-    case 3:
-      is(from, 'im', 'Message sequence unexpected (3).');
-      is(value, '#0false', 'First frame should have the context removed.');
-      // Do nothing and wait for the second frame to get the context;
-      break;
-
-    case 4:
-      is(from, 'im', 'Message sequence unexpected (4).');
-      is(value, '#1true', 'Second frame should get the context.');
-      // Do nothing and wait for the input to show up in input frame.
-      break;
-
-    case 5:
-      is(from, 'input', 'Message sequence unexpected (5).');
+    case 2:
       is(value, '#0#1hello',
          'Failed to get correct input from the second iframe.');
+      // Do nothing and wait for the next input from the second iframe.
+      break;
 
+    case 3:
+      is(value, '#0#1#1hello',
+         'Failed to get correct input from the second iframe.');
       // Receive the second input from the second iframe.
       // Deactive the second iframe.
       let req3 = gFrames[1].setInputMethodActive(false);
@@ -214,12 +157,18 @@ function next(msg) {
       req3.onerror = function() {
         ok(false, 'setInputMethodActive(false) failed (3): ' + this.error.name);
       };
+
+      // Wait for a short while to ensure the second iframe is not active any
+      // more.
+      gTimerId = setTimeout(function() {
+        ok(true, 'Successfully deactivate the second iframe.');
+        tearDown();
+      }, 1000);
       break;
 
-    case 6:
-      is(from, 'im', 'Message sequence unexpected (6).');
-      is(value, '#1false', 'Second frame should have the context removed.');
-
+    case 4:
+      ok(false, 'Failed to deactivate the second iframe in time.');
+      clearTimeout(gTimerId);
       tearDown();
       break;
   }

@@ -34,8 +34,6 @@ RTCPPacketInformation::RTCPPacketInformation()
       ntp_secs(0),
       ntp_frac(0),
       rtp_timestamp(0),
-      xr_originator_ssrc(0),
-      xr_dlrr_item(false),
       VoIPMetric(NULL) {
 }
 

@@ -13,7 +13,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.mozilla.gecko.EventDispatcher;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
 import org.mozilla.gecko.home.HomeConfig.PanelConfig;
@@ -78,8 +77,7 @@ public class PanelInfoManager implements GeckoEventListener {
         synchronized(sCallbacks) {
             // If there are no pending callbacks, register the event listener.
             if (sCallbacks.size() == 0) {
-                EventDispatcher.getInstance().registerGeckoThreadListener(this,
-                    "HomePanels:Data");
+                GeckoAppShell.getEventDispatcher().registerEventListener("HomePanels:Data", this);
             }
             sCallbacks.put(requestId, callback);
         }
@@ -137,8 +135,7 @@ public class PanelInfoManager implements GeckoEventListener {
 
                 // Unregister the event listener if there are no more pending callbacks.
                 if (sCallbacks.size() == 0) {
-                    EventDispatcher.getInstance().unregisterGeckoThreadListener(this,
-                        "HomePanels:Data");
+                    GeckoAppShell.getEventDispatcher().unregisterEventListener("HomePanels:Data", this);
                 }
             }
 

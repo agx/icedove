@@ -244,8 +244,7 @@ class StoreBuffer
         bool operator!=(const CellPtrEdge &other) const { return edge != other.edge; }
 
         bool maybeInRememberedSet(const Nursery &nursery) const {
-            JS_ASSERT(IsInsideNursery(*edge));
-            return !nursery.isInside(edge);
+            return !nursery.isInside(edge) && nursery.isInside(*edge);
         }
 
         void mark(JSTracer *trc);
@@ -265,11 +264,10 @@ class StoreBuffer
         bool operator==(const ValueEdge &other) const { return edge == other.edge; }
         bool operator!=(const ValueEdge &other) const { return edge != other.edge; }
 
-        Cell *deref() const { return edge->isGCThing() ? static_cast<Cell *>(edge->toGCThing()) : nullptr; }
+        void *deref() const { return edge->isGCThing() ? edge->toGCThing() : nullptr; }
 
         bool maybeInRememberedSet(const Nursery &nursery) const {
-            JS_ASSERT(IsInsideNursery(deref()));
-            return !nursery.isInside(edge);
+            return !nursery.isInside(edge) && nursery.isInside(deref());
         }
 
         void mark(JSTracer *trc);
@@ -313,8 +311,8 @@ class StoreBuffer
             return !(*this == other);
         }
 
-        bool maybeInRememberedSet(const Nursery &) const {
-            return !IsInsideNursery(JS::AsCell(object()));
+        bool maybeInRememberedSet(const Nursery &nursery) const {
+            return !nursery.isInside(object());
         }
 
         void mark(JSTracer *trc);
@@ -337,7 +335,7 @@ class StoreBuffer
         bool operator==(const WholeCellEdges &other) const { return edge == other.edge; }
         bool operator!=(const WholeCellEdges &other) const { return edge != other.edge; }
 
-        bool maybeInRememberedSet(const Nursery &) const { return true; }
+        bool maybeInRememberedSet(const Nursery &nursery) const { return true; }
 
         static bool supportsDeduplication() { return true; }
         void *deduplicationKey() const { return (void *)edge; }
@@ -364,7 +362,8 @@ class StoreBuffer
         void *data;
     };
 
-    bool isOkayToUseBuffer() const {
+    template <typename Edge>
+    bool isOkayToUseBuffer(const Edge &edge) const {
         /*
          * Disabled store buffers may not have a valid state; e.g. when stored
          * inline in the ChunkTrailer.
@@ -383,8 +382,8 @@ class StoreBuffer
     }
 
     template <typename Buffer, typename Edge>
-    void putFromAnyThread(Buffer &buffer, const Edge &edge) {
-        if (!isOkayToUseBuffer())
+    void put(Buffer &buffer, const Edge &edge) {
+        if (!isOkayToUseBuffer(edge))
             return;
         mozilla::ReentrancyGuard g(*this);
         if (edge.maybeInRememberedSet(nursery_))
@@ -392,21 +391,11 @@ class StoreBuffer
     }
 
     template <typename Buffer, typename Edge>
-    void unputFromAnyThread(Buffer &buffer, const Edge &edge) {
-        if (!isOkayToUseBuffer())
+    void unput(Buffer &buffer, const Edge &edge) {
+        if (!isOkayToUseBuffer(edge))
             return;
         mozilla::ReentrancyGuard g(*this);
         buffer.unput(this, edge);
-    }
-
-    template <typename Buffer, typename Edge>
-    void putFromMainThread(Buffer &buffer, const Edge &edge) {
-        if (!isEnabled())
-            return;
-        JS_ASSERT(CurrentThreadCanAccessRuntime(runtime_));
-        mozilla::ReentrancyGuard g(*this);
-        if (edge.maybeInRememberedSet(nursery_))
-            buffer.put(this, edge);
     }
 
     MonoTypeBuffer<ValueEdge> bufferVal;
@@ -443,38 +432,30 @@ class StoreBuffer
     bool isAboutToOverflow() const { return aboutToOverflow_; }
 
     /* Insert a single edge into the buffer/remembered set. */
-    void putValueFromAnyThread(JS::Value *valuep) { putFromAnyThread(bufferVal, ValueEdge(valuep)); }
-    void putCellFromAnyThread(Cell **cellp) { putFromAnyThread(bufferCell, CellPtrEdge(cellp)); }
-    void putSlotFromAnyThread(JSObject *obj, int kind, int32_t start, int32_t count) {
-        putFromAnyThread(bufferSlot, SlotsEdge(obj, kind, start, count));
+    void putValue(JS::Value *valuep) { put(bufferVal, ValueEdge(valuep)); }
+    void putCell(Cell **cellp) { put(bufferCell, CellPtrEdge(cellp)); }
+    void putSlot(JSObject *obj, int kind, int32_t start, int32_t count) {
+        put(bufferSlot, SlotsEdge(obj, kind, start, count));
     }
-    void putWholeCellFromMainThread(Cell *cell) {
+    void putWholeCell(Cell *cell) {
         JS_ASSERT(cell->isTenured());
-        putFromMainThread(bufferWholeCell, WholeCellEdges(cell));
+        put(bufferWholeCell, WholeCellEdges(cell));
     }
 
     /* Insert or update a single edge in the Relocatable buffer. */
-    void putRelocatableValueFromAnyThread(JS::Value *valuep) {
-        putFromAnyThread(bufferRelocVal, ValueEdge(valuep));
-    }
-    void removeRelocatableValueFromAnyThread(JS::Value *valuep) {
-        unputFromAnyThread(bufferRelocVal, ValueEdge(valuep));
-    }
-    void putRelocatableCellFromAnyThread(Cell **cellp) {
-        putFromAnyThread(bufferRelocCell, CellPtrEdge(cellp));
-    }
-    void removeRelocatableCellFromAnyThread(Cell **cellp) {
-        unputFromAnyThread(bufferRelocCell, CellPtrEdge(cellp));
-    }
+    void putRelocatableValue(JS::Value *valuep) { put(bufferRelocVal, ValueEdge(valuep)); }
+    void putRelocatableCell(Cell **cellp) { put(bufferRelocCell, CellPtrEdge(cellp)); }
+    void removeRelocatableValue(JS::Value *valuep) { unput(bufferRelocVal, ValueEdge(valuep)); }
+    void removeRelocatableCell(Cell **cellp) { unput(bufferRelocCell, CellPtrEdge(cellp)); }
 
     /* Insert an entry into the generic buffer. */
     template <typename T>
-    void putGeneric(const T &t) { putFromAnyThread(bufferGeneric, t);}
+    void putGeneric(const T &t) { put(bufferGeneric, t);}
 
     /* Insert or update a callback entry. */
     template <typename Key>
     void putCallback(void (*callback)(JSTracer *trc, Key *key, void *data), Key *key, void *data) {
-        putFromAnyThread(bufferGeneric, CallbackRef<Key>(callback, key, data));
+        put(bufferGeneric, CallbackRef<Key>(callback, key, data));
     }
 
     /* Methods to mark the source of all edges in the store buffer. */

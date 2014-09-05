@@ -21,24 +21,36 @@
 
 namespace webrtc {
 VideoFramesQueue::VideoFramesQueue()
-    : _renderDelayMs(10)
+    : _incomingFrames(),
+      _renderDelayMs(10)
 {
 }
 
 VideoFramesQueue::~VideoFramesQueue() {
-  for (FrameList::iterator iter = _incomingFrames.begin();
-       iter != _incomingFrames.end(); ++iter) {
-      delete *iter;
+  while (!_incomingFrames.Empty()) {
+    ListItem* item = _incomingFrames.First();
+    if (item) {
+      I420VideoFrame* ptrFrame = static_cast<I420VideoFrame*>(item->GetItem());
+      assert(ptrFrame != NULL);
+      delete ptrFrame;
+    }
+    _incomingFrames.Erase(item);
   }
-  for (FrameList::iterator iter = _emptyFrames.begin();
-       iter != _emptyFrames.end(); ++iter) {
-      delete *iter;
+  while (!_emptyFrames.Empty()) {
+    ListItem* item = _emptyFrames.First();
+    if (item) {
+      I420VideoFrame* ptrFrame =
+        static_cast<I420VideoFrame*>(item->GetItem());
+      assert(ptrFrame != NULL);
+      delete ptrFrame;
+    }
+    _emptyFrames.Erase(item);
   }
 }
 
 int32_t VideoFramesQueue::AddFrame(const I420VideoFrame& newFrame) {
   if (newFrame.native_handle() != NULL) {
-    _incomingFrames.push_back(new TextureVideoFrame(
+    _incomingFrames.PushBack(new TextureVideoFrame(
         static_cast<NativeHandle*>(newFrame.native_handle()),
         newFrame.width(),
         newFrame.height(),
@@ -49,12 +61,15 @@ int32_t VideoFramesQueue::AddFrame(const I420VideoFrame& newFrame) {
 
   I420VideoFrame* ptrFrameToAdd = NULL;
   // Try to re-use a VideoFrame. Only allocate new memory if it is necessary.
-  if (!_emptyFrames.empty()) {
-    ptrFrameToAdd = _emptyFrames.front();
-    _emptyFrames.pop_front();
+  if (!_emptyFrames.Empty()) {
+    ListItem* item = _emptyFrames.First();
+    if (item) {
+      ptrFrameToAdd = static_cast<I420VideoFrame*>(item->GetItem());
+      _emptyFrames.Erase(item);
+    }
   }
   if (!ptrFrameToAdd) {
-    if (_emptyFrames.size() + _incomingFrames.size() >
+    if (_emptyFrames.GetSize() + _incomingFrames.GetSize() >
         KMaxNumberOfFrames) {
       WEBRTC_TRACE(kTraceWarning, kTraceVideoRenderer, -1,
                    "%s: too many frames, limit: %d", __FUNCTION__,
@@ -64,12 +79,17 @@ int32_t VideoFramesQueue::AddFrame(const I420VideoFrame& newFrame) {
 
     WEBRTC_TRACE(kTraceMemory, kTraceVideoRenderer, -1,
                  "%s: allocating buffer %d", __FUNCTION__,
-                 _emptyFrames.size() + _incomingFrames.size());
+                 _emptyFrames.GetSize() + _incomingFrames.GetSize());
 
     ptrFrameToAdd = new I420VideoFrame();
+    if (!ptrFrameToAdd) {
+      WEBRTC_TRACE(kTraceError, kTraceVideoRenderer, -1,
+                   "%s: could not create new frame for", __FUNCTION__);
+      return -1;
+    }
   }
   ptrFrameToAdd->CopyFrame(newFrame);
-  _incomingFrames.push_back(ptrFrameToAdd);
+  _incomingFrames.PushBack(ptrFrameToAdd);
   return 0;
 }
 
@@ -79,16 +99,20 @@ int32_t VideoFramesQueue::AddFrame(const I420VideoFrame& newFrame) {
 // Recycle all frames that are older than the most recent frame.
 I420VideoFrame* VideoFramesQueue::FrameToRecord() {
   I420VideoFrame* ptrRenderFrame = NULL;
-  for (FrameList::iterator iter = _incomingFrames.begin();
-       iter != _incomingFrames.end(); ++iter) {
-    I420VideoFrame* ptrOldestFrameInList = *iter;
+  ListItem* item = _incomingFrames.First();
+  while(item) {
+    I420VideoFrame* ptrOldestFrameInList =
+        static_cast<I420VideoFrame*>(item->GetItem());
     if (ptrOldestFrameInList->render_time_ms() <=
         TickTime::MillisecondTimestamp() + _renderDelayMs) {
-      // List is traversed beginning to end. If ptrRenderFrame is not
-      // NULL it must be the first, and thus oldest, VideoFrame in the
-      // queue. It can be recycled.
-      ReturnFrame(ptrRenderFrame);
-      iter = _incomingFrames.erase(iter);
+      if (ptrRenderFrame) {
+        // List is traversed beginning to end. If ptrRenderFrame is not
+        // NULL it must be the first, and thus oldest, VideoFrame in the
+        // queue. It can be recycled.
+        ReturnFrame(ptrRenderFrame);
+        _incomingFrames.PopFront();
+      }
+      item = _incomingFrames.Next(item);
       ptrRenderFrame = ptrOldestFrameInList;
     } else {
       // All VideoFrames following this one will be even newer. No match
@@ -107,7 +131,7 @@ int32_t VideoFramesQueue::ReturnFrame(I420VideoFrame* ptrOldFrame) {
     ptrOldFrame->set_height(0);
     ptrOldFrame->set_render_time_ms(0);
     ptrOldFrame->ResetSize();
-    _emptyFrames.push_back(ptrOldFrame);
+    _emptyFrames.PushBack(ptrOldFrame);
   } else {
     delete ptrOldFrame;
   }

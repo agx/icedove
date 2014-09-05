@@ -118,13 +118,13 @@ public:
     // Are equivalent, and the explicit wrapping of the Address in the former
     // is unnecessary.
     struct ImplicitAddress {
-        explicit ImplicitAddress(RegisterID base)
+        ImplicitAddress(RegisterID base)
             : base(base)
             , offset(0)
         {
         }
 
-        MOZ_IMPLICIT ImplicitAddress(Address address)
+        ImplicitAddress(Address address)
             : base(address.base)
             , offset(address.offset)
         {
@@ -285,7 +285,7 @@ public:
         {
         }
 
-        explicit Label(AbstractMacroAssembler<AssemblerType>* masm)
+        Label(AbstractMacroAssembler<AssemblerType>* masm)
             : m_label(masm->m_assembler.label())
         {
         }
@@ -310,7 +310,7 @@ public:
         {
         }
 
-        explicit DataLabelPtr(AbstractMacroAssembler<AssemblerType>* masm)
+        DataLabelPtr(AbstractMacroAssembler<AssemblerType>* masm)
             : m_label(masm->m_assembler.label())
         {
         }
@@ -334,7 +334,7 @@ public:
         {
         }
 
-        explicit DataLabel32(AbstractMacroAssembler<AssemblerType>* masm)
+        DataLabel32(AbstractMacroAssembler<AssemblerType>* masm)
             : m_label(masm->m_assembler.label())
         {
         }
@@ -403,7 +403,7 @@ public:
         {
         }
 
-        explicit Jump(JmpSrc jmp)
+        Jump(JmpSrc jmp)
             : m_jmp(jmp)
         {
         }

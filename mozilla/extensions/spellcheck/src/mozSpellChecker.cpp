@@ -279,7 +279,7 @@ mozSpellChecker::GetDictionaryList(nsTArray<nsString> *aDictionaryList)
   nsresult rv;
 
   // For catching duplicates
-  nsTHashtable<nsStringHashKey> dictionaries;
+  nsClassHashtable<nsStringHashKey, nsCString> dictionaries;
 
   nsCOMArray<mozISpellCheckingEngine> spellCheckingEngines;
   rv = GetEngineList(&spellCheckingEngines);
@@ -298,10 +298,10 @@ mozSpellChecker::GetDictionaryList(nsTArray<nsString> *aDictionaryList)
 
       // Skip duplicate dictionaries. Only take the first one
       // for each name.
-      if (dictionaries.Contains(dictName))
+      if (dictionaries.Get(dictName, nullptr))
         continue;
 
-      dictionaries.PutEntry(dictName);
+      dictionaries.Put(dictName, nullptr);
 
       if (!aDictionaryList->AppendElement(dictName)) {
         NS_FREE_XPCOM_ALLOCATED_POINTER_ARRAY(count, words);
@@ -319,7 +319,7 @@ NS_IMETHODIMP
 mozSpellChecker::GetCurrentDictionary(nsAString &aDictionary)
 {
   if (!mSpellCheckingEngine) {
-    aDictionary.Truncate();
+    aDictionary.AssignLiteral("");
     return NS_OK;
   }
 

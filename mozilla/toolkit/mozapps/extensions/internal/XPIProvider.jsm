@@ -37,12 +37,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "OS",
                                   "resource://gre/modules/osfile.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "BrowserToolboxProcess",
                                   "resource:///modules/devtools/ToolboxProcess.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "ConsoleAPI",
-                                  "resource://gre/modules/devtools/Console.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "Blocklist",
-                                   "@mozilla.org/extensions/blocklist;1",
-                                   Ci.nsIBlocklistService);
 XPCOMUtils.defineLazyServiceGetter(this,
                                    "ChromeRegistry",
                                    "@mozilla.org/chrome/chrome-registry;1",
@@ -125,7 +120,6 @@ const TOOLKIT_ID                      = "toolkit@mozilla.org";
 
 // The value for this is in Makefile.in
 #expand const DB_SCHEMA                       = __MOZ_EXTENSIONS_DB_SCHEMA__;
-const NOTIFICATION_TOOLBOXPROCESS_LOADED      = "ToolboxProcessLoaded";
 
 // Properties that exist in the install manifest
 const PROP_METADATA      = ["id", "version", "type", "internalName", "updateURL",
@@ -151,10 +145,10 @@ const PENDING_INSTALL_METADATA =
 // DB schema version to ensure changes are picked up ASAP.
 const STATIC_BLOCKLIST_PATTERNS = [
   { creator: "Mozilla Corp.",
-    level: Blocklist.STATE_BLOCKED,
+    level: Ci.nsIBlocklistService.STATE_BLOCKED,
     blockID: "i162" },
   { creator: "Mozilla.org",
-    level: Blocklist.STATE_BLOCKED,
+    level: Ci.nsIBlocklistService.STATE_BLOCKED,
     blockID: "i162" }
 ];
 
@@ -401,32 +395,11 @@ SafeInstallOperation.prototype = {
    *         The directory to move into, this is expected to be an empty
    *         directory.
    */
-  moveUnder: function SIO_move(aFile, aTargetDirectory) {
+  move: function SIO_move(aFile, aTargetDirectory) {
     try {
       this._installDirEntry(aFile, aTargetDirectory, false);
     }
     catch (e) {
-      this.rollback();
-      throw e;
-    }
-  },
-
-  /**
-   * Renames a file to a new location.  If an error occurs then all
-   * files that have been moved will be moved back to their original location.
-   *
-   * @param  aOldLocation
-   *         The old location of the file.
-   * @param  aNewLocation
-   *         The new location of the file.
-   */
-  moveTo: function(aOldLocation, aNewLocation) {
-    try {
-      let oldFile = aOldLocation.clone(), newFile = aNewLocation.clone();
-      oldFile.moveTo(newFile.parent, newFile.leafName);
-      this._installedFiles.push({ oldFile: oldFile, newFile: newFile, isMoveTo: true});
-    }
-    catch(e) {
       this.rollback();
       throw e;
     }
@@ -460,10 +433,7 @@ SafeInstallOperation.prototype = {
   rollback: function SIO_rollback() {
     while (this._installedFiles.length > 0) {
       let move = this._installedFiles.pop();
-      if (move.isMoveTo) {
-        move.newFile.moveTo(oldDir.parent, oldDir.leafName);
-      }
-      else if (move.newFile.isDirectory()) {
+      if (move.newFile.isDirectory()) {
         let oldDir = move.oldFile.parent.clone();
         oldDir.append(move.oldFile.leafName);
         oldDir.create(Ci.nsIFile.DIRECTORY_TYPE, FileUtils.PERMS_DIRECTORY);
@@ -583,17 +553,20 @@ function applyBlocklistChanges(aOldAddon, aNewAddon, aOldAppVersion,
   aNewAddon.userDisabled = aOldAddon.userDisabled;
   aNewAddon.softDisabled = aOldAddon.softDisabled;
 
-  let oldBlocklistState = Blocklist.getAddonBlocklistState(createWrapper(aOldAddon),
-                                                           aOldAppVersion,
-                                                           aOldPlatformVersion);
-  let newBlocklistState = Blocklist.getAddonBlocklistState(createWrapper(aNewAddon));
+  let bs = Cc["@mozilla.org/extensions/blocklist;1"].
+           getService(Ci.nsIBlocklistService);
+
+  let oldBlocklistState = bs.getAddonBlocklistState(createWrapper(aOldAddon),
+                                                    aOldAppVersion,
+                                                    aOldPlatformVersion);
+  let newBlocklistState = bs.getAddonBlocklistState(createWrapper(aNewAddon));
 
   // If the blocklist state hasn't changed then the properties don't need to
   // change
   if (newBlocklistState == oldBlocklistState)
     return;
 
-  if (newBlocklistState == Blocklist.STATE_SOFTBLOCKED) {
+  if (newBlocklistState == Ci.nsIBlocklistService.STATE_SOFTBLOCKED) {
     if (aNewAddon.type != "theme") {
       // The add-on has become softblocked, set softDisabled if it isn't already
       // userDisabled
@@ -622,7 +595,7 @@ function isUsableAddon(aAddon) {
   if (aAddon.type == "theme" && aAddon.internalName == XPIProvider.defaultSkin)
     return true;
 
-  if (aAddon.blocklistState == Blocklist.STATE_BLOCKED)
+  if (aAddon.blocklistState == Ci.nsIBlocklistService.STATE_BLOCKED)
     return false;
 
   if (AddonManager.checkUpdateSecurity && !aAddon.providesUpdatesSecurely)
@@ -944,7 +917,7 @@ function loadManifestFromRDF(aUri, aStream) {
   }
   else {
     addon.userDisabled = false;
-    addon.softDisabled = addon.blocklistState == Blocklist.STATE_SOFTBLOCKED;
+    addon.softDisabled = addon.blocklistState == Ci.nsIBlocklistService.STATE_SOFTBLOCKED;
   }
 
   addon.applyBackgroundUpdates = AddonManager.AUTOUPDATE_DEFAULT;
@@ -1574,20 +1547,6 @@ function makeSafe(aFunction) {
   }
 }
 
-/**
- * Record a bit of per-addon telemetry
- * @param aAddon the addon to record
- */
-function recordAddonTelemetry(aAddon) {
-  let loc = aAddon.defaultLocale;
-  if (loc) {
-    if (loc.name)
-      XPIProvider.setTelemetry(aAddon.id, "name", loc.name);
-    if (loc.creator)
-      XPIProvider.setTelemetry(aAddon.id, "creator", loc.creator);
-  }
-}
-
 this.XPIProvider = {
   // An array of known install locations
   installLocations: null,
@@ -1620,6 +1579,8 @@ this.XPIProvider = {
   allAppGlobal: true,
   // A string listing the enabled add-ons for annotating crash reports
   enabledAddons: null,
+  // An array of add-on IDs of add-ons that were inactive during startup
+  inactiveAddonIDs: [],
   // Keep track of startup phases for telemetry
   runPhase: XPI_STARTING,
   // Keep track of the newest file in each add-on, in case we want to
@@ -1629,10 +1590,6 @@ this.XPIProvider = {
   _telemetryDetails: {},
   // Experiments are disabled by default. Track ones that are locally enabled.
   _enabledExperiments: null,
-  // A Map from an add-on install to its ID
-  _addonFileMap: new Map(),
-  // Flag to know if ToolboxProcess.jsm has already been loaded by someone or not
-  _toolboxProcessLoaded: false,
 
   /*
    * Set a value in the telemetry hash for a given ID
@@ -1644,30 +1601,27 @@ this.XPIProvider = {
   },
 
   // Keep track of in-progress operations that support cancel()
-  _inProgress: [],
+  _inProgress: new Set(),
 
   doing: function XPI_doing(aCancellable) {
-    this._inProgress.push(aCancellable);
+    this._inProgress.add(aCancellable);
   },
 
   done: function XPI_done(aCancellable) {
-    let i = this._inProgress.indexOf(aCancellable);
-    if (i != -1) {
-      this._inProgress.splice(i, 1);
-      return true;
-    }
-    return false;
+    return this._inProgress.delete(aCancellable);
   },
 
   cancelAll: function XPI_cancelAll() {
-    // Cancelling one may alter _inProgress, so don't use a simple iterator
-    while (this._inProgress.length > 0) {
-      let c = this._inProgress.shift();
-      try {
-        c.cancel();
-      }
-      catch (e) {
-        logger.warn("Cancel failed", e);
+    // Cancelling one may alter _inProgress, so restart the iterator after each
+    while (this._inProgress.size > 0) {
+      for (let c of this._inProgress) {
+        try {
+          c.cancel();
+        }
+        catch (e) {
+          logger.warn("Cancel failed", e);
+        }
+        this._inProgress.delete(c);
       }
     }
   },
@@ -1680,8 +1634,55 @@ this.XPIProvider = {
    * consumers may still have URIs of (leaked) resources they want to map.
    */
   _addURIMapping: function XPI__addURIMapping(aID, aFile) {
-    logger.info("Mapping " + aID + " to " + aFile.path);
-    this._addonFileMap.set(aID, aFile.path);
+    try {
+      // Always use our own mechanics instead of nsIIOService.newFileURI, so
+      // that we can be sure to map things as we want them mapped.
+      let uri = this._resolveURIToFile(getURIForResourceInFile(aFile, "."));
+      if (!uri) {
+        throw new Error("Cannot resolve");
+      }
+      this._ensureURIMappings();
+      this._uriMappings[aID] = uri.spec;
+    }
+    catch (ex) {
+      logger.warn("Failed to add URI mapping", ex);
+    }
+  },
+
+  /**
+   * Ensures that the URI to Addon mappings are available.
+   *
+   * The function will add mappings for all non-bootstrapped but enabled
+   * add-ons.
+   * Bootstrapped add-on mappings will be added directly when the bootstrap
+   * scope get loaded. (See XPIProvider._addURIMapping() and callers)
+   */
+  _ensureURIMappings: function XPI__ensureURIMappings() {
+    if (this._uriMappings) {
+      return;
+    }
+    // XXX Convert to Map(), once it gets stable with stable iterators
+    this._uriMappings = Object.create(null);
+
+    // XXX Convert to Set(), once it gets stable with stable iterators
+    let enabled = Object.create(null);
+    let enabledAddons = this.enabledAddons || "";
+    for (let a of enabledAddons.split(",")) {
+      a = decodeURIComponent(a.split(":")[0]);
+      enabled[a] = null;
+    }
+
+    let cache = JSON.parse(Prefs.getCharPref(PREF_INSTALL_CACHE, "[]"));
+    for (let loc of cache) {
+      for (let [id, val] in Iterator(loc.addons)) {
+        if (!(id in enabled)) {
+          continue;
+        }
+        let file = new nsIFile(val.descriptor);
+        let spec = Services.io.newFileURI(file).spec;
+        this._uriMappings[id] = spec;
+      }
+    }
   },
 
   /**
@@ -1870,16 +1871,13 @@ this.XPIProvider = {
       Services.prefs.addObserver(PREF_EM_MIN_COMPAT_APP_VERSION, this, false);
       Services.prefs.addObserver(PREF_EM_MIN_COMPAT_PLATFORM_VERSION, this, false);
       Services.obs.addObserver(this, NOTIFICATION_FLUSH_PERMISSIONS, false);
-      if (Cu.isModuleLoaded("resource:///modules/devtools/ToolboxProcess.jsm")) {
-        // If BrowserToolboxProcess is already loaded, set the boolean to true
-        // and do whatever is needed
-        this._toolboxProcessLoaded = true;
+
+      try {
         BrowserToolboxProcess.on("connectionchange",
                                  this.onDebugConnectionChange.bind(this));
       }
-      else {
-        // Else, wait for it to load
-        Services.obs.addObserver(this, NOTIFICATION_TOOLBOXPROCESS_LOADED, false);
+      catch (e) {
+        // BrowserToolboxProcess is not available in all applications
       }
 
       let flushCaches = this.checkForChanges(aAppChanged, aOldAppVersion,
@@ -1888,34 +1886,22 @@ this.XPIProvider = {
       // Changes to installed extensions may have changed which theme is selected
       this.applyThemeChange();
 
-      if (aAppChanged === undefined) {
+      // If the application has been upgraded and there are add-ons outside the
+      // application directory then we may need to synchronize compatibility
+      // information but only if the mismatch UI isn't disabled
+      if (aAppChanged && !this.allAppGlobal &&
+          Prefs.getBoolPref(PREF_EM_SHOW_MISMATCH_UI, true)) {
+        this.showUpgradeUI();
+        flushCaches = true;
+      }
+      else if (aAppChanged === undefined) {
         // For new profiles we will never need to show the add-on selection UI
         Services.prefs.setBoolPref(PREF_SHOWN_SELECTION_UI, true);
-      }
-      else if (aAppChanged && !this.allAppGlobal &&
-               Prefs.getBoolPref(PREF_EM_SHOW_MISMATCH_UI, true)) {
-        if (!Prefs.getBoolPref(PREF_SHOWN_SELECTION_UI, false)) {
-          // Flip a flag to indicate that we interrupted startup with an interactive prompt
-          Services.startup.interrupted = true;
-          // This *must* be modal as it has to block startup.
-          var features = "chrome,centerscreen,dialog,titlebar,modal";
-          Services.ww.openWindow(null, URI_EXTENSION_SELECT_DIALOG, "", features, null);
-          Services.prefs.setBoolPref(PREF_SHOWN_SELECTION_UI, true);
-          // Ensure any changes to the add-ons list are flushed to disk
-          Services.prefs.setBoolPref(PREF_PENDING_OPERATIONS,
-                                     !XPIDatabase.writeAddonsList());
-        }
-        else {
-          let addonsToUpdate = this.shouldForceUpdateCheck(aAppChanged);
-          if (addonsToUpdate) {
-            this.showUpgradeUI(addonsToUpdate);
-            flushCaches = true;
-          }
-        }
       }
 
       if (flushCaches) {
         flushStartupCache();
+
         // UI displayed early in startup (like the compatibility UI) may have
         // caused us to cache parts of the skin or locale in memory. These must
         // be flushed to allow extension provided skins and locales to take full
@@ -1925,6 +1911,10 @@ this.XPIProvider = {
       }
 
       this.enabledAddons = Prefs.getCharPref(PREF_EM_ENABLED_ADDONS, "");
+
+      // Invalidate the URI mappings now that |enabledAddons| was updated.
+      // |_ensureMappings()| will re-create the mappings when needed.
+      delete this._uriMappings;
 
       if ("nsICrashReporter" in Ci &&
           Services.appinfo instanceof Ci.nsICrashReporter) {
@@ -2019,6 +2009,8 @@ this.XPIProvider = {
     this.enabledAddons = null;
     this.allAppGlobal = true;
 
+    this.inactiveAddonIDs = [];
+
     // If there are pending operations then we must update the list of active
     // add-ons
     if (Prefs.getBoolPref(PREF_PENDING_OPERATIONS, false)) {
@@ -2033,7 +2025,9 @@ this.XPIProvider = {
 
     // This is needed to allow xpcshell tests to simulate a restart
     this.extensionsActive = false;
-    this._addonFileMap.clear();
+
+    // Remove URI mappings again
+    delete this._uriMappings;
 
     if (gLazyObjectsLoaded) {
       let done = XPIDatabase.shutdown();
@@ -2079,65 +2073,29 @@ this.XPIProvider = {
   },
 
   /**
-   * If the application has been upgraded and there are add-ons outside the
-   * application directory then we may need to synchronize compatibility
-   * information but only if the mismatch UI isn't disabled.
-   *
-   * @returns False if no update check is needed, otherwise an array of add-on
-   *          IDs to check for updates. Array may be empty if no add-ons can be/need
-   *           to be updated, but the metadata check needs to be performed.
+   * Shows the "Compatibility Updates" UI
    */
-  shouldForceUpdateCheck: function XPI_shouldForceUpdateCheck(aAppChanged) {
-    AddonManagerPrivate.recordSimpleMeasure("XPIDB_metadata_age", AddonRepository.metadataAge());
-
-    let startupChanges = AddonManager.getStartupChanges(AddonManager.STARTUP_CHANGE_DISABLED);
-    logger.debug("shouldForceUpdateCheck startupChanges: " + startupChanges.toSource());
-    AddonManagerPrivate.recordSimpleMeasure("XPIDB_startup_disabled", startupChanges.length);
-
-    let forceUpdate = [];
-    if (startupChanges.length > 0) {
-    let addons = XPIDatabase.getAddons();
-      for (let addon of addons) {
-        if ((startupChanges.indexOf(addon.id) != -1) &&
-            (addon.permissions() & AddonManager.PERM_CAN_UPGRADE)) {
-          logger.debug("shouldForceUpdateCheck: can upgrade disabled add-on " + addon.id);
-          forceUpdate.push(addon.id);
-        }
-      }
-    }
-
-    if (AddonRepository.isMetadataStale()) {
-      logger.debug("shouldForceUpdateCheck: metadata is stale");
-      return forceUpdate;
-    }
-    if (forceUpdate.length > 0) {
-      return forceUpdate;
-    }
-
-    return false;
-  },
-
-  /**
-   * Shows the "Compatibility Updates" UI.
-   *
-   * @param  aAddonIDs
-   *         Array opf addon IDs that were disabled by the application update, and
-   *         should therefore be checked for updates.
-   */
-  showUpgradeUI: function XPI_showUpgradeUI(aAddonIDs) {
-    logger.debug("XPI_showUpgradeUI: " + aAddonIDs.toSource());
+  showUpgradeUI: function XPI_showUpgradeUI() {
     // Flip a flag to indicate that we interrupted startup with an interactive prompt
     Services.startup.interrupted = true;
 
-    var variant = Cc["@mozilla.org/variant;1"].
-                  createInstance(Ci.nsIWritableVariant);
-    variant.setFromVariant(aAddonIDs);
+    if (!Prefs.getBoolPref(PREF_SHOWN_SELECTION_UI, false)) {
+      // This *must* be modal as it has to block startup.
+      var features = "chrome,centerscreen,dialog,titlebar,modal";
+      Services.ww.openWindow(null, URI_EXTENSION_SELECT_DIALOG, "", features, null);
+      Services.prefs.setBoolPref(PREF_SHOWN_SELECTION_UI, true);
+    }
+    else {
+      var variant = Cc["@mozilla.org/variant;1"].
+                    createInstance(Ci.nsIWritableVariant);
+      variant.setFromVariant(this.inactiveAddonIDs);
 
-    // This *must* be modal as it has to block startup.
-    var features = "chrome,centerscreen,dialog,titlebar,modal";
-    var ww = Cc["@mozilla.org/embedcomp/window-watcher;1"].
-             getService(Ci.nsIWindowWatcher);
-    ww.openWindow(null, URI_EXTENSION_UPDATE_DIALOG, "", features, variant);
+      // This *must* be modal as it has to block startup.
+      var features = "chrome,centerscreen,dialog,titlebar,modal";
+      var ww = Cc["@mozilla.org/embedcomp/window-watcher;1"].
+               getService(Ci.nsIWindowWatcher);
+      ww.openWindow(null, URI_EXTENSION_UPDATE_DIALOG, "", features, variant);
+    }
 
     // Ensure any changes to the add-ons list are flushed to disk
     Services.prefs.setBoolPref(PREF_PENDING_OPERATIONS,
@@ -2737,10 +2695,10 @@ this.XPIProvider = {
         // The ID in the manifest that was loaded must match the ID of the old
         // add-on.
         if (newAddon.id != aOldAddon.id)
-          throw new Error("Incorrect id in install manifest for existing add-on " + aOldAddon.id);
+          throw new Error("Incorrect id in install manifest");
       }
       catch (e) {
-        logger.warn("updateMetadata: Add-on " + aOldAddon.id + " is invalid", e);
+        logger.warn("Add-on is invalid", e);
         XPIDatabase.removeAddonMetadata(aOldAddon);
         if (!aInstallLocation.locked)
           aInstallLocation.uninstallAddon(aOldAddon.id);
@@ -3029,7 +2987,7 @@ this.XPIProvider = {
         }
       }
       catch (e) {
-        logger.warn("addMetadata: Add-on " + aId + " is invalid", e);
+        logger.warn("Add-on is invalid", e);
 
         // Remove the invalid add-on from the install location if the install
         // location isn't locked, no restart will be necessary
@@ -3105,7 +3063,7 @@ this.XPIProvider = {
         // then it was probably either softDisabled or userDisabled
         if (!newAddon.active && newAddon.visible && !isAddonDisabled(newAddon)) {
           // If the add-on is softblocked then assume it is softDisabled
-          if (newAddon.blocklistState == Blocklist.STATE_SOFTBLOCKED)
+          if (newAddon.blocklistState == Ci.nsIBlocklistService.STATE_SOFTBLOCKED)
             newAddon.softDisabled = true;
           else
             newAddon.userDisabled = true;
@@ -3221,7 +3179,16 @@ this.XPIProvider = {
             let addonState = addonStates[aOldAddon.id];
             delete addonStates[aOldAddon.id];
 
-            recordAddonTelemetry(aOldAddon);
+            // Remember add-ons that were inactive during startup
+            if (aOldAddon.visible && !aOldAddon.active)
+              XPIProvider.inactiveAddonIDs.push(aOldAddon.id);
+
+            // record a bit more per-addon telemetry
+            let loc = aOldAddon.defaultLocale;
+            if (loc) {
+              XPIProvider.setTelemetry(aOldAddon.id, "name", loc.name);
+              XPIProvider.setTelemetry(aOldAddon.id, "creator", loc.creator);
+            }
 
             // Check if the add-on has been changed outside the XPI provider
             if (aOldAddon.updateDate != addonState.mtime) {
@@ -3641,13 +3608,7 @@ this.XPIProvider = {
    *         The AddonInstall to remove
    */
   removeActiveInstall: function XPI_removeActiveInstall(aInstall) {
-    let where = this.installs.indexOf(aInstall);
-    if (where == -1) {
-      logger.warn("removeActiveInstall: could not find active install for "
-          + aInstall.sourceURI.spec);
-      return;
-    }
-    this.installs.splice(where, 1);
+    this.installs = this.installs.filter(function installFilter(i) i != aInstall);
   },
 
   /**
@@ -3746,15 +3707,17 @@ this.XPIProvider = {
    * @see    amIAddonManager.mapURIToAddonID
    */
   mapURIToAddonID: function XPI_mapURIToAddonID(aURI) {
+    this._ensureURIMappings();
     let resolved = this._resolveURIToFile(aURI);
-    if (!resolved || !(resolved instanceof Ci.nsIFileURL))
+    if (!resolved) {
       return null;
-
-    for (let [id, path] of this._addonFileMap) {
-      if (resolved.file.path.startsWith(path))
-        return id;
     }
-
+    resolved = resolved.spec;
+    for (let [id, spec] in Iterator(this._uriMappings)) {
+      if (resolved.startsWith(spec)) {
+        return id;
+      }
+    }
     return null;
   },
 
@@ -3922,12 +3885,6 @@ this.XPIProvider = {
         this.importPermissions();
       }
       return;
-    }
-    else if (aTopic == NOTIFICATION_TOOLBOXPROCESS_LOADED) {
-      Services.obs.removeObserver(this, NOTIFICATION_TOOLBOXPROCESS_LOADED, false);
-      this._toolboxProcessLoaded = true;
-      BrowserToolboxProcess.on("connectionchange",
-                               this.onDebugConnectionChange.bind(this));
     }
 
     if (aTopic == "nsPref:changed") {
@@ -4155,6 +4112,9 @@ this.XPIProvider = {
     let loader = Cc["@mozilla.org/moz/jssubscript-loader;1"].
                  createInstance(Ci.mozIJSSubScriptLoader);
 
+    // Add a mapping for XPIProvider.mapURIToAddonID
+    this._addURIMapping(aId, aFile);
+
     try {
       // Copy the reason values from the global object into the bootstrap scope.
       for (let name in BOOTSTRAP_REASONS)
@@ -4165,9 +4125,6 @@ this.XPIProvider = {
 
       for (let feature of features)
         this.bootstrapScopes[aId][feature] = gGlobalScope[feature];
-
-      // Define a console for the add-on
-      this.bootstrapScopes[aId]["console"] = new ConsoleAPI({ consoleID: "addon/" + aId });
 
       // As we don't want our caller to control the JS version used for the
       // bootstrap file, we run loadSubScript within the context of the
@@ -4182,11 +4139,11 @@ this.XPIProvider = {
       logger.warn("Error loading bootstrap.js for " + aId, e);
     }
 
-    // Only access BrowserToolboxProcess if ToolboxProcess.jsm has been
-    // initialized as otherwise, when it will be initialized, all addons'
-    // globals will be added anyways
-    if (this._toolboxProcessLoaded) {
+    try {
       BrowserToolboxProcess.setAddonOptions(aId, { global: this.bootstrapScopes[aId] });
+    }
+    catch (e) {
+      // BrowserToolboxProcess is not available in all applications
     }
   },
 
@@ -4203,10 +4160,11 @@ this.XPIProvider = {
     this.persistBootstrappedAddons();
     this.addAddonsToCrashReporter();
 
-    // Only access BrowserToolboxProcess if ToolboxProcess.jsm has been
-    // initialized as otherwise, there won't be any addon globals added to it
-    if (this._toolboxProcessLoaded) {
+    try {
       BrowserToolboxProcess.setAddonOptions(aId, { global: null });
+    }
+    catch (e) {
+      // BrowserToolboxProcess is not available in all applications
     }
   },
 
@@ -4418,11 +4376,10 @@ this.XPIProvider = {
    */
   uninstallAddon: function XPI_uninstallAddon(aAddon) {
     if (!(aAddon.inDatabase))
-      throw new Error("Cannot uninstall addon " + aAddon.id + " because it is not installed");
+      throw new Error("Can only uninstall installed addons.");
 
     if (aAddon._installLocation.locked)
-      throw new Error("Cannot uninstall addon " + aAddon.id
-          + " from locked install location " + aAddon._installLocation.name);
+      throw new Error("Cannot uninstall addons from locked install locations");
 
     if ("_hasResourceCache" in aAddon)
       aAddon._hasResourceCache = new Map();
@@ -5662,7 +5619,11 @@ AddonInstall.prototype = {
         XPIProvider.setTelemetry(this.addon.id, "location", this.installLocation.name);
         XPIProvider.setTelemetry(this.addon.id, "scan_MS", scanTime);
         XPIProvider.setTelemetry(this.addon.id, "scan_items", scanItems);
-        recordAddonTelemetry(this.addon);
+        let loc = this.addon.defaultLocale;
+        if (loc) {
+          XPIProvider.setTelemetry(this.addon.id, "name", loc.name);
+          XPIProvider.setTelemetry(this.addon.id, "creator", loc.creator);
+        }
       }
     }).bind(this)).then(null, (e) => {
       logger.warn("Failed to install " + this.file.path + " from " + this.sourceURI.spec, e);
@@ -6203,7 +6164,9 @@ AddonInternal.prototype = {
     if (staticItem)
       return staticItem.level;
 
-    return Blocklist.getAddonBlocklistState(createWrapper(this));
+    let bs = Cc["@mozilla.org/extensions/blocklist;1"].
+             getService(Ci.nsIBlocklistService);
+    return bs.getAddonBlocklistState(createWrapper(this));
   },
 
   get blocklistURL() {
@@ -6213,7 +6176,9 @@ AddonInternal.prototype = {
       return url.replace(/%blockID%/g, staticItem.blockID);
     }
 
-    return Blocklist.getAddonBlocklistURL(createWrapper(this));
+    let bs = Cc["@mozilla.org/extensions/blocklist;1"].
+             getService(Ci.nsIBlocklistService);
+    return bs.getAddonBlocklistURL(createWrapper(this));
   },
 
   applyCompatibilityUpdate: function AddonInternal_applyCompatibilityUpdate(aUpdate, aSyncCompatibility) {
@@ -6227,22 +6192,6 @@ AddonInternal.prototype = {
       });
     });
     this.appDisabled = !isUsableAddon(this);
-  },
-
-  /**
-   * getDataDirectory tries to execute the callback with two arguments:
-   * 1) the path of the data directory within the profile,
-   * 2) any exception generated from trying to build it.
-   */
-  getDataDirectory: function(callback) {
-    let parentPath = OS.Path.join(OS.Constants.Path.profileDir, "extension-data");
-    let dirPath = OS.Path.join(parentPath, this.id);
-
-    Task.spawn(function*() {
-      yield OS.File.makeDir(parentPath, {ignoreExisting: true});
-      yield OS.File.makeDir(dirPath, {ignoreExisting: true});
-    }).then(() => callback(dirPath, null),
-            e => callback(dirPath, e));
   },
 
   /**
@@ -6301,44 +6250,7 @@ AddonInternal.prototype = {
 
     // Compatibility info may have changed so update appDisabled
     this.appDisabled = !isUsableAddon(this);
-  },
-
-  permissions: function AddonInternal_permissions() {
-    let permissions = 0;
-
-    // Add-ons that aren't installed cannot be modified in any way
-    if (!(this.inDatabase))
-      return permissions;
-
-    // Experiments can only be uninstalled. An uninstall reflects the user
-    // intent of "disable this experiment." This is partially managed by the
-    // experiments manager.
-    if (this.type == "experiment") {
-      return AddonManager.PERM_CAN_UNINSTALL;
-    }
-
-    if (!this.appDisabled) {
-      if (this.userDisabled || this.softDisabled) {
-        permissions |= AddonManager.PERM_CAN_ENABLE;
-      }
-      else if (this.type != "theme") {
-        permissions |= AddonManager.PERM_CAN_DISABLE;
-      }
-    }
-
-    // Add-ons that are in locked install locations, or are pending uninstall
-    // cannot be upgraded or uninstalled
-    if (!this._installLocation.locked && !this.pendingUninstall) {
-      // Add-ons that are installed by a file link cannot be upgraded
-      if (!this._installLocation.isLinkedAddon(this.id)) {
-        permissions |= AddonManager.PERM_CAN_UPGRADE;
-      }
-
-      permissions |= AddonManager.PERM_CAN_UNINSTALL;
-    }
-
-    return permissions;
-  },
+  }
 };
 
 /**
@@ -6384,8 +6296,7 @@ function AddonWrapper(aAddon) {
   ["id", "syncGUID", "version", "type", "isCompatible", "isPlatformCompatible",
    "providesUpdatesSecurely", "blocklistState", "blocklistURL", "appDisabled",
    "softDisabled", "skinnable", "size", "foreignInstall", "hasBinaryComponents",
-   "strictCompatibility", "compatibilityOverrides", "updateURL",
-   "getDataDirectory"].forEach(function(aProp) {
+   "strictCompatibility", "compatibilityOverrides", "updateURL"].forEach(function(aProp) {
      this.__defineGetter__(aProp, function AddonWrapper_propertyGetter() aAddon[aProp]);
   }, this);
 
@@ -6642,15 +6553,10 @@ function AddonWrapper(aAddon) {
       return AddonManager.PENDING_UNINSTALL;
     }
 
-    // Extensions have an intentional inconsistancy between what the DB says is
-    // enabled and what we say to the ouside world. so we need to cover up that
-    // lie here as well.
-    if (aAddon.type != "experiment") {
-      if (aAddon.active && isAddonDisabled(aAddon))
-        pending |= AddonManager.PENDING_DISABLE;
-      else if (!aAddon.active && !isAddonDisabled(aAddon))
-        pending |= AddonManager.PENDING_ENABLE;
-    }
+    if (aAddon.active && isAddonDisabled(aAddon))
+      pending |= AddonManager.PENDING_DISABLE;
+    else if (!aAddon.active && !isAddonDisabled(aAddon))
+      pending |= AddonManager.PENDING_ENABLE;
 
     if (aAddon.pendingUpgrade)
       pending |= AddonManager.PENDING_UPGRADE;
@@ -6677,7 +6583,40 @@ function AddonWrapper(aAddon) {
   });
 
   this.__defineGetter__("permissions", function AddonWrapper_permisionsGetter() {
-    return aAddon.permissions();
+    let permissions = 0;
+
+    // Add-ons that aren't installed cannot be modified in any way
+    if (!(aAddon.inDatabase))
+      return permissions;
+
+    // Experiments can only be uninstalled. An uninstall reflects the user
+    // intent of "disable this experiment." This is partially managed by the
+    // experiments manager.
+    if (aAddon.type == "experiment") {
+      return AddonManager.PERM_CAN_UNINSTALL;
+    }
+
+    if (!aAddon.appDisabled) {
+      if (this.userDisabled) {
+        permissions |= AddonManager.PERM_CAN_ENABLE;
+      }
+      else if (aAddon.type != "theme") {
+        permissions |= AddonManager.PERM_CAN_DISABLE;
+      }
+    }
+
+    // Add-ons that are in locked install locations, or are pending uninstall
+    // cannot be upgraded or uninstalled
+    if (!aAddon._installLocation.locked && !aAddon.pendingUninstall) {
+      // Add-ons that are installed by a file link cannot be upgraded
+      if (!aAddon._installLocation.isLinkedAddon(aAddon.id)) {
+        permissions |= AddonManager.PERM_CAN_UPGRADE;
+      }
+
+      permissions |= AddonManager.PERM_CAN_UNINSTALL;
+    }
+
+    return permissions;
   });
 
   this.__defineGetter__("isActive", function AddonWrapper_isActiveGetter() {
@@ -6995,7 +6934,6 @@ DirectoryInstallLocation.prototype = {
 
       this._IDToFileMap[id] = entry;
       this._FileToIDMap[entry.path] = id;
-      XPIProvider._addURIMapping(id, entry);
     }
   },
 
@@ -7158,13 +7096,13 @@ DirectoryInstallLocation.prototype = {
       file.append(aId);
 
       if (file.exists())
-        transaction.moveUnder(file, trashDir);
+        transaction.move(file, trashDir);
 
       file = self._directory.clone();
       file.append(aId + ".xpi");
       if (file.exists()) {
         flushJarCache(file);
-        transaction.moveUnder(file, trashDir);
+        transaction.move(file, trashDir);
       }
     }
 
@@ -7172,33 +7110,8 @@ DirectoryInstallLocation.prototype = {
     // temporary directory
     try {
       moveOldAddon(aId);
-      if (aExistingAddonID && aExistingAddonID != aId) {
+      if (aExistingAddonID && aExistingAddonID != aId)
         moveOldAddon(aExistingAddonID);
-
-        {
-          // Move the data directories.
-          /* XXX ajvincent We can't use OS.File:  installAddon isn't compatible
-           * with Promises, nor is SafeInstallOperation.  Bug 945540 has been filed
-           * for porting to OS.File.
-           */
-          let oldDataDir = FileUtils.getDir(
-            KEY_PROFILEDIR, ["extension-data", aExistingAddonID], false, true
-          );
-
-          if (oldDataDir.exists()) {
-            let newDataDir = FileUtils.getDir(
-              KEY_PROFILEDIR, ["extension-data", aId], false, true
-            );
-            if (newDataDir.exists()) {
-              let trashData = trashDir.clone();
-              trashData.append("data-directory");
-              transaction.moveUnder(newDataDir, trashData);
-            }
-
-            transaction.moveTo(oldDataDir, newDataDir);
-          }
-        }
-      }
 
       if (aCopy) {
         transaction.copy(aSource, this._directory);
@@ -7207,7 +7120,7 @@ DirectoryInstallLocation.prototype = {
         if (aSource.isFile())
           flushJarCache(aSource);
 
-        transaction.moveUnder(aSource, this._directory);
+        transaction.move(aSource, this._directory);
       }
     }
     finally {
@@ -7230,7 +7143,6 @@ DirectoryInstallLocation.prototype = {
     }
     this._FileToIDMap[newFile.path] = aId;
     this._IDToFileMap[aId] = newFile;
-    XPIProvider._addURIMapping(aId, newFile);
 
     if (aExistingAddonID && aExistingAddonID != aId &&
         aExistingAddonID in this._IDToFileMap) {
@@ -7280,7 +7192,7 @@ DirectoryInstallLocation.prototype = {
     let transaction = new SafeInstallOperation();
 
     try {
-      transaction.moveUnder(file, trashDir);
+      transaction.move(file, trashDir);
     }
     finally {
       // It isn't ideal if this cleanup fails, but it is probably better than
@@ -7425,7 +7337,6 @@ WinRegInstallLocation.prototype = {
 
       this._IDToFileMap[id] = file;
       this._FileToIDMap[file.path] = id;
-      XPIProvider._addURIMapping(id, file);
     }
   },
 

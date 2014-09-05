@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <ostream>
 
 #include "mozilla/Assertions.h"
 #include "mozilla/FloatingPoint.h"
@@ -93,8 +92,7 @@ struct BaseRect {
   // Always returns false if aRect is empty or 'this' is empty.
   bool Intersects(const Sub& aRect) const
   {
-    return !IsEmpty() && !aRect.IsEmpty() &&
-           x < aRect.XMost() && aRect.x < XMost() &&
+    return x < aRect.XMost() && aRect.x < XMost() &&
            y < aRect.YMost() && aRect.y < YMost();
   }
   // Returns the rectangle containing the intersection of the points
@@ -237,25 +235,13 @@ struct BaseRect {
     return IsEqualEdges(aRect) || (IsEmpty() && aRect.IsEmpty());
   }
 
-  friend Sub operator+(Sub aSub, const Point& aPoint)
+  Sub operator+(const Point& aPoint) const
   {
-    aSub += aPoint;
-    return aSub;
+    return Sub(x + aPoint.x, y + aPoint.y, width, height);
   }
-  friend Sub operator-(Sub aSub, const Point& aPoint)
+  Sub operator-(const Point& aPoint) const
   {
-    aSub -= aPoint;
-    return aSub;
-  }
-  friend Sub operator+(Sub aSub, const SizeT& aSize)
-  {
-    aSub += aSize;
-    return aSub;
-  }
-  friend Sub operator-(Sub aSub, const SizeT& aSize)
-  {
-    aSub -= aSize;
-    return aSub;
+    return Sub(x - aPoint.x, y - aPoint.y, width, height);
   }
   Sub& operator+=(const Point& aPoint)
   {
@@ -267,18 +253,7 @@ struct BaseRect {
     MoveBy(-aPoint);
     return *static_cast<Sub*>(this);
   }
-  Sub& operator+=(const SizeT& aSize)
-  {
-    width += aSize.width;
-    height += aSize.height;
-    return *static_cast<Sub*>(this);
-  }
-  Sub& operator-=(const SizeT& aSize)
-  {
-    width -= aSize.width;
-    height -= aSize.height;
-    return *static_cast<Sub*>(this);
-  }
+
   // Find difference as a Margin
   MarginT operator-(const Sub& aRect) const
   {
@@ -482,11 +457,6 @@ struct BaseRect {
     rect.x = std::min(rect.XMost(), aRect.XMost()) - rect.width;
     rect.y = std::min(rect.YMost(), aRect.YMost()) - rect.height;
     return rect;
-  }
-
-  friend std::ostream& operator<<(std::ostream& stream, const Sub& aRect) {
-    return stream << '(' << aRect.x << ',' << aRect.y << ','
-                  << aRect.width << ',' << aRect.height << ')';
   }
 
 private:

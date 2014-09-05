@@ -18,15 +18,12 @@
 
 #define A_RTP_CONNECTION_H_
 
-#include "mozilla/Types.h"
 #include <media/stagefright/foundation/AHandler.h>
 #include <utils/List.h>
 
-#include "prio.h"
-
 namespace android {
 
-struct MOZ_EXPORT ABuffer;
+struct ABuffer;
 struct ARTPSource;
 struct ASessionDescription;
 
@@ -38,13 +35,12 @@ struct ARTPConnection : public AHandler {
     ARTPConnection(uint32_t flags = 0);
 
     void addStream(
-            PRFileDesc *rtpSocket, PRFileDesc *rtcpSocket,
-            int interleavedRTPIdx, int interleavedRTCPIdx,
+            int rtpSocket, int rtcpSocket,
             const sp<ASessionDescription> &sessionDesc, size_t index,
             const sp<AMessage> &notify,
             bool injected);
 
-    void removeStream(PRFileDesc *rtpSocket, PRFileDesc *rtcpSocket);
+    void removeStream(int rtpSocket, int rtcpSocket);
 
     void injectPacket(int index, const sp<ABuffer> &buffer);
 
@@ -52,7 +48,7 @@ struct ARTPConnection : public AHandler {
     // (the rtpSocket is bound to an even port, the rtcpSocket to the
     // next higher port).
     static void MakePortPair(
-            PRFileDesc **rtpSocket, PRFileDesc **rtcpSocket, uint16_t *rtpPort);
+            int *rtpSocket, int *rtcpSocket, unsigned *rtpPort);
 
 protected:
     virtual ~ARTPConnection();
@@ -66,7 +62,7 @@ private:
         kWhatInjectPacket,
     };
 
-    static const uint32_t kSocketPollTimeoutUs;
+    static const int64_t kSelectTimeoutUs;
 
     uint32_t mFlags;
 

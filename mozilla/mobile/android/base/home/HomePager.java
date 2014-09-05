@@ -53,8 +53,7 @@ public class HomePager extends ViewPager {
     private final Drawable mOriginalBackground;
 
     // Telemetry session for current panel.
-    private TelemetryContract.Session mCurrentPanelSession;
-    private String mCurrentPanelSessionSuffix;
+    private String mCurrentPanelSession;
 
     // Current load state of HomePager.
     private LoadState mLoadState;
@@ -510,9 +509,8 @@ public class HomePager extends ViewPager {
         // Stop the current panel's session if we have one.
         stopCurrentPanelTelemetrySession();
 
-        mCurrentPanelSession = TelemetryContract.Session.HOME_PANEL;
-        mCurrentPanelSessionSuffix = panelId;
-        Telemetry.startUISession(mCurrentPanelSession, mCurrentPanelSessionSuffix);
+        mCurrentPanelSession = TelemetryContract.Session.HOME_PANEL + panelId;
+        Telemetry.startUISession(mCurrentPanelSession);
     }
 
     /**
@@ -520,9 +518,8 @@ public class HomePager extends ViewPager {
      */
     private void stopCurrentPanelTelemetrySession() {
         if (mCurrentPanelSession != null) {
-            Telemetry.stopUISession(mCurrentPanelSession, mCurrentPanelSessionSuffix);
+            Telemetry.stopUISession(mCurrentPanelSession);
             mCurrentPanelSession = null;
-            mCurrentPanelSessionSuffix = null;
         }
     }
 }

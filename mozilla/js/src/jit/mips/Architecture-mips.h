@@ -17,18 +17,11 @@
 #ifdef _mips_hard_float
 #define JS_CODEGEN_MIPS_HARDFP
 #endif
-
-#if _MIPS_SIM == _ABIO32
-#define USES_O32_ABI
-#else
-#error "Unsupported ABI"
-#endif
-
 namespace js {
 namespace jit {
 
 // Shadow stack space is not required on MIPS.
-static const uint32_t ShadowStackSpace = 4 * sizeof(uintptr_t);
+static const uint32_t ShadowStackSpace = 0;
 
 // These offsets are specific to nunboxing, and capture offsets into the
 // components of a js::Value.
@@ -120,7 +113,7 @@ class Registers
         return Names[code];
     }
     static const char *GetName(uint32_t i) {
-        MOZ_ASSERT(i < Total);
+        JS_ASSERT(i < Total);
         return GetName(Code(i));
     }
 
@@ -151,8 +144,6 @@ class Registers
         (1 << Registers::t6) |
         (1 << Registers::t7);
 
-    // We use this constant to save registers when entering functions. This
-    // is why $ra is added here even though it is not "Non Volatile".
     static const uint32_t NonVolatileMask =
         (1 << Registers::s0) |
         (1 << Registers::s1) |
@@ -161,8 +152,7 @@ class Registers
         (1 << Registers::s4) |
         (1 << Registers::s5) |
         (1 << Registers::s6) |
-        (1 << Registers::s7) |
-        (1 << Registers::ra);
+        (1 << Registers::s7);
 
     static const uint32_t WrapperMask =
         VolatileMask |         // = arguments
@@ -209,7 +199,7 @@ typedef uint32_t PackedRegisterMask;
 // - 64 bit floating-point coprocessor - In this case, there are 32 double
 // precision register which can also be used as single precision registers.
 
-// When using O32 ABI, floating-point coprocessor is 32 bit.
+// When using O32 ABI, floating-point coprocessor is 32 bit
 // When using N32 ABI, floating-point coprocessor is 64 bit.
 class FloatRegisters
 {
@@ -260,7 +250,7 @@ class FloatRegisters
         return Names[code];
     }
     static const char *GetName(uint32_t i) {
-        MOZ_ASSERT(i < Total);
+        JS_ASSERT(i < Total);
         return GetName(Code(i));
     }
 

@@ -3086,8 +3086,9 @@ nsHTMLEditor::SetSelectionAfterTableEdit(nsIDOMElement* aTable, int32_t aRow, in
 {
   NS_ENSURE_TRUE(aTable, NS_ERROR_NOT_INITIALIZED);
 
-  nsRefPtr<Selection> selection = GetSelection();
-  nsresult res;
+  nsCOMPtr<nsISelection>selection;
+  nsresult res = GetSelection(getter_AddRefs(selection));
+  NS_ENSURE_SUCCESS(res, res);
   
   if (!selection)
   {
@@ -3116,11 +3117,7 @@ nsHTMLEditor::SetSelectionAfterTableEdit(nsIDOMElement* aTable, int32_t aRow, in
           //   but don't go into nested tables
           // TODO: Should we really be placing the caret at the END
           //  of the cell content?
-          nsCOMPtr<nsINode> cellNode = do_QueryInterface(cell);
-          if (cellNode) {
-            CollapseSelectionToDeepestNonTableFirstChild(selection, cellNode);
-          }
-          return NS_OK;
+          return CollapseSelectionToDeepestNonTableFirstChild(selection, cell);
         }
       } else {
         // Setup index to find another cell in the 

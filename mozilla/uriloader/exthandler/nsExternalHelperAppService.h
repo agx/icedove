@@ -38,6 +38,7 @@
 #include "nsIPrompt.h"
 #include "nsAutoPtr.h"
 #include "mozilla/Attributes.h"
+#include "necko-config.h"
 
 class nsExternalAppHandler;
 class nsIMIMEInfo;
@@ -71,7 +72,7 @@ public:
    * Initializes internal state. Will be called automatically when
    * this service is first instantiated.
    */
-  nsresult Init();
+  NS_HIDDEN_(nsresult) Init();
  
   /**
    * Given a mimetype and an extension, looks up a mime info from the OS.
@@ -109,7 +110,7 @@ public:
   virtual nsresult GetFileTokenForPath(const char16_t * platformAppPath,
                                        nsIFile ** aFile);
 
-  virtual nsresult OSProtocolHandlerExists(const char *aScheme,
+  virtual NS_HIDDEN_(nsresult) OSProtocolHandlerExists(const char *aScheme,
                                                        bool *aExists) = 0;
 
 protected:
@@ -121,7 +122,7 @@ protected:
    * @param aContentType The type to search for.
    * @param aMIMEInfo    [inout] The mime info, if found
    */
-  nsresult FillMIMEInfoForMimeTypeFromExtras(
+  NS_HIDDEN_(nsresult) FillMIMEInfoForMimeTypeFromExtras(
     const nsACString& aContentType, nsIMIMEInfo * aMIMEInfo);
   /**
    * Searches the "extra" array of MIMEInfo objects for an object
@@ -131,7 +132,7 @@ protected:
    *
    * @see FillMIMEInfoForMimeTypeFromExtras
    */
-  nsresult FillMIMEInfoForExtensionFromExtras(
+  NS_HIDDEN_(nsresult) FillMIMEInfoForExtensionFromExtras(
     const nsACString& aExtension, nsIMIMEInfo * aMIMEInfo);
 
   /**
@@ -140,7 +141,7 @@ protected:
    * @param aMIMEType [out] The found MIME type.
    * @return true if the extension was found, false otherwise.
    */
-  bool GetTypeFromExtras(const nsACString& aExtension,
+  NS_HIDDEN_(bool) GetTypeFromExtras(const nsACString& aExtension,
                                        nsACString& aMIMEType);
 
 #ifdef PR_LOGGING
@@ -175,6 +176,14 @@ protected:
    * the private browsing mode)
    */
   void ExpungeTemporaryPrivateFiles();
+
+#ifdef NECKO_PROTOCOL_rtsp
+  /**
+   * Launch video app for rtsp protocol. This function is supported only on Gonk
+   * for now.
+   */
+  static void LaunchVideoAppForRtsp(nsIURI* aURI);
+#endif
 
   /**
    * Array for the files that should be deleted
@@ -328,10 +337,6 @@ protected:
    * empty.
    */
   nsCOMPtr<nsIArray> mSignatureInfo;
-  /**
-   * Stores the redirect information associated with the channel.
-   */
-  nsCOMPtr<nsIArray> mRedirects;
   /**
    * Creates the temporary file for the download and an output stream for it.
    * Upon successful return, both mTempFile and mSaver will be valid.

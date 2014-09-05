@@ -577,7 +577,6 @@ regxpcom.exe
   modules/attachmentChecker.js
   modules/ctypes.jsm
   modules/dbViewWrapper.js
-  modules/displayNameutils.js
   modules/debug.js
   modules/errUtils.js
   modules/folderUtils.jsm

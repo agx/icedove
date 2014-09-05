@@ -22,6 +22,9 @@
 #define JAVASCRIPT_NAVIGATOR_PROPERTY_CATEGORY \
   "JavaScript-navigator-property"
 
+#define JAVASCRIPT_GLOBAL_STATIC_NAMESET_CATEGORY \
+  "JavaScript-global-static-nameset"
+
 #define JAVASCRIPT_DOM_CLASS \
   "JavaScript-DOM-class"
 

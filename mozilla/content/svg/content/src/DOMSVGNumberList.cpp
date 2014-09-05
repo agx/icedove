@@ -171,8 +171,8 @@ DOMSVGNumberList::Clear(ErrorResult& error)
   }
 }
 
-already_AddRefed<DOMSVGNumber>
-DOMSVGNumberList::Initialize(DOMSVGNumber& aItem,
+already_AddRefed<nsIDOMSVGNumber>
+DOMSVGNumberList::Initialize(nsIDOMSVGNumber *newItem,
                              ErrorResult& error)
 {
   if (IsAnimValList()) {
@@ -187,25 +187,33 @@ DOMSVGNumberList::Initialize(DOMSVGNumber& aItem,
   // from this list, and so the InsertItemBefore() call would not insert a
   // clone of newItem, it would actually insert newItem. To prevent that from
   // happening we have to do the clone here, if necessary.
-  nsRefPtr<DOMSVGNumber> domItem = aItem.HasOwner() ? aItem.Clone() : &aItem;
+
+  nsCOMPtr<DOMSVGNumber> domItem = do_QueryInterface(newItem);
+  if (!domItem) {
+    error.Throw(NS_ERROR_DOM_SVG_WRONG_TYPE_ERR);
+    return nullptr;
+  }
+  if (domItem->HasOwner()) {
+    newItem = domItem->Clone();
+  }
 
   Clear(error);
   MOZ_ASSERT(!error.Failed());
-  return InsertItemBefore(*domItem, 0, error);
+  return InsertItemBefore(newItem, 0, error);
 }
 
-already_AddRefed<DOMSVGNumber>
+already_AddRefed<nsIDOMSVGNumber>
 DOMSVGNumberList::GetItem(uint32_t index, ErrorResult& error)
 {
   bool found;
-  nsRefPtr<DOMSVGNumber> item = IndexedGetter(index, found, error);
+  nsRefPtr<nsIDOMSVGNumber> item = IndexedGetter(index, found, error);
   if (!found) {
     error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
   }
   return item.forget();
 }
 
-already_AddRefed<DOMSVGNumber>
+already_AddRefed<nsIDOMSVGNumber>
 DOMSVGNumberList::IndexedGetter(uint32_t index, bool& found, ErrorResult& error)
 {
   if (IsAnimValList()) {
@@ -218,8 +226,8 @@ DOMSVGNumberList::IndexedGetter(uint32_t index, bool& found, ErrorResult& error)
   return nullptr;
 }
 
-already_AddRefed<DOMSVGNumber>
-DOMSVGNumberList::InsertItemBefore(DOMSVGNumber& aItem,
+already_AddRefed<nsIDOMSVGNumber>
+DOMSVGNumberList::InsertItemBefore(nsIDOMSVGNumber *newItem,
                                    uint32_t index,
                                    ErrorResult& error)
 {
@@ -234,8 +242,14 @@ DOMSVGNumberList::InsertItemBefore(DOMSVGNumber& aItem,
     return nullptr;
   }
 
-  // must do this before changing anything!
-  nsRefPtr<DOMSVGNumber> domItem = aItem.HasOwner() ? aItem.Clone() : &aItem;
+  nsCOMPtr<DOMSVGNumber> domItem = do_QueryInterface(newItem);
+  if (!domItem) {
+    error.Throw(NS_ERROR_DOM_SVG_WRONG_TYPE_ERR);
+    return nullptr;
+  }
+  if (domItem->HasOwner()) {
+    domItem = domItem->Clone(); // must do this before changing anything!
+  }
 
   // Ensure we have enough memory so we can avoid complex error handling below:
   if (!mItems.SetCapacity(mItems.Length() + 1) ||
@@ -249,7 +263,7 @@ DOMSVGNumberList::InsertItemBefore(DOMSVGNumber& aItem,
   MaybeInsertNullInAnimValListAt(index);
 
   InternalList().InsertItem(index, domItem->ToSVGNumber());
-  mItems.InsertElementAt(index, domItem);
+  mItems.InsertElementAt(index, domItem.get());
 
   // This MUST come after the insertion into InternalList(), or else under the
   // insertion into InternalList() the values read from domItem would be bad
@@ -261,8 +275,8 @@ DOMSVGNumberList::InsertItemBefore(DOMSVGNumber& aItem,
   return domItem.forget();
 }
 
-already_AddRefed<DOMSVGNumber>
-DOMSVGNumberList::ReplaceItem(DOMSVGNumber& aItem,
+already_AddRefed<nsIDOMSVGNumber>
+DOMSVGNumberList::ReplaceItem(nsIDOMSVGNumber *newItem,
                               uint32_t index,
                               ErrorResult& error)
 {
@@ -271,13 +285,18 @@ DOMSVGNumberList::ReplaceItem(DOMSVGNumber& aItem,
     return nullptr;
   }
 
+  nsCOMPtr<DOMSVGNumber> domItem = do_QueryInterface(newItem);
+  if (!domItem) {
+    error.Throw(NS_ERROR_DOM_SVG_WRONG_TYPE_ERR);
+    return nullptr;
+  }
   if (index >= LengthNoFlush()) {
     error.Throw(NS_ERROR_DOM_INDEX_SIZE_ERR);
     return nullptr;
   }
-
-  // must do this before changing anything!
-  nsRefPtr<DOMSVGNumber> domItem = aItem.HasOwner() ? aItem.Clone() : &aItem;
+  if (domItem->HasOwner()) {
+    domItem = domItem->Clone(); // must do this before changing anything!
+  }
 
   AutoChangeNumberListNotifier notifier(this);
   if (mItems[index]) {
@@ -296,7 +315,7 @@ DOMSVGNumberList::ReplaceItem(DOMSVGNumber& aItem,
   return domItem.forget();
 }
 
-already_AddRefed<DOMSVGNumber>
+already_AddRefed<nsIDOMSVGNumber>
 DOMSVGNumberList::RemoveItem(uint32_t index,
                              ErrorResult& error)
 {
@@ -316,7 +335,7 @@ DOMSVGNumberList::RemoveItem(uint32_t index,
   MaybeRemoveItemFromAnimValListAt(index);
 
   // We have to return the removed item, so get it, creating it if necessary:
-  nsRefPtr<DOMSVGNumber> result = GetItemAt(index);
+  nsRefPtr<nsIDOMSVGNumber> result = GetItemAt(index);
 
   AutoChangeNumberListNotifier notifier(this);
   // Notify the DOM item of removal *before* modifying the lists so that the
@@ -331,7 +350,7 @@ DOMSVGNumberList::RemoveItem(uint32_t index,
   return result.forget();
 }
 
-already_AddRefed<DOMSVGNumber>
+already_AddRefed<nsIDOMSVGNumber>
 DOMSVGNumberList::GetItemAt(uint32_t aIndex)
 {
   MOZ_ASSERT(aIndex < mItems.Length());
@@ -339,7 +358,7 @@ DOMSVGNumberList::GetItemAt(uint32_t aIndex)
   if (!mItems[aIndex]) {
     mItems[aIndex] = new DOMSVGNumber(this, AttrEnum(), aIndex, IsAnimValList());
   }
-  nsRefPtr<DOMSVGNumber> result = mItems[aIndex];
+  nsRefPtr<nsIDOMSVGNumber> result = mItems[aIndex];
   return result.forget();
 }
 

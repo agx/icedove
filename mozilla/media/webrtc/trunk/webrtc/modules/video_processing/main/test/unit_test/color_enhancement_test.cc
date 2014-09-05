@@ -23,14 +23,14 @@ TEST_F(VideoProcessingModuleTest, ColorEnhancement)
 {
     TickTime t0;
     TickTime t1;
-    TickInterval acc_ticks;
+    TickInterval accTicks;
 
     // Use a shorter version of the Foreman clip for this test.
-    fclose(source_file_);
+    fclose(_sourceFile);
     const std::string video_file =
       webrtc::test::ResourcePath("foreman_cif_short", "yuv");
-    source_file_  = fopen(video_file.c_str(), "rb");
-    ASSERT_TRUE(source_file_ != NULL) <<
+    _sourceFile  = fopen(video_file.c_str(), "rb");
+    ASSERT_TRUE(_sourceFile != NULL) <<
         "Cannot read source file: " + video_file + "\n";
 
     std::string output_file = webrtc::test::OutputPath() +
@@ -39,27 +39,27 @@ TEST_F(VideoProcessingModuleTest, ColorEnhancement)
     ASSERT_TRUE(modFile != NULL) << "Could not open output file.\n";
 
     uint32_t frameNum = 0;
-    scoped_array<uint8_t> video_buffer(new uint8_t[frame_length_]);
-    while (fread(video_buffer.get(), 1, frame_length_, source_file_) ==
-        frame_length_)
+    scoped_array<uint8_t> video_buffer(new uint8_t[_frame_length]);
+    while (fread(video_buffer.get(), 1, _frame_length, _sourceFile) ==
+        _frame_length)
     {
         // Using ConvertToI420 to add stride to the image.
         EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
-                                   width_, height_,
-                                   0, kRotateNone, &video_frame_));
+                                   _width, _height,
+                                   0, kRotateNone, &_videoFrame));
         frameNum++;
         t0 = TickTime::Now();
-        ASSERT_EQ(0, VideoProcessingModule::ColorEnhancement(&video_frame_));
+        ASSERT_EQ(0, VideoProcessingModule::ColorEnhancement(&_videoFrame));
         t1 = TickTime::Now();
-        acc_ticks += t1 - t0;
-        if (PrintI420VideoFrame(video_frame_, modFile) < 0) {
+        accTicks += t1 - t0;
+        if (PrintI420VideoFrame(_videoFrame, modFile) < 0) {
           return;
         }
     }
-    ASSERT_NE(0, feof(source_file_)) << "Error reading source file";
+    ASSERT_NE(0, feof(_sourceFile)) << "Error reading source file";
 
     printf("\nTime per frame: %d us \n",
-        static_cast<int>(acc_ticks.Microseconds() / frameNum));
+        static_cast<int>(accTicks.Microseconds() / frameNum));
     rewind(modFile);
 
     printf("Comparing files...\n\n");
@@ -82,62 +82,62 @@ TEST_F(VideoProcessingModuleTest, ColorEnhancement)
     ASSERT_EQ(refLen, testLen) << "File lengths differ.";
 
     I420VideoFrame refVideoFrame;
-    refVideoFrame.CreateEmptyFrame(width_, height_,
-                                   width_, half_width_, half_width_);
+    refVideoFrame.CreateEmptyFrame(_width, _height,
+                                   _width, _half_width, _half_width);
 
     // Compare frame-by-frame.
-    scoped_array<uint8_t> ref_buffer(new uint8_t[frame_length_]);
-    while (fread(video_buffer.get(), 1, frame_length_, modFile) ==
-        frame_length_)
+    scoped_array<uint8_t> ref_buffer(new uint8_t[_frame_length]);
+    while (fread(video_buffer.get(), 1, _frame_length, modFile) ==
+        _frame_length)
     {
         // Using ConvertToI420 to add stride to the image.
         EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
-                                   width_, height_,
-                                   0, kRotateNone, &video_frame_));
-        ASSERT_EQ(frame_length_, fread(ref_buffer.get(), 1, frame_length_,
+                                   _width, _height,
+                                   0, kRotateNone, &_videoFrame));
+        ASSERT_EQ(_frame_length, fread(ref_buffer.get(), 1, _frame_length,
                                        refFile));
         EXPECT_EQ(0, ConvertToI420(kI420, ref_buffer.get(), 0, 0,
-                                   width_, height_,
+                                   _width, _height,
                                     0, kRotateNone, &refVideoFrame));
-        EXPECT_EQ(0, memcmp(video_frame_.buffer(kYPlane),
+        EXPECT_EQ(0, memcmp(_videoFrame.buffer(kYPlane),
                             refVideoFrame.buffer(kYPlane),
-                            size_y_));
-        EXPECT_EQ(0, memcmp(video_frame_.buffer(kUPlane),
+                            _size_y));
+        EXPECT_EQ(0, memcmp(_videoFrame.buffer(kUPlane),
                             refVideoFrame.buffer(kUPlane),
-                            size_uv_));
-        EXPECT_EQ(0, memcmp(video_frame_.buffer(kVPlane),
+                            _size_uv));
+        EXPECT_EQ(0, memcmp(_videoFrame.buffer(kVPlane),
                             refVideoFrame.buffer(kVPlane),
-                            size_uv_));
+                            _size_uv));
     }
-    ASSERT_NE(0, feof(source_file_)) << "Error reading source file";
+    ASSERT_NE(0, feof(_sourceFile)) << "Error reading source file";
 
     // Verify that all color pixels are enhanced, and no luminance values are
     // altered.
 
-    scoped_array<uint8_t> testFrame(new uint8_t[frame_length_]);
+    scoped_array<uint8_t> testFrame(new uint8_t[_frame_length]);
 
     // Use value 128 as probe value, since we know that this will be changed
     // in the enhancement.
-    memset(testFrame.get(), 128, frame_length_);
+    memset(testFrame.get(), 128, _frame_length);
 
     I420VideoFrame testVideoFrame;
-    testVideoFrame.CreateEmptyFrame(width_, height_,
-                                    width_, half_width_, half_width_);
+    testVideoFrame.CreateEmptyFrame(_width, _height,
+                                    _width, _half_width, _half_width);
     EXPECT_EQ(0, ConvertToI420(kI420, testFrame.get(), 0, 0,
-                               width_, height_, 0, kRotateNone,
+                               _width, _height, 0, kRotateNone,
                                &testVideoFrame));
 
     ASSERT_EQ(0, VideoProcessingModule::ColorEnhancement(&testVideoFrame));
 
     EXPECT_EQ(0, memcmp(testVideoFrame.buffer(kYPlane), testFrame.get(),
-                        size_y_))
+                        _size_y))
       << "Function is modifying the luminance.";
 
     EXPECT_NE(0, memcmp(testVideoFrame.buffer(kUPlane),
-                        testFrame.get() + size_y_, size_uv_)) <<
+                        testFrame.get() + _size_y, _size_uv)) <<
                         "Function is not modifying all chrominance pixels";
     EXPECT_NE(0, memcmp(testVideoFrame.buffer(kVPlane),
-                        testFrame.get() + size_y_ + size_uv_, size_uv_)) <<
+                        testFrame.get() + _size_y + _size_uv, _size_uv)) <<
                         "Function is not modifying all chrominance pixels";
 
     ASSERT_EQ(0, fclose(refFile));

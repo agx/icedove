@@ -20,7 +20,7 @@ function testEditorAdded(aEditor)
 {
   if (aEditor.styleSheet.styleSheetIndex == 0) {
     gEditorAddedCount++;
-    gUI.editors[0].getSourceEditor().then(testFirstStyleSheetEditor);
+    testFirstStyleSheetEditor(aEditor);
   }
   if (aEditor.styleSheet.styleSheetIndex == 1) {
     gEditorAddedCount++;

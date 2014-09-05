@@ -35,11 +35,6 @@ class FileWrapperImpl : public FileWrapper {
                        bool loop = false,
                        bool text = false) OVERRIDE;
 
-  virtual int OpenFromFileHandle(FILE* handle,
-                                 bool manage_file,
-                                 bool read_only,
-                                 bool loop = false) OVERRIDE;
-
   virtual int CloseFile() OVERRIDE;
   virtual int SetMaxFileSize(size_t bytes) OVERRIDE;
   virtual int Flush() OVERRIDE;
@@ -56,7 +51,6 @@ class FileWrapperImpl : public FileWrapper {
   scoped_ptr<RWLockWrapper> rw_lock_;
 
   FILE* id_;
-  bool managed_file_handle_;
   bool open_;
   bool looping_;
   bool read_only_;

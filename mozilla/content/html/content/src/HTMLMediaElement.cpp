@@ -9,8 +9,6 @@
 #include "mozilla/dom/ElementInlines.h"
 #include "mozilla/ArrayUtils.h"
 #include "mozilla/MathAlgorithms.h"
-#include "mozilla/dom/MediaKeyNeededEvent.h"
-#include "mozilla/AsyncEventDispatcher.h"
 
 #include "base/basictypes.h"
 #include "nsIDOMHTMLMediaElement.h"
@@ -425,7 +423,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLMediaElement, nsGenericHTM
   }
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPlayed);
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTextTrackManager)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMediaKeys)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLMediaElement, nsGenericHTMLElement)
@@ -442,11 +439,10 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLMediaElement, nsGenericHTMLE
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mAudioChannelAgent)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mError)
   for (uint32_t i = 0; i < tmp->mOutputStreams.Length(); ++i) {
-    NS_IMPL_CYCLE_COLLECTION_UNLINK(mOutputStreams[i].mStream)
+    NS_IMPL_CYCLE_COLLECTION_UNLINK(mOutputStreams[i].mStream);
   }
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPlayed)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPlayed);
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTextTrackManager)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mMediaKeys)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(HTMLMediaElement)
@@ -899,9 +895,6 @@ void HTMLMediaElement::LoadFromSourceChildren()
       ReportLoadError("MediaLoadUnsupportedTypeAttribute", params, ArrayLength(params));
       continue;
     }
-    // TODO: "If candidate has a keySystem attribute whose value represents a
-    //       Key System that the user agent knows it cannot use with type,
-    //       then end the synchronous section[...]" (Bug 1016707)
     nsAutoString media;
     if (child->GetAttr(kNameSpaceID_None, nsGkAtoms::media, media) && !media.IsEmpty()) {
       nsCSSParser cssParser;
@@ -2015,8 +2008,7 @@ HTMLMediaElement::HTMLMediaElement(already_AddRefed<nsINodeInfo>& aNodeInfo)
     mHasAudio(false),
     mDownloadSuspendedByCache(false),
     mAudioChannelFaded(false),
-    mPlayingThroughTheAudioChannel(false),
-    mWaitingFor(MediaWaitingFor::None)
+    mPlayingThroughTheAudioChannel(false)
 {
 #ifdef PR_LOGGING
   if (!gMediaElementLog) {
@@ -2351,7 +2343,7 @@ bool HTMLMediaElement::CheckAudioChannelPermissions(const nsAString& aString)
   }
 
   nsCOMPtr<nsIPermissionManager> permissionManager =
-    services::GetPermissionManager();
+    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
   if (!permissionManager) {
     return false;
   }
@@ -2734,14 +2726,11 @@ public:
     }
     aGraph->DispatchToMainThreadAfterStreamStateUpdate(event.forget());
   }
-  virtual void NotifyEvent(MediaStreamGraph* aGraph,
-                           MediaStreamListener::MediaStreamGraphEvent event) MOZ_OVERRIDE
+  virtual void NotifyFinished(MediaStreamGraph* aGraph) MOZ_OVERRIDE
   {
-    if (event == EVENT_FINISHED) {
-      nsCOMPtr<nsIRunnable> event =
-        NS_NewRunnableMethod(this, &StreamListener::DoNotifyFinished);
-      aGraph->DispatchToMainThreadAfterStreamStateUpdate(event.forget());
-    }
+    nsCOMPtr<nsIRunnable> event =
+      NS_NewRunnableMethod(this, &StreamListener::DoNotifyFinished);
+    aGraph->DispatchToMainThreadAfterStreamStateUpdate(event.forget());
   }
   virtual void NotifyHasCurrentData(MediaStreamGraph* aGraph) MOZ_OVERRIDE
   {
@@ -3080,14 +3069,6 @@ void HTMLMediaElement::UpdateReadyStateForData(MediaDecoderOwner::NextFrameStatu
     return;
   }
 
-  // Section 2.4.3.1 of the Media Source Extensions spec requires
-  // changing to HAVE_METADATA when seeking into an unbuffered
-  // range.
-  if (aNextFrame == MediaDecoderOwner::NEXT_FRAME_WAIT_FOR_MSE_DATA) {
-    ChangeReadyState(nsIDOMHTMLMediaElement::HAVE_METADATA);
-    return;
-  }
-
   if (mReadyState > nsIDOMHTMLMediaElement::HAVE_METADATA &&
       mDownloadSuspendedByCache &&
       mDecoder &&
@@ -3291,7 +3272,7 @@ nsresult HTMLMediaElement::DispatchAsyncEvent(const nsAString& aName)
   }
 
   nsCOMPtr<nsIRunnable> event = new nsAsyncEventRunner(aName, this);
-  NS_DispatchToMainThread(event);
+  NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
   return NS_OK;
 }
 
@@ -3483,7 +3464,7 @@ void HTMLMediaElement::DispatchAsyncSourceError(nsIContent* aSourceElement)
   LOG_EVENT(PR_LOG_DEBUG, ("%p Queuing simple source error event", this));
 
   nsCOMPtr<nsIRunnable> event = new nsSourceErrorEventRunner(this, aSourceElement);
-  NS_DispatchToMainThread(event);
+  NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
 }
 
 void HTMLMediaElement::NotifyAddedSource()
@@ -3872,11 +3853,6 @@ void HTMLMediaElement::UpdateAudioChannelPlayingState()
       mAudioChannelAgent->SetVisibilityState(!OwnerDoc()->Hidden());
     }
 
-    // This is needed to pass nsContentUtils::IsCallerChrome().
-    // AudioChannel API should not called from content but it can happen that
-    // this method has some content JS in its stack.
-    AutoNoJSAPI nojsapi;
-
     if (mPlayingThroughTheAudioChannel) {
       int32_t canPlay;
       mAudioChannelAgent->StartPlaying(&canPlay);
@@ -3908,72 +3884,6 @@ NS_IMETHODIMP HTMLMediaElement::CanPlayChanged(int32_t canPlay)
   UpdateChannelMuteState(static_cast<AudioChannelState>(canPlay));
   mPaused.SetCanPlay(canPlay != AUDIO_CHANNEL_STATE_MUTED);
   return NS_OK;
-}
-
-MediaKeys*
-HTMLMediaElement::GetMediaKeys() const
-{
-  return mMediaKeys;
-}
-
-already_AddRefed<Promise>
-HTMLMediaElement::SetMediaKeys(mozilla::dom::MediaKeys* aMediaKeys,
-                               ErrorResult& aRv)
-{
-  nsCOMPtr<nsIGlobalObject> global =
-    do_QueryInterface(OwnerDoc()->GetInnerWindow());
-  if (!global) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return nullptr;
-  }
-  // TODO: Need to shutdown existing MediaKeys instance? bug 1016709.
-  nsRefPtr<Promise> promise = new Promise(global);
-  if (mMediaKeys != aMediaKeys) {
-    mMediaKeys = aMediaKeys;
-  }
-  promise->MaybeResolve(JS::UndefinedHandleValue);
-  return promise.forget();
-}
-
-MediaWaitingFor
-HTMLMediaElement::WaitingFor() const
-{
-  return mWaitingFor;
-}
-
-EventHandlerNonNull*
-HTMLMediaElement::GetOnneedkey()
-{
-  EventListenerManager *elm = GetExistingListenerManager();
-  return elm ? elm->GetEventHandler(nsGkAtoms::onneedkey, EmptyString())
-              : nullptr;
-}
-
-void
-HTMLMediaElement::SetOnneedkey(EventHandlerNonNull* handler)
-{
-  EventListenerManager *elm = GetOrCreateListenerManager();
-  if (elm) {
-    elm->SetEventHandler(nsGkAtoms::onneedkey, EmptyString(), handler);
-  }
-}
-
-void
-HTMLMediaElement::DispatchNeedKey(const nsTArray<uint8_t>& aInitData,
-                                  const nsAString& aInitDataType)
-{
-  nsRefPtr<MediaKeyNeededEvent> event(
-    MediaKeyNeededEvent::Constructor(this, aInitDataType, aInitData));
-  nsRefPtr<AsyncEventDispatcher> asyncDispatcher =
-    new AsyncEventDispatcher(this, event);
-  asyncDispatcher->PostDOMEvent();
-}
-
-bool
-HTMLMediaElement::IsEventAttributeName(nsIAtom* aName)
-{
-  return aName == nsGkAtoms::onneedkey ||
-         nsGenericHTMLElement::IsEventAttributeName(aName);
 }
 
 NS_IMETHODIMP HTMLMediaElement::WindowVolumeChanged()

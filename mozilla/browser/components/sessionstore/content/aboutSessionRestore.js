@@ -111,20 +111,14 @@ function restoreSession() {
 
   // restore the session into a new window and close the current tab
   var newWindow = top.openDialog(top.location, "_blank", "chrome,dialog=no,all");
-
-  var obs = Cc["@mozilla.org/observer-service;1"].getService(Ci.nsIObserverService);
-  obs.addObserver(function observe(win, topic) {
-    if (win != newWindow) {
-      return;
-    }
-
-    obs.removeObserver(observe, topic);
+  newWindow.addEventListener("load", function() {
+    newWindow.removeEventListener("load", arguments.callee, true);
     ss.setWindowState(newWindow, stateString, true);
 
     var tabbrowser = top.gBrowser;
     var tabIndex = tabbrowser.getBrowserIndexForDocument(document);
     tabbrowser.removeTab(tabbrowser.tabs[tabIndex]);
-  }, "browser-delayed-startup-finished", false);
+  }, true);
 }
 
 function startNewSession() {

@@ -12,6 +12,7 @@
 #include "gfxPlatform.h"
 #include "nsUnicharUtils.h"
 #include "nsNetUtil.h"
+#include "nsICacheService.h"
 #include "nsIProtocolHandler.h"
 #include "nsIPrincipal.h"
 #include "gfxFontConstants.h"
@@ -332,15 +333,13 @@ private:
 static ots::TableAction
 OTSTableAction(uint32_t aTag, void *aUserData)
 {
-    // preserve Graphite, color glyph and SVG tables
+    // preserve Graphite and SVG tables
     if (aTag == TRUETYPE_TAG('S', 'i', 'l', 'f') ||
         aTag == TRUETYPE_TAG('S', 'i', 'l', 'l') ||
         aTag == TRUETYPE_TAG('G', 'l', 'o', 'c') ||
         aTag == TRUETYPE_TAG('G', 'l', 'a', 't') ||
         aTag == TRUETYPE_TAG('F', 'e', 'a', 't') ||
-        aTag == TRUETYPE_TAG('S', 'V', 'G', ' ') ||
-        aTag == TRUETYPE_TAG('C', 'O', 'L', 'R') ||
-        aTag == TRUETYPE_TAG('C', 'P', 'A', 'L')) {
+        aTag == TRUETYPE_TAG('S', 'V', 'G', ' ')) {
         return ots::TABLE_ACTION_PASSTHRU;
     }
     return ots::TABLE_ACTION_DEFAULT;
@@ -504,7 +503,7 @@ gfxUserFontSet::OnLoadComplete(gfxMixedFontFamily *aFamily,
     }
 
     if (aFontData) {
-        moz_free((void*)aFontData);
+        NS_Free((void*)aFontData);
     }
 
     // error occurred, load next src
@@ -862,7 +861,7 @@ gfxUserFontSet::UserFontCache::Flusher::Observe(nsISupports* aSubject,
         return NS_OK;
     }
 
-    if (!strcmp(aTopic, "cacheservice:empty-cache")) {
+    if (!strcmp(aTopic, NS_CACHESERVICE_EMPTYCACHE_TOPIC_ID)) {
         sUserFonts->Clear();
     } else if (!strcmp(aTopic, "last-pb-context-exited")) {
         sUserFonts->EnumerateEntries(Entry::RemoveIfPrivate, nullptr);
@@ -916,7 +915,7 @@ gfxUserFontSet::UserFontCache::CacheFont(gfxFontEntry *aFontEntry)
             mozilla::services::GetObserverService();
         if (obs) {
             Flusher *flusher = new Flusher;
-            obs->AddObserver(flusher, "cacheservice:empty-cache",
+            obs->AddObserver(flusher, NS_CACHESERVICE_EMPTYCACHE_TOPIC_ID,
                              false);
             obs->AddObserver(flusher, "last-pb-context-exited", false);
             obs->AddObserver(flusher, "xpcom-shutdown", false);

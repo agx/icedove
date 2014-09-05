@@ -1484,8 +1484,7 @@ nsNativeAppSupportWin::OpenBrowserWindow()
           if ( navItem ) {
             nsCOMPtr<nsIDocShellTreeItem> rootItem;
             navItem->GetRootTreeItem( getter_AddRefs( rootItem ) );
-            nsCOMPtr<nsIDOMWindow> rootWin =
-              rootItem ? rootItem->GetWindow() : nullptr;
+            nsCOMPtr<nsIDOMWindow> rootWin( do_GetInterface( rootItem ) );
             nsCOMPtr<nsIDOMChromeWindow> chromeWin(do_QueryInterface(rootWin));
             if ( chromeWin )
               chromeWin->GetBrowserDOMWindow( getter_AddRefs ( bwin ) );

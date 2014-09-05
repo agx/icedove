@@ -29,15 +29,15 @@ let test = asyncTest(function*() {
   info("Selecting the test node");
   yield selectNode("#testElement", inspector);
 
-  yield testRuleView(view, inspector.selection.nodeFront);
+  yield testRuleView(view);
 
   info("Opening the computed view");
   let {toolbox, inspector, view} = yield openComputedView();
 
-  yield testComputedView(view, inspector.selection.nodeFront);
+  yield testComputedView(view);
 });
 
-function* testRuleView(ruleView, nodeFront) {
+function* testRuleView(ruleView) {
   info("Testing font-family tooltips in the rule view");
 
   let panel = ruleView.previewTooltip.panel;
@@ -52,15 +52,11 @@ function* testRuleView(ruleView, nodeFront) {
   // And verify that the tooltip gets shown on this property
   yield assertHoverTooltipOn(ruleView.previewTooltip, valueSpan);
 
-  let images = panel.getElementsByTagName("image");
-  is(images.length, 1, "Tooltip contains an image");
-  ok(images[0].getAttribute("src").startsWith("data:"), "Tooltip contains a data-uri image as expected");
-
-  let dataURL = yield getFontFamilyDataURL(valueSpan.textContent, nodeFront);
-  is(images[0].getAttribute("src"), dataURL, "Tooltip contains the correct data-uri image");
+  let description = panel.getElementsByTagName("description")[0];
+  is(description.style.fontFamily, "cursive", "Tooltips contains correct font-family style");
 }
 
-function* testComputedView(computedView, nodeFront) {
+function* testComputedView(computedView) {
   info("Testing font-family tooltips in the computed view");
 
   let panel = computedView.tooltip.panel;
@@ -68,10 +64,6 @@ function* testComputedView(computedView, nodeFront) {
 
   yield assertHoverTooltipOn(computedView.tooltip, valueSpan);
 
-  let images = panel.getElementsByTagName("image");
-  is(images.length, 1, "Tooltip contains an image");
-  ok(images[0].getAttribute("src").startsWith("data:"), "Tooltip contains a data-uri image as expected");
-
-  let dataURL = yield getFontFamilyDataURL(valueSpan.textContent, nodeFront);
-  is(images[0].getAttribute("src"), dataURL, "Tooltip contains the correct data-uri image");
+  let description = panel.getElementsByTagName("description")[0];
+  is(description.style.fontFamily, "cursive", "Tooltips contains correct font-family style");
 }

@@ -28,6 +28,7 @@
 #include "nsLocaleConstructors.h"
 
 // uconv
+#include "nsCharsetConverterManager.h"
 
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsJISx4051LineBreaker)
 NS_GENERIC_FACTORY_CONSTRUCTOR(nsSampleWordBreaker)
@@ -134,6 +135,12 @@ static const mozilla::Module::ContractIDEntry kIntlContracts[] = {
     { nullptr }
 };
 
+static void
+I18nModuleDtor()
+{
+    nsCharsetConverterManager::Shutdown();
+}
+
 static const mozilla::Module kIntlModule = {
     mozilla::Module::kVersion,
     kIntlCIDs,
@@ -141,7 +148,7 @@ static const mozilla::Module kIntlModule = {
     nullptr,
     nullptr,
     nullptr,
-    nullptr
+    I18nModuleDtor
 };
 
 NSMODULE_DEFN(nsI18nModule) = &kIntlModule;

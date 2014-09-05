@@ -18,7 +18,7 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSIGNOMEVFSSERVICE
 
-  nsresult Init();
+  NS_HIDDEN_(nsresult) Init();
 };
 
 #endif

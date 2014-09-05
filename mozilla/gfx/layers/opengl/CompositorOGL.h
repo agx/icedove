@@ -20,7 +20,7 @@
 #include "mozilla/gfx/Rect.h"           // for Rect, IntRect
 #include "mozilla/gfx/Types.h"          // for Float, SurfaceFormat, etc
 #include "mozilla/layers/Compositor.h"  // for SurfaceInitMode, Compositor, etc
-#include "mozilla/layers/CompositorTypes.h"  // for MaskType::MaskType::NumMaskTypes, etc
+#include "mozilla/layers/CompositorTypes.h"  // for MaskType::NumMaskTypes, etc
 #include "mozilla/layers/LayersTypes.h"
 #include "nsAutoPtr.h"                  // for nsRefPtr, nsAutoPtr
 #include "nsCOMPtr.h"                   // for already_AddRefed
@@ -31,6 +31,7 @@
 #include "nsThreadUtils.h"              // for nsRunnable
 #include "nsXULAppAPI.h"                // for XRE_GetProcessType
 #include "nscore.h"                     // for NS_IMETHOD
+#include "VBOArena.h"                   // for gl::VBOArena
 #ifdef MOZ_WIDGET_GONK
 #include <ui/GraphicBuffer.h>
 #endif
@@ -153,9 +154,7 @@ protected:
   nsTArray<GLuint> mUnusedTextures;
 };
 
-// If you want to make this class not MOZ_FINAL, first remove calls to virtual
-// methods (Destroy) that are made in the destructor.
-class CompositorOGL MOZ_FINAL : public Compositor
+class CompositorOGL : public Compositor
 {
   typedef mozilla::gl::GLContext GLContext;
 
@@ -169,7 +168,7 @@ public:
   virtual ~CompositorOGL();
 
   virtual TemporaryRef<DataTextureSource>
-  CreateDataTextureSource(TextureFlags aFlags = TextureFlags::NO_FLAGS) MOZ_OVERRIDE;
+  CreateDataTextureSource(TextureFlags aFlags = 0) MOZ_OVERRIDE;
 
   virtual bool Initialize() MOZ_OVERRIDE;
 
@@ -177,15 +176,11 @@ public:
 
   virtual TextureFactoryIdentifier GetTextureFactoryIdentifier() MOZ_OVERRIDE
   {
-    TextureFactoryIdentifier result =
-      TextureFactoryIdentifier(LayersBackend::LAYERS_OPENGL,
-                               XRE_GetProcessType(),
-                               GetMaxTextureSize(),
-                               mFBOTextureTarget == LOCAL_GL_TEXTURE_2D,
-                               SupportsPartialTextureUpdate());
-    result.mSupportedBlendModes += gfx::CompositionOp::OP_SCREEN;
-    result.mSupportedBlendModes += gfx::CompositionOp::OP_MULTIPLY;
-    return result;
+    return TextureFactoryIdentifier(LayersBackend::LAYERS_OPENGL,
+                                    XRE_GetProcessType(),
+                                    GetMaxTextureSize(),
+                                    mFBOTextureTarget == LOCAL_GL_TEXTURE_2D,
+                                    SupportsPartialTextureUpdate());
   }
 
   virtual TemporaryRef<CompositingRenderTarget>
@@ -203,7 +198,18 @@ public:
                         const gfx::Rect& aClipRect,
                         const EffectChain &aEffectChain,
                         gfx::Float aOpacity,
-                        const gfx::Matrix4x4 &aTransform) MOZ_OVERRIDE;
+                        const gfx::Matrix4x4 &aTransform) MOZ_OVERRIDE
+  {
+    DrawQuadInternal(aRect, aClipRect, aEffectChain,
+                     aOpacity, aTransform, LOCAL_GL_TRIANGLE_STRIP);
+  }
+
+  virtual void DrawLines(const std::vector<gfx::Point>& aLines,
+                         const gfx::Rect& aClipRect,
+                         const gfx::Color& aColor,
+                         gfx::Float aOpacity,
+                         const gfx::Matrix4x4 &aTransform) MOZ_OVERRIDE;
+
 
   virtual void EndFrame() MOZ_OVERRIDE;
   virtual void SetFBAcquireFence(Layer* aLayer) MOZ_OVERRIDE;
@@ -233,6 +239,11 @@ public:
   }
 
   virtual void MakeCurrent(MakeCurrentFlags aFlags = 0) MOZ_OVERRIDE;
+
+  virtual void SetTargetContext(gfx::DrawTarget* aTarget) MOZ_OVERRIDE
+  {
+    mTarget = aTarget;
+  }
 
   virtual void PrepareViewport(const gfx::IntSize& aSize,
                                const gfx::Matrix& aWorldTransform) MOZ_OVERRIDE;
@@ -268,10 +279,22 @@ public:
     return mProjMatrix;
   }
 private:
+  virtual void DrawQuadInternal(const gfx::Rect& aRect,
+                                const gfx::Rect& aClipRect,
+                                const EffectChain &aEffectChain,
+                                gfx::Float aOpacity,
+                                const gfx::Matrix4x4 &aTransformi,
+                                GLuint aDrawMode);
+
   virtual gfx::IntSize GetWidgetSize() const MOZ_OVERRIDE
   {
     return gfx::ToIntSize(mWidgetSize);
   }
+
+  /**
+   * Context target, nullptr when drawing directly to our swap chain.
+   */
+  RefPtr<gfx::DrawTarget> mTarget;
 
   /** Widget associated with this compositor */
   nsIWidget *mWidget;
@@ -300,6 +323,11 @@ private:
    * coords and texcoords.
    */
   GLuint mQuadVBO;
+
+  /**
+   * When we can't use mQuadVBO, we allocate VBOs from this arena instead.
+   */
+  gl::VBOArena mVBOs;
 
   bool mHasBGRA;
 
@@ -330,9 +358,7 @@ private:
                           gfx::Rect *aClipRectOut = nullptr,
                           gfx::Rect *aRenderBoundsOut = nullptr) MOZ_OVERRIDE;
 
-  ShaderConfigOGL GetShaderConfigFor(Effect *aEffect,
-                                     MaskType aMask = MaskType::MaskNone,
-                                     gfx::CompositionOp aOp = gfx::CompositionOp::OP_OVER) const;
+  ShaderConfigOGL GetShaderConfigFor(Effect *aEffect, MaskType aMask = MaskNone) const;
   ShaderProgramOGL* GetShaderProgramFor(const ShaderConfigOGL &aConfig);
 
   /**
@@ -346,21 +372,19 @@ private:
                             GLuint aSourceFrameBuffer,
                             GLuint *aFBO, GLuint *aTexture);
 
-  void BindAndDrawQuads(ShaderProgramOGL *aProg,
-                        int aQuads,
-                        const gfx::Rect* aLayerRect,
-                        const gfx::Rect* aTextureRect);
+  GLintptr QuadVBOVertexOffset() { return 0; }
+  GLintptr QuadVBOTexCoordOffset() { return sizeof(float)*4*2; }
+
+  void BindQuadVBO();
+  void QuadVBOVerticesAttrib(GLuint aAttribIndex);
+  void QuadVBOTexCoordsAttrib(GLuint aAttribIndex);
+  void BindAndDrawQuad(GLuint aVertAttribIndex,
+                       GLuint aTexCoordAttribIndex,
+                       GLuint aDrawMode = LOCAL_GL_TRIANGLE_STRIP);
   void BindAndDrawQuad(ShaderProgramOGL *aProg,
-                       const gfx::Rect& aLayerRect,
-                       const gfx::Rect& aTextureRect = gfx::Rect(0.0f, 0.0f, 1.0f, 1.0f)) {
-    gfx::Rect layerRects[4];
-    gfx::Rect textureRects[4];
-    layerRects[0] = aLayerRect;
-    textureRects[0] = aTextureRect;
-    BindAndDrawQuads(aProg, 1, layerRects, textureRects);
-  }
+                       GLuint aDrawMode = LOCAL_GL_TRIANGLE_STRIP);
   void BindAndDrawQuadWithTextureRect(ShaderProgramOGL *aProg,
-                                      const gfx::Rect& aRect,
+                                      const gfx3DMatrix& aTextureTransform,
                                       const gfx::Rect& aTexCoordRect,
                                       TextureSource *aTexture);
 
@@ -370,7 +394,7 @@ private:
    * Copies the content of our backbuffer to the set transaction target.
    * Does not restore the target FBO, so only call from EndFrame.
    */
-  void CopyToTarget(gfx::DrawTarget* aTarget, const nsIntPoint& aTopLeft, const gfx::Matrix& aWorldMatrix);
+  void CopyToTarget(gfx::DrawTarget* aTarget, const gfx::Matrix& aWorldMatrix);
 
   /**
    * Implements the flipping of the y-axis to convert from layers/compositor

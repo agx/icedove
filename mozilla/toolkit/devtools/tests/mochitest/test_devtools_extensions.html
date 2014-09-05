@@ -18,10 +18,9 @@
     <script type="application/javascript;version=1.8">
       const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
       const { Services } = Cu.import("resource://gre/modules/Services.jsm", {});
-
+      const { gDevToolsExtensions } = Cu.import("resource://gre/modules/devtools/DevToolsExtensions.jsm", {});
       Cu.import("resource://gre/modules/devtools/Loader.jsm");
       const { require } = devtools;
-      const contentGlobals  = require("devtools/server/content-globals");
       const tabs = require('sdk/tabs');
       const { getMostRecentBrowserWindow, getInnerId } = require('sdk/window/utils');
       const { PageMod } = require('sdk/page-mod');
@@ -59,7 +58,7 @@
             let id = getInnerId(getMostRecentBrowserWindow().gBrowser.selectedTab.linkedBrowser.contentWindow);
 
             // getting
-            is(contentGlobals.getContentGlobals({
+            is(gDevToolsExtensions.getContentGlobals({
               'inner-window-id': id
             }).length, 1, 'found a global for inner-id = ' + id);
 
@@ -68,7 +67,7 @@
                 Services.obs.removeObserver(observer, 'inner-window-destroyed');
                 setTimeout(function() {
                   // closing the tab window should have removed the global
-                  is(contentGlobals.getContentGlobals({
+                  is(gDevToolsExtensions.getContentGlobals({
                     'inner-window-id': id
                   }).length, 0, 'did not find a global for inner-id = ' + id);
 
@@ -91,21 +90,21 @@
         };
 
         // adding
-        contentGlobals.addContentGlobal(globalDetails);
+        gDevToolsExtensions.addContentGlobal(globalDetails);
 
         // getting
-        is(contentGlobals.getContentGlobals({
+        is(gDevToolsExtensions.getContentGlobals({
           'inner-window-id': 5
         }).length, 1, 'found a global for inner-id = 5');
-        is(contentGlobals.getContentGlobals({
+        is(gDevToolsExtensions.getContentGlobals({
           'inner-window-id': 4
         }).length, 0, 'did not find a global for inner-id = 4');
 
         // remove
-        contentGlobals.removeContentGlobal(globalDetails);
+        gDevToolsExtensions.removeContentGlobal(globalDetails);
 
         // getting again
-        is(contentGlobals.getContentGlobals({
+        is(gDevToolsExtensions.getContentGlobals({
           'inner-window-id': 5
         }).length, 0, 'did not find a global for inner-id = 5');
 

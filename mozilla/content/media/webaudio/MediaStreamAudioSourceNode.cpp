@@ -8,7 +8,7 @@
 #include "mozilla/dom/MediaStreamAudioSourceNodeBinding.h"
 #include "AudioNodeEngine.h"
 #include "AudioNodeExternalInputStream.h"
-#include "nsIDocument.h"
+#include "DOMMediaStream.h"
 
 namespace mozilla {
 namespace dom {
@@ -37,52 +37,16 @@ MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(AudioContext* aContext,
               ChannelInterpretation::Speakers),
     mInputStream(aMediaStream)
 {
-  AudioNodeEngine* engine = new MediaStreamAudioSourceNodeEngine(this);
+  AudioNodeEngine* engine = new AudioNodeEngine(this);
   mStream = aContext->Graph()->CreateAudioNodeExternalInputStream(engine);
   ProcessedMediaStream* outputStream = static_cast<ProcessedMediaStream*>(mStream.get());
   mInputPort = outputStream->AllocateInputPort(aMediaStream->GetStream(),
                                                MediaInputPort::FLAG_BLOCK_INPUT);
-  mInputStream->AddConsumerToKeepAlive(static_cast<nsIDOMEventTarget*>(this));
-
-  PrincipalChanged(mInputStream); // trigger enabling/disabling of the connector
-  mInputStream->AddPrincipalChangeObserver(this);
+  mInputStream->AddConsumerToKeepAlive(this);
 }
 
 MediaStreamAudioSourceNode::~MediaStreamAudioSourceNode()
 {
-  if (mInputStream) {
-    mInputStream->RemovePrincipalChangeObserver(this);
-  }
-}
-
-/**
- * Changes the principal.  Note that this will be called on the main thread, but
- * changes will be enacted on the MediaStreamGraph thread.  If the principal
- * change results in the document principal losing access to the stream, then
- * there needs to be other measures in place to ensure that any media that is
- * governed by the new stream principal is not available to the Media Stream
- * Graph before this change completes.  Otherwise, a site could get access to
- * media that they are not authorized to receive.
- *
- * One solution is to block the altered content, call this method, then dispatch
- * another change request to the MediaStreamGraph thread that allows the content
- * under the new principal to flow.  This might be unnecessary if the principal
- * change is changing to be the document principal.
- */
-void
-MediaStreamAudioSourceNode::PrincipalChanged(DOMMediaStream* ms)
-{
-  bool subsumes = false;
-  nsIDocument* doc = Context()->GetParentObject()->GetExtantDoc();
-  if (doc) {
-    nsIPrincipal* docPrincipal = doc->NodePrincipal();
-    nsIPrincipal* streamPrincipal = mInputStream->GetPrincipal();
-    if (NS_FAILED(docPrincipal->Subsumes(streamPrincipal, &subsumes))) {
-      subsumes = false;
-    }
-  }
-  auto stream = static_cast<AudioNodeExternalInputStream*>(mStream.get());
-  stream->SetInt32Parameter(MediaStreamAudioSourceNodeEngine::ENABLE, subsumes);
 }
 
 size_t
@@ -119,3 +83,4 @@ MediaStreamAudioSourceNode::WrapObject(JSContext* aCx)
 
 }
 }
+

@@ -17,6 +17,7 @@
        '<(webrtc_root)/common_video/common_video.gyp:common_video',
 
         # ModulesShared
+        '<(webrtc_root)/modules/modules.gyp:media_file',
         '<(webrtc_root)/modules/modules.gyp:rtp_rtcp',
         '<(webrtc_root)/modules/modules.gyp:webrtc_utility',
 
@@ -38,6 +39,7 @@
         'include/vie_base.h',
         'include/vie_capture.h',
         'include/vie_codec.h',
+        'include/vie_encryption.h',
         'include/vie_errors.h',
         'include/vie_external_codec.h',
         'include/vie_image_process.h',
@@ -54,6 +56,7 @@
         'vie_capture_impl.h',
         'vie_codec_impl.h',
         'vie_defines.h',
+        'vie_encryption_impl.h',
         'vie_external_codec_impl.h',
         'vie_image_process_impl.h',
         'vie_impl.h',
@@ -86,6 +89,7 @@
         'vie_base_impl.cc',
         'vie_capture_impl.cc',
         'vie_codec_impl.cc',
+        'vie_encryption_impl.cc',
         'vie_external_codec_impl.cc',
         'vie_image_process_impl.cc',
         'vie_impl.cc',
@@ -109,6 +113,23 @@
         'vie_render_manager.cc',
         'vie_sender.cc',
         'vie_sync_module.cc',
+
+        # New VideoEngine API
+        'internal/call.cc',
+        'internal/call.h',
+        'internal/transport_adapter.cc',
+        'internal/transport_adapter.h',
+        'internal/video_receive_stream.cc',
+        'internal/video_receive_stream.h',
+        'internal/video_send_stream.cc',
+        'internal/video_send_stream.h',
+        'new_include/call.h',
+        'new_include/config.h',
+        'new_include/frame_callback.h',
+        'new_include/transport.h',
+        'new_include/video_receive_stream.h',
+        'new_include/video_renderer.h',
+        'new_include/video_send_stream.h',
       ], # source
       # TODO(jschuh): Bug 1348: fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
@@ -164,10 +185,10 @@
               'target_name': 'video_engine_core_unittests_run',
               'type': 'none',
               'dependencies': [
+                '<(import_isolate_path):import_isolate_gypi',
                 'video_engine_core_unittests',
               ],
               'includes': [
-                '../build/isolate.gypi',
                 'video_engine_core_unittests.isolate',
               ],
               'sources': [

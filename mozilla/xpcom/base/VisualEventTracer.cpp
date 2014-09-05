@@ -12,18 +12,17 @@
 #include "plstr.h"
 #include "nsThreadUtils.h"
 
-namespace mozilla {
-namespace eventtracer {
+namespace mozilla { namespace eventtracer {
 
 #ifdef MOZ_VISUAL_EVENT_TRACER
 
 namespace {
 
 const uint32_t kBatchSize = 256;
-const char kTypeChars[eventtracer::eLast] = {' ', 'N', 'S', 'W', 'E', 'D'};
+const char kTypeChars[eventtracer::eLast] = {' ','N','S','W','E','D'};
 
 // Flushing thread and records queue monitor
-mozilla::Monitor* gMonitor = nullptr;
+mozilla::Monitor * gMonitor = nullptr;
 
 // gInitialized and gCapture can be accessed from multiple threads
 // simultaneously without any locking.  However, since they are only ever
@@ -35,26 +34,25 @@ bool gInitialized;
 bool gCapture;
 
 // Time stamp of the epoch we have started to capture
-mozilla::TimeStamp* gProfilerStart;
+mozilla::TimeStamp * gProfilerStart;
 
 // Duration of the log to keep up to
-mozilla::TimeDuration* gMaxBacklogTime;
+mozilla::TimeDuration * gMaxBacklogTime;
 
 
 // Record of a single event
-class Record
-{
+class Record {
 public:
-  Record()
+  Record() 
     : mType(::mozilla::eventtracer::eNone)
     , mItem(nullptr)
     , mText(nullptr)
-    , mText2(nullptr)
+    , mText2(nullptr) 
   {
     MOZ_COUNT_CTOR(Record);
-  }
+  } 
 
-  Record& operator=(const Record& aOther)
+  Record& operator=(const Record & aOther)
   {
     mType = aOther.mType;
     mTime = aOther.mTime;
@@ -64,31 +62,29 @@ public:
     return *this;
   }
 
-  ~Record()
+  ~Record() 
   {
     PL_strfree(mText2);
-    PL_strfree(mText);
+    PL_strfree(mText); 
     MOZ_COUNT_DTOR(Record);
   }
 
   uint32_t mType;
   TimeStamp mTime;
-  void* mItem;
-  char* mText;
-  char* mText2;
+  void * mItem;
+  char * mText;
+  char * mText2;
 };
 
-char* DupCurrentThreadName()
+char * DupCurrentThreadName()
 {
-  if (NS_IsMainThread()) {
+  if (NS_IsMainThread())
     return PL_strdup("Main Thread");
-  }
 
-  PRThread* currentThread = PR_GetCurrentThread();
-  const char* name = PR_GetThreadName(currentThread);
-  if (name) {
+  PRThread * currentThread = PR_GetCurrentThread();
+  const char * name = PR_GetThreadName(currentThread);
+  if (name)
     return PL_strdup(name);
-  }
 
   char buffer[128];
   PR_snprintf(buffer, 127, "Nameless %p", currentThread);
@@ -97,11 +93,10 @@ char* DupCurrentThreadName()
 }
 
 // An array of events, each thread keeps its own private instance
-class RecordBatch
-{
+class RecordBatch {
 public:
   RecordBatch(size_t aLength = kBatchSize,
-              char* aThreadName = DupCurrentThreadName())
+              char * aThreadName = DupCurrentThreadName())
     : mRecordsHead(new Record[aLength])
     , mRecordsTail(mRecordsHead + aLength)
     , mNextRecord(mRecordsHead)
@@ -119,61 +114,52 @@ public:
     MOZ_COUNT_DTOR(RecordBatch);
   }
 
-  void Close()
-  {
-    mClosed = true;
-  }
+  void Close() { mClosed = true; }
 
-  size_t Length() const
-  {
-    return mNextRecord - mRecordsHead;
-  }
+  size_t Length() const { return mNextRecord - mRecordsHead; }
   bool CanBeDeleted(const TimeStamp& aUntil) const;
 
-  static RecordBatch* Register();
-  static void Close(void* aData);  // Registered on freeing thread data
-  static RecordBatch* Clone(RecordBatch* aLog, const TimeStamp& aSince);
-  static void Delete(RecordBatch* aLog);
+  static RecordBatch * Register();
+  static void Close(void * data); // Registered on freeing thread data
+  static RecordBatch * Clone(RecordBatch * aLog, const TimeStamp& aSince);
+  static void Delete(RecordBatch * aLog);
 
-  static RecordBatch* CloneLog();
+  static RecordBatch * CloneLog();
   static void GCLog(const TimeStamp& aUntil);
   static void DeleteLog();
 
-  Record* mRecordsHead;
-  Record* mRecordsTail;
-  Record* mNextRecord;
+  Record * mRecordsHead;
+  Record * mRecordsTail;
+  Record * mNextRecord;
 
-  RecordBatch* mNextBatch;
-  char* mThreadNameCopy;
+  RecordBatch * mNextBatch;
+  char * mThreadNameCopy;
   bool mClosed;
 };
 
 // Protected by gMonitor, accessed concurently
 // Linked list of batches threads want to flush on disk
-RecordBatch* gLogHead = nullptr;
-RecordBatch* gLogTail = nullptr;
+RecordBatch * gLogHead = nullptr;
+RecordBatch * gLogTail = nullptr;
 
 // Registers the batch in the linked list
 // static
-RecordBatch*
+RecordBatch *
 RecordBatch::Register()
 {
   MonitorAutoLock mon(*gMonitor);
 
-  if (!gInitialized) {
+  if (!gInitialized)
     return nullptr;
-  }
 
-  if (gLogHead) {
+  if (gLogHead)
     RecordBatch::GCLog(TimeStamp::Now() - *gMaxBacklogTime);
-  }
 
-  RecordBatch* batch = new RecordBatch();
-  if (!gLogHead) {
+  RecordBatch * batch = new RecordBatch();
+  if (!gLogHead)
     gLogHead = batch;
-  } else { // gLogTail is non-null
+  else // gLogTail is non-null
     gLogTail->mNextBatch = batch;
-  }
   gLogTail = batch;
 
   mon.Notify();
@@ -181,24 +167,23 @@ RecordBatch::Register()
 }
 
 void
-RecordBatch::Close(void* aData)
+RecordBatch::Close(void * data)
 {
-  RecordBatch* batch = static_cast<RecordBatch*>(aData);
+  RecordBatch * batch = static_cast<RecordBatch*>(data);
   batch->Close();
 }
 
 // static
-RecordBatch*
-RecordBatch::Clone(RecordBatch* aOther, const TimeStamp& aSince)
+RecordBatch *
+RecordBatch::Clone(RecordBatch * aOther, const TimeStamp& aSince)
 {
-  if (!aOther) {
+  if (!aOther)
     return nullptr;
-  }
 
   size_t length = aOther->Length();
   size_t min = 0;
   size_t max = length;
-  Record* record = nullptr;
+  Record * record = nullptr;
 
   // Binary search for record with time >= aSince
   size_t i;
@@ -206,22 +191,20 @@ RecordBatch::Clone(RecordBatch* aOther, const TimeStamp& aSince)
     i = (max + min) / 2;
 
     record = aOther->mRecordsHead + i;
-    if (record->mTime >= aSince) {
+    if (record->mTime >= aSince)
       max = i;
-    } else {
-      min = i + 1;
-    }
+    else
+      min = i+1;
   }
   i = (max + min) / 2;
 
   // How many Record's to copy?
   size_t toCopy = length - i;
-  if (!toCopy) {
+  if (!toCopy)
     return RecordBatch::Clone(aOther->mNextBatch, aSince);
-  }
 
   // Clone
-  RecordBatch* clone = new RecordBatch(toCopy, PL_strdup(aOther->mThreadNameCopy));
+  RecordBatch * clone = new RecordBatch(toCopy, PL_strdup(aOther->mThreadNameCopy));
   for (; i < length; ++i) {
     record = aOther->mRecordsHead + i;
     *clone->mNextRecord = *record;
@@ -234,17 +217,17 @@ RecordBatch::Clone(RecordBatch* aOther, const TimeStamp& aSince)
 
 // static
 void
-RecordBatch::Delete(RecordBatch* aLog)
+RecordBatch::Delete(RecordBatch * aLog)
 {
   while (aLog) {
-    RecordBatch* batch = aLog;
+    RecordBatch * batch = aLog;
     aLog = aLog->mNextBatch;
     delete batch;
   }
 }
 
 // static
-RecordBatch*
+RecordBatch *
 RecordBatch::CloneLog()
 {
   TimeStamp startEpoch = *gProfilerStart;
@@ -264,10 +247,10 @@ RecordBatch::GCLog(const TimeStamp& aUntil)
   // Garbage collect all unreferenced and old batches
   gMonitor->AssertCurrentThreadOwns();
 
-  RecordBatch* volatile* referer = &gLogHead;
+  RecordBatch *volatile * referer = &gLogHead;
   gLogTail = nullptr;
 
-  RecordBatch* batch = *referer;
+  RecordBatch * batch = *referer;
   while (batch) {
     if (batch->CanBeDeleted(aUntil)) {
       // The batch is completed and thus unreferenced by the thread
@@ -276,7 +259,8 @@ RecordBatch::GCLog(const TimeStamp& aUntil)
       *referer = batch->mNextBatch;
       delete batch;
       batch = *referer;
-    } else {
+    }
+    else {
       // We walk the whole list, so this will end up filled with
       // the very last valid element of it.
       gLogTail = batch;
@@ -293,7 +277,7 @@ RecordBatch::GCLog(const TimeStamp& aUntil)
 void
 RecordBatch::DeleteLog()
 {
-  RecordBatch* batch;
+  RecordBatch * batch;
   {
     MonitorAutoLock mon(*gMonitor);
     batch = gLogHead;
@@ -318,7 +302,7 @@ RecordBatch::CanBeDeleted(const TimeStamp& aUntil) const
       return true;
     }
 
-    if ((mNextRecord - 1)->mTime <= aUntil) {
+    if ((mNextRecord-1)->mTime <= aUntil) {
       // Is the last record older then the time we demand records
       // for?  If not, this batch has expired.
       return true;
@@ -333,8 +317,8 @@ RecordBatch::CanBeDeleted(const TimeStamp& aUntil) const
 class EventFilter
 {
 public:
-  static EventFilter* Build(const char* aFilterVar);
-  bool EventPasses(const char* aFilterVar);
+  static EventFilter * Build(const char * filterVar);
+  bool EventPasses(const char * eventName);
 
   ~EventFilter()
   {
@@ -344,24 +328,23 @@ public:
   }
 
 private:
-  EventFilter(const char* aEventName, EventFilter* aNext)
-    : mFilter(PL_strdup(aEventName))
-    , mNext(aNext)
+  EventFilter(const char * eventName, EventFilter * next)
+    : mFilter(PL_strdup(eventName))
+    , mNext(next)
   {
     MOZ_COUNT_CTOR(EventFilter);
   }
 
-  char* mFilter;
-  EventFilter* mNext;
+  char * mFilter;
+  EventFilter * mNext;
 };
 
 // static
-EventFilter*
-EventFilter::Build(const char* aFilterVar)
+EventFilter *
+EventFilter::Build(const char * filterVar)
 {
-  if (!aFilterVar || !*aFilterVar) {
+  if (!filterVar || !*filterVar)
     return nullptr;
-  }
 
   // Reads a comma serpatated list of events.
 
@@ -370,55 +353,48 @@ EventFilter::Build(const char* aFilterVar)
   int pos = 0, count, delta = 0;
 
   // Read up to a comma or EOF -> get name of an event first in the list
-  count = sscanf(aFilterVar, "%63[^,]%n", eventName, &delta);
-  if (count == 0) {
+  count = sscanf(filterVar, "%63[^,]%n", eventName, &delta);
+  if (count == 0) 
     return nullptr;
-  }
 
   pos = delta;
 
   // Skip a comma, if present, accept spaces around it
-  count = sscanf(aFilterVar + pos, " , %n", &delta);
-  if (count != EOF) {
+  count = sscanf(filterVar + pos, " , %n", &delta);
+  if (count != EOF)
     pos += delta;
-  }
 
   // eventName contains name of the first event in the list
   // second argument recursively parses the rest of the list string and
   // fills mNext of the just created EventFilter object chaining the objects
-  return new EventFilter(eventName, Build(aFilterVar + pos));
+  return new EventFilter(eventName, Build(filterVar + pos));
 }
 
 bool
-EventFilter::EventPasses(const char* aEventName)
+EventFilter::EventPasses(const char * eventName)
 {
-  if (!strcmp(aEventName, mFilter)) {
+  if (!strcmp(eventName, mFilter))
     return true;
-  }
 
-  if (mNext) {
-    return mNext->EventPasses(aEventName);
-  }
+  if (mNext)
+    return mNext->EventPasses(eventName);
 
   return false;
 }
 
-// State and control variables, initialized in Init() method, after it
+// State and control variables, initialized in Init() method, after it 
 // immutable and read concurently.
-EventFilter* gEventFilter = nullptr;
+EventFilter * gEventFilter = nullptr;
 unsigned gThreadPrivateIndex;
 
 // static
-bool
-CheckEventFilters(uint32_t aType, void* aItem, const char* aText)
+bool CheckEventFilters(uint32_t aType, void * aItem, const char * aText)
 {
-  if (!gEventFilter) {
+  if (!gEventFilter)
     return true;
-  }
 
-  if (aType == eName) {
+  if (aType == eName)
     return true;
-  }
 
   return gEventFilter->EventPasses(aText);
 }
@@ -427,25 +403,21 @@ CheckEventFilters(uint32_t aType, void* aItem, const char* aText)
 
 #endif //MOZ_VISUAL_EVENT_TRACER
 
-// static
-void
-Init()
+// static 
+void Init()
 {
 #ifdef MOZ_VISUAL_EVENT_TRACER
-  const char* logEvents = PR_GetEnv("MOZ_PROFILING_EVENTS");
-  if (logEvents && *logEvents) {
+  const char * logEvents = PR_GetEnv("MOZ_PROFILING_EVENTS");
+  if (logEvents && *logEvents)
     gEventFilter = EventFilter::Build(logEvents);
-  }
 
   PRStatus status = PR_NewThreadPrivateIndex(&gThreadPrivateIndex, &RecordBatch::Close);
-  if (status != PR_SUCCESS) {
+  if (status != PR_SUCCESS)
     return;
-  }
 
   gMonitor = new mozilla::Monitor("Profiler");
-  if (!gMonitor) {
+  if (!gMonitor)
     return;
-  }
 
   gProfilerStart = new mozilla::TimeStamp();
   gMaxBacklogTime = new mozilla::TimeDuration();
@@ -454,9 +426,8 @@ Init()
 #endif
 }
 
-// static
-void
-Shutdown()
+// static 
+void Shutdown()
 {
 #ifdef MOZ_VISUAL_EVENT_TRACER
   gCapture = false;
@@ -486,35 +457,30 @@ Shutdown()
 #endif
 }
 
-// static
-void
-Mark(uint32_t aType, void* aItem, const char* aText, const char* aText2)
+// static 
+void Mark(uint32_t aType, void * aItem, const char * aText, const char * aText2)
 {
 #ifdef MOZ_VISUAL_EVENT_TRACER
-  if (!gInitialized || !gCapture) {
+  if (!gInitialized || !gCapture)
     return;
-  }
 
-  if (aType == eNone) {
+  if (aType == eNone)
     return;
-  }
 
-  if (!CheckEventFilters(aType, aItem, aText)) { // Events use just aText
+  if (!CheckEventFilters(aType, aItem, aText)) // Events use just aText
     return;
-  }
 
-  RecordBatch* threadLogPrivate = static_cast<RecordBatch*>(
-    PR_GetThreadPrivate(gThreadPrivateIndex));
+  RecordBatch * threadLogPrivate = static_cast<RecordBatch *>(
+      PR_GetThreadPrivate(gThreadPrivateIndex));
   if (!threadLogPrivate) {
     threadLogPrivate = RecordBatch::Register();
-    if (!threadLogPrivate) {
+    if (!threadLogPrivate)
       return;
-    }
 
     PR_SetThreadPrivate(gThreadPrivateIndex, threadLogPrivate);
   }
 
-  Record* record = threadLogPrivate->mNextRecord;
+  Record * record = threadLogPrivate->mNextRecord;
   record->mType = aType;
   record->mTime = mozilla::TimeStamp::Now();
   record->mItem = aItem;
@@ -543,13 +509,12 @@ class VisualEventTracerLog : public nsIVisualEventTracerLog
   VisualEventTracerLog(RecordBatch* aBatch)
     : mBatch(aBatch)
     , mProfilerStart(*gProfilerStart)
-  {
-  }
+  {}
 
   virtual ~VisualEventTracerLog();
 
 protected:
-  RecordBatch* mBatch;
+  RecordBatch * mBatch;
   TimeStamp mProfilerStart;
 };
 
@@ -561,26 +526,27 @@ VisualEventTracerLog::~VisualEventTracerLog()
 }
 
 NS_IMETHODIMP
-VisualEventTracerLog::GetJSONString(nsACString& aResult)
+VisualEventTracerLog::GetJSONString(nsACString & _retval)
 {
   nsCString buffer;
-  buffer.AssignLiteral("{\n\"version\": 1,\n\"records\":[\n");
 
-  RecordBatch* batch = mBatch;
+  buffer.Assign(NS_LITERAL_CSTRING("{\n\"version\": 1,\n\"records\":[\n"));
+
+  RecordBatch * batch = mBatch;
   while (batch) {
     if (batch != mBatch) {
       // This is not the first batch we are writting, add comma
-      buffer.AppendLiteral(",\n");
+      buffer.Append(NS_LITERAL_CSTRING(",\n"));
     }
 
-    buffer.AppendLiteral("{\"thread\":\"");
+    buffer.Append(NS_LITERAL_CSTRING("{\"thread\":\""));
     buffer.Append(batch->mThreadNameCopy);
-    buffer.AppendLiteral("\",\"log\":[\n");
+    buffer.Append(NS_LITERAL_CSTRING("\",\"log\":[\n"));
 
     static const int kBufferSize = 2048;
     char buf[kBufferSize];
 
-    for (Record* record = batch->mRecordsHead;
+    for (Record * record = batch->mRecordsHead;
          record < batch->mNextRecord;
          ++record) {
 
@@ -602,14 +568,14 @@ VisualEventTracerLog::GetJSONString(nsACString& aResult)
       buffer.Append(buf);
     }
 
-    buffer.AppendLiteral("]}\n");
+    buffer.Append(NS_LITERAL_CSTRING("]}\n"));
 
-    RecordBatch* next = batch->mNextBatch;
+    RecordBatch * next = batch->mNextBatch;
     batch = next;
   }
 
-  buffer.AppendLiteral("]}\n");
-  aResult.Assign(buffer);
+  buffer.Append(NS_LITERAL_CSTRING("]}\n"));
+  _retval.Assign(buffer);
 
   return NS_OK;
 }
@@ -623,7 +589,7 @@ VisualEventTracerLog::WriteToProfilingFile()
   }
 
   PRFileDesc* fd = PR_Open(filename, PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE,
-                           0644);
+			   0644);
   if (!fd) {
     return NS_ERROR_FILE_ACCESS_DENIED;
   }
@@ -646,9 +612,8 @@ NS_IMPL_ISUPPORTS(VisualEventTracer, nsIVisualEventTracer)
 NS_IMETHODIMP
 VisualEventTracer::Start(const uint32_t aMaxBacklogSeconds)
 {
-  if (!gInitialized) {
+  if (!gInitialized)
     return NS_ERROR_UNEXPECTED;
-  }
 
   if (gCapture) {
     NS_WARNING("VisualEventTracer has already been started");
@@ -672,9 +637,8 @@ VisualEventTracer::Start(const uint32_t aMaxBacklogSeconds)
 NS_IMETHODIMP
 VisualEventTracer::Stop()
 {
-  if (!gInitialized) {
+  if (!gInitialized)
     return NS_ERROR_UNEXPECTED;
-  }
 
   if (!gCapture) {
     NS_WARNING("VisualEventTracer is not runing");
@@ -698,16 +662,15 @@ VisualEventTracer::Stop()
 }
 
 NS_IMETHODIMP
-VisualEventTracer::Snapshot(nsIVisualEventTracerLog** aResult)
+VisualEventTracer::Snapshot(nsIVisualEventTracerLog ** _result)
 {
-  if (!gInitialized) {
+  if (!gInitialized)
     return NS_ERROR_UNEXPECTED;
-  }
 
-  RecordBatch* batch = RecordBatch::CloneLog();
+  RecordBatch * batch = RecordBatch::CloneLog();
 
   nsRefPtr<VisualEventTracerLog> log = new VisualEventTracerLog(batch);
-  log.forget(aResult);
+  log.forget(_result);
 
   return NS_OK;
 }

@@ -535,7 +535,7 @@ ArrayBufferObject::canNeuterAsmJSArrayBuffer(JSContext *cx, ArrayBufferObject &b
 void *
 ArrayBufferObject::createMappedContents(int fd, size_t offset, size_t length)
 {
-    return SystemPageAllocator::AllocateMappedContent(fd, offset, length, ARRAY_BUFFER_ALIGNMENT);
+    return AllocateMappedContent(fd, offset, length, ARRAY_BUFFER_ALIGNMENT);
 }
 
 void
@@ -544,7 +544,7 @@ ArrayBufferObject::releaseMappedArray()
     if(!isMappedArrayBuffer() || isNeutered())
         return;
 
-    SystemPageAllocator::DeallocateMappedContent(dataPointer(), byteLength());
+    DeallocateMappedContent(dataPointer(), byteLength());
 }
 
 void
@@ -656,7 +656,7 @@ ArrayBufferObject::create(JSContext *cx, uint32_t nbytes, void *data /* = nullpt
 
     JS_ASSERT(obj->getClass() == &class_);
 
-    JS_ASSERT(!gc::IsInsideNursery(obj));
+    JS_ASSERT(!gc::IsInsideNursery(cx->runtime(), obj));
 
     if (data) {
         obj->initialize(nbytes, data, OwnsData);
@@ -973,10 +973,8 @@ ArrayBufferViewObject::bufferObject(JSContext *cx, Handle<ArrayBufferViewObject 
         Rooted<TypedArrayObject *> typedArray(cx, &thisObject->as<TypedArrayObject>());
         if (!TypedArrayObject::ensureHasBuffer(cx, typedArray))
             return nullptr;
-        return thisObject->as<TypedArrayObject>().buffer();
     }
-    MOZ_ASSERT(thisObject->is<DataViewObject>());
-    return &thisObject->as<DataViewObject>().arrayBuffer();
+    return &thisObject->getFixedSlot(BUFFER_SLOT).toObject().as<ArrayBufferObject>();
 }
 
 /* JS Friend API */
@@ -1055,18 +1053,6 @@ JS_NeuterArrayBuffer(JSContext *cx, HandleObject obj,
     return true;
 }
 
-JS_FRIEND_API(bool)
-JS_IsNeuteredArrayBufferObject(JSObject *obj)
-{
-    obj = CheckedUnwrap(obj);
-    if (!obj)
-        return false;
-
-    return obj->is<ArrayBufferObject>()
-           ? obj->as<ArrayBufferObject>().isNeutered()
-           : false;
-}
-
 JS_FRIEND_API(JSObject *)
 JS_NewArrayBuffer(JSContext *cx, uint32_t nbytes)
 {
@@ -1140,7 +1126,7 @@ JS_CreateMappedArrayBufferContents(int fd, size_t offset, size_t length)
 JS_PUBLIC_API(void)
 JS_ReleaseMappedArrayBufferContents(void *contents, size_t length)
 {
-    SystemPageAllocator::DeallocateMappedContent(contents, length);
+    DeallocateMappedContent(contents, length);
 }
 
 JS_FRIEND_API(bool)
@@ -1166,9 +1152,9 @@ JS_GetArrayBufferViewData(JSObject *obj)
 }
 
 JS_FRIEND_API(JSObject *)
-JS_GetArrayBufferViewBuffer(JSContext *cx, HandleObject objArg)
+JS_GetArrayBufferViewBuffer(JSContext *cx, JSObject *obj)
 {
-    JSObject *obj = CheckedUnwrap(objArg);
+    obj = CheckedUnwrap(obj);
     if (!obj)
         return nullptr;
     Rooted<ArrayBufferViewObject *> viewObject(cx, &obj->as<ArrayBufferViewObject>());

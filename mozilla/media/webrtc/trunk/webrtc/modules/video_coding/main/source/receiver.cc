@@ -38,7 +38,6 @@ VCMReceiver::VCMReceiver(VCMTiming* timing,
       timing_(timing),
       render_wait_event_(event_factory->CreateEvent()),
       state_(kPassive),
-      receiveState_(kReceiveStateInitial),
       max_video_delay_ms_(kMaxVideoDelayMs) {}
 
 VCMReceiver::~VCMReceiver() {
@@ -56,10 +55,8 @@ void VCMReceiver::Reset() {
   render_wait_event_->Reset();
   if (master_) {
     state_ = kReceiving;
-    receiveState_ = kReceiveStateInitial;
   } else {
     state_ = kPassive;
-    receiveState_ = kReceiveStateInitial;
   }
 }
 
@@ -211,9 +208,8 @@ VCMEncodedFrame* VCMReceiver::FrameForDecoding(
   TRACE_EVENT_ASYNC_STEP1("webrtc", "Video", frame->TimeStamp(),
                           "SetRenderTS", "render_time", next_render_time_ms);
   if (dual_receiver != NULL) {
-    dual_receiver->UpdateDualState(*frame);
+    dual_receiver->UpdateState(*frame);
   }
-  UpdateReceiveState(*frame);
   if (!frame->Complete()) {
     // Update stats for incomplete frames.
     bool retransmitted = false;
@@ -242,9 +238,8 @@ void VCMReceiver::ReceiveStatistics(uint32_t* bitrate,
 
 void VCMReceiver::ReceivedFrameCount(VCMFrameCount* frame_count) const {
   assert(frame_count);
-  std::map<FrameType, uint32_t> counts(jitter_buffer_.FrameStatistics());
-  frame_count->numDeltaFrames = counts[kVideoFrameDelta];
-  frame_count->numKeyFrames = counts[kVideoFrameKey];
+  jitter_buffer_.FrameStatistics(&frame_count->numDeltaFrames,
+                                 &frame_count->numKeyFrames);
 }
 
 uint32_t VCMReceiver::DiscardedPackets() const {
@@ -260,7 +255,6 @@ void VCMReceiver::SetNackMode(VCMNackMode nackMode,
                              high_rtt_nack_threshold_ms);
   if (!master_) {
     state_ = kPassive;  // The dual decoder defaults to passive.
-    receiveState_ = kReceiveStateWaitingKey; // XXX Initial
   }
 }
 
@@ -320,11 +314,6 @@ VCMReceiverState VCMReceiver::State() const {
   return state_;
 }
 
-VideoReceiveState VCMReceiver::ReceiveState() const {
-  CriticalSectionScoped cs(crit_sect_);
-  return receiveState_;
-}
-
 void VCMReceiver::SetDecodeErrorMode(VCMDecodeErrorMode decode_error_mode) {
   jitter_buffer_.SetDecodeErrorMode(decode_error_mode);
 }
@@ -362,29 +351,13 @@ int VCMReceiver::RenderBufferSizeMs() {
   return render_end - render_start;
 }
 
-void VCMReceiver::UpdateReceiveState(const VCMEncodedFrame& frame) {
-  if (frame.Complete() && frame.FrameType() == kVideoFrameKey) {
-    receiveState_ = kReceiveStateNormal;
-    return;
-  }
-  if (frame.MissingFrame() || !frame.Complete()) {
-    // State is corrupted
-    receiveState_ = kReceiveStateWaitingKey;
-  }
-  // state continues
-}
-
 void VCMReceiver::UpdateState(VCMReceiverState new_state) {
   CriticalSectionScoped cs(crit_sect_);
   assert(!(state_ == kPassive && new_state == kWaitForPrimaryDecode));
-  WEBRTC_TRACE(webrtc::kTraceInfo, webrtc::kTraceVideoCoding,
-               VCMId(vcm_id_, receiver_id_),
-               "Receiver changing state: %d to %d",
-               state_, new_state);
   state_ = new_state;
 }
 
-void VCMReceiver::UpdateDualState(const VCMEncodedFrame& frame) {
+void VCMReceiver::UpdateState(const VCMEncodedFrame& frame) {
   if (jitter_buffer_.nack_mode() == kNoNack) {
     // Dual decoder mode has not been enabled.
     return;

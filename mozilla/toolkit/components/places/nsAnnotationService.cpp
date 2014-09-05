@@ -259,9 +259,7 @@ nsAnnotationService::SetItemAnnotation(int64_t aItemId,
                                        int32_t aFlags,
                                        uint16_t aExpiration)
 {
-  PROFILER_LABEL("AnnotationService", "SetItemAnnotation",
-    js::ProfileEntry::Category::OTHER);
-
+  PROFILER_LABEL("AnnotationService", "SetItemAnnotation");
   NS_ENSURE_ARG_MIN(aItemId, 1);
   NS_ENSURE_ARG(aValue);
 

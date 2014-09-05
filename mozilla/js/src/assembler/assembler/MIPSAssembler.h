@@ -180,10 +180,6 @@ public:
         {
         }
 
-        bool isSet() const {
-            return m_offset != -1;
-        }
-
     private:
         JmpSrc(int offset)
             : m_offset(offset)
@@ -774,11 +770,6 @@ public:
     size_t size() const
     {
         return m_buffer.size();
-    }
-
-    size_t allocSize() const
-    {
-        return m_buffer.allocSize();
     }
 
     void executableCopy(void* buffer)

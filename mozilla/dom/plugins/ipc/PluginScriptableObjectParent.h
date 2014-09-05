@@ -45,9 +45,6 @@ public:
   void
   InitializeLocal(NPObject* aObject);
 
-  virtual void
-  ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
-
   virtual bool
   AnswerHasMethod(PPluginIdentifierParent* aId,
                   bool* aHasMethod) MOZ_OVERRIDE;

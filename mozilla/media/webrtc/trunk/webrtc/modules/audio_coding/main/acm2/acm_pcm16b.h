@@ -15,8 +15,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 class ACMPCM16B : public ACMGenericCodec {
  public:
   explicit ACMPCM16B(int16_t codec_id);
@@ -38,8 +36,6 @@ class ACMPCM16B : public ACMGenericCodec {
 
   int32_t sampling_freq_hz_;
 };
-
-}  // namespace acm2
 
 }  // namespace webrtc
 

@@ -130,12 +130,6 @@ let UI = {
               rootButton.setAttribute("hidden", "true");
             }
           }
-          let tabsButton = document.querySelector(".tab.browser-tabs");
-          if (response.tabs.length > 0) {
-            tabsButton.classList.remove("hidden");
-          } else {
-            tabsButton.classList.add("hidden");
-          }
         }
       );
     }

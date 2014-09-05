@@ -64,7 +64,7 @@ FileSystemRequestParent::Dispatch(ContentParent* aParent,
 
     nsAutoCString permissionName;
     permissionName = mFileSystem->GetPermission();
-    permissionName.Append('-');
+    permissionName.AppendLiteral("-");
     permissionName.Append(access);
 
     if (!AssertAppProcessPermission(aParent, permissionName.get())) {

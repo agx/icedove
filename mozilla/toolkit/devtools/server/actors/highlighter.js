@@ -402,9 +402,6 @@ BoxModelHighlighter.prototype = {
     let pseudoClassesBox = this.chromeDoc.createElementNS(XHTML_NS, "span");
     pseudoClassesBox.className = "highlighter-nodeinfobar-pseudo-classes";
 
-    let dimensionBox = this.chromeDoc.createElementNS(XHTML_NS, "span");
-    dimensionBox.className = "highlighter-nodeinfobar-dimensions";
-
     // Add some content to force a better boundingClientRect
     pseudoClassesBox.textContent = "&nbsp;";
 
@@ -418,7 +415,6 @@ BoxModelHighlighter.prototype = {
     texthbox.appendChild(idLabel);
     texthbox.appendChild(classesBox);
     texthbox.appendChild(pseudoClassesBox);
-    texthbox.appendChild(dimensionBox);
 
     nodeInfobar.appendChild(texthbox);
 
@@ -435,7 +431,6 @@ BoxModelHighlighter.prototype = {
       idLabel: idLabel,
       classesBox: classesBox,
       pseudoClassesBox: pseudoClassesBox,
-      dimensionBox: dimensionBox,
       positioner: infobarPositioner,
       barHeight: barHeight,
     };
@@ -591,7 +586,9 @@ BoxModelHighlighter.prototype = {
 
     options.region = options.region || "content";
 
-    this.rect = this.layoutHelpers.getAdjustedQuads(this.currentNode, "margin");
+    // TODO: Remove this polyfill
+    this.rect =
+      this.layoutHelpers.getAdjustedQuadsPolyfill(this.currentNode, "margin");
 
     if (!this.rect) {
       return null;
@@ -599,8 +596,9 @@ BoxModelHighlighter.prototype = {
 
     if (this.rect.bounds.width > 0 && this.rect.bounds.height > 0) {
       for (let boxType in this._boxModelNodes) {
+        // TODO: Remove this polyfill
         let {p1, p2, p3, p4} = boxType === "margin" ? this.rect :
-          this.layoutHelpers.getAdjustedQuads(this.currentNode, boxType);
+          this.layoutHelpers.getAdjustedQuadsPolyfill(this.currentNode, boxType);
 
         let boxNode = this._boxModelNodes[boxType];
         boxNode.setAttribute("points",
@@ -711,36 +709,29 @@ BoxModelHighlighter.prototype = {
    * Update node information (tagName#id.class)
    */
   _updateInfobar: function() {
-    if (!this.currentNode) {
-      return;
+    if (this.currentNode) {
+      // Tag name
+      this.nodeInfo.tagNameLabel.textContent = this.currentNode.tagName;
+
+      // ID
+      this.nodeInfo.idLabel.textContent = this.currentNode.id ? "#" + this.currentNode.id : "";
+
+      // Classes
+      let classes = this.nodeInfo.classesBox;
+
+      classes.textContent = this.currentNode.classList.length ?
+                              "." + Array.join(this.currentNode.classList, ".") : "";
+
+      // Pseudo-classes
+      let pseudos = PSEUDO_CLASSES.filter(pseudo => {
+        return DOMUtils.hasPseudoClassLock(this.currentNode, pseudo);
+      }, this);
+
+      let pseudoBox = this.nodeInfo.pseudoClassesBox;
+      pseudoBox.textContent = pseudos.join("");
+
+      this._moveInfobar();
     }
-
-    // Tag name
-    this.nodeInfo.tagNameLabel.textContent = this.currentNode.tagName;
-
-    // ID
-    this.nodeInfo.idLabel.textContent = this.currentNode.id ? "#" + this.currentNode.id : "";
-
-    // Classes
-    let classes = this.nodeInfo.classesBox;
-
-    classes.textContent = this.currentNode.classList.length ?
-                            "." + Array.join(this.currentNode.classList, ".") : "";
-
-    // Pseudo-classes
-    let pseudos = PSEUDO_CLASSES.filter(pseudo => {
-      return DOMUtils.hasPseudoClassLock(this.currentNode, pseudo);
-    }, this);
-
-    let pseudoBox = this.nodeInfo.pseudoClassesBox;
-    pseudoBox.textContent = pseudos.join("");
-
-    // Dimensions
-    let dimensionBox = this.nodeInfo.dimensionBox;
-    let rect = this.currentNode.getBoundingClientRect();
-    dimensionBox.textContent = Math.ceil(rect.width) + " x " +
-                               Math.ceil(rect.height);
-    this._moveInfobar();
   },
 
   /**

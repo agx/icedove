@@ -63,8 +63,63 @@ private:
   nsRefPtr<mozilla::dom::URL> mURL;
 };
 
+// Base class for the URL runnable objects.
+class URLRunnable : public nsRunnable
+{
+protected:
+  WorkerPrivate* mWorkerPrivate;
+  nsCOMPtr<nsIEventTarget> mSyncLoopTarget;
+
+protected:
+  URLRunnable(WorkerPrivate* aWorkerPrivate)
+  : mWorkerPrivate(aWorkerPrivate)
+  {
+    mWorkerPrivate->AssertIsOnWorkerThread();
+  }
+
+public:
+  bool
+  Dispatch(JSContext* aCx)
+  {
+    mWorkerPrivate->AssertIsOnWorkerThread();
+
+    AutoSyncLoopHolder syncLoop(mWorkerPrivate);
+
+    mSyncLoopTarget = syncLoop.EventTarget();
+
+    if (NS_FAILED(NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL))) {
+      JS_ReportError(aCx, "Failed to dispatch to main thread!");
+      return false;
+    }
+
+    return syncLoop.Run();
+  }
+
+private:
+  NS_IMETHOD Run()
+  {
+    AssertIsOnMainThread();
+
+    MainThreadRun();
+
+    nsRefPtr<MainThreadStopSyncLoopRunnable> response =
+      new MainThreadStopSyncLoopRunnable(mWorkerPrivate,
+                                         mSyncLoopTarget.forget(),
+                                         true);
+    if (!response->Dispatch(nullptr)) {
+      NS_WARNING("Failed to dispatch response!");
+    }
+
+    return NS_OK;
+  }
+
+protected:
+  virtual void
+  MainThreadRun() = 0;
+};
+
 // This class creates an URL from a DOM Blob on the main thread.
-class CreateURLRunnable : public WorkerMainThreadRunnable
+class CreateURLRunnable : public URLRunnable
 {
 private:
   nsIDOMBlob* mBlob;
@@ -74,14 +129,14 @@ public:
   CreateURLRunnable(WorkerPrivate* aWorkerPrivate, nsIDOMBlob* aBlob,
                     const mozilla::dom::objectURLOptions& aOptions,
                     nsString& aURL)
-  : WorkerMainThreadRunnable(aWorkerPrivate),
+  : URLRunnable(aWorkerPrivate),
     mBlob(aBlob),
     mURL(aURL)
   {
     MOZ_ASSERT(aBlob);
   }
 
-  bool
+  void
   MainThreadRun()
   {
     AssertIsOnMainThread();
@@ -94,7 +149,7 @@ public:
       doc = window->GetExtantDoc();
       if (!doc) {
         SetDOMStringToNull(mURL);
-        return false;
+        return;
       }
 
       principal = doc->NodePrincipal();
@@ -111,7 +166,7 @@ public:
     if (NS_FAILED(rv)) {
       NS_WARNING("Failed to add data entry for the blob!");
       SetDOMStringToNull(mURL);
-      return false;
+      return;
     }
 
     if (doc) {
@@ -121,12 +176,11 @@ public:
     }
 
     mURL = NS_ConvertUTF8toUTF16(url);
-    return true;
   }
 };
 
 // This class revokes an URL on the main thread.
-class RevokeURLRunnable : public WorkerMainThreadRunnable
+class RevokeURLRunnable : public URLRunnable
 {
 private:
   const nsString mURL;
@@ -134,11 +188,11 @@ private:
 public:
   RevokeURLRunnable(WorkerPrivate* aWorkerPrivate,
                     const nsAString& aURL)
-  : WorkerMainThreadRunnable(aWorkerPrivate),
+  : URLRunnable(aWorkerPrivate),
     mURL(aURL)
   {}
 
-  bool
+  void
   MainThreadRun()
   {
     AssertIsOnMainThread();
@@ -150,7 +204,7 @@ public:
     if (window) {
       doc = window->GetExtantDoc();
       if (!doc) {
-        return false;
+        return;
       }
 
       principal = doc->NodePrincipal();
@@ -178,13 +232,11 @@ public:
     if (!window) {
       mWorkerPrivate->UnregisterHostObjectURI(url);
     }
-
-    return true;
   }
 };
 
 // This class creates a URL object on the main thread.
-class ConstructorRunnable : public WorkerMainThreadRunnable
+class ConstructorRunnable : public URLRunnable
 {
 private:
   const nsString mURL;
@@ -199,7 +251,7 @@ public:
   ConstructorRunnable(WorkerPrivate* aWorkerPrivate,
                       const nsAString& aURL, const nsAString& aBase,
                       mozilla::ErrorResult& aRv)
-  : WorkerMainThreadRunnable(aWorkerPrivate)
+  : URLRunnable(aWorkerPrivate)
   , mURL(aURL)
   , mBase(aBase)
   , mRv(aRv)
@@ -210,7 +262,7 @@ public:
   ConstructorRunnable(WorkerPrivate* aWorkerPrivate,
                       const nsAString& aURL, URLProxy* aBaseProxy,
                       mozilla::ErrorResult& aRv)
-  : WorkerMainThreadRunnable(aWorkerPrivate)
+  : URLRunnable(aWorkerPrivate)
   , mURL(aURL)
   , mBaseProxy(aBaseProxy)
   , mRv(aRv)
@@ -218,7 +270,7 @@ public:
     mWorkerPrivate->AssertIsOnWorkerThread();
   }
 
-  bool
+  void
   MainThreadRun()
   {
     AssertIsOnMainThread();
@@ -227,7 +279,7 @@ public:
     nsCOMPtr<nsIIOService> ioService(do_GetService(NS_IOSERVICE_CONTRACTID, &rv));
     if (NS_FAILED(rv)) {
       mRv.Throw(rv);
-      return true;
+      return;
     }
 
     nsCOMPtr<nsIURI> baseURL;
@@ -237,7 +289,7 @@ public:
                              getter_AddRefs(baseURL));
       if (NS_FAILED(rv)) {
         mRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-        return true;
+        return;
       }
     } else {
       baseURL = mBaseProxy->URI();
@@ -248,11 +300,10 @@ public:
                            getter_AddRefs(url));
     if (NS_FAILED(rv)) {
       mRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-      return true;
+      return;
     }
 
     mRetval = new URLProxy(new mozilla::dom::URL(url));
-    return true;
   }
 
   URLProxy*
@@ -285,7 +336,7 @@ private:
 };
 
 // This class is the generic getter for any URL property.
-class GetterRunnable : public WorkerMainThreadRunnable
+class GetterRunnable : public URLRunnable
 {
 public:
   enum GetterType {
@@ -305,7 +356,7 @@ public:
   GetterRunnable(WorkerPrivate* aWorkerPrivate,
                  GetterType aType, nsString& aValue,
                  URLProxy* aURLProxy)
-  : WorkerMainThreadRunnable(aWorkerPrivate)
+  : URLRunnable(aWorkerPrivate)
   , mValue(aValue)
   , mType(aType)
   , mURLProxy(aURLProxy)
@@ -313,7 +364,7 @@ public:
     mWorkerPrivate->AssertIsOnWorkerThread();
   }
 
-  bool
+  void
   MainThreadRun()
   {
     AssertIsOnMainThread();
@@ -363,8 +414,6 @@ public:
         mURLProxy->URL()->GetHash(mValue);
         break;
     }
-
-    return true;
   }
 
 private:
@@ -374,7 +423,7 @@ private:
 };
 
 // This class is the generic setter for any URL property.
-class SetterRunnable : public WorkerMainThreadRunnable
+class SetterRunnable : public URLRunnable
 {
 public:
   enum SetterType {
@@ -393,7 +442,7 @@ public:
   SetterRunnable(WorkerPrivate* aWorkerPrivate,
                  SetterType aType, const nsAString& aValue,
                  URLProxy* aURLProxy, mozilla::ErrorResult& aRv)
-  : WorkerMainThreadRunnable(aWorkerPrivate)
+  : URLRunnable(aWorkerPrivate)
   , mValue(aValue)
   , mType(aType)
   , mURLProxy(aURLProxy)
@@ -402,7 +451,7 @@ public:
     mWorkerPrivate->AssertIsOnWorkerThread();
   }
 
-  bool
+  void
   MainThreadRun()
   {
     AssertIsOnMainThread();
@@ -448,8 +497,6 @@ public:
         mURLProxy->URL()->SetHash(mValue);
         break;
     }
-
-    return true;
   }
 
 private:

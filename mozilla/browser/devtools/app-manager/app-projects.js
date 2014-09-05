@@ -1,10 +1,9 @@
-const {Cc,Ci,Cu,Cr} = require("chrome");
+const {Cc,Ci,Cu} = require("chrome");
 const ObservableObject = require("devtools/shared/observable-object");
 const promise = require("devtools/toolkit/deprecated-sync-thenables");
 
 const {EventEmitter} = Cu.import("resource://gre/modules/devtools/event-emitter.js");
 const {generateUUID} = Cc['@mozilla.org/uuid-generator;1'].getService(Ci.nsIUUIDGenerator);
-const {FileUtils} = Cu.import("resource://gre/modules/FileUtils.jsm");
 
 /**
  * IndexedDB wrapper that just save project objects
@@ -38,45 +37,20 @@ const IDB = {
       let db = IDB._db = request.result;
       let objectStore = db.transaction("projects").objectStore("projects");
       let projects = []
-      let toRemove = [];
       objectStore.openCursor().onsuccess = function(event) {
         let cursor = event.target.result;
         if (cursor) {
           if (cursor.value.location) {
-
             // We need to make sure this object has a `.location` property.
             // The UI depends on this property.
             // This should not be needed as we make sure to register valid
             // projects, but in the past (before bug 924568), we might have
             // registered invalid objects.
-
-
-            // We also want to make sure the location is valid.
-            // If the location doesn't exist, we remove the project.
-
-            try {
-              let file = FileUtils.File(cursor.value.location);
-              if (file.exists()) {
-                projects.push(cursor.value);
-              } else {
-                toRemove.push(cursor.value.location);
-              }
-            } catch (e) {
-              if (e.result == Cr.NS_ERROR_FILE_UNRECOGNIZED_PATH) {
-                // A URL
-                projects.push(cursor.value);
-              }
-            }
+            projects.push(cursor.value);
           }
           cursor.continue();
         } else {
-          let removePromises = [];
-          for (let location of toRemove) {
-            removePromises.push(IDB.remove(location));
-          }
-          promise.all(removePromises).then(() => {
-            deferred.resolve(projects);
-          });
+          deferred.resolve(projects);
         }
       };
     };
@@ -108,12 +82,6 @@ const IDB = {
 
   update: function(project) {
     let deferred = promise.defer();
-
-    // Clone object to make it storable by IndexedDB.
-    // Projects are proxified objects (for the template
-    // mechanismn in the first version of the App Manager).
-    // This will change in the future.
-    project = JSON.parse(JSON.stringify(project));
 
     var transaction = IDB._db.transaction(["projects"], "readwrite");
     var objectStore = transaction.objectStore("projects");
@@ -163,14 +131,6 @@ const AppProjects = {
   },
 
   addPackaged: function(folder) {
-    let file = FileUtils.File(folder.path);
-    if (!file.exists()) {
-      return promise.reject("path doesn't exist");
-    }
-    let existingProject = this.get(folder.path);
-    if (existingProject) {
-      return promise.reject("Already added");
-    }
     let project = {
       type: "packaged",
       location: folder.path,
@@ -191,10 +151,6 @@ const AppProjects = {
   },
 
   addHosted: function(manifestURL) {
-    let existingProject = this.get(manifestURL);
-    if (existingProject) {
-      return promise.reject("Already added");
-    }
     let project = {
       type: "hosted",
       location: manifestURL
@@ -207,7 +163,11 @@ const AppProjects = {
   },
 
   update: function (project) {
-    return IDB.update(project);
+    return IDB.update({
+      type: project.type,
+      location: project.location,
+      packagedAppOrigin: project.packagedAppOrigin
+    }).then(() => project);
   },
 
   remove: function(location) {

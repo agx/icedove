@@ -255,7 +255,7 @@ nsGrid::FindRowsAndColumns(nsIFrame** aRows, nsIFrame** aColumns)
   nsIFrame* child = nullptr;
   // if we have <grid></grid> then mBox will be null (bug 125689)
   if (mBox)
-    child = nsBox::GetChildBox(mBox);
+    child = mBox->GetChildBox();
 
   while(child)
   {
@@ -287,7 +287,7 @@ nsGrid::FindRowsAndColumns(nsIFrame** aRows, nsIFrame** aColumns)
       child = oldBox;
     }
 
-    child = nsBox::GetNextBox(child);
+    child = child->GetNextBox();
   }
 }
 
@@ -419,7 +419,7 @@ nsGrid::PopulateCellMap(nsGridRow* aRows, nsGridRow* aColumns, int32_t aRowCount
 
      child = row->mBox;
      if (child) {
-       child = nsBox::GetChildBox(child);
+       child = child->GetChildBox();
 
        j = 0;
 
@@ -438,7 +438,7 @@ nsGrid::PopulateCellMap(nsGridRow* aRows, nsGridRow* aColumns, int32_t aRowCount
          else
            GetCellAt(i,j)->SetBoxInColumn(child);
 
-         child = nsBox::GetNextBox(child);
+         child = child->GetNextBox();
 
          j++;
        }
@@ -1115,13 +1115,13 @@ nsGrid::GetRowFlex(nsBoxLayoutState& aState, int32_t aIndex, bool aIsHorizontal)
     // the grid. 3) Then we are not flexible
 
     box = GetScrollBox(box);
-    nsIFrame* parent = nsBox::GetParentBox(box);
+    nsIFrame* parent = box->GetParentBox();
     nsIFrame* parentsParent=nullptr;
 
     while(parent)
     {
       parent = GetScrollBox(parent);
-      parentsParent = nsBox::GetParentBox(parent);
+      parentsParent = parent->GetParentBox();
 
       // if our parents parent is not a grid
       // the get its flex. If its 0 then we are
@@ -1248,7 +1248,7 @@ nsGrid::GetScrollBox(nsIFrame* aChild)
     return nullptr;
 
   // get parent
-  nsIFrame* parent = nsBox::GetParentBox(aChild);
+  nsIFrame* parent = aChild->GetParentBox();
 
   // walk up until we find a scrollframe or a part
   // if it's a scrollframe return it.
@@ -1265,7 +1265,7 @@ nsGrid::GetScrollBox(nsIFrame* aChild)
     if (parentGridRow) 
       break;
 
-    parent = nsBox::GetParentBox(parent);
+    parent = parent->GetParentBox();
   }
 
   return aChild;

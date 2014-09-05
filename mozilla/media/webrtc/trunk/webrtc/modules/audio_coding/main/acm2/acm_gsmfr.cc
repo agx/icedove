@@ -21,8 +21,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 #ifndef WEBRTC_CODEC_GSMFR
 
 ACMGSMFR::ACMGSMFR(int16_t /* codec_id */) : encoder_inst_ptr_(NULL) {}
@@ -155,7 +153,5 @@ void ACMGSMFR::InternalDestructEncoderInst(void* ptr_inst) {
 }
 
 #endif
-
-}  // namespace acm2
 
 }  // namespace webrtc

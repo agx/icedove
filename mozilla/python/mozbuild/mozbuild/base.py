@@ -320,11 +320,8 @@ class MozbuildObject(ProcessExecutionMixin):
             stem = os.path.join(stem, substs['MOZ_APP_NAME'])
 
         if substs['OS_ARCH'] == 'Darwin':
-            if substs['MOZ_BUILD_APP'] == 'xulrunner':
-                stem = os.path.join(stem, 'XUL.framework');
-            else:
-                stem = os.path.join(stem, substs['MOZ_MACBUNDLE_NAME'], 'Contents',
-                    'MacOS')
+            stem = os.path.join(stem, substs['MOZ_MACBUNDLE_NAME'], 'Contents',
+                'MacOS')
         elif where == 'default':
             stem = os.path.join(stem, 'bin')
 

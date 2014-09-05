@@ -120,8 +120,12 @@ public:
   nsresult CheckInnerWindowCorrectness()
   {
     NS_ENSURE_STATE(!mHasOrHasHadOwnerWindow || mOwnerWindow);
-    if (mOwnerWindow && !mOwnerWindow->IsCurrentInnerWindow()) {
-      return NS_ERROR_FAILURE;
+    if (mOwnerWindow) {
+      NS_ASSERTION(mOwnerWindow->IsInnerWindow(), "Should have inner window here!\n");
+      nsPIDOMWindow* outer = mOwnerWindow->GetOuterWindow();
+      if (!outer || outer->GetCurrentInnerWindow() != mOwnerWindow) {
+        return NS_ERROR_FAILURE;
+      }
     }
     return NS_OK;
   }
@@ -155,7 +159,7 @@ protected:
 private:
   // Inner window or sandbox.
   nsIGlobalObject*           mParentObject;
-  // mParentObject pre QI-ed and cached (inner window)
+  // mParentObject pre QI-ed and cached
   // (it is needed for off main thread access)
   nsPIDOMWindow*             mOwnerWindow;
   bool                       mHasOrHasHadOwnerWindow;

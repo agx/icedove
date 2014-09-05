@@ -13,7 +13,6 @@
 #include "JSStreamWriter.h"
 #include "ProfilerBacktrace.h"
 #include "mozilla/Mutex.h"
-#include "gtest/MozGtestFriend.h"
 
 class ThreadProfile;
 
@@ -47,11 +46,6 @@ public:
   char getTagName() const { return mTagName; }
 
 private:
-  FRIEND_TEST(ThreadProfile, InsertOneTag);
-  FRIEND_TEST(ThreadProfile, InsertOneTagWithTinyBuffer);
-  FRIEND_TEST(ThreadProfile, InsertTagsNoWrap);
-  FRIEND_TEST(ThreadProfile, InsertTagsWrap);
-  FRIEND_TEST(ThreadProfile, MemoryMeasure);
   friend class ThreadProfile;
   union {
     const char* mTagData;
@@ -61,7 +55,7 @@ private:
     float       mTagFloat;
     Address     mTagAddress;
     uintptr_t   mTagOffset;
-    int         mTagInt;
+    int         mTagLine;
     char        mTagChar;
   };
   char mTagName;
@@ -106,11 +100,6 @@ public:
   void* GetStackTop() const { return mStackTop; }
   void DuplicateLastSample();
 private:
-  FRIEND_TEST(ThreadProfile, InsertOneTag);
-  FRIEND_TEST(ThreadProfile, InsertOneTagWithTinyBuffer);
-  FRIEND_TEST(ThreadProfile, InsertTagsNoWrap);
-  FRIEND_TEST(ThreadProfile, InsertTagsWrap);
-  FRIEND_TEST(ThreadProfile, MemoryMeasure);
   // Circular buffer 'Keep One Slot Open' implementation
   // for simplicity
   ProfileEntry*  mEntries;
@@ -127,15 +116,6 @@ private:
   int            mGeneration;
   int            mPendingGenerationFlush;
   void* const    mStackTop;
-
-  // Only Linux is using a signal sender, instead of stopping the thread, so we
-  // need some space to store the data which cannot be collected in the signal
-  // handler code.
-#ifdef XP_LINUX
-public:
-  int64_t        mRssMemory;
-  int64_t        mUssMemory;
-#endif
 };
 
 std::ostream& operator<<(std::ostream& stream, const ThreadProfile& profile);

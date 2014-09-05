@@ -11,9 +11,9 @@ nsMathMLSelectedFrame::~nsMathMLSelectedFrame()
 }
 
 void
-nsMathMLSelectedFrame::Init(nsIContent*       aContent,
-                            nsContainerFrame* aParent,
-                            nsIFrame*         aPrevInFlow)
+nsMathMLSelectedFrame::Init(nsIContent*      aContent,
+                            nsIFrame*        aParent,
+                            nsIFrame*        aPrevInFlow)
 {
   // Init our local attributes
   mInvalidMarkup = false;
@@ -56,14 +56,16 @@ nsMathMLSelectedFrame::ChildListChanged(int32_t aModType)
   return nsMathMLContainerFrame::ChildListChanged(aModType);
 }
 
-void
+nsresult
 nsMathMLSelectedFrame::SetInitialChildList(ChildListID     aListID,
                                            nsFrameList&    aChildList)
 {
-  nsMathMLContainerFrame::SetInitialChildList(aListID, aChildList);
+  nsresult rv = nsMathMLContainerFrame::SetInitialChildList(aListID,
+                                                            aChildList);
   // This very first call to GetSelectedFrame() will cause us to be marked as an
   // embellished operator if the selected child is an embellished operator
   GetSelectedFrame();
+  return rv;
 }
 
 //  Only paint the selected child...
@@ -97,12 +99,13 @@ nsMathMLSelectedFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
 }
 
 // Only reflow the selected child ...
-void
+nsresult
 nsMathMLSelectedFrame::Reflow(nsPresContext*          aPresContext,
                               nsHTMLReflowMetrics&     aDesiredSize,
                               const nsHTMLReflowState& aReflowState,
                               nsReflowStatus&          aStatus)
 {
+  nsresult rv = NS_OK;
   aStatus = NS_FRAME_COMPLETE;
   aDesiredSize.Width() = aDesiredSize.Height() = 0;
   aDesiredSize.SetTopAscent(0);
@@ -112,14 +115,15 @@ nsMathMLSelectedFrame::Reflow(nsPresContext*          aPresContext,
     nsSize availSize(aReflowState.ComputedWidth(), NS_UNCONSTRAINEDSIZE);
     nsHTMLReflowState childReflowState(aPresContext, aReflowState,
                                        childFrame, availSize);
-    ReflowChild(childFrame, aPresContext, aDesiredSize,
-                childReflowState, aStatus);
+    rv = ReflowChild(childFrame, aPresContext, aDesiredSize,
+                     childReflowState, aStatus);
     SaveReflowAndBoundingMetricsFor(childFrame, aDesiredSize,
                                     aDesiredSize.mBoundingMetrics);
     mBoundingMetrics = aDesiredSize.mBoundingMetrics;
   }
   FinalizeReflow(*aReflowState.rendContext, aDesiredSize);
   NS_FRAME_SET_TRUNCATION(aStatus, aReflowState, aDesiredSize);
+  return rv;
 }
 
 // Only place the selected child ...

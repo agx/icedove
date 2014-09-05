@@ -12,11 +12,9 @@
 #include "nsCOMPtr.h"
 #include "nsDependentSubstring.h"
 #include "nsIDOMWakeLockListener.h"
-#include "nsIMutableArray.h"
 #include "nsIObserver.h"
 #include "nsIObserverService.h"
 #include "nsIPowerManagerService.h"
-#include "nsISupportsPrimitives.h"
 #include "nsISupportsUtils.h"
 #include "nsIVolume.h"
 #include "nsIVolumeService.h"
@@ -226,7 +224,7 @@ nsVolumeService::GetVolumeByPath(const nsAString& aPath, nsIVolume **aResult)
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
     nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
     NS_ConvertUTF16toUTF8 volMountPointSlash(vol->MountPoint());
-    volMountPointSlash.Append('/');
+    volMountPointSlash.Append(NS_LITERAL_CSTRING("/"));
     nsDependentCSubstring testStr(realPathBuf, volMountPointSlash.Length());
     if (volMountPointSlash.Equals(testStr)) {
       vol.forget(aResult);
@@ -251,41 +249,23 @@ nsVolumeService::CreateOrGetVolumeByPath(const nsAString& aPath, nsIVolume** aRe
                                          -1    /* generation */,
                                          true  /* isMediaPresent*/,
                                          false /* isSharing */,
-                                         false /* isFormatting */,
-                                         true  /* isFake */);
+                                         false /* isFormatting */);
   vol.forget(aResult);
   return NS_OK;
 }
 
 NS_IMETHODIMP
-nsVolumeService::GetVolumeNames(nsIArray** aVolNames)
+nsVolumeService::GetVolumeNames(nsTArray<nsString>& aVolNames)
 {
-  NS_ENSURE_ARG_POINTER(aVolNames);
   MonitorAutoLock autoLock(mArrayMonitor);
-
-  *aVolNames = nullptr;
-
-  nsresult rv;
-  nsCOMPtr<nsIMutableArray> volNames =
-    do_CreateInstance(NS_ARRAY_CONTRACTID, &rv);
-  NS_ENSURE_SUCCESS(rv, rv);
 
   nsVolume::Array::size_type numVolumes = mVolumeArray.Length();
   nsVolume::Array::index_type volIndex;
   for (volIndex = 0; volIndex < numVolumes; volIndex++) {
     nsRefPtr<nsVolume> vol = mVolumeArray[volIndex];
-    nsCOMPtr<nsISupportsString> isupportsString =
-      do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = isupportsString->SetData(vol->Name());
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    rv = volNames->AppendElement(isupportsString, false);
-    NS_ENSURE_SUCCESS(rv, rv);
+    aVolNames.AppendElement(vol->Name());
   }
 
-  NS_ADDREF(*aVolNames = volNames);
   return NS_OK;
 }
 
@@ -402,8 +382,8 @@ nsVolumeService::CreateFakeVolume(const nsAString& name, const nsAString& path)
                                           -1    /* mountGeneration */,
                                           true  /* isMediaPresent */,
                                           false /* isSharing */,
-                                          false /* isFormatting */,
-                                          true  /* isFake */);
+                                          false /* isFormatting */);
+    vol->SetIsFake(true);
     vol->LogState();
     UpdateVolume(vol.get());
     return NS_OK;

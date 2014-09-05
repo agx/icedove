@@ -69,8 +69,8 @@ public:
    * @param aEndHTOffset   [out, optional] end hyper text offset
    */
   void GetAttributes(nsIPersistentProperties* aAttributes,
-                     uint32_t* aStartHTOffset = nullptr,
-                     uint32_t* aEndHTOffset = nullptr);
+                     int32_t* aStartHTOffset = nullptr,
+                     int32_t* aEndHTOffset = nullptr);
 
 protected:
   /**
@@ -85,7 +85,7 @@ protected:
    */
   class TextAttr;
   void GetRange(TextAttr* aAttrArray[], uint32_t aAttrArrayLen,
-                uint32_t* aStartOffset, uint32_t* aEndOffset);
+                int32_t* aStartHTOffset, int32_t* aEndHTOffset);
 
 private:
   Accessible* mOffsetAcc;
@@ -315,7 +315,7 @@ protected:
     FontSizeTextAttr(nsIFrame* aRootFrame, nsIFrame* aFrame);
     virtual ~FontSizeTextAttr() { }
 
-  protected:
+  protected: 
 
     // TTextAttr
     virtual bool GetValueFor(Accessible* aAccessible, nscoord* aValue);

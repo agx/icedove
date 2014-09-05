@@ -9,3 +9,6 @@ endif
 
 include $(topsrcdir)/config/rules.mk
 
+charsetalias.properties.h: props2arrays.py charsetalias.properties
+	$(PYTHON) $^ $@
+

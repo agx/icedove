@@ -35,6 +35,8 @@ const TOPIC_TIMER_CALLBACK = "timer-callback";
 const TOPIC_DELAYED_STARTUP = "browser-delayed-startup-finished";
 const TOPIC_XUL_WINDOW_CLOSED = "xul-window-destroyed";
 
+const FRAME_SCRIPT_URL = "chrome://browser/content/newtab/preloaderContent.js";
+
 function createTimer(obj, delay) {
   let timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
   timer.init(obj, delay, Ci.nsITimer.TYPE_ONE_SHOT);
@@ -61,6 +63,7 @@ this.BrowserNewTabPreloader = {
   },
 
   newTab: function Preloader_newTab(aTab) {
+    let swapped = false;
     let win = aTab.ownerDocument.defaultView;
     if (win.gBrowser) {
       let utils = win.QueryInterface(Ci.nsIInterfaceRequestor)
@@ -69,11 +72,17 @@ this.BrowserNewTabPreloader = {
       let {width, height} = utils.getBoundsWithoutFlushing(win.gBrowser);
       let hiddenBrowser = HiddenBrowsers.get(width, height)
       if (hiddenBrowser) {
-        return hiddenBrowser.swapWithNewTab(aTab);
+        swapped = hiddenBrowser.swapWithNewTab(aTab);
       }
+
+      // aTab's browser is now visible and is therefore allowed to make
+      // background captures.
+      let msgMan = aTab.linkedBrowser.messageManager;
+      msgMan.loadFrameScript(FRAME_SCRIPT_URL, false);
+      msgMan.sendAsyncMessage("BrowserNewTabPreloader:allowBackgroundCaptures");
     }
 
-    return false;
+    return swapped;
   }
 };
 
@@ -320,9 +329,9 @@ HiddenBrowser.prototype = {
     // Swap docShells.
     tabbrowser.swapNewTabWithBrowser(aTab, this._browser);
 
-    // Load all delayed frame scripts attached to the "browers" message manager.
+    // Load all default frame scripts attached to the target window.
     let mm = aTab.linkedBrowser.messageManager;
-    let scripts = win.getGroupMessageManager("browsers").getDelayedFrameScripts();
+    let scripts = win.messageManager.getDelayedFrameScripts();
     Array.forEach(scripts, ([script, runGlobal]) => mm.loadFrameScript(script, true, runGlobal));
 
     // Remove the browser, it will be recreated by a timer.
@@ -368,9 +377,6 @@ HiddenBrowser.prototype = {
       this._browser.setAttribute("src", NEWTAB_URL);
       this._applySize();
       doc.getElementById("win").appendChild(this._browser);
-
-      // Let the docShell be inactive so that document.hidden=true.
-      this._browser.docShell.isActive = false;
     });
   },
 

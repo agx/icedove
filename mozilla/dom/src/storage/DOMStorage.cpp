@@ -7,7 +7,7 @@
 #include "DOMStorageCache.h"
 #include "DOMStorageManager.h"
 
-#include "mozilla/dom/StorageEvent.h"
+#include "nsIDOMStorageEvent.h"
 #include "nsIObserverService.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsIPermissionManager.h"
@@ -190,19 +190,23 @@ DOMStorage::BroadcastChangeNotification(const nsSubstring& aKey,
                                         const nsSubstring& aOldValue,
                                         const nsSubstring& aNewValue)
 {
-  StorageEventInit dict;
-  dict.mBubbles = false;
-  dict.mCancelable = false;
-  dict.mKey = aKey;
-  dict.mNewValue = aNewValue;
-  dict.mOldValue = aOldValue;
-  dict.mStorageArea = static_cast<nsIDOMStorage*>(this);
-  dict.mUrl = mDocumentURI;
-
+  nsCOMPtr<nsIDOMEvent> domEvent;
   // Note, this DOM event should never reach JS. It is cloned later in
   // nsGlobalWindow.
-  nsRefPtr<StorageEvent> event =
-    StorageEvent::Constructor(nullptr, NS_LITERAL_STRING("storage"), dict);
+  NS_NewDOMStorageEvent(getter_AddRefs(domEvent), nullptr, nullptr, nullptr);
+
+  nsCOMPtr<nsIDOMStorageEvent> event = do_QueryInterface(domEvent);
+  nsresult rv = event->InitStorageEvent(NS_LITERAL_STRING("storage"),
+                                        false,
+                                        false,
+                                        aKey,
+                                        aOldValue,
+                                        aNewValue,
+                                        mDocumentURI,
+                                        static_cast<nsIDOMStorage*>(this));
+  if (NS_FAILED(rv)) {
+    return;
+  }
 
   nsRefPtr<StorageNotifierRunnable> r =
     new StorageNotifierRunnable(event,
@@ -237,14 +241,20 @@ DOMStorage::CanUseStorage(DOMStorage* aStorage)
   }
 
   // chrome can always use aStorage regardless of permission preferences
-  nsCOMPtr<nsIPrincipal> subjectPrincipal =
-    nsContentUtils::SubjectPrincipal();
-  if (nsContentUtils::IsSystemPrincipal(subjectPrincipal)) {
+  if (nsContentUtils::IsCallerChrome()) {
     return true;
   }
 
+  nsCOMPtr<nsIPrincipal> subjectPrincipal;
+  nsresult rv = nsContentUtils::GetSecurityManager()->
+                  GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
+  NS_ENSURE_SUCCESS(rv, false);
+
+  // if subjectPrincipal were null we'd have returned after
+  // IsCallerChrome().
+
   nsCOMPtr<nsIPermissionManager> permissionManager =
-    services::GetPermissionManager();
+    do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
   if (!permissionManager) {
     return false;
   }

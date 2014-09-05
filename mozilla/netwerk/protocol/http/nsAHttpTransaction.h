@@ -7,7 +7,6 @@
 
 #include "nsISupports.h"
 #include "nsTArray.h"
-#include "nsWeakReference.h"
 
 class nsIInterfaceRequestor;
 class nsIEventTarget;
@@ -22,8 +21,6 @@ class nsAHttpSegmentWriter;
 class nsHttpTransaction;
 class nsHttpPipeline;
 class nsHttpRequestHead;
-class nsHttpConnectionInfo;
-class SpdyConnectTransaction;
 
 //----------------------------------------------------------------------------
 // Abstract base class for a HTTP transaction:
@@ -34,15 +31,9 @@ class SpdyConnectTransaction;
 // write function returns NS_BASE_STREAM_WOULD_BLOCK in this case).
 //----------------------------------------------------------------------------
 
-// 2af6d634-13e3-494c-8903-c9dce5c22fc0
-#define NS_AHTTPTRANSACTION_IID \
-{ 0x2af6d634, 0x13e3, 0x494c, {0x89, 0x03, 0xc9, 0xdc, 0xe5, 0xc2, 0x2f, 0xc0 }}
-
-class nsAHttpTransaction : public nsSupportsWeakReference
+class nsAHttpTransaction : public nsISupports
 {
 public:
-    NS_DECLARE_STATIC_IID_ACCESSOR(NS_AHTTPTRANSACTION_IID)
-
     // called by the connection when it takes ownership of the transaction.
     virtual void SetConnection(nsAHttpConnection *) = 0;
 
@@ -133,21 +124,8 @@ public:
     // its IO functions all the time.
     virtual bool IsNullTransaction() { return false; }
 
-    // If we used rtti this would be the result of doing
-    // dynamic_cast<nsHttpTransaction *>(this).. i.e. it can be nullptr for
-    // non nsHttpTransaction implementations of nsAHttpTransaction
-    virtual nsHttpTransaction *QueryHttpTransaction() { return nullptr; }
-
-    // If we used rtti this would be the result of doing
-    // dynamic_cast<SpdyConnectTransaction *>(this).. i.e. it can be nullptr for
-    // other types
-    virtual SpdyConnectTransaction *QuerySpdyConnectTransaction() { return nullptr; }
-
     // return the load group connection information associated with the transaction
     virtual nsILoadGroupConnectionInfo *LoadGroupConnectionInfo() { return nullptr; }
-
-    // return the connection information associated with the transaction
-    virtual nsHttpConnectionInfo *ConnectionInfo() = 0;
 
     // The base definition of these is done in nsHttpTransaction.cpp
     virtual bool ResponseTimeoutEnabled() const;
@@ -175,20 +153,7 @@ public:
 
         CLASS_MAX
     };
-
-    // conceptually the security info is part of the connection, but sometimes
-    // in the case of TLS tunneled within TLS the transaction might present
-    // a more specific security info that cannot be represented as a layer in
-    // the connection due to multiplexing. This interface represents such an
-    // overload. If it returns NS_FAILURE the connection should be considered
-    // authoritative.
-    virtual nsresult GetTransactionSecurityInfo(nsISupports **)
-    {
-        return NS_ERROR_NOT_IMPLEMENTED;
-    }
 };
-
-NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransaction, NS_AHTTPTRANSACTION_IID)
 
 #define NS_DECL_NSAHTTPTRANSACTION \
     void SetConnection(nsAHttpConnection *); \
@@ -201,12 +166,11 @@ NS_DEFINE_STATIC_IID_ACCESSOR(nsAHttpTransaction, NS_AHTTPTRANSACTION_IID)
     uint32_t Caps();   \
     void     SetDNSWasRefreshed(); \
     uint64_t Available(); \
-    virtual nsresult ReadSegments(nsAHttpSegmentReader *, uint32_t, uint32_t *); \
-    virtual nsresult WriteSegments(nsAHttpSegmentWriter *, uint32_t, uint32_t *); \
+    nsresult ReadSegments(nsAHttpSegmentReader *, uint32_t, uint32_t *); \
+    nsresult WriteSegments(nsAHttpSegmentWriter *, uint32_t, uint32_t *); \
     void     Close(nsresult reason);                                    \
-    nsHttpConnectionInfo *ConnectionInfo();                             \
     void     SetProxyConnectFailed();                                   \
-    virtual nsHttpRequestHead *RequestHead();                                   \
+    nsHttpRequestHead *RequestHead();                                   \
     uint32_t Http1xTransactionCount();                                  \
     nsresult TakeSubTransactions(nsTArray<nsRefPtr<nsAHttpTransaction> > &outTransactions); \
     nsresult AddTransaction(nsAHttpTransaction *);                      \

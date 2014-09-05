@@ -270,8 +270,7 @@ jsd_GetCallObjectForStackFrame(JSDContext* jsdc,
 
     if( jsd_IsValidFrameInThreadState(jsdc, jsdthreadstate, jsdframe) )
     {
-        AutoPushJSContext cx(jsdthreadstate->context);
-        obj = jsdframe->frame.callObject(cx);
+        obj = jsdframe->frame.callObject(jsdthreadstate->context);
         if(obj)                                                             
             jsdval = JSD_NewValue(jsdc, OBJECT_TO_JSVAL(obj));              
     }
@@ -293,8 +292,9 @@ jsd_GetScopeChainForStackFrame(JSDContext* jsdc,
 
     if( jsd_IsValidFrameInThreadState(jsdc, jsdthreadstate, jsdframe) )
     {
-        AutoPushJSContext cx(jsdthreadstate->context);
-        obj = jsdframe->frame.scopeChain(cx);
+        JS_BeginRequest(jsdthreadstate->context);
+        obj = jsdframe->frame.scopeChain(jsdthreadstate->context);
+        JS_EndRequest(jsdthreadstate->context);
         if(obj)
             jsdval = JSD_NewValue(jsdc, OBJECT_TO_JSVAL(obj));
     }
@@ -316,8 +316,9 @@ jsd_GetThisForStackFrame(JSDContext* jsdc,
     {
         bool ok;
         JS::RootedValue thisval(jsdthreadstate->context);
-        AutoPushJSContext cx(jsdthreadstate->context);
-        ok = jsdframe->frame.getThisValue(cx, &thisval);
+        JS_BeginRequest(jsdthreadstate->context);
+        ok = jsdframe->frame.getThisValue(jsdthreadstate->context, &thisval);
+        JS_EndRequest(jsdthreadstate->context);
         if(ok)
             jsdval = JSD_NewValue(jsdc, thisval);
     }
@@ -481,6 +482,7 @@ jsd_ValToStringInStackFrame(JSDContext* jsdc,
         return nullptr;
 
     JS::RootedString retval(cx);
+    MOZ_ASSERT(cx);
     JS::RootedValue v(cx, val);
     {
         AutoPushJSContext cx(jsdthreadstate->context);

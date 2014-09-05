@@ -28,7 +28,6 @@ Navigator implements NavigatorLanguage;
 Navigator implements NavigatorOnLine;
 Navigator implements NavigatorContentUtils;
 Navigator implements NavigatorStorageUtils;
-Navigator implements NavigatorFeatures;
 
 [NoInterfaceObject]
 interface NavigatorID {
@@ -53,7 +52,6 @@ interface NavigatorID {
 [NoInterfaceObject]
 interface NavigatorLanguage {
   readonly attribute DOMString? language;
-  [Pure, Cached, Frozen] readonly attribute sequence<DOMString> languages;
 };
 
 [NoInterfaceObject]
@@ -79,12 +77,6 @@ interface NavigatorContentUtils {
 interface NavigatorStorageUtils {
   // NOT IMPLEMENTED
   //void yieldForStorageUpdates();
-};
-
-[NoInterfaceObject]
-interface NavigatorFeatures {
-  [Func="Navigator::HasFeatureDetectionSupport"]
-  Promise getFeature(DOMString name);
 };
 
 // Things that definitely need to be in the spec and and are not for some
@@ -114,7 +106,7 @@ Navigator implements NavigatorGeolocation;
 interface NavigatorBattery {
     // XXXbz Per spec this should be non-nullable, but we return null in
     // torn-down windows.  See bug 884925.
-    [Throws, Pref="dom.battery.enabled"]
+    [Throws, Func="Navigator::HasBatterySupport"]
     readonly attribute BatteryManager? battery;
 };
 Navigator implements NavigatorBattery;
@@ -151,22 +143,6 @@ callback interface MozIdleObserver {
   void onactive();
 };
 
-#ifdef MOZ_B2G
-dictionary MobileIdOptions {
-  boolean forceSelection = false;
-};
-
-[NoInterfaceObject]
-interface NavigatorMobileId {
-    // Ideally we would use [CheckPermissions] here, but the "mobileid"
-    // permission is set to PROMPT_ACTION and [CheckPermissions] only checks
-    // for ALLOW_ACTION.
-    [Throws, NewObject, Func="Navigator::HasMobileIdSupport"]
-    Promise getMobileIdAssertion(optional MobileIdOptions options);
-};
-Navigator implements NavigatorMobileId;
-#endif // MOZ_B2G
-
 // nsIDOMNavigator
 partial interface Navigator {
   [Throws]
@@ -181,7 +157,7 @@ partial interface Navigator {
   readonly attribute boolean cookieEnabled;
   [Throws]
   readonly attribute DOMString buildID;
-  [Throws, CheckPermissions="power"]
+  [Throws, Func="Navigator::HasPowerSupport"]
   readonly attribute MozPowerManager mozPower;
 
   // WebKit/Blink/Trident/Presto support this.
@@ -191,13 +167,13 @@ partial interface Navigator {
   /**
    * Navigator requests to add an idle observer to the existing window.
    */
-  [Throws, CheckPermissions="idle", Pref="dom.idle-observers-api.enabled"]
+  [Throws, Func="Navigator::HasIdleSupport"]
   void addIdleObserver(MozIdleObserver aIdleObserver);
 
   /**
    * Navigator requests to remove an idle observer from the existing window.
    */
-  [Throws, CheckPermissions="idle", Pref="dom.idle-observers-api.enabled"]
+  [Throws, Func="Navigator::HasIdleSupport"]
   void removeIdleObserver(MozIdleObserver aIdleObserver);
 
   /**
@@ -242,7 +218,7 @@ partial interface Navigator {
 
 // nsIDOMNavigatorDesktopNotification
 partial interface Navigator {
-  [Throws, Pref="notification.feature.enabled"]
+  [Throws, Func="Navigator::HasDesktopNotificationSupport"]
   readonly attribute DesktopNotificationCenter mozNotification;
 };
 
@@ -283,30 +259,30 @@ partial interface Navigator {
 
 #ifdef MOZ_B2G_RIL
 partial interface Navigator {
-  [Throws, Pref="dom.mobileconnection.enabled", CheckPermissions="mobileconnection mobilenetwork"]
+  [Throws, Func="Navigator::HasMobileConnectionSupport"]
   readonly attribute MozMobileConnectionArray mozMobileConnections;
 };
 
 partial interface Navigator {
-  [Throws, Pref="dom.cellbroadcast.enabled", CheckPermissions="cellbroadcast"]
+  [Throws, Func="Navigator::HasCellBroadcastSupport"]
   readonly attribute MozCellBroadcast mozCellBroadcast;
 };
 
 partial interface Navigator {
-  [Throws, Pref="dom.voicemail.enabled", CheckPermissions="voicemail"]
+  [Throws, Func="Navigator::HasVoicemailSupport"]
   readonly attribute MozVoicemail mozVoicemail;
 };
 
 partial interface Navigator {
-  [Throws, Pref="dom.icc.enabled", CheckPermissions="mobileconnection"]
+  [Throws, Func="Navigator::HasIccManagerSupport"]
   readonly attribute MozIccManager? mozIccManager;
 };
+#endif // MOZ_B2G_RIL
 
 partial interface Navigator {
-  [Throws, Pref="dom.telephony.enabled", CheckPermissions="telephony"]
+  [Throws, Func="Navigator::HasTelephonySupport"]
   readonly attribute Telephony? mozTelephony;
 };
-#endif // MOZ_B2G_RIL
 
 #ifdef MOZ_GAMEPAD
 // https://dvcs.w3.org/hg/gamepad/raw-file/default/gamepad.html#navigator-interface-extension
@@ -318,14 +294,14 @@ partial interface Navigator {
 
 #ifdef MOZ_B2G_BT
 partial interface Navigator {
-  [Throws, CheckPermissions="bluetooth"]
+  [Throws, Func="Navigator::HasBluetoothSupport"]
   readonly attribute BluetoothManager mozBluetooth;
 };
 #endif // MOZ_B2G_BT
 
 #ifdef MOZ_B2G_FM
 partial interface Navigator {
-  [Throws, CheckPermissions="fmradio"]
+  [Throws, Func="Navigator::HasFMRadioSupport"]
   readonly attribute FMRadio mozFMRadio;
 };
 #endif // MOZ_B2G_FM
@@ -370,12 +346,6 @@ partial interface Navigator {
                               optional unsigned long long innerWindowID = 0);
 };
 #endif // MOZ_MEDIA_NAVIGATOR
-
-// Service Workers/Navigation Controllers
-partial interface Navigator {
-  [Pref="dom.serviceWorkers.enabled"]
-  readonly attribute ServiceWorkerContainer serviceWorker;
-};
 
 partial interface Navigator {
   [Throws, Pref="beacon.enabled"]

@@ -118,9 +118,6 @@ interface mozRTCPeerConnection : EventTarget  {
   [Pref="media.peerconnection.identity.enabled"]
   readonly attribute RTCIdentityAssertion? peerIdentity;
 
-  [ChromeOnly]
-  readonly attribute DOMString id;
-
   sequence<MediaStream> getLocalStreams ();
   sequence<MediaStream> getRemoteStreams ();
   MediaStream? getStreamById (DOMString streamId);
@@ -142,6 +139,8 @@ interface mozRTCPeerConnection : EventTarget  {
   RTCDataChannel createDataChannel (DOMString label,
                                     optional RTCDataChannelInit dataChannelDict);
   attribute EventHandler ondatachannel;
+  attribute EventHandler onconnection;
+  attribute EventHandler onclosedconnection;
   [Pref="media.peerconnection.identity.enabled"]
   attribute EventHandler onidentityresult;
   [Pref="media.peerconnection.identity.enabled"]
@@ -151,4 +150,3 @@ interface mozRTCPeerConnection : EventTarget  {
   [Pref="media.peerconnection.identity.enabled"]
   attribute EventHandler onidpvalidationerror;
 };
-

@@ -13,7 +13,6 @@
 #include "nsJSUtils.h"
 #include "mozJSComponentLoader.h"
 #include "nsContentUtils.h"
-#include "JavaScriptParent.h"
 #include "jsfriendapi.h"
 #include "js/StructuredClone.h"
 #include "mozilla/Attributes.h"
@@ -27,8 +26,6 @@
 #include "nsIDOMFile.h"
 #include "nsIDOMFileList.h"
 #include "nsWindowMemoryReporter.h"
-#include "nsDOMClassInfo.h"
-#include "ShimInterfaceInfo.h"
 
 using namespace mozilla;
 using namespace JS;
@@ -262,7 +259,7 @@ nsXPCComponents_Interfaces::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
         }
         case JSENUMERATE_NEXT:
         {
-            uint32_t idx = statep->toInt32();
+            uint32_t idx = JSVAL_TO_INT(*statep);
             nsIInterfaceInfo* interface = mInterfaces.SafeElementAt(idx);
             *statep = UINT_TO_JSVAL(idx + 1);
 
@@ -306,12 +303,9 @@ nsXPCComponents_Interfaces::NewResolve(nsIXPConnectWrappedNative *wrapper,
 
     // we only allow interfaces by name here
     if (name.encodeLatin1(cx, str) && name.ptr()[0] != '{') {
-        nsCOMPtr<nsIInterfaceInfo> info =
-            ShimInterfaceInfo::MaybeConstruct(name.ptr(), cx);
-        if (!info) {
-            XPTInterfaceInfoManager::GetSingleton()->
-                GetInfoForName(name.ptr(), getter_AddRefs(info));
-        }
+        nsCOMPtr<nsIInterfaceInfo> info;
+        XPTInterfaceInfoManager::GetSingleton()->
+            GetInfoForName(name.ptr(), getter_AddRefs(info));
         if (!info)
             return NS_OK;
 
@@ -329,7 +323,9 @@ nsXPCComponents_Interfaces::NewResolve(nsIXPConnectWrappedNative *wrapper,
                     // Assign, not compare
                     (idobj = holder->GetJSObject())) {
                     *objp = obj;
-                    *_retval = JS_DefinePropertyById(cx, obj, id, idobj,
+                    *_retval = JS_DefinePropertyById(cx, obj, id,
+                                                     OBJECT_TO_JSVAL(idobj),
+                                                     nullptr, nullptr,
                                                      JSPROP_ENUMERATE |
                                                      JSPROP_READONLY |
                                                      JSPROP_PERMANENT);
@@ -511,7 +507,7 @@ nsXPCComponents_InterfacesByID::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
         }
         case JSENUMERATE_NEXT:
         {
-            uint32_t idx = statep->toInt32();
+            uint32_t idx = JSVAL_TO_INT(*statep);
             nsIInterfaceInfo* interface = mInterfaces.SafeElementAt(idx);
             *statep = UINT_TO_JSVAL(idx + 1);
             if (interface) {
@@ -583,7 +579,9 @@ nsXPCComponents_InterfacesByID::NewResolve(nsIXPConnectWrappedNative *wrapper,
                 (idobj = holder->GetJSObject())) {
                 *objp = obj;
                 *_retval =
-                    JS_DefinePropertyById(cx, obj, id, idobj,
+                    JS_DefinePropertyById(cx, obj, id,
+                                          OBJECT_TO_JSVAL(idobj),
+                                          nullptr, nullptr,
                                           JSPROP_ENUMERATE |
                                           JSPROP_READONLY |
                                           JSPROP_PERMANENT);
@@ -766,7 +764,7 @@ nsXPCComponents_Classes::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
         {
             nsCOMPtr<nsISupports> isup;
             bool hasMore;
-            e = (nsISimpleEnumerator*) statep->toPrivate();
+            e = (nsISimpleEnumerator*) JSVAL_TO_PRIVATE(*statep);
 
             if (NS_SUCCEEDED(e->HasMoreElements(&hasMore)) && hasMore &&
                 NS_SUCCEEDED(e->GetNext(getter_AddRefs(isup))) && isup) {
@@ -788,7 +786,7 @@ nsXPCComponents_Classes::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
 
         case JSENUMERATE_DESTROY:
         default:
-            e = (nsISimpleEnumerator*) statep->toPrivate();
+            e = (nsISimpleEnumerator*) JSVAL_TO_PRIVATE(*statep);
             NS_IF_RELEASE(e);
             *statep = JSVAL_NULL;
             return NS_OK;
@@ -823,7 +821,9 @@ nsXPCComponents_Classes::NewResolve(nsIXPConnectWrappedNative *wrapper,
                     // Assign, not compare
                         (idobj = holder->GetJSObject())) {
                     *objp = obj;
-                    *_retval = JS_DefinePropertyById(cx, obj, id, idobj,
+                    *_retval = JS_DefinePropertyById(cx, obj, id,
+                                                     OBJECT_TO_JSVAL(idobj),
+                                                     nullptr, nullptr,
                                                      JSPROP_ENUMERATE |
                                                      JSPROP_READONLY |
                                                      JSPROP_PERMANENT);
@@ -1004,7 +1004,7 @@ nsXPCComponents_ClassesByID::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
         {
             nsCOMPtr<nsISupports> isup;
             bool hasMore;
-            e = (nsISimpleEnumerator*) statep->toPrivate();
+            e = (nsISimpleEnumerator*) JSVAL_TO_PRIVATE(*statep);
 
             if (NS_SUCCEEDED(e->HasMoreElements(&hasMore)) && hasMore &&
                 NS_SUCCEEDED(e->GetNext(getter_AddRefs(isup))) && isup) {
@@ -1027,7 +1027,7 @@ nsXPCComponents_ClassesByID::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
 
         case JSENUMERATE_DESTROY:
         default:
-            e = (nsISimpleEnumerator*) statep->toPrivate();
+            e = (nsISimpleEnumerator*) JSVAL_TO_PRIVATE(*statep);
             NS_IF_RELEASE(e);
             *statep = JSVAL_NULL;
             return NS_OK;
@@ -1082,7 +1082,9 @@ nsXPCComponents_ClassesByID::NewResolve(nsIXPConnectWrappedNative *wrapper,
                     // Assign, not compare
                     (idobj = holder->GetJSObject())) {
                     *objp = obj;
-                    *_retval = JS_DefinePropertyById(cx, obj, id, idobj,
+                    *_retval = JS_DefinePropertyById(cx, obj, id,
+                                                     ObjectValue(*idobj),
+                                                     nullptr, nullptr,
                                                      JSPROP_ENUMERATE |
                                                      JSPROP_READONLY |
                                                      JSPROP_PERMANENT);
@@ -1262,7 +1264,7 @@ nsXPCComponents_Results::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
         case JSENUMERATE_NEXT:
         {
             const char* name;
-            iter = (const void**) statep->toPrivate();
+            iter = (const void**) JSVAL_TO_PRIVATE(*statep);
             if (nsXPCException::IterateNSResults(nullptr, &name, nullptr, iter)) {
                 RootedString idstr(cx, JS_NewStringCopyZ(cx, name));
                 JS::RootedId id(cx);
@@ -1276,7 +1278,7 @@ nsXPCComponents_Results::NewEnumerate(nsIXPConnectWrappedNative *wrapper,
 
         case JSENUMERATE_DESTROY:
         default:
-            iter = (const void**) statep->toPrivate();
+            iter = (const void**) JSVAL_TO_PRIVATE(*statep);
             delete [] (char*) iter;
             *statep = JSVAL_NULL;
             return NS_OK;
@@ -1301,8 +1303,11 @@ nsXPCComponents_Results::NewResolve(nsIXPConnectWrappedNative *wrapper,
         nsresult rv;
         while (nsXPCException::IterateNSResults(&rv, &rv_name, nullptr, &iter)) {
             if (!strcmp(name.ptr(), rv_name)) {
+                jsval val = JS_NumberValue((double)rv);
+
                 *objp = obj;
-                if (!JS_DefinePropertyById(cx, obj, id, (uint32_t)rv,
+                if (!JS_DefinePropertyById(cx, obj, id, val,
+                                           nullptr, nullptr,
                                            JSPROP_ENUMERATE |
                                            JSPROP_READONLY |
                                            JSPROP_PERMANENT)) {
@@ -1492,7 +1497,8 @@ nsXPCComponents_ID::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
 
     // Do the security check if necessary
 
-    if (NS_FAILED(nsXPConnect::SecurityManager()->CanCreateInstance(cx, nsJSID::GetCID()))) {
+    nsIXPCSecurityManager* sm = nsXPConnect::XPConnect()->GetDefaultSecurityManager();
+    if (sm && NS_FAILED(sm->CanCreateInstance(cx, nsJSID::GetCID()))) {
         // the security manager vetoed. It should have set an exception.
         *_retval = false;
         return NS_OK;
@@ -1855,7 +1861,8 @@ nsXPCComponents_Exception::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
 
     // Do the security check if necessary
 
-    if (NS_FAILED(nsXPConnect::SecurityManager()->CanCreateInstance(cx, Exception::GetCID()))) {
+    nsIXPCSecurityManager* sm = xpc->GetDefaultSecurityManager();
+    if (sm && NS_FAILED(sm->CanCreateInstance(cx, Exception::GetCID()))) {
         // the security manager vetoed. It should have set an exception.
         *_retval = false;
         return NS_OK;
@@ -2147,7 +2154,7 @@ nsXPCConstructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,JSContext *
 
     JS::Rooted<JS::Value> arg(cx, ObjectValue(*iidObj));
     RootedValue rval(cx);
-    if (!JS_CallFunctionName(cx, cidObj, "createInstance", JS::HandleValueArray(arg), &rval) ||
+    if (!JS_CallFunctionName(cx, cidObj, "createInstance", arg, &rval) ||
         rval.isPrimitive()) {
         // createInstance will have thrown an exception
         *_retval = false;
@@ -2363,7 +2370,8 @@ nsXPCComponents_Constructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
 
     // Do the security check if necessary
 
-    if (NS_FAILED(nsXPConnect::SecurityManager()->CanCreateInstance(cx, nsXPCConstructor::GetCID()))) {
+    nsIXPCSecurityManager* sm = xpc->GetDefaultSecurityManager();
+    if (sm && NS_FAILED(sm->CanCreateInstance(cx, nsXPCConstructor::GetCID()))) {
         // the security manager vetoed. It should have set an exception.
         *_retval = false;
         return NS_OK;
@@ -2461,7 +2469,7 @@ nsXPCComponents_Constructor::CallOrConstruct(nsIXPConnectWrappedNative *wrapper,
             return ThrowAndFail(NS_ERROR_XPC_BAD_CID, cx, _retval);
 
         nsCOMPtr<nsIXPConnectWrappedNative> wn;
-        if (NS_FAILED(xpc->GetWrappedNativeOfJSObject(cx, val.toObjectOrNull(),
+        if (NS_FAILED(xpc->GetWrappedNativeOfJSObject(cx, JSVAL_TO_OBJECT(val),
                                                       getter_AddRefs(wn))) || !wn ||
             !(cClassID = do_QueryWrappedNative(wn))) {
             return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
@@ -2725,18 +2733,6 @@ nsXPCComponents_Utils::Import(const nsACString& registryLocation,
     return moduleloader->Import(registryLocation, targetObj, cx, optionalArgc, retval);
 }
 
-/* boolean isModuleLoaded (in AUTF8String registryLocation);
- */
-NS_IMETHODIMP
-nsXPCComponents_Utils::IsModuleLoaded(const nsACString& registryLocation, bool *retval)
-{
-    nsCOMPtr<xpcIJSModuleLoader> moduleloader =
-        do_GetService(MOZJSCOMPONENTLOADER_CONTRACTID);
-    if (!moduleloader)
-        return NS_ERROR_FAILURE;
-    return moduleloader->IsModuleLoaded(registryLocation, retval);
-}
-
 /* unload (in AUTF8String registryLocation);
  */
 NS_IMETHODIMP
@@ -2798,22 +2794,6 @@ NS_IMETHODIMP
 nsXPCComponents_Utils::ForceCC()
 {
     nsJSContext::CycleCollectNow();
-    return NS_OK;
-}
-
-/* void finishCC(); */
-NS_IMETHODIMP
-nsXPCComponents_Utils::FinishCC()
-{
-    nsCycleCollector_finishAnyCurrentCollection();
-    return NS_OK;
-}
-
-/* void ccSlice(in long long budget); */
-NS_IMETHODIMP
-nsXPCComponents_Utils::CcSlice(int64_t budget)
-{
-    nsJSContext::RunCycleCollectorWorkSlice(budget);
     return NS_OK;
 }
 
@@ -2944,7 +2924,7 @@ nsXPCComponents_Utils::GetGlobalForObject(HandleValue object,
         return NS_ERROR_FAILURE;
 
     // Outerize if necessary.
-    if (js::ObjectOp outerize = js::GetObjectClass(obj)->ext.outerObject)
+    if (JSObjectOp outerize = js::GetObjectClass(obj)->ext.outerObject)
       obj = outerize(cx, obj);
 
     retval.setObject(*obj);
@@ -2982,8 +2962,9 @@ xpc::CreateObjectIn(JSContext *cx, HandleValue vobj, CreateObjectInOptions &opti
             return false;
 
         if (define) {
-            if (!JS_DefinePropertyById(cx, scope, options.defineAs, obj, JSPROP_ENUMERATE,
-                                       JS_PropertyStub, JS_StrictPropertyStub))
+            if (!JS_DefinePropertyById(cx, scope, options.defineAs, ObjectValue(*obj),
+                                       JS_PropertyStub, JS_StrictPropertyStub,
+                                       JSPROP_ENUMERATE))
                 return false;
         }
     }
@@ -3108,17 +3089,6 @@ nsXPCComponents_Utils::IsDeadWrapper(HandleValue obj, bool *out)
     // wrapper, meaning that, if passed to another compartment, we'll generate
     // a CCW for it. Make sure that IsDeadWrapper sees through the confusion.
     *out = JS_IsDeadWrapper(js::CheckedUnwrap(&obj.toObject()));
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-nsXPCComponents_Utils::IsCrossProcessWrapper(HandleValue obj, bool *out)
-{
-    *out = false;
-    if (obj.isPrimitive())
-        return NS_ERROR_INVALID_ARG;
-
-    *out = jsipc::IsCPOW(js::CheckedUnwrap(&obj.toObject()));
     return NS_OK;
 }
 
@@ -3383,7 +3353,7 @@ nsXPCComponents_Utils::GetIncumbentGlobal(HandleValue aCallback,
     // Invoke the callback, if passed.
     if (aCallback.isObject()) {
         RootedValue ignored(aCx);
-        if (!JS_CallFunctionValue(aCx, JS::NullPtr(), aCallback, JS::HandleValueArray(globalVal), &ignored))
+        if (!JS_CallFunctionValue(aCx, JS::NullPtr(), aCallback, globalVal, &ignored))
             return NS_ERROR_FAILURE;
     }
 
@@ -3655,7 +3625,7 @@ nsXPCComponents_Utils::GetObjectPrincipal(HandleValue val, JSContext *cx,
     obj = js::CheckedUnwrap(obj);
     MOZ_ASSERT(obj);
 
-    nsCOMPtr<nsIPrincipal> prin = nsContentUtils::ObjectPrincipal(obj);
+    nsCOMPtr<nsIPrincipal> prin = nsContentUtils::GetObjectPrincipal(obj);
     prin.forget(result);
     return NS_OK;
 }

@@ -19,9 +19,7 @@ function test() {
     gFrames = gDebugger.DebuggerView.StackFrames;
     gClassicFrames = gDebugger.DebuggerView.StackFramesClassicList;
 
-
-    waitForDebuggerEvents(gPanel, gDebugger.EVENTS.AFTER_FRAMES_REFILLED)
-      .then(performTest);
+    waitForSourceAndCaretAndScopes(gPanel, ".html", 26).then(performTest);
 
     gDebuggee.gRecurseLimit = (gDebugger.gCallStackPageSize * 2) + 1;
     gDebuggee.recurse();
@@ -34,15 +32,15 @@ function performTest() {
   is(gFrames.itemCount, gDebugger.gCallStackPageSize,
     "Should have only the max limit of frames.");
   is(gClassicFrames.itemCount, gDebugger.gCallStackPageSize,
-    "Should have only the max limit of frames in the mirrored view as well.");
+    "Should have only the max limit of frames in the mirrored view as well.")
 
-  waitForDebuggerEvents(gPanel, gDebugger.EVENTS.AFTER_FRAMES_REFILLED).then(() => {
+  gDebugger.gThreadClient.addOneTimeListener("framesadded", () => {
     is(gFrames.itemCount, gDebugger.gCallStackPageSize * 2,
       "Should now have twice the max limit of frames.");
     is(gClassicFrames.itemCount, gDebugger.gCallStackPageSize * 2,
       "Should now have twice the max limit of frames in the mirrored view as well.");
 
-    waitForDebuggerEvents(gPanel, gDebugger.EVENTS.AFTER_FRAMES_REFILLED).then(() => {
+    gDebugger.gThreadClient.addOneTimeListener("framesadded", () => {
       is(gFrames.itemCount, gDebuggee.gRecurseLimit,
         "Should have reached the recurse limit.");
       is(gClassicFrames.itemCount, gDebuggee.gRecurseLimit,

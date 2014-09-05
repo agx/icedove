@@ -18,8 +18,6 @@
 namespace webrtc {
 
 // Type used to return mouse cursor shape from video capturers.
-//
-// TODO(sergeyu): Remove this type and use MouseCursor instead.
 struct MouseCursorShape {
   // Size of the cursor in screen pixels.
   DesktopSize size;

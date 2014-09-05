@@ -199,13 +199,13 @@ public:
 
   Compositor(PCompositorParent* aParent = nullptr)
     : mCompositorID(0)
-    , mDiagnosticTypes(DiagnosticTypes::NO_DIAGNOSTIC)
+    , mDiagnosticTypes(DIAGNOSTIC_NONE)
     , mParent(aParent)
     , mScreenRotation(ROTATION_0)
   {
   }
 
-  virtual TemporaryRef<DataTextureSource> CreateDataTextureSource(TextureFlags aFlags = TextureFlags::NO_FLAGS) = 0;
+  virtual TemporaryRef<DataTextureSource> CreateDataTextureSource(TextureFlags aFlags = 0) = 0;
   virtual bool Initialize() = 0;
   virtual void Destroy() = 0;
 
@@ -238,15 +238,7 @@ public:
    * If this method is not used, or we pass in nullptr, we target the compositor's
    * usual swap chain and render to the screen.
    */
-  void SetTargetContext(gfx::DrawTarget* aTarget, const nsIntRect& aRect)
-  {
-    mTarget = aTarget;
-    mTargetBounds = aRect;
-  }
-  void ClearTargetContext()
-  {
-    mTarget = nullptr;
-  }
+  virtual void SetTargetContext(gfx::DrawTarget* aTarget) = 0;
 
   typedef uint32_t MakeCurrentFlags;
   static const MakeCurrentFlags ForceMakeCurrent = 0x1;
@@ -316,10 +308,19 @@ public:
                         const EffectChain& aEffectChain,
                         gfx::Float aOpacity, const gfx::Matrix4x4 &aTransform) = 0;
 
+  /**
+   * Tell the compositor to draw lines connecting the points. Behaves like
+   * DrawQuad.
+   */
+  virtual void DrawLines(const std::vector<gfx::Point>& aLines, const gfx::Rect& aClipRect,
+                         const gfx::Color& aColor,
+                         gfx::Float aOpacity, const gfx::Matrix4x4 &aTransform)
+  { /* Should turn into pure virtual once implemented in D3D */ }
+
   /*
    * Clear aRect on current render target.
    */
-  virtual void ClearRect(const gfx::Rect& aRect) = 0;
+  virtual void ClearRect(const gfx::Rect& aRect) { }
 
   /**
    * Start a new frame.
@@ -529,9 +530,6 @@ protected:
   ScreenRotation mScreenRotation;
 
   virtual gfx::IntSize GetWidgetSize() const = 0;
-
-  RefPtr<gfx::DrawTarget> mTarget;
-  nsIntRect mTargetBounds;
 
 private:
   static LayersBackend sBackend;

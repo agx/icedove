@@ -33,22 +33,13 @@ function run_test() {
               "up to AUS.downloadUpdate() correctly (Bug 794211).");
 
   gDirProvider = new FakeDirProvider();
-
-  let cm = AUS_Cc["@mozilla.org/categorymanager;1"].getService(AUS_Ci.nsICategoryManager);
-  gOldProviders = [];
-  let enumerator = cm.enumerateCategory("xpcom-directory-providers");
-  while (enumerator.hasMoreElements()) {
-    let entry = enumerator.getNext().QueryInterface(AUS_Ci.nsISupportsCString).data;
-    let contractID = cm.getCategoryEntry("xpcom-directory-providers", entry);
-    gOldProviders.push(AUS_Cc[contractID].createInstance(AUS_Ci.nsIDirectoryServiceProvider));
-  }
+  gOldProvider = AUS_Cc["@mozilla.org/browser/directory-provider;1"]
+                       .createInstance(AUS_Ci.nsIDirectoryServiceProvider);
 
   gDirService = AUS_Cc["@mozilla.org/file/directory_service;1"]
                        .getService(AUS_Ci.nsIProperties);
 
-  gOldProviders.forEach(function (p) {
-    gDirService.unregisterProvider(p);
-  });
+  gDirService.unregisterProvider(gOldProvider);
   gDirService.registerProvider(gDirProvider);
 
   Services.prefs.setBoolPref(PREF_APP_UPDATE_SILENT, true);
@@ -96,9 +87,7 @@ function check_test_pt1() {
 
 function end_test() {
   gDirService.unregisterProvider(gDirProvider);
-  gOldProviders.forEach(function (p) {
-    gDirService.registerProvider(p);
-  });
+  gDirService.registerProvider(gOldProvider);
   gActiveUpdate = null;
   gDirService = null;
   gDirProvider = null;

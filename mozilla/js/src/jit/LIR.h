@@ -123,7 +123,7 @@ class LAllocation : public TempObject
         JS_ASSERT(!isTagged());
         bits_ |= TAG_MASK;
     }
-    inline explicit LAllocation(AnyRegister reg);
+    inline explicit LAllocation(const AnyRegister &reg);
 
     Kind kind() const {
         if (isTagged())
@@ -256,13 +256,13 @@ class LUse : public LAllocation
         set(policy, 0, usedAtStart);
         setVirtualRegister(vreg);
     }
-    explicit LUse(Policy policy, bool usedAtStart = false) {
+    LUse(Policy policy, bool usedAtStart = false) {
         set(policy, 0, usedAtStart);
     }
-    explicit LUse(Register reg, bool usedAtStart = false) {
+    LUse(Register reg, bool usedAtStart = false) {
         set(FIXED, reg.code(), usedAtStart);
     }
-    explicit LUse(FloatRegister reg, bool usedAtStart = false) {
+    LUse(FloatRegister reg, bool usedAtStart = false) {
         set(FIXED, reg.code(), usedAtStart);
     }
     LUse(Register reg, uint32_t virtualRegister) {
@@ -455,7 +455,7 @@ class LDefinition
         set(index, type, policy);
     }
 
-    explicit LDefinition(Type type, Policy policy = DEFAULT) {
+    LDefinition(Type type, Policy policy = DEFAULT) {
         set(0, type, policy);
     }
 
@@ -698,7 +698,6 @@ class LInstructionVisitor
 
   protected:
     jsbytecode *lastPC_;
-    jsbytecode *lastNotInlinedPC_;
 
     LInstruction *instruction() {
         return ins_;
@@ -707,17 +706,13 @@ class LInstructionVisitor
   public:
     void setInstruction(LInstruction *ins) {
         ins_ = ins;
-        if (ins->mirRaw()) {
+        if (ins->mirRaw())
             lastPC_ = ins->mirRaw()->trackedPc();
-            if (ins->mirRaw()->trackedTree())
-                lastNotInlinedPC_ = ins->mirRaw()->profilerLeavePc();
-        }
     }
 
     LInstructionVisitor()
       : ins_(nullptr),
-        lastPC_(nullptr),
-        lastNotInlinedPC_(nullptr)
+        lastPC_(nullptr)
     {}
 
   public:
@@ -734,29 +729,40 @@ class LMoveGroup;
 class LBlock : public TempObject
 {
     MBasicBlock *block_;
-    FixedList<LPhi> phis_;
+    Vector<LPhi *, 4, IonAllocPolicy> phis_;
     InlineList<LInstruction> instructions_;
     LMoveGroup *entryMoveGroup_;
     LMoveGroup *exitMoveGroup_;
     Label label_;
 
-    explicit LBlock(MBasicBlock *block)
+    LBlock(TempAllocator &alloc, MBasicBlock *block)
       : block_(block),
-        phis_(),
+        phis_(alloc),
         entryMoveGroup_(nullptr),
         exitMoveGroup_(nullptr)
     { }
 
   public:
-    static LBlock *New(TempAllocator &alloc, MBasicBlock *from);
+    static LBlock *New(TempAllocator &alloc, MBasicBlock *from) {
+        return new(alloc) LBlock(alloc, from);
+    }
     void add(LInstruction *ins) {
         instructions_.pushBack(ins);
+    }
+    bool addPhi(LPhi *phi) {
+        return phis_.append(phi);
     }
     size_t numPhis() const {
         return phis_.length();
     }
-    LPhi *getPhi(size_t index) {
-        return &phis_[index];
+    LPhi *getPhi(size_t index) const {
+        return phis_[index];
+    }
+    void removePhi(size_t index) {
+        phis_.erase(&phis_[index]);
+    }
+    void clearPhis() {
+        phis_.clear();
     }
     MBasicBlock *mir() const {
         return block_;
@@ -791,27 +797,11 @@ class LBlock : public TempObject
     }
     uint32_t firstId();
     uint32_t lastId();
-
-    // Return the label to branch to when branching to this block.
     Label *label() {
-        JS_ASSERT(!isTrivial());
         return &label_;
     }
-
     LMoveGroup *getEntryMoveGroup(TempAllocator &alloc);
     LMoveGroup *getExitMoveGroup(TempAllocator &alloc);
-
-    // Test whether this basic block is empty except for a simple goto, and
-    // which is not forming a loop. No code will be emitted for such blocks.
-    bool isTrivial() {
-        LInstructionIterator ins(begin());
-        while (ins->isLabel())
-            ++ins;
-        return ins->isGoto() && !mir()->isLoopHeader();
-    }
-
-    void dump(FILE *fp);
-    void dump();
 };
 
 template <size_t Defs, size_t Operands, size_t Temps>
@@ -889,7 +879,7 @@ class LCallInstructionHelper : public LInstructionHelper<Defs, Operands, Temps>
 class LRecoverInfo : public TempObject
 {
   public:
-    typedef Vector<MNode *, 2, IonAllocPolicy> Instructions;
+    typedef Vector<MResumePoint *, 2, IonAllocPolicy> Instructions;
 
   private:
     // List of instructions needed to recover the stack frames.
@@ -899,20 +889,15 @@ class LRecoverInfo : public TempObject
     // Cached offset where this resume point is encoded.
     RecoverOffset recoverOffset_;
 
-    explicit LRecoverInfo(TempAllocator &alloc);
+    LRecoverInfo(TempAllocator &alloc);
     bool init(MResumePoint *mir);
 
-    // Fill the instruction vector such as all instructions needed for the
-    // recovery are pushed before the current instruction.
-    bool appendOperands(MNode *ins);
-    bool appendDefinition(MDefinition *def);
-    bool appendResumePoint(MResumePoint *rp);
   public:
     static LRecoverInfo *New(MIRGenerator *gen, MResumePoint *mir);
 
     // Resume point of the inner most function.
     MResumePoint *mir() const {
-        return instructions_.back()->toResumePoint();
+        return instructions_.back();
     }
     RecoverOffset recoverOffset() const {
         return recoverOffset_;
@@ -922,51 +907,12 @@ class LRecoverInfo : public TempObject
         recoverOffset_ = offset;
     }
 
-    MNode **begin() {
+    MResumePoint **begin() {
         return instructions_.begin();
     }
-    MNode **end() {
+    MResumePoint **end() {
         return instructions_.end();
     }
-    size_t numInstructions() const {
-        return instructions_.length();
-    }
-
-    class OperandIter
-    {
-      private:
-        MNode **it_;
-        size_t op_;
-
-      public:
-        explicit OperandIter(MNode **it)
-          : it_(it), op_(0)
-        { }
-
-        MDefinition *operator *() {
-            return (*it_)->getOperand(op_);
-        }
-        MDefinition *operator ->() {
-            return (*it_)->getOperand(op_);
-        }
-
-        OperandIter &operator ++() {
-            ++op_;
-            if (op_ == (*it_)->numOperands()) {
-                op_ = 0;
-                ++it_;
-            }
-            return *this;
-        }
-
-        bool operator !=(const OperandIter &where) const {
-            return it_ != where.it_ || op_ != where.op_;
-        }
-
-#ifdef DEBUG
-        bool canOptimizeOutIfUnused();
-#endif
-    };
 };
 
 // An LSnapshot is the reflection of an MResumePoint in LIR. Unlike MResumePoints,
@@ -1127,7 +1073,7 @@ class LSafepoint : public TempObject
         JS_ASSERT((gcRegs().bits() & ~liveRegs().gprs().bits()) == 0);
     }
 
-    explicit LSafepoint(TempAllocator &alloc)
+    LSafepoint(TempAllocator &alloc)
       : safepointOffset_(INVALID_SAFEPOINT_OFFSET)
       , osiCallPointOffset_(0)
       , gcSlots_(alloc)
@@ -1386,7 +1332,7 @@ class LSafepoint : public TempObject
         // In general, pointer arithmetic on code is bad, but in this case,
         // getting the return address from a call instruction, stepping over pools
         // would be wrong.
-        return osiCallPointOffset_ + Assembler::PatchWrite_NearCallSize();
+        return osiCallPointOffset_ + Assembler::patchWrite_NearCallSize();
     }
     uint32_t osiCallPointOffset() const {
         return osiCallPointOffset_;
@@ -1416,7 +1362,7 @@ class LInstruction::InputIterator
     }
 
 public:
-    explicit InputIterator(LInstruction &ins) :
+    InputIterator(LInstruction &ins) :
       ins_(ins),
       idx_(0),
       snapshot_(false)
@@ -1475,7 +1421,8 @@ class LIRGraph
         }
     };
 
-    FixedList<LBlock *> blocks_;
+
+    Vector<LBlock *, 16, IonAllocPolicy> blocks_;
     Vector<Value, 0, IonAllocPolicy> constantPool_;
     typedef HashMap<Value, uint32_t, ValueHasher, IonAllocPolicy> ConstantPoolMap;
     ConstantPoolMap constantPoolMap_;
@@ -1492,13 +1439,16 @@ class LIRGraph
     // Snapshot taken before any LIR has been lowered.
     LSnapshot *entrySnapshot_;
 
+    // LBlock containing LOsrEntry, or nullptr.
+    LBlock *osrBlock_;
+
     MIRGraph &mir_;
 
   public:
-    explicit LIRGraph(MIRGraph *mir);
+    LIRGraph(MIRGraph *mir);
 
     bool init() {
-        return constantPoolMap_.init() && blocks_.init(mir_.alloc(), mir_.numBlocks());
+        return constantPoolMap_.init();
     }
     MIRGraph &mir() const {
         return mir_;
@@ -1512,8 +1462,8 @@ class LIRGraph
     uint32_t numBlockIds() const {
         return mir_.numBlockIds();
     }
-    void setBlock(size_t index, LBlock *block) {
-        blocks_[index] = block;
+    bool addBlock(LBlock *block) {
+        return blocks_.append(block);
     }
     uint32_t getVirtualRegister() {
         numVirtualRegisters_ += VREG_INCREMENT;
@@ -1543,7 +1493,7 @@ class LIRGraph
         // Round to StackAlignment, but also round to at least sizeof(Value) in
         // case that's greater, because StackOffsetOfPassedArg rounds argument
         // slots to 8-byte boundaries.
-        size_t Alignment = Max(size_t(StackAlignment), sizeof(Value));
+        size_t Alignment = Max(sizeof(StackAlignment), sizeof(Value));
         return AlignBytes(localSlotCount(), Alignment);
     }
     size_t paddedLocalSlotsSize() const {
@@ -1578,6 +1528,13 @@ class LIRGraph
         JS_ASSERT(entrySnapshot_);
         return entrySnapshot_;
     }
+    void setOsrBlock(LBlock *block) {
+        JS_ASSERT(!osrBlock_);
+        osrBlock_ = block;
+    }
+    LBlock *osrBlock() const {
+        return osrBlock_;
+    }
     bool noteNeedsSafepoint(LInstruction *ins);
     size_t numNonCallSafepoints() const {
         return nonCallSafepoints_.length();
@@ -1591,12 +1548,10 @@ class LIRGraph
     LInstruction *getSafepoint(size_t i) const {
         return safepoints_[i];
     }
-
-    void dump(FILE *fp) const;
-    void dump() const;
+    void removeBlock(size_t i);
 };
 
-LAllocation::LAllocation(AnyRegister reg)
+LAllocation::LAllocation(const AnyRegister &reg)
 {
     if (reg.isFloat())
         *this = LFloatReg(reg.fpu());

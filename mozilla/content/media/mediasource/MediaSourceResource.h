@@ -65,7 +65,7 @@ private:
     return aMallocSizeOf(this) + SizeOfExcludingThis(aMallocSizeOf);
   }
 
-  const nsCString mType;
+  const nsAutoCString mType;
 };
 
 } // namespace mozilla

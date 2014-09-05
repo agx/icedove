@@ -22,7 +22,7 @@
 
 using namespace mozilla;
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsPerformanceTiming, mPerformance)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsPerformanceTiming, mPerformance)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsPerformanceTiming, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(nsPerformanceTiming, Release)
@@ -337,7 +337,7 @@ nsPerformanceTiming::WrapObject(JSContext *cx)
 }
 
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(nsPerformanceNavigation, mPerformance)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsPerformanceNavigation, mPerformance)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsPerformanceNavigation, AddRef)
 NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(nsPerformanceNavigation, Release)
@@ -360,22 +360,22 @@ nsPerformanceNavigation::WrapObject(JSContext *cx)
 }
 
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED(nsPerformance, DOMEventTargetHelper,
-                                   mWindow, mTiming,
-                                   mNavigation, mEntries,
-                                   mParentPerformance)
-NS_IMPL_ADDREF_INHERITED(nsPerformance, DOMEventTargetHelper)
-NS_IMPL_RELEASE_INHERITED(nsPerformance, DOMEventTargetHelper)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_5(nsPerformance,
+                                        mWindow, mTiming,
+                                        mNavigation, mEntries,
+                                        mParentPerformance)
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsPerformance)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsPerformance)
 
-nsPerformance::nsPerformance(nsPIDOMWindow* aWindow,
+nsPerformance::nsPerformance(nsIDOMWindow* aWindow,
                              nsDOMNavigationTiming* aDOMTiming,
                              nsITimedChannel* aChannel,
                              nsPerformance* aParentPerformance)
-  : DOMEventTargetHelper(aWindow),
-    mWindow(aWindow),
+  : mWindow(aWindow),
     mDOMTiming(aDOMTiming),
     mChannel(aChannel),
     mParentPerformance(aParentPerformance),
+    mBufferSizeSet(kDefaultBufferSize),
     mPrimaryBufferSize(kDefaultBufferSize)
 {
   MOZ_ASSERT(aWindow, "Parent window object should be provided");
@@ -390,7 +390,7 @@ nsPerformance::~nsPerformance()
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsPerformance)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END_INHERITING(DOMEventTargetHelper)
+NS_INTERFACE_MAP_END
 
 
 nsPerformanceTiming*
@@ -405,21 +405,6 @@ nsPerformance::Timing()
         mDOMTiming->GetNavigationStart());
   }
   return mTiming;
-}
-
-void
-nsPerformance::DispatchBufferFullEvent()
-{
-  nsCOMPtr<nsIDOMEvent> event;
-  nsresult rv = NS_NewDOMEvent(getter_AddRefs(event), this, nullptr, nullptr);
-  if (NS_SUCCEEDED(rv)) {
-    // it bubbles, and it isn't cancelable
-    rv = event->InitEvent(NS_LITERAL_STRING("resourcetimingbufferfull"), true, false);
-    if (NS_SUCCEEDED(rv)) {
-      event->SetTrusted(true);
-      DispatchDOMEvent(nullptr, event, nullptr, nullptr);
-    }
-  }
 }
 
 nsPerformanceNavigation*
@@ -448,7 +433,12 @@ nsPerformance::GetEntries(nsTArray<nsRefPtr<PerformanceEntry> >& retval)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  retval = mEntries;
+  retval.Clear();
+  uint32_t count = mEntries.Length();
+  if (count > mPrimaryBufferSize) {
+    count = mPrimaryBufferSize;
+  }
+  retval.AppendElements(mEntries.Elements(), count);
 }
 
 void
@@ -459,7 +449,7 @@ nsPerformance::GetEntriesByType(const nsAString& entryType,
 
   retval.Clear();
   uint32_t count = mEntries.Length();
-  for (uint32_t i = 0 ; i < count; i++) {
+  for (uint32_t i = 0 ; i < count && i < mPrimaryBufferSize ; i++) {
     if (mEntries[i]->GetEntryType().Equals(entryType)) {
       retval.AppendElement(mEntries[i]);
     }
@@ -475,7 +465,7 @@ nsPerformance::GetEntriesByName(const nsAString& name,
 
   retval.Clear();
   uint32_t count = mEntries.Length();
-  for (uint32_t i = 0 ; i < count; i++) {
+  for (uint32_t i = 0 ; i < count && i < mPrimaryBufferSize ; i++) {
     if (mEntries[i]->GetName().Equals(name) &&
         (!entryType.WasPassed() ||
          mEntries[i]->GetEntryType().Equals(entryType.Value()))) {
@@ -488,6 +478,7 @@ void
 nsPerformance::ClearResourceTimings()
 {
   MOZ_ASSERT(NS_IsMainThread());
+  mPrimaryBufferSize = mBufferSizeSet;
   mEntries.Clear();
 }
 
@@ -495,7 +486,11 @@ void
 nsPerformance::SetResourceTimingBufferSize(uint64_t maxSize)
 {
   MOZ_ASSERT(NS_IsMainThread());
-  mPrimaryBufferSize = maxSize;
+  mBufferSizeSet = maxSize;
+  if (mBufferSizeSet < mEntries.Length()) {
+    // call onresourcetimingbufferfull
+    // https://bugzilla.mozilla.org/show_bug.cgi?id=936813
+  }
 }
 
 /**
@@ -511,12 +506,6 @@ nsPerformance::AddEntry(nsIHttpChannel* channel,
   if (!nsContentUtils::IsResourceTimingEnabled()) {
     return;
   }
-
-  // Don't add the entry if the buffer is full
-  if (mEntries.Length() >= mPrimaryBufferSize) {
-    return;
-  }
-
   if (channel && timedChannel) {
     nsAutoCString name;
     nsAutoString initiatorType;
@@ -557,9 +546,9 @@ nsPerformance::AddEntry(nsIHttpChannel* channel,
 
     mEntries.InsertElementSorted(performanceEntry,
         PerformanceEntryComparator());
-    if (mEntries.Length() >= mPrimaryBufferSize) {
+    if (mEntries.Length() > mPrimaryBufferSize) {
       // call onresourcetimingbufferfull
-      DispatchBufferFullEvent();
+      // https://bugzilla.mozilla.org/show_bug.cgi?id=936813
     }
   }
 }

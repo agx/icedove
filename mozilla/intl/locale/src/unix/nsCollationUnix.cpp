@@ -81,7 +81,7 @@ nsresult nsCollationUnix::Initialize(nsILocale* locale)
   if (NS_SUCCEEDED(res)) {
     // keep the same behavior as 4.x as well as avoiding Linux collation key problem
     if (localeStr.LowerCaseEqualsLiteral("en_us")) { // note: locale is in platform format
-      localeStr.Assign('C');
+      localeStr.AssignLiteral("C");
     }
 
     nsPosixLocale::GetPlatformLocale(localeStr, mLocale);

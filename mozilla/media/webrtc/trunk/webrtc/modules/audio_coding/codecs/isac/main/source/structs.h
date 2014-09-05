@@ -18,9 +18,10 @@
 #ifndef WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_STRUCTS_H_
 #define WEBRTC_MODULES_AUDIO_CODING_CODECS_ISAC_MAIN_SOURCE_STRUCTS_H_
 
-#include "webrtc/modules/audio_coding/codecs/isac/main/interface/isac.h"
-#include "webrtc/modules/audio_coding/codecs/isac/main/source/settings.h"
-#include "webrtc/typedefs.h"
+
+#include "typedefs.h"
+#include "settings.h"
+#include "isac.h"
 
 typedef struct Bitstreamstruct {
 

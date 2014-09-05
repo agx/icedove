@@ -8,7 +8,7 @@
 #ifndef nsFontInflationData_h_
 #define nsFontInflationData_h_
 
-#include "nsContainerFrame.h"
+#include "nsIFrame.h"
 
 struct nsHTMLReflowState;
 

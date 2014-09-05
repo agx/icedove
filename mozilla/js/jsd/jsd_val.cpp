@@ -24,7 +24,7 @@ void JSD_ASSERT_VALID_VALUE(JSDValue* jsdval)
     if(!JS_CLIST_IS_EMPTY(&jsdval->props))
     {
         MOZ_ASSERT(CHECK_BIT_FLAG(jsdval->flags, GOT_PROPS));
-        MOZ_ASSERT(!jsdval->val.isPrimitive());
+        MOZ_ASSERT(!JSVAL_IS_PRIMITIVE(jsdval->val));
     }
 
     if(jsdval->proto)
@@ -60,63 +60,63 @@ void JSD_ASSERT_VALID_PROPERTY(JSDProperty* jsdprop)
 bool
 jsd_IsValueObject(JSDContext* jsdc, JSDValue* jsdval)
 {
-    return !jsdval->val.isPrimitive() || jsdval->val.isNull();
+    return !JSVAL_IS_PRIMITIVE(jsdval->val) || JSVAL_IS_NULL(jsdval->val);
 }
 
 bool
 jsd_IsValueNumber(JSDContext* jsdc, JSDValue* jsdval)
 {
-    return jsdval->val.isNumber();
+    return JSVAL_IS_NUMBER(jsdval->val);
 }
 
 bool
 jsd_IsValueInt(JSDContext* jsdc, JSDValue* jsdval)
 {
-    return jsdval->val.isInt32();
+    return JSVAL_IS_INT(jsdval->val);
 }
 
 bool
 jsd_IsValueDouble(JSDContext* jsdc, JSDValue* jsdval)
 {
-    return jsdval->val.isDouble();
+    return JSVAL_IS_DOUBLE(jsdval->val);
 }
 
 bool
 jsd_IsValueString(JSDContext* jsdc, JSDValue* jsdval)
 {
-    return jsdval->val.isString();
+    return JSVAL_IS_STRING(jsdval->val);
 }
 
 bool
 jsd_IsValueBoolean(JSDContext* jsdc, JSDValue* jsdval)
 {
-    return jsdval->val.isBoolean();
+    return JSVAL_IS_BOOLEAN(jsdval->val);
 }
 
 bool
 jsd_IsValueNull(JSDContext* jsdc, JSDValue* jsdval)
 {
-    return jsdval->val.isNull();
+    return JSVAL_IS_NULL(jsdval->val);
 }
 
 bool
 jsd_IsValueVoid(JSDContext* jsdc, JSDValue* jsdval)
 {
-    return jsdval->val.isUndefined();
+    return JSVAL_IS_VOID(jsdval->val);
 }
 
 bool
 jsd_IsValuePrimitive(JSDContext* jsdc, JSDValue* jsdval)
 {
-    return jsdval->val.isPrimitive();
+    return JSVAL_IS_PRIMITIVE(jsdval->val);
 }
 
 bool
 jsd_IsValueFunction(JSDContext* jsdc, JSDValue* jsdval)
 {
     AutoSafeJSContext cx; // NB: Actually unused.
-    return !jsdval->val.isPrimitive() &&
-           JS_ObjectIsCallable(cx, jsdval->val.toObjectOrNull());
+    return !JSVAL_IS_PRIMITIVE(jsdval->val) &&
+           JS_ObjectIsCallable(cx, JSVAL_TO_OBJECT(jsdval->val));
 }
 
 bool
@@ -127,7 +127,7 @@ jsd_IsValueNative(JSDContext* jsdc, JSDValue* jsdval)
 
     if(jsd_IsValueFunction(jsdc, jsdval))
     {
-        JSAutoCompartment ac(cx, jsdval->val.toObjectOrNull());
+        JSAutoCompartment ac(cx, JSVAL_TO_OBJECT(jsdval->val));
         AutoSaveExceptionState as(cx);
         bool ok = false;
         fun = JSD_GetValueFunction(jsdc, jsdval);
@@ -136,7 +136,7 @@ jsd_IsValueNative(JSDContext* jsdc, JSDValue* jsdval)
         MOZ_ASSERT(fun);
         return ok;
     }
-    return !jsdval->val.isPrimitive();
+    return !JSVAL_IS_PRIMITIVE(jsdval->val);
 }
 
 /***************************************************************************/
@@ -145,26 +145,26 @@ bool
 jsd_GetValueBoolean(JSDContext* jsdc, JSDValue* jsdval)
 {
     jsval val = jsdval->val;
-    if(!val.isBoolean())
+    if(!JSVAL_IS_BOOLEAN(val))
         return false;
-    return val.toBoolean();
+    return JSVAL_TO_BOOLEAN(val);
 }
 
 int32_t
 jsd_GetValueInt(JSDContext* jsdc, JSDValue* jsdval)
 {
     jsval val = jsdval->val;
-    if(!val.isInt32())
+    if(!JSVAL_IS_INT(val))
         return 0;
-    return val.toInt32();
+    return JSVAL_TO_INT(val);
 }
 
 double
 jsd_GetValueDouble(JSDContext* jsdc, JSDValue* jsdval)
 {
-    if(!jsdval->val.isDouble())
+    if(!JSVAL_IS_DOUBLE(jsdval->val))
         return 0;
-    return jsdval->val.toDouble();
+    return JSVAL_TO_DOUBLE(jsdval->val);
 }
 
 JSString*
@@ -179,13 +179,13 @@ jsd_GetValueString(JSDContext* jsdc, JSDValue* jsdval)
         return jsdval->string;
 
     /* Reuse the string without copying or re-rooting it */
-    if(jsdval->val.isString()) {
-        jsdval->string = jsdval->val.toString();
+    if(JSVAL_IS_STRING(jsdval->val)) {
+        jsdval->string = JSVAL_TO_STRING(jsdval->val);
         return jsdval->string;
     }
 
     /* Objects call JS_ValueToString in their own compartment. */
-    scopeObj = !jsdval->val.isPrimitive() ? jsdval->val.toObjectOrNull() : jsdc->glob;
+    scopeObj = !JSVAL_IS_PRIMITIVE(jsdval->val) ? JSVAL_TO_OBJECT(jsdval->val) : jsdc->glob;
     {
         JSAutoCompartment ac(cx, scopeObj);
         AutoSaveExceptionState as(cx);
@@ -201,7 +201,7 @@ jsd_GetValueString(JSDContext* jsdc, JSDValue* jsdval)
         return nullptr;
     }
 
-    jsdval->string = stringval.toString();
+    jsdval->string = JSVAL_TO_STRING(stringval);
     if(!JS::AddNamedStringRoot(cx, &jsdval->string, "ValueString"))
         jsdval->string = nullptr;
 
@@ -216,7 +216,7 @@ jsd_GetValueFunctionId(JSDContext* jsdc, JSDValue* jsdval)
 
     if(!jsdval->funName && jsd_IsValueFunction(jsdc, jsdval))
     {
-        JSAutoCompartment ac(cx, jsdval->val.toObjectOrNull());
+        JSAutoCompartment ac(cx, JSVAL_TO_OBJECT(jsdval->val));
         AutoSaveExceptionState as(cx);
         fun = JSD_GetValueFunction(jsdc, jsdval);
         if(!fun)
@@ -247,13 +247,13 @@ jsd_NewValue(JSDContext* jsdc, jsval value)
     if(!(jsdval = (JSDValue*) calloc(1, sizeof(JSDValue))))
         return nullptr;
 
-    if(val.isGCThing())
+    if(JSVAL_IS_GCTHING(val))
     {
         bool ok;
         JSAutoCompartment ac(cx, jsdc->glob);
 
         ok = JS::AddNamedValueRoot(cx, &jsdval->val, "JSDValue");
-        if(ok && val.isString()) {
+        if(ok && JSVAL_IS_STRING(val)) {
             if(!JS_WrapValue(cx, &val)) {
                 ok = false;
             }
@@ -279,7 +279,7 @@ jsd_DropValue(JSDContext* jsdc, JSDValue* jsdval)
     if(0 == --jsdval->nref)
     {
         jsd_RefreshValue(jsdc, jsdval);
-        if(jsdval->val.isGCThing())
+        if(JSVAL_IS_GCTHING(jsdval->val))
         {
             AutoSafeJSContext cx;
             JSAutoCompartment ac(cx, jsdc->glob);
@@ -362,12 +362,12 @@ static bool _buildProps(JSDContext* jsdc, JSDValue* jsdval)
 
     MOZ_ASSERT(JS_CLIST_IS_EMPTY(&jsdval->props));
     MOZ_ASSERT(!(CHECK_BIT_FLAG(jsdval->flags, GOT_PROPS)));
-    MOZ_ASSERT(!jsdval->val.isPrimitive());
+    MOZ_ASSERT(!JSVAL_IS_PRIMITIVE(jsdval->val));
 
-    if(jsdval->val.isPrimitive())
+    if(JSVAL_IS_PRIMITIVE(jsdval->val))
         return false;
 
-    obj = jsdval->val.toObjectOrNull();
+    obj = JSVAL_TO_OBJECT(jsdval->val);
 
     JSAutoCompartment ac(cx, obj);
 
@@ -409,7 +409,7 @@ jsd_RefreshValue(JSDContext* jsdc, JSDValue* jsdval)
     if(jsdval->string)
     {
         /* if the jsval is a string, then we didn't need to root the string */
-        if(!jsdval->val.isString())
+        if(!JSVAL_IS_STRING(jsdval->val))
         {
             JSAutoCompartment ac(cx, jsdc->glob);
             JS::RemoveStringRoot(cx, &jsdval->string);
@@ -505,7 +505,7 @@ jsd_GetValueProperty(JSDContext* jsdc, JSDValue* jsdval, JSString* nameStr)
     if(!JS_ValueToId(cx, nameval, &nameid))
         return nullptr;
 
-    if(!(obj = jsdval->val.toObjectOrNull()))
+    if(!(obj = JSVAL_TO_OBJECT(jsdval->val)))
         return nullptr;
 
     JS::Rooted<JSPropertyDescriptor> desc(cx);
@@ -567,10 +567,10 @@ jsd_GetValueFunction(JSDContext* jsdc, JSDValue* jsdval)
     JS::RootedObject obj(cx);
     JS::RootedFunction fun(cx);
 
-    if (jsdval->val.isPrimitive())
+    if (JSVAL_IS_PRIMITIVE(jsdval->val))
         return nullptr;
 
-    obj = js::UncheckedUnwrap(jsdval->val.toObjectOrNull());
+    obj = js::UncheckedUnwrap(JSVAL_TO_OBJECT(jsdval->val));
     JSAutoCompartment ac(cx, obj);
     JS::RootedValue funval(cx, JS::ObjectValue(*obj));
     fun = JS_ValueToFunction(cx, funval);
@@ -588,9 +588,9 @@ jsd_GetValuePrototype(JSDContext* jsdc, JSDValue* jsdval)
         JS::RootedObject proto(cx);
         MOZ_ASSERT(!jsdval->proto);
         SET_BIT_FLAG(jsdval->flags, GOT_PROTO);
-        if(jsdval->val.isPrimitive())
+        if(JSVAL_IS_PRIMITIVE(jsdval->val))
             return nullptr;
-        obj = jsdval->val.toObjectOrNull();
+        obj = JSVAL_TO_OBJECT(jsdval->val);
         if(!JS_GetPrototype(cx, obj, &proto))
             return nullptr;
         if(!proto)
@@ -612,9 +612,9 @@ jsd_GetValueParent(JSDContext* jsdc, JSDValue* jsdval)
         JS::RootedObject parent(cx);
         MOZ_ASSERT(!jsdval->parent);
         SET_BIT_FLAG(jsdval->flags, GOT_PARENT);
-        if(jsdval->val.isPrimitive())
+        if(JSVAL_IS_PRIMITIVE(jsdval->val))
             return nullptr;
-        obj = jsdval->val.toObjectOrNull();
+        obj = JSVAL_TO_OBJECT(jsdval->val);
         {
             JSAutoCompartment ac(cx, obj);
             parent = JS_GetParentOrScopeChain(cx, obj);
@@ -639,9 +639,9 @@ jsd_GetValueConstructor(JSDContext* jsdc, JSDValue* jsdval)
         JS::RootedObject ctor(cx);
         MOZ_ASSERT(!jsdval->ctor);
         SET_BIT_FLAG(jsdval->flags, GOT_CTOR);
-        if(jsdval->val.isPrimitive())
+        if(JSVAL_IS_PRIMITIVE(jsdval->val))
             return nullptr;
-        obj = jsdval->val.toObjectOrNull();
+        obj = JSVAL_TO_OBJECT(jsdval->val);
         if(!JS_GetPrototype(cx, obj, &proto))
             return nullptr;
         if(!proto)
@@ -663,9 +663,9 @@ const char*
 jsd_GetValueClassName(JSDContext* jsdc, JSDValue* jsdval)
 {
     jsval val = jsdval->val;
-    if(!jsdval->className && !val.isPrimitive())
+    if(!jsdval->className && !JSVAL_IS_PRIMITIVE(val))
     {
-        JS::RootedObject obj(jsdc->jsrt, val.toObjectOrNull());
+        JS::RootedObject obj(jsdc->jsrt, JSVAL_TO_OBJECT(val));
         AutoSafeJSContext cx;
         JSAutoCompartment ac(cx, obj);
         jsdval->className = JS_GetDebugClassName(obj);
@@ -685,7 +685,7 @@ jsd_GetScriptForValue(JSDContext* jsdc, JSDValue* jsdval)
         return nullptr;
 
     {
-        JSAutoCompartment ac(cx, val.toObjectOrNull());
+        JSAutoCompartment ac(cx, JSVAL_TO_OBJECT(val));
         AutoSaveExceptionState as(cx);
         JS::RootedFunction fun(cx, JSD_GetValueFunction(jsdc, jsdval));
         if (fun)

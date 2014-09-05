@@ -27,14 +27,17 @@ class TempAllocator
     CompilerRootNode *rootList_;
 
   public:
-    explicit TempAllocator(LifoAlloc *lifoAlloc)
+    TempAllocator(LifoAlloc *lifoAlloc)
       : lifoScope_(lifoAlloc),
         rootList_(nullptr)
     { }
 
-    void *allocateInfallible(size_t bytes)
+    void *allocateOrCrash(size_t bytes)
     {
-        return lifoScope_.alloc().allocInfallible(bytes);
+        void *p = lifoScope_.alloc().alloc(bytes);
+        if (!p)
+            js::CrashAtUnhandlableOOM("LifoAlloc::allocOrCrash");
+        return p;
     }
 
     void *allocate(size_t bytes)
@@ -74,17 +77,17 @@ class TempAllocator
 };
 
 // Stack allocated rooter for all roots associated with a TempAllocator
-class AutoTempAllocatorRooter : private JS::AutoGCRooter
+class AutoTempAllocatorRooter : private AutoGCRooter
 {
   public:
     explicit AutoTempAllocatorRooter(JSContext *cx, TempAllocator *temp
                                      MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : JS::AutoGCRooter(cx, IONALLOC), temp(temp)
+      : AutoGCRooter(cx, IONALLOC), temp(temp)
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-    friend void JS::AutoGCRooter::trace(JSTracer *trc);
+    friend void AutoGCRooter::trace(JSTracer *trc);
     void trace(JSTracer *trc);
 
   private:
@@ -97,7 +100,7 @@ class IonAllocPolicy
     TempAllocator &alloc_;
 
   public:
-    MOZ_IMPLICIT IonAllocPolicy(TempAllocator &alloc)
+    IonAllocPolicy(TempAllocator &alloc)
       : alloc_(alloc)
     {}
     void *malloc_(size_t bytes) {
@@ -175,7 +178,7 @@ class AutoIonContextAlloc
 struct TempObject
 {
     inline void *operator new(size_t nbytes, TempAllocator &alloc) {
-        return alloc.allocateInfallible(nbytes);
+        return alloc.allocateOrCrash(nbytes);
     }
     template <class T>
     inline void *operator new(size_t nbytes, T *pos) {

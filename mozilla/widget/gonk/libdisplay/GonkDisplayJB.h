@@ -25,7 +25,7 @@
 
 namespace mozilla {
 
-class MOZ_EXPORT GonkDisplayJB : public GonkDisplay {
+class GonkDisplayJB : public GonkDisplay {
 public:
     GonkDisplayJB();
     ~GonkDisplayJB();

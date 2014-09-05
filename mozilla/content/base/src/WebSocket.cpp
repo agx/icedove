@@ -11,13 +11,13 @@
 #include "jsfriendapi.h"
 #include "js/OldDebugAPI.h"
 #include "mozilla/DOMEventTargetHelper.h"
-#include "mozilla/dom/ScriptSettings.h"
 #include "nsIScriptGlobalObject.h"
 #include "nsIDOMWindow.h"
 #include "nsIDocument.h"
 #include "nsXPCOM.h"
 #include "nsIXPConnect.h"
 #include "nsContentUtils.h"
+#include "nsCxPusher.h"
 #include "nsError.h"
 #include "nsIScriptObjectPrincipal.h"
 #include "nsIURL.h"
@@ -330,7 +330,7 @@ WebSocket::ScheduleConnectionCloseEvents(nsISupports* aContext,
                                          nsresult aStatusCode,
                                          bool sync)
 {
-  MOZ_ASSERT(NS_IsMainThread());
+  NS_ABORT_IF_FALSE(NS_IsMainThread(), "Not running on main thread");
 
   // no-op if some other code has already initiated close event
   if (!mOnCloseScheduled) {
@@ -351,7 +351,8 @@ WebSocket::ScheduleConnectionCloseEvents(nsISupports* aContext,
     if (sync) {
       DispatchConnectionCloseEvents();
     } else {
-      NS_DispatchToCurrentThread(new CallDispatchConnectionCloseEvents(this));
+      NS_DispatchToMainThread(new CallDispatchConnectionCloseEvents(this),
+                              NS_DISPATCH_NORMAL);
     }
   }
 
@@ -703,7 +704,7 @@ WebSocket::Init(JSContext* aCx,
     }
 
     if (!mRequestedProtocolList.IsEmpty()) {
-      mRequestedProtocolList.AppendLiteral(", ");
+      mRequestedProtocolList.Append(NS_LITERAL_CSTRING(", "));
     }
 
     AppendUTF16toUTF8(aProtocolArray[index], mRequestedProtocolList);
@@ -865,14 +866,15 @@ WebSocket::CreateAndDispatchMessageEvent(const nsACString& aData,
   if (NS_FAILED(rv))
     return NS_OK;
 
-  nsCOMPtr<nsIGlobalObject> globalObject = do_QueryInterface(GetOwner());
-  if (NS_WARN_IF(!globalObject)) {
-    return NS_ERROR_FAILURE;
-  }
+  // Get the JSContext
+  nsCOMPtr<nsIScriptGlobalObject> sgo = do_QueryInterface(GetOwner());
+  NS_ENSURE_TRUE(sgo, NS_ERROR_FAILURE);
 
-  AutoJSAPI jsapi;
-  JSContext* cx = jsapi.cx();
-  JSAutoCompartment ac(cx, globalObject->GetGlobalJSObject());
+  nsIScriptContext* scriptContext = sgo->GetContext();
+  NS_ENSURE_TRUE(scriptContext, NS_ERROR_FAILURE);
+
+  AutoPushJSContext cx(scriptContext->GetNativeContext());
+  NS_ENSURE_TRUE(cx, NS_ERROR_FAILURE);
 
   // Create appropriate JS object for message
   JS::Rooted<JS::Value> jsData(cx);
@@ -991,7 +993,7 @@ WebSocket::ParseURL(const nsString& aURL)
   nsAutoCString filePath;
   rv = parsedURL->GetFilePath(filePath);
   if (filePath.IsEmpty()) {
-    filePath.Assign('/');
+    filePath.AssignLiteral("/");
   }
   NS_ENSURE_SUCCESS(rv, NS_ERROR_DOM_SYNTAX_ERR);
 
@@ -1017,7 +1019,7 @@ WebSocket::ParseURL(const nsString& aURL)
 
   mResource = filePath;
   if (!query.IsEmpty()) {
-    mResource.Append('?');
+    mResource.AppendLiteral("?");
     mResource.Append(query);
   }
   uint32_t length = mResource.Length();

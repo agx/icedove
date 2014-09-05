@@ -112,21 +112,13 @@
   var sandbox2 = new Cu.Sandbox("http://example.com", sandboxOptions);
   sandbox.sandbox2 = sandbox2;
 
-  function cloneAndTest(test) {
-    var output = sandbox.test = Cu.cloneInto(test, sandbox);
+  function cloneAndTest(test, cloneOptions) {
+    var output = sandbox.test = Cu.cloneInto(test, sandbox, cloneOptions);
     compare(test, output);
 
-    output = Cu.evalInSandbox('cloneInto(test, sandbox2)', sandbox);
+    sandbox.cloneOptions = cloneOptions;
+    output = Cu.evalInSandbox('cloneInto(test, sandbox2, cloneOptions)', sandbox);
     compare(test, output);
-  }
-
-  function cloneAndTestWithFunctions(test) {
-    var output = sandbox.test = Cu.cloneInto(test, sandbox, { cloneFunctions: true });
-    compare(test, output);
-
-    output = Cu.evalInSandbox('cloneInto(test, sandbox2, { cloneFunctions: true })', sandbox);
-    // Note - We need to waive here, because functions are filtered out by object Xrays.
-    compare(test, Cu.waiveXrays(output));
   }
 
   var tests = [
@@ -162,7 +154,7 @@
   }
 
   var test = { a: function() { return 42; } }
-  cloneAndTestWithFunctions(test);
+  cloneAndTest(test, { cloneFunctions: true });
   ]]>
   </script>
 </window>

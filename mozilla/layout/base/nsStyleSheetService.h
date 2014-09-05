@@ -32,14 +32,14 @@ class nsStyleSheetService MOZ_FINAL
   , public nsIMemoryReporter
 {
  public:
-  nsStyleSheetService();
-  ~nsStyleSheetService();
+  nsStyleSheetService() NS_HIDDEN;
+  ~nsStyleSheetService() NS_HIDDEN;
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSISTYLESHEETSERVICE
   NS_DECL_NSIMEMORYREPORTER
 
-  nsresult Init();
+  NS_HIDDEN_(nsresult) Init();
 
   nsCOMArray<nsIStyleSheet>* AgentStyleSheets() { return &mSheets[AGENT_SHEET]; }
   nsCOMArray<nsIStyleSheet>* UserStyleSheets() { return &mSheets[USER_SHEET]; }
@@ -52,17 +52,17 @@ class nsStyleSheetService MOZ_FINAL
 
  private:
 
-  void RegisterFromEnumerator(nsICategoryManager  *aManager,
+  NS_HIDDEN_(void) RegisterFromEnumerator(nsICategoryManager  *aManager,
                                           const char          *aCategory,
                                           nsISimpleEnumerator *aEnumerator,
                                           uint32_t             aSheetType);
 
-  int32_t FindSheetByURI(const nsCOMArray<nsIStyleSheet> &sheets,
+  NS_HIDDEN_(int32_t) FindSheetByURI(const nsCOMArray<nsIStyleSheet> &sheets,
                                      nsIURI *sheetURI);
 
   // Like LoadAndRegisterSheet, but doesn't notify.  If successful, the
   // new sheet will be the last sheet in mSheets[aSheetType].
-  nsresult LoadAndRegisterSheetInternal(nsIURI *aSheetURI,
+  NS_HIDDEN_(nsresult) LoadAndRegisterSheetInternal(nsIURI *aSheetURI,
                                                     uint32_t aSheetType);
 
   nsCOMArray<nsIStyleSheet> mSheets[3];

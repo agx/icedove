@@ -80,13 +80,12 @@ public :
                                         TrackRate aTrackRate,
                                         TrackTicks aTrackOffset,
                                         uint32_t aTrackEvents,
-                                        const MediaSegment& aQueuedMedia) MOZ_OVERRIDE;
+                                        const MediaSegment& aQueuedMedia);
 
   /**
    * Notified the stream is being removed.
    */
-  virtual void NotifyEvent(MediaStreamGraph* aGraph,
-                           MediaStreamListener::MediaStreamGraphEvent event) MOZ_OVERRIDE;
+  virtual void NotifyRemoved(MediaStreamGraph* aGraph);
 
   /**
    * Creates an encoder with a given MIME type. Returns null if we are unable

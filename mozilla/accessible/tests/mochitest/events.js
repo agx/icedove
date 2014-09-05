@@ -1766,7 +1766,8 @@ function textSelectionChecker(aID, aStartOffset, aEndOffset)
   this.check = function textSelectionChecker_check(aEvent)
   {
     if (aStartOffset == aEndOffset) {
-      ok(true, "Collapsed selection triggered text selection change event.");
+      is(getAccessible(aID, [nsIAccessibleText]).caretOffset, aStartOffset,
+         "Wrong collapsed selection!");
     } else {
       testTextGetSelection(aID, aStartOffset, aEndOffset, 0);
     }

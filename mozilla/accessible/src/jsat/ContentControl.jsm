@@ -45,7 +45,6 @@ this.ContentControl.prototype = {
     for (let message of this.messagesOfInterest) {
       cs.addMessageListener(message, this);
     }
-    cs.addEventListener('mousemove', this);
   },
 
   stop: function cc_stop() {
@@ -53,7 +52,6 @@ this.ContentControl.prototype = {
     for (let message of this.messagesOfInterest) {
       cs.removeMessageListener(message, this);
     }
-    cs.removeEventListener('mousemove', this);
   },
 
   get document() {
@@ -126,22 +124,18 @@ this.ContentControl.prototype = {
     }
   },
 
-  handleEvent: function cc_handleEvent(aEvent) {
-    if (aEvent.type === 'mousemove') {
-      this.handleMoveToPoint(
-        { json: { x: aEvent.screenX, y: aEvent.screenY, rule: 'Simple' } });
-    }
-    if (!Utils.getMessageManager(aEvent.target)) {
-      aEvent.preventDefault();
-    }
-  },
-
   handleMoveToPoint: function cc_handleMoveToPoint(aMessage) {
     let [x, y] = [aMessage.json.x, aMessage.json.y];
     let rule = TraversalRules[aMessage.json.rule];
+    let vc = this.vc;
+    let win = this.window;
 
-    let dpr = this.window.devicePixelRatio;
+    let dpr = win.devicePixelRatio;
     this.vc.moveToPoint(rule, x * dpr, y * dpr, true);
+
+    let delta = Utils.isContentProcess ?
+      { x: x - win.mozInnerScreenX, y: y - win.mozInnerScreenY } : {};
+    this.sendToChild(vc, aMessage, delta);
   },
 
   handleClearCursor: function cc_handleClearCursor(aMessage) {
@@ -227,26 +221,9 @@ this.ContentControl.prototype = {
       return;
     }
 
-    // recursively find a descendant that is activatable.
-    let getActivatableDescendant = (aAccessible) => {
-      if (aAccessible.actionCount > 0) {
-        return aAccessible;
-      }
-
-      for (let acc = aAccessible.firstChild; acc; acc = acc.nextSibling) {
-        let activatable = getActivatableDescendant(acc);
-        if (activatable) {
-          return activatable;
-        }
-      }
-
-      return null;
-    };
-
     let vc = this.vc;
     if (!this.sendToChild(vc, aMessage)) {
-      let position = vc.position;
-      activateAccessible(getActivatableDescendant(position) || position);
+      activateAccessible(vc.position);
     }
   },
 

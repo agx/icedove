@@ -551,7 +551,8 @@ add_task(function* run_test_3() {
   Services.prefs.setBoolPref(PREF_GETADDONS_CACHE_ENABLED, true);
   Services.prefs.setCharPref(PREF_GETADDONS_BYIDS, GETADDONS_FAILED);
 
-  yield AddonRepository.repopulateCache();
+  yield new Promise((resolve, reject) =>
+    AddonRepository.repopulateCache(ADDON_IDS, resolve));
   yield check_initialized_cache([false, false, false]);
 });
 
@@ -559,7 +560,8 @@ add_task(function* run_test_3() {
 add_task(function* run_test_4() {
   Services.prefs.setCharPref(PREF_GETADDONS_BYIDS, GETADDONS_EMPTY);
 
-  yield AddonRepository.repopulateCache();
+  yield new Promise((resolve, reject) =>
+    AddonRepository.repopulateCache(ADDON_IDS, resolve));
   yield check_initialized_cache([false, false, false]);
 });
 
@@ -567,7 +569,8 @@ add_task(function* run_test_4() {
 add_task(function* run_test_5() {
   Services.prefs.setCharPref(PREF_GETADDONS_BYIDS, GETADDONS_RESULTS);
 
-  yield AddonRepository.repopulateCache();
+  yield new Promise((resolve, reject) =>
+    AddonRepository.repopulateCache(ADDON_IDS, resolve));
   yield check_initialized_cache([true, true, true]);
 });
 
@@ -575,7 +578,8 @@ add_task(function* run_test_5() {
 add_task(function* run_test_5_1() {
   Services.prefs.setBoolPref(PREF_ADDON0_CACHE_ENABLED, false);
 
-  yield AddonRepository.repopulateCache();
+  yield new Promise((resolve, reject) =>
+    AddonRepository.repopulateCache(ADDON_IDS, resolve));
 
   // Reset pref for next test
   Services.prefs.setBoolPref(PREF_ADDON0_CACHE_ENABLED, true);
@@ -588,7 +592,8 @@ add_task(function* run_test_6() {
   do_check_true(gDBFile.exists());
   Services.prefs.setBoolPref(PREF_GETADDONS_CACHE_ENABLED, false);
 
-  yield AddonRepository.repopulateCache();
+  yield new Promise((resolve, reject) =>
+    AddonRepository.repopulateCache(ADDON_IDS, resolve));
   // Database should have been deleted
   do_check_false(gDBFile.exists());
 

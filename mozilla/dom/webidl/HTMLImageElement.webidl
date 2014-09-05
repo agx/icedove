@@ -23,8 +23,7 @@ interface HTMLImageElement : HTMLElement {
            attribute DOMString alt;
            [SetterThrows]
            attribute DOMString src;
-           [SetterThrows, Pref="dom.image.srcset.enabled"]
-           attribute DOMString srcset;
+//           attribute DOMString srcset;
            [SetterThrows]
            attribute DOMString crossOrigin;
            [SetterThrows]
@@ -54,13 +53,6 @@ partial interface HTMLImageElement {
            attribute DOMString longDesc;
 
   [TreatNullAs=EmptyString,SetterThrows] attribute DOMString border;
-};
-
-// [Update me: not in whatwg spec yet]
-// http://picture.responsiveimages.org/#the-img-element
-partial interface HTMLImageElement {
-           [Pref="dom.image.srcset.enabled"]
-  readonly attribute DOMString? currentSrc;
 };
 
 // Mozilla extensions.

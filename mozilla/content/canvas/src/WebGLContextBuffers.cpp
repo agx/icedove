@@ -385,7 +385,7 @@ WebGLContext::DeleteBuffer(WebGLBuffer *buffer)
                    static_cast<WebGLBuffer*>(nullptr));
     }
 
-    if (mBoundVertexArray->mElementArrayBuffer == buffer) {
+    if (mBoundVertexArray->mBoundElementArrayBuffer == buffer) {
         BindBuffer(LOCAL_GL_ELEMENT_ARRAY_BUFFER,
                    static_cast<WebGLBuffer*>(nullptr));
     }
@@ -433,7 +433,7 @@ WebGLContext::GetBufferSlotByTarget(GLenum target, const char* infos)
             return &mBoundArrayBuffer;
 
         case LOCAL_GL_ELEMENT_ARRAY_BUFFER:
-            return &mBoundVertexArray->mElementArrayBuffer;
+            return &mBoundVertexArray->mBoundElementArrayBuffer;
 
         case LOCAL_GL_TRANSFORM_FEEDBACK_BUFFER:
             if (!IsWebGL2()) {
@@ -487,7 +487,7 @@ WebGLContext::CheckedBufferData(GLenum target,
     if (target == LOCAL_GL_ARRAY_BUFFER) {
         boundBuffer = mBoundArrayBuffer;
     } else if (target == LOCAL_GL_ELEMENT_ARRAY_BUFFER) {
-        boundBuffer = mBoundVertexArray->mElementArrayBuffer;
+        boundBuffer = mBoundVertexArray->mBoundElementArrayBuffer;
     }
     MOZ_ASSERT(boundBuffer != nullptr, "no buffer bound for this target");
 

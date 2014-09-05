@@ -21,7 +21,7 @@ ShouldExposeChildWindow(nsString& aNameBeingResolved, nsIDOMWindow *aChild)
   // If we're same-origin with the child, go ahead and expose it.
   nsCOMPtr<nsIScriptObjectPrincipal> sop = do_QueryInterface(aChild);
   NS_ENSURE_TRUE(sop, false);
-  if (nsContentUtils::SubjectPrincipal()->Equals(sop->GetPrincipal())) {
+  if (nsContentUtils::GetSubjectPrincipal()->Equals(sop->GetPrincipal())) {
     return true;
   }
 
@@ -89,7 +89,6 @@ WindowNamedPropertiesHandler::getOwnPropDescriptor(JSContext* aCx,
                                                    bool /* unused */,
                                                    JS::MutableHandle<JSPropertyDescriptor> aDesc)
 {
-  // Note: The infallibleInit call below depends on this check.
   if (!JSID_IS_STRING(aId)) {
     // Nothing to do if we're resolving a non-string property.
     return true;
@@ -100,8 +99,7 @@ WindowNamedPropertiesHandler::getOwnPropDescriptor(JSContext* aCx,
     return true;
   }
 
-  nsDependentJSString str;
-  str.infallibleInit(aId);
+  nsDependentJSString str(aId);
 
   // Grab the DOM window.
   nsGlobalWindow* win = GetWindowFromGlobal(global);
@@ -183,7 +181,7 @@ WindowNamedPropertiesHandler::ownPropNames(JSContext* aCx,
   // We iterate backwards so we can remove things from the list easily.
   for (size_t i = names.Length(); i > 0; ) {
     --i; // Now we're pointing at the next name we want to look at
-    nsIDOMWindow* childWin = win->GetChildWindow(names[i]);
+    nsCOMPtr<nsIDOMWindow> childWin = win->GetChildWindow(names[i]);
     if (!childWin || !ShouldExposeChildWindow(names[i], childWin)) {
       names.RemoveElementAt(i);
     }

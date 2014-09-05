@@ -2168,12 +2168,12 @@ NS_IMETHODIMP nsMessenger::OnItemRemoved(nsIMsgFolder *parentItem, nsISupports *
       folder->GenerateMessageURI(msgKey, msgUri);
       // need to remove the correspnding folder entry, and
       // adjust the current history pos.
-      size_t uriPos = mLoadedMsgHistory.IndexOf(msgUri);
-      if (uriPos != mLoadedMsgHistory.NoIndex)
+      int32_t uriPos = mLoadedMsgHistory.IndexOf(msgUri);
+      if (uriPos != kNotFound)
       {
         mLoadedMsgHistory.RemoveElementAt(uriPos);
         mLoadedMsgHistory.RemoveElementAt(uriPos); // and the folder uri entry
-        if (mCurHistoryPos >= (int32_t)uriPos)
+        if ((int32_t) mCurHistoryPos >= uriPos)
           mCurHistoryPos -= 2;
       }
     }

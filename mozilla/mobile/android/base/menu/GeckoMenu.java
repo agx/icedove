@@ -15,6 +15,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.view.ActionProvider;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -45,14 +46,11 @@ public class GeckoMenu extends ListView
     private static final AssertBehavior THREAD_ASSERT_BEHAVIOR = AppConstants.RELEASE_BUILD ? AssertBehavior.NONE : AssertBehavior.THROW;
 
     /*
-     * A callback for a menu item click/long click event.
+     * A callback for a menu item selected event.
      */
     public static interface Callback {
-        // Called when a menu item is clicked, with the actual menu item as the argument.
-        public boolean onMenuItemClick(MenuItem item);
-
-        // Called when a menu item is long-clicked, with the actual menu item as the argument.
-        public boolean onMenuItemLongClick(MenuItem item);
+        // Called when a menu item is selected, with the actual menu item as the argument.
+        public boolean onMenuItemSelected(MenuItem item);
     }
 
     /*
@@ -224,25 +222,11 @@ public class GeckoMenu extends ListView
                     handleMenuItemClick(menuItem);
                 }
             });
-            ((MenuItemActionBar) actionView).setOnLongClickListener(new View.OnLongClickListener() {
-                @Override
-                public boolean onLongClick(View v) {
-                    handleMenuItemLongClick(menuItem);
-                    return true;
-                }
-            });
         } else if (actionView instanceof MenuItemActionView) {
             ((MenuItemActionView) actionView).setMenuItemClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View view) {
                     handleMenuItemClick(menuItem);
-                }
-            });
-            ((MenuItemActionView) actionView).setMenuItemLongClickListener(new View.OnLongClickListener() {
-                @Override
-                public boolean onLongClick(View view) {
-                    handleMenuItemLongClick(menuItem);
-                    return true;
                 }
             });
         }
@@ -572,17 +556,7 @@ public class GeckoMenu extends ListView
             showMenu(subMenu);
         } else {
             close();
-            mCallback.onMenuItemClick(item);
-        }
-    }
-
-    private void handleMenuItemLongClick(GeckoMenuItem item) {
-        if(!item.isEnabled()) {
-            return;
-        }
-
-        if(mCallback != null) {
-            mCallback.onMenuItemLongClick(item);
+            mCallback.onMenuItemSelected(item);
         }
     }
 

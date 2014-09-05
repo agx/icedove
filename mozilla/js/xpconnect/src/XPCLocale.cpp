@@ -10,19 +10,17 @@
 
 #include "nsCollationCID.h"
 #include "nsJSUtils.h"
+#include "nsICharsetConverterManager.h"
 #include "nsIPlatformCharset.h"
 #include "nsILocaleService.h"
 #include "nsICollation.h"
 #include "nsUnicharUtils.h"
 #include "nsComponentManagerUtils.h"
 #include "nsServiceManagerUtils.h"
-#include "mozilla/dom/EncodingUtils.h"
-#include "nsIUnicodeDecoder.h"
 
 #include "xpcpublic.h"
 
 using namespace JS;
-using mozilla::dom::EncodingUtils;
 
 /**
  * JS locale callbacks implemented by XPCOM modules.  These are theoretically
@@ -192,7 +190,11 @@ private:
             nsAutoCString charset;
             rv = platformCharset->GetDefaultCharsetForLocale(localeStr, charset);
             if (NS_SUCCEEDED(rv)) {
-              mDecoder = EncodingUtils::DecoderForEncoding(charset);
+              // get/create unicode decoder for charset
+              nsCOMPtr<nsICharsetConverterManager> ccm =
+                do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
+              if (NS_SUCCEEDED(rv))
+                ccm->GetUnicodeDecoder(charset.get(), getter_AddRefs(mDecoder));
             }
           }
         }

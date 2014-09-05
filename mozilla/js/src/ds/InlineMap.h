@@ -157,7 +157,7 @@ class InlineMap
           : inlAddPtr(ptr), isInlinePtr(true), inlPtrFound(found)
         {}
 
-        explicit AddPtr(const WordMapAddPtr &p) : mapAddPtr(p), isInlinePtr(false) {}
+        AddPtr(const WordMapAddPtr &p) : mapAddPtr(p), isInlinePtr(false) {}
 
         void operator==(const AddPtr &other);
 

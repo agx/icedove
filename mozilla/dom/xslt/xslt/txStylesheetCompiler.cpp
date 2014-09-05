@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/ArrayUtils.h"
-#include "mozilla/Move.h"
 
 #include "txStylesheetCompiler.h"
 #include "txStylesheetCompileHandlers.h"
@@ -103,7 +102,7 @@ txStylesheetCompiler::startElement(int32_t aNamespaceID, nsIAtom* aLocalName,
 nsresult
 txStylesheetCompiler::startElement(const char16_t *aName,
                                    const char16_t **aAttrs,
-                                   int32_t aAttrCount)
+                                   int32_t aAttrCount, int32_t aIDOffset)
 {
     if (NS_FAILED(mStatus)) {
         // ignore content after failure
@@ -162,8 +161,12 @@ txStylesheetCompiler::startElement(const char16_t *aName,
                                   getter_AddRefs(localname), &namespaceID);
     NS_ENSURE_SUCCESS(rv, rv);
 
+    int32_t idOffset = aIDOffset;
+    if (idOffset > 0) {
+        idOffset /= 2;
+    }
     return startElementInternal(namespaceID, localname, prefix, atts,
-                                aAttrCount);
+                                aAttrCount, idOffset);
 }
 
 nsresult
@@ -171,7 +174,8 @@ txStylesheetCompiler::startElementInternal(int32_t aNamespaceID,
                                            nsIAtom* aLocalName,
                                            nsIAtom* aPrefix,
                                            txStylesheetAttr* aAttributes,
-                                           int32_t aAttrCount)
+                                           int32_t aAttrCount,
+                                           int32_t aIDOffset)
 {
     nsresult rv = NS_OK;
     int32_t i;
@@ -182,16 +186,6 @@ txStylesheetCompiler::startElementInternal(int32_t aNamespaceID,
     // Update the elementcontext if we have special attributes
     for (i = 0; i < aAttrCount; ++i) {
         txStylesheetAttr* attr = aAttributes + i;
-
-        // id
-        if (mEmbedStatus == eNeedEmbed &&
-            attr->mLocalName == nsGkAtoms::id &&
-            attr->mNamespaceID == kNameSpaceID_None &&
-            attr->mValue.Equals(mTarget)) {
-            // We found the right ID, signal to compile the
-            // embedded stylesheet.
-            mEmbedStatus = eInEmbed;
-        }
 
         // xml:space
         if (attr->mNamespaceID == kNameSpaceID_XML &&
@@ -282,6 +276,14 @@ txStylesheetCompiler::startElementInternal(int32_t aNamespaceID,
         }
     }
 
+    if (mEmbedStatus == eNeedEmbed) {
+        // handle embedded stylesheets
+        if (aIDOffset >= 0 && aAttributes[aIDOffset].mValue.Equals(mTarget)) {
+            // We found the right ID, signal to compile the 
+            // embedded stylesheet.
+            mEmbedStatus = eInEmbed;
+        }
+    }
     const txElementHandler* handler;
     do {
         handler = isInstruction ?
@@ -334,7 +336,7 @@ txStylesheetCompiler::endElement()
             nsAutoPtr<txInstruction> instr(new txRemoveVariable(var->mName));
             NS_ENSURE_TRUE(instr, NS_ERROR_OUT_OF_MEMORY);
 
-            rv = addInstruction(Move(instr));
+            rv = addInstruction(instr);
             NS_ENSURE_SUCCESS(rv, rv);
             
             mInScopeVariables.RemoveElementAt(i);
@@ -482,7 +484,7 @@ txStylesheetCompiler::ensureNewElementContext()
     NS_ENSURE_SUCCESS(rv, rv);
 
     mElementContext.forget();
-    mElementContext = Move(context);
+    mElementContext = context;
 
     return NS_OK;
 }
@@ -721,7 +723,7 @@ txStylesheetCompilerState::closeInstructionContainer()
 }
 
 nsresult
-txStylesheetCompilerState::addInstruction(nsAutoPtr<txInstruction>&& aInstruction)
+txStylesheetCompilerState::addInstruction(nsAutoPtr<txInstruction> aInstruction)
 {
     NS_PRECONDITION(mNextInstrPtr, "adding instruction outside container");
 

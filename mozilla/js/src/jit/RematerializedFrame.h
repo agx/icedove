@@ -41,11 +41,10 @@ class RematerializedFrame
     Value thisValue_;
     Value slots_[1];
 
-    RematerializedFrame(ThreadSafeContext *cx, uint8_t *top, InlineFrameIterator &iter);
+    RematerializedFrame(JSContext *cx, uint8_t *top, InlineFrameIterator &iter);
 
   public:
-    static RematerializedFrame *New(ThreadSafeContext *cx, uint8_t *top,
-                                    InlineFrameIterator &iter);
+    static RematerializedFrame *New(JSContext *cx, uint8_t *top, InlineFrameIterator &iter);
 
     bool prevUpToDate() const {
         return prevUpToDate_;

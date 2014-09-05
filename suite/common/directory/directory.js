@@ -113,16 +113,17 @@ function Init()
     // fix bug # 37102: if its a FTP directory
     // ensure it ends with a trailing slash
     if (baseURI.substr(baseURI.length - 1) != "/") {
-      debug("append trailing slash to FTP directory URL\n");
+      debug("append traiing slash to FTP directory URL\n");
       baseURI += "/";
     }
 
-    // Let's also enable the logging window.
-    var node = document.getElementById("main-splitter");
-    node.hidden = false;
+	  // Lets also enable the loggin window.
 
-    node = document.getElementById("logbox");
-    node.hidden = false;
+	  var node = document.getElementById("main-splitter");
+	  node.setAttribute("hidden", false);
+
+	  node = document.getElementById("logbox");
+	  node.setAttribute("hidden", false);
   }
 
   if (baseURI && (baseURI.indexOf("file://") != 0)) {
@@ -183,8 +184,6 @@ function OnClick(event)
     var item = tree.contentView.getItemAtIndex(tree.currentIndex);
     window.content.location.href = item.getAttributeNS(NC_NS, "url");
   }
-
-  return true;
 }
 
 function doSort(aTarget)
@@ -221,6 +220,7 @@ function BeginDragTree (event)
     var url = item.getAttributeNS(NC_NS, "url");
     var desc = item.getAttributeNS(NC_NS, "desc");
     
+    var RDF = Components.classes[RDFSERVICE_CONTRACTID].getService(nsIRDFService);
     var transferable = 
       Components.classes[TRANSFERABLE_CONTRACTID].createInstance(nsITransferable);
     var genDataURL = 
@@ -228,6 +228,8 @@ function BeginDragTree (event)
     var genDataHTML = 
       Components.classes[WSTRING_CONTRACTID].createInstance(nsISupportsString);
     var genData = 
+      Components.classes[WSTRING_CONTRACTID].createInstance(nsISupportsString);
+    var genDataURL = 
       Components.classes[WSTRING_CONTRACTID].createInstance(nsISupportsString);
 
     transferable.init(null);

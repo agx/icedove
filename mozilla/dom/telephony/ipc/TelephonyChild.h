@@ -9,19 +9,17 @@
 #include "mozilla/dom/telephony/TelephonyCommon.h"
 #include "mozilla/dom/telephony/PTelephonyChild.h"
 #include "mozilla/dom/telephony/PTelephonyRequestChild.h"
-#include "nsITelephonyService.h"
+#include "nsITelephonyProvider.h"
 
 BEGIN_TELEPHONY_NAMESPACE
-
-class TelephonyIPCService;
 
 class TelephonyChild : public PTelephonyChild
 {
 public:
-  TelephonyChild(TelephonyIPCService* aService);
+  TelephonyChild(nsITelephonyListener* aListener);
 
 protected:
-  virtual ~TelephonyChild();
+  virtual ~TelephonyChild() {}
 
   virtual void
   ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
@@ -42,7 +40,7 @@ protected:
 
   virtual bool
   RecvNotifyCdmaCallWaiting(const uint32_t& aClientId,
-                            const IPCCdmaWaitingCallData& aData) MOZ_OVERRIDE;
+                            const nsString& aNumber) MOZ_OVERRIDE;
 
   virtual bool
   RecvNotifyConferenceCallStateChanged(const uint16_t& aCallState) MOZ_OVERRIDE;
@@ -57,7 +55,7 @@ protected:
                                  const uint16_t& aNotification) MOZ_OVERRIDE;
 
 private:
-  nsRefPtr<TelephonyIPCService> mService;
+  nsCOMPtr<nsITelephonyListener> mListener;
 };
 
 class TelephonyRequestChild : public PTelephonyRequestChild
@@ -83,7 +81,7 @@ protected:
   RecvNotifyDialError(const nsString& aError) MOZ_OVERRIDE;
 
   virtual bool
-  RecvNotifyDialSuccess(const uint32_t& aCallIndex) MOZ_OVERRIDE;
+  RecvNotifyDialSuccess() MOZ_OVERRIDE;
 
 private:
   nsCOMPtr<nsITelephonyListener> mListener;

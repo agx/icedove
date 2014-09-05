@@ -36,10 +36,14 @@ using mozilla::RotateLeft;
 bool
 ShapeTable::init(ThreadSafeContext *cx, Shape *lastProp)
 {
-    uint32_t sizeLog2 = CeilingLog2Size(entryCount);
-    uint32_t size = JS_BIT(sizeLog2);
-    if (entryCount >= size - (size >> 2))
-        sizeLog2++;
+    /*
+     * Either we're creating a table for a large scope that was populated
+     * via property cache hit logic under JSOP_INITPROP, JSOP_SETNAME, or
+     * JSOP_SETPROP; or else calloc failed at least once already. In any
+     * event, let's try to grow, overallocating to hold at least twice the
+     * current population.
+     */
+    uint32_t sizeLog2 = CeilingLog2Size(2 * entryCount);
     if (sizeLog2 < MIN_SIZE_LOG2)
         sizeLog2 = MIN_SIZE_LOG2;
 
@@ -686,7 +690,7 @@ js::NewReshapedObject(JSContext *cx, HandleTypeObject type, JSObject *parent,
         }
         Shape *nshape = shape;
         while (!nshape->isEmptyShape()) {
-            ids[nshape->slot()].set(nshape->propid());
+            ids[nshape->slot()] = nshape->propid();
             nshape = nshape->previous();
         }
     }
@@ -1522,7 +1526,7 @@ BaseShape::assertConsistency()
 void
 JSCompartment::sweepBaseShapeTable()
 {
-    gcstats::AutoPhase ap(runtimeFromMainThread()->gc.stats,
+    gcstats::AutoPhase ap(runtimeFromMainThread()->gcStats,
                           gcstats::PHASE_SWEEP_TABLES_BASE_SHAPE);
 
     if (baseShapes.initialized()) {
@@ -1549,7 +1553,7 @@ InitialShapeEntry::InitialShapeEntry() : shape(nullptr), proto(nullptr)
 }
 
 inline
-InitialShapeEntry::InitialShapeEntry(const ReadBarrieredShape &shape, TaggedProto proto)
+InitialShapeEntry::InitialShapeEntry(const ReadBarriered<Shape> &shape, TaggedProto proto)
   : shape(shape), proto(proto)
 {
 }
@@ -1663,14 +1667,15 @@ JSCompartment::checkInitialShapesTableAfterMovingGC()
      * initialShapes that points into the nursery, and that the hash table
      * entries are discoverable.
      */
+    JS::shadow::Runtime *rt = JS::shadow::Runtime::asShadowRuntime(runtimeFromMainThread());
     for (InitialShapeSet::Enum e(initialShapes); !e.empty(); e.popFront()) {
         InitialShapeEntry entry = e.front();
         TaggedProto proto = entry.proto;
         Shape *shape = entry.shape.get();
 
-        JS_ASSERT_IF(proto.isObject(), !IsInsideNursery(proto.toObject()));
-        JS_ASSERT_IF(shape->getObjectParent(), !IsInsideNursery(shape->getObjectParent()));
-        JS_ASSERT_IF(shape->getObjectMetadata(), !IsInsideNursery(shape->getObjectMetadata()));
+        JS_ASSERT_IF(proto.isObject(), !IsInsideNursery(rt, proto.toObject()));
+        JS_ASSERT(!IsInsideNursery(rt, shape->getObjectParent()));
+        JS_ASSERT(!IsInsideNursery(rt, shape->getObjectMetadata()));
 
         InitialShapeEntry::Lookup lookup(shape->getObjectClass(),
                                          proto,
@@ -1720,18 +1725,18 @@ EmptyShape::getInitialShape(ExclusiveContext *cx, const Class *clasp, TaggedProt
     new (shape) EmptyShape(nbase, nfixed);
 
     Lookup lookup(clasp, protoRoot, parentRoot, metadataRoot, nfixed, objectFlags);
-    if (!p.add(cx, table, lookup, InitialShapeEntry(ReadBarrieredShape(shape), protoRoot)))
+    if (!p.add(cx, table, lookup, InitialShapeEntry(shape, protoRoot)))
         return nullptr;
 
 #ifdef JSGC_GENERATIONAL
     if (cx->hasNursery()) {
-        if ((protoRoot.isObject() && IsInsideNursery(protoRoot.toObject())) ||
-            IsInsideNursery(parentRoot.get()) ||
-            IsInsideNursery(metadataRoot.get()))
+        if ((protoRoot.isObject() && cx->nursery().isInside(protoRoot.toObject())) ||
+            cx->nursery().isInside(parentRoot.get()) ||
+            cx->nursery().isInside(metadataRoot.get()))
         {
             InitialShapeSetRef ref(
                 &table, clasp, protoRoot, parentRoot, metadataRoot, nfixed, objectFlags);
-            cx->asJSContext()->runtime()->gc.storeBuffer.putGeneric(ref);
+            cx->asJSContext()->runtime()->gcStoreBuffer.putGeneric(ref);
         }
     }
 #endif
@@ -1757,7 +1762,7 @@ NewObjectCache::invalidateEntriesForShape(JSContext *cx, HandleShape shape, Hand
         kind = GetBackgroundAllocKind(kind);
 
     Rooted<GlobalObject *> global(cx, &shape->getObjectParent()->global());
-    Rooted<types::TypeObject *> type(cx, cx->getNewType(clasp, TaggedProto(proto)));
+    Rooted<types::TypeObject *> type(cx, cx->getNewType(clasp, proto.get()));
 
     EntryIndex entry;
     if (lookupGlobal(clasp, global, kind, &entry))
@@ -1788,7 +1793,7 @@ EmptyShape::insertInitialShape(ExclusiveContext *cx, HandleShape shape, HandleOb
     JS_ASSERT(nshape == entry.shape);
 #endif
 
-    entry.shape = ReadBarrieredShape(shape);
+    entry.shape = shape.get();
 
     /*
      * This affects the shape that will be produced by the various NewObject
@@ -1809,7 +1814,7 @@ EmptyShape::insertInitialShape(ExclusiveContext *cx, HandleShape shape, HandleOb
 void
 JSCompartment::sweepInitialShapeTable()
 {
-    gcstats::AutoPhase ap(runtimeFromMainThread()->gc.stats,
+    gcstats::AutoPhase ap(runtimeFromMainThread()->gcStats,
                           gcstats::PHASE_SWEEP_TABLES_INITIAL_SHAPE);
 
     if (initialShapes.initialized()) {
@@ -1826,8 +1831,7 @@ JSCompartment::sweepInitialShapeTable()
                 JS_ASSERT(parent == shape->getObjectParent());
 #endif
                 if (shape != entry.shape || proto != entry.proto.raw()) {
-                    ReadBarrieredShape readBarrieredShape(shape);
-                    InitialShapeEntry newKey(readBarrieredShape, TaggedProto(proto));
+                    InitialShapeEntry newKey(shape, proto);
                     e.rekeyFront(newKey.getLookup(), newKey);
                 }
             }

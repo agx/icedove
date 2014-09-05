@@ -184,18 +184,10 @@ function SelectServer(server)
 var gThreePaneIncomingServerListener = {
     onServerLoaded: function(server) {},
     onServerUnloaded: function(server) {
-      let defaultServer;
-      try {
-        defaultServer = accountManager.defaultAccount.incomingServer;
-      } catch (e) {
-       // If there is no default server we have nothing to do.
-       return;
-      }
-
       var selectedFolders = GetSelectedMsgFolders();
       for (var i = 0; i < selectedFolders.length; i++) {
         if (ServerContainsFolder(server, selectedFolders[i])) {
-          SelectServer(defaultServer);
+          SelectServer(accountManager.defaultAccount.incomingServer);
           // we've made a new selection, we're done
           return;
         }
@@ -205,7 +197,7 @@ var gThreePaneIncomingServerListener = {
       // this could happen if nothing was selected when the server was removed
       selectedFolders = GetSelectedMsgFolders();
       if (selectedFolders.length == 0) {
-        SelectServer(defaultServer);
+        SelectServer(accountManager.defaultAccount.incomingServer);
       }
     },
     onServerChanged: function(server) {
@@ -433,6 +425,8 @@ function OnLoadMessenger()
     }
   }
 #endif
+
+  ToolbarIconColor.init();
 
   // Set a sane starting width/height for all resolutions on new profiles.
   // Do this before the window loads.
@@ -695,6 +689,8 @@ function OnUnloadMessenger()
   sessionStoreManager.unloadingWindow(window);
 
   TabsInTitlebar.uninit();
+
+  ToolbarIconColor.uninit();
 
   LightweightThemeListener.uninit();
 
@@ -1963,6 +1959,8 @@ let TabsInTitlebar = {
       titlebar.style.marginBottom = "";
       menubar.style.paddingBottom = "";
     }
+
+    ToolbarIconColor.inferFromText();
   },
 
   _sizePlaceholder: function (type, width) {

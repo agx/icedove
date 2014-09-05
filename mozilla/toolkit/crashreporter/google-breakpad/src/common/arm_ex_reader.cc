@@ -487,16 +487,14 @@ void ExceptionTableInfo::Start()
     // create CFI entries that Breakpad can use.  This can also fail.
     // First, add a new stack frame entry, into which ExtabEntryDecode
     // will write the CFI entries.
-    if (!handler_->HasStackFrame(addr, next_addr - addr)) {
-      handler_->AddStackFrame(addr, next_addr - addr);
-      int ret = ExtabEntryDecode(buf, buf_used);
-      if (ret < 0) {
-	handler_->DeleteStackFrame();
-	BPLOG(INFO) << "ExtabEntryDecode: failed with error code: " << ret;
-	continue;
-      }
-      handler_->SubmitStackFrame();
+    handler_->AddStackFrame(addr, next_addr - addr);
+    int ret = ExtabEntryDecode(buf, buf_used);
+    if (ret < 0) {
+      handler_->DeleteStackFrame();
+      BPLOG(INFO) << "ExtabEntryDecode: failed with error code: " << ret;
+      continue;
     }
+    handler_->SubmitStackFrame();
 
   } /* iterating over .exidx */
 }

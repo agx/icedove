@@ -60,8 +60,8 @@ enum UIStateChangeType
 };
 
 #define NS_PIDOMWINDOW_IID \
-{ 0x33403513, 0x6e4a, 0x4985, \
-  { 0x99, 0x8d, 0xfc, 0x02, 0x81, 0x6e, 0xb9, 0xf2 } }
+{ 0xf26953de, 0xa799, 0x4a92, \
+  { 0x87, 0x49, 0x7c, 0x37, 0xe5, 0x90, 0x3f, 0x37 } }
 
 class nsPIDOMWindow : public nsIDOMWindowInternal
 {
@@ -188,7 +188,7 @@ public:
     return mDoc;
   }
 
-  virtual bool IsRunningTimeout() = 0;
+  virtual NS_HIDDEN_(bool) IsRunningTimeout() = 0;
 
   // Audio API
   bool GetAudioMuted() const;
@@ -278,7 +278,6 @@ public:
 
   // Set the window up with an about:blank document with the current subject
   // principal.
-  // Outer windows only.
   virtual void SetInitialPrincipalToSubject() = 0;
 
   virtual PopupControlState PushPopupControlState(PopupControlState aState,
@@ -365,8 +364,7 @@ public:
     return !IsInnerWindow();
   }
 
-  // Outer windows only.
-  virtual bool WouldReuseInnerWindow(nsIDocument* aNewDocument) = 0;
+  virtual bool WouldReuseInnerWindow(nsIDocument *aNewDocument) = 0;
 
   /**
    * Get the docshell in this window.
@@ -426,9 +424,8 @@ public:
   virtual void EnterModalState() = 0;
   virtual void LeaveModalState() = 0;
 
-  // Outer windows only.
   virtual bool CanClose() = 0;
-  virtual void ForceClose() = 0;
+  virtual nsresult ForceClose() = 0;
 
   bool IsModalContentWindow() const
   {
@@ -466,21 +463,6 @@ public:
   bool HasTouchEventListeners()
   {
     return mMayHaveTouchEventListener;
-  }
-
-   /**
-   * Will be called when touch caret visibility has changed. mMayHaveTouchCaret
-   * is set if that some node (this window, its document, or content in that
-   * document) has a visible touch caret.
-   */
-  void SetMayHaveTouchCaret(bool aSetValue)
-  {
-    mMayHaveTouchCaret = aSetValue;
-  }
-
-  bool MayHaveTouchCaret()
-  {
-    return mMayHaveTouchCaret;
   }
 
   /**
@@ -776,7 +758,6 @@ protected:
   bool                   mIsInnerWindow;
   bool                   mMayHavePaintEventListener;
   bool                   mMayHaveTouchEventListener;
-  bool                   mMayHaveTouchCaret;
   bool                   mMayHaveMouseEnterLeaveEventListener;
   bool                   mMayHavePointerEnterLeaveEventListener;
 

@@ -1846,9 +1846,11 @@ nsNavHistoryQueryResultNode::nsNavHistoryQueryResultNode(
 nsNavHistoryQueryResultNode::~nsNavHistoryQueryResultNode() {
   // Remove this node from result's observers.  We don't need to be notified
   // anymore.
-  if (mResult && mResult->mAllBookmarksObservers.Contains(this))
+  if (mResult && mResult->mAllBookmarksObservers.IndexOf(this) !=
+                   mResult->mAllBookmarksObservers.NoIndex)
     mResult->RemoveAllBookmarksObserver(this);
-  if (mResult && mResult->mHistoryObservers.Contains(this))
+  if (mResult && mResult->mHistoryObservers.IndexOf(this) !=
+                   mResult->mHistoryObservers.NoIndex)
     mResult->RemoveHistoryObserver(this);
 }
 

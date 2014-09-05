@@ -149,7 +149,7 @@ public:
     return IsPACURI(tmp);
   }
 
-  nsresult Init(nsISystemProxySettings *);
+  NS_HIDDEN_(nsresult) Init(nsISystemProxySettings *);
   static nsPACMan *sInstance;
 
   // PAC thread operations only

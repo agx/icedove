@@ -634,10 +634,9 @@ nsNSSCertificateDB::ImportEmailCertificate(uint8_t * data, uint32_t length,
 
     mozilla::pkix::ScopedCERTCertList certChain;
 
-    SECStatus rv = certVerifier->VerifyCert(node->cert,
+    SECStatus rv = certVerifier->VerifyCert(node->cert, nullptr,
                                             certificateUsageEmailRecipient,
-                                            now, ctx, nullptr, 0,
-                                            nullptr, &certChain);
+                                            now, ctx, 0, &certChain);
 
     if (rv != SECSuccess) {
       nsCOMPtr<nsIX509Cert> certToShow = nsNSSCertificate::Create(node->cert);
@@ -802,10 +801,9 @@ nsNSSCertificateDB::ImportValidCACertsInList(CERTCertList *certList, nsIInterfac
        !CERT_LIST_END(node,certList);
        node = CERT_LIST_NEXT(node)) {
     mozilla::pkix::ScopedCERTCertList certChain;
-    SECStatus rv = certVerifier->VerifyCert(node->cert,
+    SECStatus rv = certVerifier->VerifyCert(node->cert, nullptr,
                                             certificateUsageVerifyCA,
-                                            PR_Now(), ctx, nullptr, 0, nullptr,
-                                            &certChain);
+                                            PR_Now(), ctx, 0, &certChain);
     if (rv != SECSuccess) {
       nsCOMPtr<nsIX509Cert> certToShow = nsNSSCertificate::Create(node->cert);
       DisplayCertificateAlert(ctx, "NotImportingUnverifiedCert", certToShow, proofOfLock);
@@ -1383,10 +1381,9 @@ nsNSSCertificateDB::FindCertByEmailAddress(nsISupports *aToken, const char *aEma
        !CERT_LIST_END(node, certlist);
        node = CERT_LIST_NEXT(node)) {
 
-    SECStatus srv = certVerifier->VerifyCert(node->cert,
+    SECStatus srv = certVerifier->VerifyCert(node->cert, nullptr,
                                              certificateUsageEmailRecipient,
-                                             PR_Now(), nullptr /*XXX pinarg*/,
-                                             nullptr /*hostname*/);
+                                             PR_Now(), nullptr /*XXX pinarg*/);
     if (srv == SECSuccess) {
       break;
     }
@@ -1775,12 +1772,10 @@ nsNSSCertificateDB::VerifyCertNow(nsIX509Cert* aCert,
   SECOidTag evOidPolicy;
   SECStatus srv;
 
-  srv = certVerifier->VerifyCert(nssCert,
+  srv = certVerifier->VerifyCert(nssCert, nullptr,
                                  aUsage, PR_Now(),
                                  nullptr, // Assume no context
-                                 nullptr, // hostname
                                  aFlags,
-                                 nullptr, // stapledOCSPResponse
                                  &resultChain,
                                  &evOidPolicy);
 

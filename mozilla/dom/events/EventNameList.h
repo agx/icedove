@@ -293,6 +293,7 @@ EVENT(mozpointerlockerror,
       NS_POINTERLOCKERROR,
       EventNameType_HTML,
       NS_EVENT)
+
 EVENT(pointerdown,
       NS_POINTER_DOWN,
       EventNameType_All,
@@ -462,10 +463,6 @@ BEFOREUNLOAD_EVENT(beforeunload,
 WINDOW_EVENT(hashchange,
              NS_HASHCHANGE,
              EventNameType_XUL | EventNameType_HTMLBodyOrFramesetOnly,
-             NS_EVENT)
-WINDOW_EVENT(languagechange,
-             NS_LANGUAGECHANGE,
-             EventNameType_HTMLBodyOrFramesetOnly,
              NS_EVENT)
 // XXXbz Should the onmessage attribute on <body> really not work?  If so, do we
 // need a different macro to flag things like that (IDL, but not content

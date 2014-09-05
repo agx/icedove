@@ -33,8 +33,8 @@ class CompileRuntime
 
     js::PerThreadData *mainThread();
 
-    // &mainThread.jitTop
-    const void *addressOfJitTop();
+    // &mainThread.ionTop
+    const void *addressOfIonTop();
 
     // rt->mainThread.jitStackLimit;
     const void *addressOfJitStackLimit();
@@ -68,7 +68,6 @@ class CompileRuntime
     bool signalHandlersInstalled();
     bool jitSupportsFloatingPoint();
     bool hadOutOfMemory();
-    bool profilingScripts();
 
     const JSAtomState &names();
     const StaticStrings &staticStrings();
@@ -129,7 +128,7 @@ class JitCompileOptions
 {
   public:
     JitCompileOptions();
-    explicit JitCompileOptions(JSContext *cx);
+    JitCompileOptions(JSContext *cx);
 
     bool cloneSingletons() const {
         return cloneSingletons_;

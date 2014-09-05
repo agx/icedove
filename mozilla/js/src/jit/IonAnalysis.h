@@ -31,15 +31,6 @@ enum Observability {
 bool
 EliminatePhis(MIRGenerator *mir, MIRGraph &graph, Observability observe);
 
-size_t
-MarkLoopBlocks(MIRGraph &graph, MBasicBlock *header, bool *canOsr);
-
-void
-UnmarkLoopBlocks(MIRGraph &graph, MBasicBlock *header);
-
-bool
-MakeLoopsContiguous(MIRGraph &graph);
-
 bool
 EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph);
 
@@ -72,6 +63,9 @@ AssertExtendedGraphCoherency(MIRGraph &graph);
 
 bool
 EliminateRedundantChecks(MIRGraph &graph);
+
+bool
+UnsplitEdges(LIRGraph *lir);
 
 class MDefinition;
 
@@ -108,7 +102,7 @@ struct LinearTerm
 class LinearSum
 {
   public:
-    explicit LinearSum(TempAllocator &alloc)
+    LinearSum(TempAllocator &alloc)
       : terms_(alloc),
         constant_(0)
     {

@@ -14,8 +14,6 @@
 #include "nsILocalFile.h"
 #include "nsIRemoteOpenFileListener.h"
 
-class nsILoadContext;
-
 namespace mozilla {
 
 namespace ipc {
@@ -74,8 +72,7 @@ public:
   // Note: currently only PR_RDONLY is supported for 'flags'
   nsresult AsyncRemoteFileOpen(int32_t aFlags,
                                nsIRemoteOpenFileListener* aListener,
-                               nsITabChild* aTabChild,
-                               nsILoadContext *aLoadContext);
+                               nsITabChild* aTabChild);
 
   void ReleaseIPDLReference()
   {

@@ -2,47 +2,14 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-Components.utils.import("resource://gre/modules/CharsetMenu.jsm");
-
 var gCharset="";
 var gTitleWasEdited = false;
 var gCharsetWasChanged = false;
 var gInsertNewContentType = false;
 var gContenttypeElement;
 var gInitDone = false;
-var gCharsetInfo;
 
 //Cancel() is in EdDialogCommon.js
-
-var gCharsetView = {
-  get rowCount() { return gCharsetInfo.length; },
-  selection: null,
-  getRowProperties: function(index) { return ""; },
-  getCellProperties: function(index, column) { return ""; },
-  getColumnProperties: function(columm) { return ""; },
-  isContainer: function() { return false; },
-  isContainerOpen: function() { return false; },
-  isContainerEmpty: function() { return true; },
-  isSeparator: function() { return false; },
-  isSorted: function() { return false; },
-  canDrop: function(index, orientation) { return false; },
-  drop: function(index, orientation) {},
-  getParentIndex: function(index) { return -1; },
-  hasNextSibling: function(index, after) { return false; },
-  getLevel: function(index) { return 1; },
-  getImageSrc: function(index) { return null; },
-  getProgressMode: function(index) { return 0; },
-  getCellValue: function(index) { return ""; },
-  getCellText: function(index) { return gCharsetInfo[index].label; },
-  toggleOpenState: function(index) {},
-  cycleHeader: function(column) {},
-  selectionChanged: function() {},
-  cycleCell: function(index, column) {},
-  isEditable: function isEditable(index, column) { return false; },
-  isSelectable: function isSelectable(index, column) { return true; },
-  performAction: function performAction(action) {},
-  performActionOnCell: function performActionOnCell(action, index, column) {}
-};
 
 function Startup()
 {
@@ -52,6 +19,8 @@ function Startup()
     window.close();
     return;
   }
+
+  Services.obs.notifyObservers(null, "charsetmenu-selected", "other");
 
   gDialog.TitleInput    = document.getElementById("TitleInput");
   gDialog.charsetTree   = document.getElementById('CharsetTree'); 
@@ -72,11 +41,6 @@ function Startup()
   try {
     gCharset = editor.documentCharacterSet;
   } catch (e) {}
-
-  var data = CharsetMenu.getData();
-  var charsets = data.pinnedCharsets.concat(data.otherCharsets);
-  gCharsetInfo = CharsetMenu.getCharsetInfo(charsets.map(info => info.value));
-  gDialog.charsetTree.view = gCharsetView;
 
   InitDialog();
 
@@ -101,8 +65,9 @@ function InitDialog()
 {
   gDialog.TitleInput.value = GetDocumentTitle();
 
+  var RDF = Components.classes["@mozilla.org/rdf/rdf-service;1"].getService(Components.interfaces.nsIRDFService);
   var tree = gDialog.charsetTree;
-  var index = gCharsetInfo.map(info => info.value).indexOf(gCharset);
+  var index = tree.view.getIndexOfResource(RDF.GetResource(gCharset));
   if (index >= 0) {
     tree.view.selection.select(index);
     tree.treeBoxObject.ensureRowIsVisible(index);
@@ -135,13 +100,23 @@ function onAccept()
 }
 
 
+function readRDFString(aDS,aRes,aProp) 
+{
+  var n = aDS.GetTarget(aRes, aProp, true);
+  if (n)
+    return n.QueryInterface(Components.interfaces.nsIRDFLiteral).Value;
+  else
+    return "";
+}
+
+      
 function SelectCharset()
 {
   if(gInitDone) 
   {
     try 
-    {
-      gCharset = gCharsetInfo[gDialog.charsetTree.currentIndex].value;
+	{
+      gCharset = gDialog.charsetTree.builderView.getResourceAtIndex(gDialog.charsetTree.currentIndex).Value;
       if (gCharset)
         gCharsetWasChanged = true;
     }

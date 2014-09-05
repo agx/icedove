@@ -104,7 +104,7 @@ function goUpdateConsoleCommands() {
         </toolbarbutton>
         <toolbarbutton label="&btnPageCSS.label;" type="menu-button"
                        category="css" class="devtools-toolbarbutton webconsole-filter-button"
-                       tooltiptext="&btnPageCSS.tooltip2;"
+                       tooltiptext="&btnPageCSS.tooltip;"
                        accesskey="&btnPageCSS.accesskey;"
                        tabindex="4">
           <menupopup>
@@ -173,16 +173,15 @@ function goUpdateConsoleCommands() {
       <hbox id="output-wrapper" flex="1" context="output-contextmenu" tooltip="aHTMLTooltip">
         <div xmlns="http://www.w3.org/1999/xhtml" id="output-container" tabindex="1" />
       </hbox>
-      <notificationbox id="webconsole-notificationbox">
-        <hbox class="jsterm-input-container" style="direction:ltr">
-          <stack class="jsterm-stack-node" flex="1">
-            <textbox class="jsterm-complete-node devtools-monospace"
-                     multiline="true" rows="1" tabindex="-1"/>
-            <textbox class="jsterm-input-node devtools-monospace"
-                     multiline="true" rows="1" tabindex="0"/>
-          </stack>
-        </hbox>
-      </notificationbox>
+
+      <hbox class="jsterm-input-container" style="direction:ltr">
+        <stack class="jsterm-stack-node" flex="1">
+          <textbox class="jsterm-complete-node devtools-monospace"
+                   multiline="true" rows="1" tabindex="-1"/>
+          <textbox class="jsterm-input-node devtools-monospace"
+                   multiline="true" rows="1" tabindex="0"/>
+        </stack>
+      </hbox>
     </vbox>
 
     <splitter class="devtools-side-splitter"/>

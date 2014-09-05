@@ -21,7 +21,8 @@
   min-width: 30px;
   min-height: 28px;
   margin: 0;
-  list-style-image: url(profiler-stopwatch.svg);
+  list-style-image: url(profiler-stopwatch.png);
+  -moz-image-region: rect(0px,16px,16px,0px);
 }
 
 #requests-menu-perf-notice-button .button-text {
@@ -406,11 +407,6 @@ label.requests-menu-status-code {
   -moz-image-region: rect(0px,16px,16px,0px);
 }
 
-#details-pane-toggle > .toolbarbutton-icon {
-  width: 16px;
-  height: 16px;
-}
-
 #details-pane-toggle[pane-collapsed] {
   list-style-image: url("chrome://browser/skin/devtools/debugger-expand.png");
 }
@@ -419,25 +415,10 @@ label.requests-menu-status-code {
   -moz-image-region: rect(0px,32px,16px,16px);
 }
 
-@media (min-resolution: 2dppx) {
-  #details-pane-toggle {
-    list-style-image: url("chrome://browser/skin/devtools/debugger-collapse@2x.png");
-    -moz-image-region: rect(0px,32px,32px,0px);
-  }
-
-  #details-pane-toggle[pane-collapsed] {
-    list-style-image: url("chrome://browser/skin/devtools/debugger-expand@2x.png");
-  }
-
-  #details-pane-toggle:active {
-    -moz-image-region: rect(0px,64px,32px,32px);
-  }
-}
-
 /* Network request details tabpanels */
 
 .theme-dark .tabpanel-content {
-  background-color: #343c45; /* Toolbars */
+  background: url(background-noise-toolbar.png), #343c45; /* Toolbars */
   color: #f5f7fa; /* Light foreground text */
 }
 
@@ -481,12 +462,12 @@ label.requests-menu-status-code {
 }
 
 .theme-dark  #response-content-info-header {
-  background-color: #eb5368; /* Red highlight */
+  background: url(background-noise-toolbar.png), #eb5368; /* Red highlight */
   color: #f5f7fa; /* Light foreground text */
 }
 
 .theme-light  #response-content-info-header {
-  background-color: #ed2655; /* Red highlight */
+  background: url(background-noise-toolbar.png), #ed2655; /* Red highlight */
   color: #f5f7fa; /* Light foreground text */
 }
 
@@ -551,13 +532,13 @@ label.requests-menu-status-code {
 .theme-dark #requests-menu-footer {
   border-top: 1px solid @table_itemDarkStartBorder@;
   box-shadow: 0 1px 0 @table_itemDarkEndBorder@ inset;
-  background-color: #343c45; /* Toolbars */
+  background: url(background-noise-toolbar.png), #343c45; /* Toolbars */
 }
 
 .theme-light #requests-menu-footer {
   border-top: 1px solid @table_itemLightStartBorder@;
   box-shadow: 0 1px 0 @table_itemLightEndBorder@ inset;
-  background-color: #f0f1f2; /* Toolbars */
+  background: url(background-noise-toolbar.png), #f0f1f2; /* Toolbars */
 }
 
 .requests-menu-footer-button,
@@ -632,7 +613,8 @@ label.requests-menu-status-code {
   background: none;
   box-shadow: none;
   border-color: transparent;
-  list-style-image: url(profiler-stopwatch.svg);
+  list-style-image: url(profiler-stopwatch.png);
+  -moz-image-region: rect(0px,16px,16px,0px);
   -moz-padding-end: 0;
   cursor: pointer;
 }
@@ -676,11 +658,11 @@ label.requests-menu-status-code {
 }
 
 .theme-dark #network-statistics-charts {
-  background-color: #343c45; /* Toolbars */
+  background: url(background-noise-toolbar.png), #343c45; /* Toolbars */
 }
 
 .theme-light #network-statistics-charts {
-  background-color: #f0f1f2; /* Toolbars */
+  background: url(background-noise-toolbar.png), #f0f1f2; /* Toolbars */
 }
 
 #network-statistics-charts .pie-chart-container {

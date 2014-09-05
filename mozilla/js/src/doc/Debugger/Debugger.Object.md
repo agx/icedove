@@ -91,14 +91,12 @@ from its prototype:
     If a function has no name, SpiderMonkey attempts to infer an appropriate
     name for it given its context. For example:
 
-    ```language-js
-    function f() {}          // display name: f (the given name)
-    var g = function () {};  // display name: g
-    o.p = function () {};    // display name: o.p
-    var q = {
-      r: function () {}      // display name: q.r
-    };
-    ```
+        function f() {}          // display name: f (the given name)
+        var g = function () {};  // display name: g
+        o.p = function () {};    // display name: o.p
+        var q = {
+          r: function () {}      // display name: q.r
+        };
 
     Note that the display name may not be a proper JavaScript identifier,
     or even a proper expression: we attempt to find helpful names even when
@@ -108,13 +106,11 @@ from its prototype:
     refer to a function that occurs somewhere within an expression that is
     assigned to <i>a</i>. For example:
 
-    ```language-js
-    function h() {
-      var i = function() {};    // display name: h/i
-      f(function () {});        // display name: h/<
-    }
-    var s = f(function () {});  // display name: s<
-    ```
+        function h() {
+          var i = function() {};    // display name: h/i
+          f(function () {});        // display name: h/<
+        }
+        var s = f(function () {});  // display name: s<
 
 `parameterNames`
 :   If the referent is a debuggee function, the names of the its parameters,
@@ -131,16 +127,12 @@ from its prototype:
     reflect the structure of the parameters. For example, if the referent is
     a function declared in this way:
 
-    ```language-js
-    function f(a, [b, c], {d, e:f}) { ... }
-    ```
+        function f(a, [b, c], {d, e:f}) { ... }
 
     then this `Debugger.Object` instance's `parameterNames` property would
     have the value:
 
-    ```language-js
-    ["a", ["b", "c"], {d:"d", e:"f"}]
-    ```
+        ["a", ["b", "c"], {d:"d", e:"f"}]
 
 `script`
 :   If the referent is a function that is debuggee code, this is that
@@ -202,9 +194,7 @@ from its prototype:
     example, in Firefox, a metadata object for a JavaScript Module's global
     object might look like this:
 
-    ```language-js
-    { "type":"jsm", "uri":"resource:://gre/modules/XPCOMUtils.jsm" }
-    ```
+        { "type":"jsm", "uri":"resource:://gre/modules/XPCOMUtils.jsm" }
 
     Firefox provides [DebuggerHostAnnotationsForFirefox annotations] for its
     host objects.

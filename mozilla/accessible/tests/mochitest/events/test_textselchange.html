@@ -46,8 +46,7 @@
                                     new textSelectionChecker("ta1", 0, 1),
                                     { shiftKey: true }));
       gQueue.push(new synthLeftKey("ta1",
-                                    [new textSelectionChecker("ta1", 0, 0),
-                                     new caretMoveChecker(0, "ta1")]));
+                                    new textSelectionChecker("ta1", 0, 0)));
 
       gQueue.invoke(); // Will call SimpleTest.finish();
     }

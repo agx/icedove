@@ -8,7 +8,6 @@
 
 #include "mozilla/Assertions.h"         // for MOZ_ASSERT, etc.
 #include "mozilla/TypedEnum.h"          // for MOZ_BEGIN_ENUM_CLASS, etc.
-#include "mozilla/dom/Text.h"
 #include "nsAutoPtr.h"                  // for nsRefPtr
 #include "nsCOMArray.h"                 // for nsCOMArray
 #include "nsCOMPtr.h"                   // for already_AddRefed, nsCOMPtr
@@ -68,7 +67,6 @@ class nsString;
 class nsTransactionManager;
 
 namespace mozilla {
-class ErrorResult;
 class TextComposition;
 
 namespace dom {
@@ -76,7 +74,6 @@ class DataTransfer;
 class Element;
 class EventTarget;
 class Selection;
-class Text;
 }  // namespace dom
 }  // namespace mozilla
 
@@ -191,17 +188,12 @@ public:
 
 public:
 
-  nsresult MarkNodeDirty(nsINode* aNode);
   virtual bool IsModifiableNode(nsINode *aNode);
 
   NS_IMETHOD InsertTextImpl(const nsAString& aStringToInsert, 
                                nsCOMPtr<nsIDOMNode> *aInOutNode, 
                                int32_t *aInOutOffset,
                                nsIDOMDocument *aDoc);
-  nsresult InsertTextIntoTextNodeImpl(const nsAString& aStringToInsert,
-                                      nsINode* aTextNode,
-                                      int32_t aOffset,
-                                      bool aSuppressIME = false);
   nsresult InsertTextIntoTextNodeImpl(const nsAString& aStringToInsert, 
                                       nsIDOMCharacterData *aTextNode, 
                                       int32_t aOffset,
@@ -213,8 +205,6 @@ public:
 
   /* helper routines for node/parent manipulations */
   nsresult DeleteNode(nsINode* aNode);
-  nsresult InsertNode(nsIContent* aContent, nsINode* aParent,
-                      int32_t aPosition);
   nsresult ReplaceContainer(nsINode* inNode,
                             mozilla::dom::Element** outNode,
                             const nsAString& aNodeType,
@@ -247,9 +237,10 @@ public:
   /* Method to replace certain CreateElementNS() calls. 
      Arguments:
       nsString& aTag          - tag you want
+      nsIContent** aContent   - returned Content that was created with above namespace.
   */
-  already_AddRefed<mozilla::dom::Element>
-    CreateHTMLContent(const nsAString& aTag, mozilla::ErrorResult& rv);
+  nsresult CreateHTMLContent(const nsAString& aTag,
+                             mozilla::dom::Element** aContent);
 
   // IME event handlers
   virtual nsresult BeginIMEComposition(mozilla::WidgetCompositionEvent* aEvent);
@@ -264,21 +255,21 @@ protected:
 
   /** create a transaction for setting aAttribute to aValue on aElement
     */
-  NS_IMETHOD CreateTxnForSetAttribute(nsIDOMElement *aElement,
-                                      const nsAString &  aAttribute,
+  NS_IMETHOD CreateTxnForSetAttribute(nsIDOMElement *aElement, 
+                                      const nsAString &  aAttribute, 
                                       const nsAString &  aValue,
                                       ChangeAttributeTxn ** aTxn);
 
   /** create a transaction for removing aAttribute on aElement
     */
-  NS_IMETHOD CreateTxnForRemoveAttribute(nsIDOMElement *aElement,
+  NS_IMETHOD CreateTxnForRemoveAttribute(nsIDOMElement *aElement, 
                                          const nsAString &  aAttribute,
                                          ChangeAttributeTxn ** aTxn);
 
   /** create a transaction for creating a new child node of aParent of type aTag.
     */
   NS_IMETHOD CreateTxnForCreateElement(const nsAString & aTag,
-                                       nsIDOMNode      *aParent,
+                                       nsIDOMNode     *aParent,
                                        int32_t         aPosition,
                                        CreateElementTxn ** aTxn);
 
@@ -330,13 +321,6 @@ protected:
   NS_IMETHOD DeleteText(nsIDOMCharacterData *aElement,
                         uint32_t             aOffset,
                         uint32_t             aLength);
-
-  inline nsresult DeleteText(mozilla::dom::Text* aText, uint32_t aOffset,
-                             uint32_t aLength)
-  {
-    return DeleteText(static_cast<nsIDOMCharacterData*>(GetAsDOMNode(aText)),
-                      aOffset, aLength);
-  }
 
 //  NS_IMETHOD DeleteRange(nsIDOMRange *aRange);
 
@@ -600,15 +584,14 @@ public:
   bool IsDescendantOfEditorRoot(nsINode* aNode);
 
   /** returns true if aNode is a container */
-  virtual bool IsContainer(nsINode* aNode);
-  virtual bool IsContainer(nsIDOMNode* aNode);
+  virtual bool IsContainer(nsIDOMNode *aNode);
 
   /** returns true if aNode is an editable node */
   bool IsEditable(nsIDOMNode *aNode);
-  virtual bool IsEditable(nsINode* aNode);
+  virtual bool IsEditable(nsIContent *aNode);
 
   /** returns true if aNode is a MozEditorBogus node */
-  bool IsMozEditorBogusNode(nsINode* aNode);
+  bool IsMozEditorBogusNode(nsIContent *aNode);
 
   /** counts number of editable child nodes */
   uint32_t CountEditableChildren(nsINode* aNode);

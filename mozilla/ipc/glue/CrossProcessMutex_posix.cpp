@@ -19,24 +19,6 @@ struct MutexData {
 
 namespace mozilla {
 
-static void
-InitMutex(pthread_mutex_t* mMutex)
-{
-  pthread_mutexattr_t mutexAttributes;
-  pthread_mutexattr_init(&mutexAttributes);
-  // Make the mutex reentrant so it behaves the same as a win32 mutex
-  if (pthread_mutexattr_settype(&mutexAttributes, PTHREAD_MUTEX_RECURSIVE)) {
-    MOZ_CRASH();
-  }
-  if (pthread_mutexattr_setpshared(&mutexAttributes, PTHREAD_PROCESS_SHARED)) {
-    MOZ_CRASH();
-  }
-
-  if (pthread_mutex_init(mMutex, &mutexAttributes)) {
-    MOZ_CRASH();
-  }
-}
-
 CrossProcessMutex::CrossProcessMutex(const char*)
     : mSharedBuffer(nullptr)
     , mMutex(nullptr)
@@ -61,7 +43,20 @@ CrossProcessMutex::CrossProcessMutex(const char*)
   mCount = &(data->mCount);
 
   *mCount = 1;
-  InitMutex(mMutex);
+
+  pthread_mutexattr_t mutexAttributes;
+  pthread_mutexattr_init(&mutexAttributes);
+  // Make the mutex reentrant so it behaves the same as a win32 mutex
+  if (pthread_mutexattr_settype(&mutexAttributes, PTHREAD_MUTEX_RECURSIVE)) {
+    MOZ_CRASH();
+  }
+  if (pthread_mutexattr_setpshared(&mutexAttributes, PTHREAD_PROCESS_SHARED)) {
+    MOZ_CRASH();
+  }
+
+  if (pthread_mutex_init(mMutex, &mutexAttributes)) {
+    MOZ_CRASH();
+  }
 
   MOZ_COUNT_CTOR(CrossProcessMutex);
 }
@@ -89,13 +84,7 @@ CrossProcessMutex::CrossProcessMutex(CrossProcessMutexHandle aHandle)
 
   mMutex = &(data->mMutex);
   mCount = &(data->mCount);
-  int32_t count = (*mCount)++;
-
-  if (count == 0) {
-    // The other side has already let go of their CrossProcessMutex, so now
-    // mMutex is garbage. We need to re-initialize it.
-    InitMutex(mMutex);
-  }
+  (*mCount)++;
 
   MOZ_COUNT_CTOR(CrossProcessMutex);
 }

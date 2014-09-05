@@ -59,7 +59,7 @@ class AutoLockMonitor
 #endif
 
   public:
-    explicit AutoLockMonitor(Monitor &monitor)
+    AutoLockMonitor(Monitor &monitor)
 #ifdef JS_THREADSAFE
       : monitor(monitor)
     {
@@ -132,7 +132,7 @@ class AutoUnlockMonitor
 #endif
 
   public:
-    explicit AutoUnlockMonitor(Monitor &monitor)
+    AutoUnlockMonitor(Monitor &monitor)
 #ifdef JS_THREADSAFE
       : monitor(monitor)
     {

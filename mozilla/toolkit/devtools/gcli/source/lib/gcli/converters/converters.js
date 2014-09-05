@@ -18,7 +18,6 @@
 
 var promise = require('../util/promise');
 var util = require('../util/util');
-var host = require('../util/host');
 
 // It's probably easiest to read this bottom to top
 
@@ -235,17 +234,10 @@ exports.convert = function(data, from, to, conversionContext) {
     if (from === to) {
       return promise.resolve(data);
     }
-
-    var converter = getConverter(from, to);
-    return host.exec(function() {
-      return converter.exec(data, conversionContext);
-    });
+    return promise.resolve(getConverter(from, to).exec(data, conversionContext));
   }
   catch (ex) {
-    var converter = getConverter('error', to);
-    return host.exec(function() {
-      return converter.exec(ex, conversionContext);
-    });
+    return promise.resolve(getConverter('error', to).exec(ex, conversionContext));
   }
 };
 

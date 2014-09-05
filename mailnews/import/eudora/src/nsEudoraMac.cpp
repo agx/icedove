@@ -918,6 +918,8 @@ nsresult nsEudoraMac::GetAttachmentInfo(const char *pFileName, nsIFile *pFile, n
   OSType    type = '?\??\?';
   OSType    creator = '?\??\?';
   uint32_t  fNum = 0;
+  int      i;
+  char16_t  c;
 
   nsCString  str(pFileName);
   if (str.Length() > 22)
@@ -929,9 +931,21 @@ nsresult nsEudoraMac::GetAttachmentInfo(const char *pFileName, nsIFile *pFile, n
     str.Right(fileNum, 10);
     if ((fileNum.CharAt(0) == '(') && (fileNum.CharAt(9) == ')'))
     {
-      if (MsgIsHex(fileNum.get() + 1, 8))
+      for (i = 1; i < 9; i++)
       {
-        fNum = MsgUnhex(fileNum.get() + 1, 8);
+        fNum *= 16;
+        c = fileNum.CharAt(i);
+        if ((c >= '0') && (c <= '9'))
+          fNum += (c - '0');
+        else if ((c >= 'a') && (c <= 'f'))
+          fNum += (c - 'a' + 10);
+        else if ((c >= 'A') && (c <= 'F'))
+          fNum += (c - 'A' + 10);
+        else
+          break;
+      }
+      if (i == 9)
+      {
         str.Left(fileNum, str.Length() - 10);
         str = fileNum;
         str.Trim(kWhitespace);

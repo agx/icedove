@@ -17,8 +17,6 @@ class RegExpStaticsObject : public JSObject
     static const Class class_;
 
     size_t sizeOfData(mozilla::MallocSizeOf mallocSizeOf) {
-        // XXX: should really call RegExpStatics::sizeOfIncludingThis() here
-        // instead, but the extra memory it would measure is insignificant.
         return mallocSizeOf(getPrivate());
     }
 };

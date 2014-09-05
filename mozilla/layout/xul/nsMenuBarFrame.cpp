@@ -60,9 +60,9 @@ nsMenuBarFrame::nsMenuBarFrame(nsIPresShell* aShell, nsStyleContext* aContext):
 } // cntr
 
 void
-nsMenuBarFrame::Init(nsIContent*       aContent,
-                     nsContainerFrame* aParent,
-                     nsIFrame*         aPrevInFlow)
+nsMenuBarFrame::Init(nsIContent*      aContent,
+                     nsIFrame*        aParent,
+                     nsIFrame*        aPrevInFlow)
 {
   nsBoxFrame::Init(aContent, aParent, aPrevInFlow);
 
@@ -159,6 +159,17 @@ nsMenuBarFrame::ToggleMenuActiveState()
   return nullptr;
 }
 
+static void
+GetInsertionPoint(nsIPresShell* aShell, nsIFrame* aFrame, nsIFrame* aChild,
+                  nsIFrame** aResult)
+{
+  nsIContent* child = nullptr;
+  if (aChild)
+    child = aChild->GetContent();
+  *aResult = aShell->FrameConstructor()->
+    GetInsertionPoint(aFrame->GetContent(), child);
+}
+
 nsMenuFrame*
 nsMenuBarFrame::FindMenuWithShortcut(nsIDOMKeyEvent* aKeyEvent)
 {
@@ -177,14 +188,14 @@ nsMenuBarFrame::FindMenuWithShortcut(nsIDOMKeyEvent* aKeyEvent)
     return nullptr; // no character was pressed so just return
 
   // Enumerate over our list of frames.
-  nsIFrame* immediateParent = PresContext()->PresShell()->FrameConstructor()->
-    GetInsertionPoint(GetContent(), nullptr);
+  nsIFrame* immediateParent = nullptr;
+  GetInsertionPoint(PresContext()->PresShell(), this, nullptr, &immediateParent);
   if (!immediateParent)
     immediateParent = this;
 
   // Find a most preferred accesskey which should be returned.
   nsIFrame* foundMenu = nullptr;
-  size_t foundIndex = accessKeys.NoIndex;
+  uint32_t foundIndex = accessKeys.NoIndex;
   nsIFrame* currFrame = immediateParent->GetFirstPrincipalChild();
 
   while (currFrame) {
@@ -200,7 +211,7 @@ nsMenuBarFrame::FindMenuWithShortcut(nsIDOMKeyEvent* aKeyEvent)
         const char16_t* start = shortcutKey.BeginReading();
         const char16_t* end = shortcutKey.EndReading();
         uint32_t ch = UTF16CharEnumerator::NextChar(&start, end);
-        size_t index = accessKeys.IndexOf(ch);
+        uint32_t index = accessKeys.IndexOf(ch);
         if (index != accessKeys.NoIndex &&
             (foundIndex == accessKeys.NoIndex || index < foundIndex)) {
           foundMenu = currFrame;

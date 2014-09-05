@@ -156,7 +156,7 @@ VerifyEntryContentDigest(nsIZipReader * zip, const nsACString & aFilename,
 
   ScopedPK11Context digestContext(PK11_CreateDigestContext(SEC_OID_SHA1));
   if (!digestContext) {
-    return mozilla::psm::GetXPCOMFromNSSError(PR_GetError());
+    return PRErrorCode_to_nsresult(PR_GetError());
   }
 
   rv = MapSECStatus(PK11_DigestBegin(digestContext));
@@ -603,12 +603,10 @@ VerifySignature(AppTrustedRoot trustedRoot,
   if (trustDomain.SetTrustedRoot(trustedRoot) != SECSuccess) {
     return MapSECStatus(SECFailure);
   }
-  if (BuildCertChain(trustDomain, signerCert, PR_Now(),
-                     EndEntityOrCA::MustBeEndEntity,
+  if (BuildCertChain(trustDomain, signerCert, PR_Now(), MustBeEndEntity,
                      KeyUsage::digitalSignature,
-                     KeyPurposeId::id_kp_codeSigning,
-                     CertPolicyId::anyPolicy,
-                     nullptr, builtChain)
+                     SEC_OID_EXT_KEY_USAGE_CODE_SIGN,
+                     SEC_OID_X509_ANY_POLICY, nullptr, builtChain)
         != SECSuccess) {
     return MapSECStatus(SECFailure);
   }

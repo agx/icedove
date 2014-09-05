@@ -25,7 +25,7 @@ template <typename T>
 class CompilerRoot : public CompilerRootNode
 {
   public:
-    explicit CompilerRoot(T ptr)
+    CompilerRoot(T ptr)
       : CompilerRootNode(nullptr)
     {
         if (ptr) {

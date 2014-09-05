@@ -27,7 +27,7 @@ class ScopeObject;
 class Shape;
 class UnownedBaseShape;
 
-template<class> class HeapPtr;
+template<class, typename> class HeapPtr;
 
 namespace jit {
 class JitCode;
@@ -49,10 +49,10 @@ namespace gc {
  * these are the variants generated for JSObject. They are listed from most to
  * least desirable for use:
  *
- * MarkObject(JSTracer *trc, const HeapPtrObject &thing, const char *name);
+ * MarkObject(JSTracer *trc, const HeapPtr<JSObject> &thing, const char *name);
  *     This function should be used for marking JSObjects, in preference to all
- *     others below. Use it when you have HeapPtrObject, which automatically
- *     implements write barriers.
+ *     others below. Use it when you have HeapPtr<JSObject>, which
+ *     automatically implements write barriers.
  *
  * MarkObjectRoot(JSTracer *trc, JSObject *thing, const char *name);
  *     This function is only valid during the root marking phase of GC (i.e.,
@@ -88,16 +88,16 @@ namespace gc {
  */
 
 #define DeclMarker(base, type)                                                                    \
-void Mark##base(JSTracer *trc, BarrieredBase<type*> *thing, const char *name);                    \
+void Mark##base(JSTracer *trc, BarrieredPtr<type> *thing, const char *name);                      \
 void Mark##base##Root(JSTracer *trc, type **thingp, const char *name);                            \
 void Mark##base##Unbarriered(JSTracer *trc, type **thingp, const char *name);                     \
-void Mark##base##Range(JSTracer *trc, size_t len, HeapPtr<type*> *thing, const char *name);       \
+void Mark##base##Range(JSTracer *trc, size_t len, HeapPtr<type> *thing, const char *name);        \
 void Mark##base##RootRange(JSTracer *trc, size_t len, type **thing, const char *name);            \
 bool Is##base##Marked(type **thingp);                                                             \
-bool Is##base##Marked(BarrieredBase<type*> *thingp);                                              \
+bool Is##base##Marked(BarrieredPtr<type> *thingp);                                                \
 bool Is##base##AboutToBeFinalized(type **thingp);                                                 \
-bool Is##base##AboutToBeFinalized(BarrieredBase<type*> *thingp);                                  \
-type *Update##base##IfRelocated(JSRuntime *rt, BarrieredBase<type*> *thingp);                     \
+bool Is##base##AboutToBeFinalized(BarrieredPtr<type> *thingp);                                    \
+type *Update##base##IfRelocated(JSRuntime *rt, BarrieredPtr<type> *thingp);                       \
 type *Update##base##IfRelocated(JSRuntime *rt, type **thingp);
 
 DeclMarker(BaseShape, BaseShape)
@@ -155,7 +155,7 @@ MarkGCThingUnbarriered(JSTracer *trc, void **thingp, const char *name);
 /*** ID Marking ***/
 
 void
-MarkId(JSTracer *trc, BarrieredBase<jsid> *id, const char *name);
+MarkId(JSTracer *trc, BarrieredId *id, const char *name);
 
 void
 MarkIdRoot(JSTracer *trc, jsid *id, const char *name);
@@ -172,10 +172,10 @@ MarkIdRootRange(JSTracer *trc, size_t len, jsid *vec, const char *name);
 /*** Value Marking ***/
 
 void
-MarkValue(JSTracer *trc, BarrieredBase<Value> *v, const char *name);
+MarkValue(JSTracer *trc, BarrieredValue *v, const char *name);
 
 void
-MarkValueRange(JSTracer *trc, size_t len, BarrieredBase<Value> *vec, const char *name);
+MarkValueRange(JSTracer *trc, size_t len, BarrieredValue *vec, const char *name);
 
 inline void
 MarkValueRange(JSTracer *trc, HeapValue *begin, HeapValue *end, const char *name)
@@ -240,6 +240,13 @@ MarkCrossCompartmentSlot(JSTracer *trc, JSObject *src, HeapSlot *dst_slot, const
 /*** Special Cases ***/
 
 /*
+ * The unioned HeapPtr stored in script->globalObj needs special treatment to
+ * typecheck correctly.
+ */
+void
+MarkObject(JSTracer *trc, HeapPtr<GlobalObject, JSScript *> *thingp, const char *name);
+
+/*
  * MarkChildren<JSObject> is exposed solely for preWriteBarrier on
  * JSObject::TradeGuts. It should not be considered external interface.
  */
@@ -265,25 +272,25 @@ PushArena(GCMarker *gcmarker, ArenaHeader *aheader);
  */
 
 inline void
-Mark(JSTracer *trc, BarrieredBase<Value> *v, const char *name)
+Mark(JSTracer *trc, BarrieredValue *v, const char *name)
 {
     MarkValue(trc, v, name);
 }
 
 inline void
-Mark(JSTracer *trc, BarrieredBase<JSObject*> *o, const char *name)
+Mark(JSTracer *trc, BarrieredPtrObject *o, const char *name)
 {
     MarkObject(trc, o, name);
 }
 
 inline void
-Mark(JSTracer *trc, BarrieredBase<JSScript*> *o, const char *name)
+Mark(JSTracer *trc, BarrieredPtrScript *o, const char *name)
 {
     MarkScript(trc, o, name);
 }
 
 inline void
-Mark(JSTracer *trc, HeapPtrJitCode *code, const char *name)
+Mark(JSTracer *trc, HeapPtr<jit::JitCode> *code, const char *name)
 {
     MarkJitCode(trc, code, name);
 }
@@ -309,7 +316,7 @@ bool
 IsCellAboutToBeFinalized(Cell **thing);
 
 inline bool
-IsMarked(BarrieredBase<Value> *v)
+IsMarked(BarrieredValue *v)
 {
     if (!v->isMarkable())
         return true;
@@ -317,19 +324,19 @@ IsMarked(BarrieredBase<Value> *v)
 }
 
 inline bool
-IsMarked(BarrieredBase<JSObject*> *objp)
+IsMarked(BarrieredPtrObject *objp)
 {
     return IsObjectMarked(objp);
 }
 
 inline bool
-IsMarked(BarrieredBase<JSScript*> *scriptp)
+IsMarked(BarrieredPtrScript *scriptp)
 {
     return IsScriptMarked(scriptp);
 }
 
 inline bool
-IsAboutToBeFinalized(BarrieredBase<Value> *v)
+IsAboutToBeFinalized(BarrieredValue *v)
 {
     if (!v->isMarkable())
         return false;
@@ -337,13 +344,13 @@ IsAboutToBeFinalized(BarrieredBase<Value> *v)
 }
 
 inline bool
-IsAboutToBeFinalized(BarrieredBase<JSObject*> *objp)
+IsAboutToBeFinalized(BarrieredPtrObject *objp)
 {
     return IsObjectAboutToBeFinalized(objp);
 }
 
 inline bool
-IsAboutToBeFinalized(BarrieredBase<JSScript*> *scriptp)
+IsAboutToBeFinalized(BarrieredPtrScript *scriptp)
 {
     return IsScriptAboutToBeFinalized(scriptp);
 }
@@ -358,11 +365,11 @@ IsAboutToBeFinalized(const js::jit::VMFunction **vmfunc)
      * Preserves entries in the WeakCache<VMFunction, JitCode>
      * iff the JitCode has been marked.
      */
-    return false;
+    return true;
 }
 
 inline bool
-IsAboutToBeFinalized(ReadBarrieredJitCode code)
+IsAboutToBeFinalized(ReadBarriered<js::jit::JitCode> code)
 {
     return IsJitCodeAboutToBeFinalized(code.unsafeGet());
 }

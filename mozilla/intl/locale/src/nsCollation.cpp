@@ -8,10 +8,8 @@
 #include "nsUnicharUtils.h"
 #include "prmem.h"
 #include "nsIUnicodeEncoder.h"
+#include "nsICharsetConverterManager.h"
 #include "nsServiceManagerUtils.h"
-#include "mozilla/dom/EncodingUtils.h"
-
-using mozilla::dom::EncodingUtils;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -75,13 +73,13 @@ nsresult nsCollation::SetCharset(const char* aCharset)
 {
   NS_ENSURE_ARG_POINTER(aCharset);
 
-  nsDependentCString label(aCharset);
-  nsAutoCString encoding;
-  if (!EncodingUtils::FindEncodingForLabelNoReplacement(label, encoding)) {
-      return NS_ERROR_UCONV_NOCONV;
+  nsresult rv;
+  nsCOMPtr <nsICharsetConverterManager> charsetConverterManager = do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
+  if (NS_SUCCEEDED(rv)) {
+    rv = charsetConverterManager->GetUnicodeEncoder(aCharset,
+                                                    getter_AddRefs(mEncoder));
   }
-  mEncoder = EncodingUtils::EncoderForEncoding(encoding);
-  return NS_OK;
+  return rv;
 }
 
 nsresult nsCollation::UnicodeToChar(const nsAString& aSrc, char** dst)

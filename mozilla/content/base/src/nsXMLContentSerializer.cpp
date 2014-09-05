@@ -98,10 +98,10 @@ nsXMLContentSerializer::Init(uint32_t aFlags, uint32_t aWrapColumn,
     mLineBreak.AssignLiteral("\r\n");
   }
   else if (mFlags & nsIDocumentEncoder::OutputCRLineBreak) { // Mac
-    mLineBreak.Assign('\r');
+    mLineBreak.AssignLiteral("\r");
   }
   else if (mFlags & nsIDocumentEncoder::OutputLFLineBreak) { // Unix/DOM
-    mLineBreak.Assign('\n');
+    mLineBreak.AssignLiteral("\n");
   }
   else {
     mLineBreak.AssignLiteral(NS_LINEBREAK);         // Platform/default
@@ -600,7 +600,7 @@ nsXMLContentSerializer::ConfirmPrefix(nsAString& aPrefix,
 void
 nsXMLContentSerializer::GenerateNewPrefix(nsAString& aPrefix)
 {
-  aPrefix.Assign('a');
+  aPrefix.AssignLiteral("a");
   char buf[128];
   PR_snprintf(buf, sizeof(buf), "%d", mPrefixIndex++);
   AppendASCIItoUTF16(buf, aPrefix);

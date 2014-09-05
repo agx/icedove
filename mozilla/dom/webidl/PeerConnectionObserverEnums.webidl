@@ -8,6 +8,7 @@
 
 enum PCObserverStateType {
     "None",
+    "ReadyState",
     "IceConnectionState",
     "IceGatheringState",
     "SdpState",

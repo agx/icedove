@@ -19,8 +19,6 @@ struct WebRtcCngDecInst;
 
 namespace webrtc {
 
-namespace acm2 {
-
 class ACMCNG: public ACMGenericCodec {
  public:
   explicit ACMCNG(int16_t codec_id);
@@ -52,8 +50,6 @@ class ACMCNG: public ACMGenericCodec {
   WebRtcCngEncInst* encoder_inst_ptr_;
   uint16_t samp_freq_hz_;
 };
-
-}  // namespace acm2
 
 }  // namespace webrtc
 

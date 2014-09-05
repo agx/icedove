@@ -822,7 +822,7 @@ nsNPAPIPluginStreamListener::NewResponseHeader(const char* headerName,
                                                const char* headerValue)
 {
   mResponseHeaders.Append(headerName);
-  mResponseHeaders.AppendLiteral(": ");
+  mResponseHeaders.Append(": ");
   mResponseHeaders.Append(headerValue);
   mResponseHeaders.Append('\n');
   return NS_OK;

@@ -23,13 +23,15 @@ class AsmJSFrameIterator
     const AsmJSModule *module_;
     const jit::CallSite *callsite_;
     uint8_t *sp_;
+    uint8_t *returnAddress_;
 
-    void settle(uint8_t *returnAddress);
+    void popFrame();
+    void settle();
 
   public:
-    explicit AsmJSFrameIterator(const AsmJSActivation *activation);
-    void operator++();
-    bool done() const { return !module_; }
+    AsmJSFrameIterator(const AsmJSActivation *activation);
+    void operator++() { popFrame(); settle(); }
+    bool done() const { return !callsite_; }
     JSAtom *functionDisplayAtom() const;
     unsigned computeLine(uint32_t *column) const;
 };

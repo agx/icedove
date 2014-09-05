@@ -41,8 +41,7 @@ class ClientTiledThebesLayer : public ThebesLayer,
   typedef ThebesLayer Base;
 
 public:
-  ClientTiledThebesLayer(ClientLayerManager* const aManager,
-                         ClientLayerManager::ThebesLayerCreationHint aCreationHint = LayerManager::NONE);
+  ClientTiledThebesLayer(ClientLayerManager* const aManager);
   ~ClientTiledThebesLayer();
 
   // Override name to distinguish it from ClientThebesLayer in layer dumps
@@ -69,14 +68,6 @@ public:
 
   virtual void ClearCachedResources() MOZ_OVERRIDE;
 
-  /**
-   * Helper method to find the nearest ancestor layers which
-   * scroll and have a displayport. The parameters are out-params
-   * which hold the return values; the values passed in may be null.
-   */
-  void GetAncestorLayers(ContainerLayer** aOutScrollAncestor,
-                         ContainerLayer** aOutDisplayPortAncestor);
-
 private:
   ClientLayerManager* ClientManager()
   {
@@ -90,32 +81,11 @@ private:
   void BeginPaint();
 
   /**
-   * Determine if we can use a fast path to just do a single high-precision,
-   * non-progressive paint.
+   * When a paint ends, updates any data necessary to persist until the next
+   * paint. If aFinish is true, this will cause the paint to be marked as
+   * finished.
    */
-  bool UseFastPath();
-
-  /**
-   * Helper function to do the high-precision paint.
-   * This function returns true if it updated the paint buffer.
-   */
-  bool RenderHighPrecision(nsIntRegion& aInvalidRegion,
-                           LayerManager::DrawThebesLayerCallback aCallback,
-                           void* aCallbackData);
-
-  /**
-   * Helper function to do the low-precision paint.
-   * This function returns true if it updated the paint buffer.
-   */
-  bool RenderLowPrecision(nsIntRegion& aInvalidRegion,
-                          LayerManager::DrawThebesLayerCallback aCallback,
-                          void* aCallbackData);
-
-  /**
-   * This causes the paint to be marked as finished, and updates any data
-   * necessary to persist until the next paint.
-   */
-  void EndPaint();
+  void EndPaint(bool aFinish);
 
   RefPtr<TiledContentClient> mContentClient;
   nsIntRegion mLowPrecisionValidRegion;

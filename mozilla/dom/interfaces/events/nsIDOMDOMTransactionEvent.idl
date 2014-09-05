@@ -7,7 +7,7 @@
 
 interface nsIVariant;
 
-[builtinclass, uuid(f57f7c46-d420-4f32-a61b-0eb585d30ee1)]
+[scriptable, builtinclass, uuid(f57f7c46-d420-4f32-a61b-0eb585d30ee1)]
 interface nsIDOMDOMTransactionEvent : nsIDOMEvent
 {
   readonly attribute nsIVariant transactions;

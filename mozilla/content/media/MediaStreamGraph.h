@@ -111,7 +111,6 @@ public:
     CONSUMED,
     NOT_CONSUMED
   };
-
   /**
    * Notify that the stream is hooked up and we'd like to start or stop receiving
    * data on it. Only fires on SourceMediaStreams.
@@ -158,17 +157,16 @@ public:
    */
   virtual void NotifyOutput(MediaStreamGraph* aGraph, GraphTime aCurrentTime) {}
 
-  enum MediaStreamGraphEvent {
-    EVENT_FINISHED,
-    EVENT_REMOVED,
-    EVENT_HAS_DIRECT_LISTENERS, // transition from no direct listeners
-    EVENT_HAS_NO_DIRECT_LISTENERS,  // transition to no direct listeners
-  };
+  /**
+   * Notify that the stream finished.
+   */
+  virtual void NotifyFinished(MediaStreamGraph* aGraph) {}
 
   /**
-   * Notify that an event has occurred on the Stream
+   * Notify that your listener has been removed, either due to RemoveListener(),
+   * or due to the stream being destroyed.  You will get no further notifications.
    */
-  virtual void NotifyEvent(MediaStreamGraph* aGraph, MediaStreamGraphEvent aEvent) {}
+  virtual void NotifyRemoved(MediaStreamGraph* aGraph) {}
 
   enum {
     TRACK_EVENT_CREATED = 0x01,
@@ -804,9 +802,6 @@ protected:
     // Resampler if the rate of the input track does not match the
     // MediaStreamGraph's.
     nsAutoRef<SpeexResamplerState> mResampler;
-#ifdef DEBUG
-    int mResamplerChannelCount;
-#endif
     TrackTicks mStart;
     // Each time the track updates are flushed to the media graph thread,
     // this is cleared.

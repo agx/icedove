@@ -14,6 +14,9 @@
       'dependencies': [
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
       ],
+      'defines': [
+        'WEBRTC_MODULE_UTILITY_VIDEO', # for compiling support for video recording
+      ],
       'include_dirs': [
         '../interface',
         '../../interface',

@@ -18,7 +18,6 @@
 #include "mozilla/RefPtr.h"             // for RefPtr
 #include "mozilla/ipc/Shmem.h"          // for Shmem
 #include "mozilla/ipc/SharedMemory.h"   // for SharedMemory
-#include "mozilla/layers/AsyncCompositionManager.h"  // for ViewTransform
 #include "mozilla/layers/CompositableClient.h"  // for CompositableClient
 #include "mozilla/layers/CompositorTypes.h"  // for TextureInfo, etc
 #include "mozilla/layers/LayersMessages.h" // for TileDescriptor
@@ -255,19 +254,25 @@ struct BasicTiledLayerPaintData {
   ParentLayerPoint mLastScrollOffset;
 
   /*
-   * The transform matrix to go from this layer's Layer units to
-   * the scroll ancestor's ParentLayer units. The "scroll ancestor" is
-   * the closest ancestor layer which scrolls, and is used to obtain
-   * the composition bounds that are relevant for this layer.
+   * The transform matrix to go from Screen units to ParentLayer units.
    */
-  gfx3DMatrix mTransformToCompBounds;
+  gfx3DMatrix mTransformParentLayerToLayoutDevice;
 
   /*
    * The critical displayport of the content from the nearest ancestor layer
    * that represents scrollable content with a display port set. Empty if a
    * critical displayport is not set.
+   *
+   * This is in LayoutDevice coordinates, but is stored as an nsIntRect for
+   * convenience when intersecting with the layer's mValidRegion.
    */
-  LayerIntRect mCriticalDisplayPort;
+  nsIntRect mCriticalDisplayPort;
+
+  /*
+   * The viewport of the content from the nearest ancestor layer that
+   * represents scrollable content with a display port set.
+   */
+  LayoutDeviceRect mViewport;
 
   /*
    * The render resolution of the document that the content this layer
@@ -276,11 +281,11 @@ struct BasicTiledLayerPaintData {
   CSSToParentLayerScale mResolution;
 
   /*
-   * The composition bounds of the layer, in Layer coordinates. This is
+   * The composition bounds of the layer, in LayoutDevice coordinates. This is
    * used to make sure that tiled updates to regions that are visible to the
    * user are grouped coherently.
    */
-  LayerRect mCompositionBounds;
+  LayoutDeviceRect mCompositionBounds;
 
   /*
    * Low precision updates are always executed a tile at a time in repeated
@@ -318,8 +323,17 @@ public:
   bool UpdateFromCompositorFrameMetrics(ContainerLayer* aLayer,
                                         bool aHasPendingNewThebesContent,
                                         bool aLowPrecision,
-                                        ViewTransform& aViewTransform);
+                                        ParentLayerRect& aCompositionBounds,
+                                        CSSToParentLayerScale& aZoom);
 
+  /**
+   * When a shared FrameMetrics can not be found for a given layer,
+   * this function is used to find the first non-empty composition bounds
+   * by traversing up the layer tree.
+   */
+  void FindFallbackContentFrameMetrics(ContainerLayer* aLayer,
+                                       ParentLayerRect& aCompositionBounds,
+                                       CSSToParentLayerScale& aZoom);
   /**
    * Determines if the compositor's upcoming composition bounds has fallen
    * outside of the contents display port. If it has then the compositor
@@ -370,7 +384,7 @@ public:
 
   void Release();
 
-  void DiscardBuffers();
+  void DiscardBackBuffers();
 
   const CSSToParentLayerScale& GetFrameResolution() { return mFrameResolution; }
 
@@ -469,7 +483,7 @@ public:
 
   virtual TextureInfo GetTextureInfo() const MOZ_OVERRIDE
   {
-    return TextureInfo(CompositableType::BUFFER_TILED);
+    return TextureInfo(BUFFER_TILED);
   }
 
   virtual void ClearCachedResources() MOZ_OVERRIDE;

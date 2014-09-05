@@ -408,7 +408,8 @@ logging::DocLoad(const char* aMsg, nsIWebProgress* aWebProgress,
 
   LogDocInfo(documentNode, document);
 
-  nsCOMPtr<nsIDocShell> docShell = window->GetDocShell();
+  nsCOMPtr<nsIWebNavigation> webNav(do_GetInterface(DOMWindow));
+  nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(webNav));
   printf("\n    ");
   LogShellLoadType(docShell);
   printf("\n");

@@ -59,6 +59,22 @@ static const char* scalingModeName(int scalingMode) {
     }
 }
 
+class nsProxyReleaseTask : public Task
+{
+public:
+    nsProxyReleaseTask(TextureClient* aClient)
+        : mTextureClient(aClient) {
+    }
+
+    virtual void Run() MOZ_OVERRIDE
+    {
+        mTextureClient = nullptr;
+    }
+
+private:
+    mozilla::RefPtr<TextureClient> mTextureClient;
+};
+
 GonkBufferQueue::GonkBufferQueue(bool allowSynchronousMode,
         const sp<IGraphicBufferAlloc>& allocator) :
     mDefaultWidth(1),
@@ -406,7 +422,7 @@ status_t GonkBufferQueue::dequeueBuffer(int *outBuf, sp<Fence>* outFence,
             if (mSlots[buf].mTextureClient) {
               mSlots[buf].mTextureClient->ClearRecycleCallback();
               // release TextureClient in ImageBridge thread
-              TextureClientReleaseTask* task = new TextureClientReleaseTask(mSlots[buf].mTextureClient);
+              nsProxyReleaseTask* task = new nsProxyReleaseTask(mSlots[buf].mTextureClient);
               mSlots[buf].mTextureClient = NULL;
               ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(FROM_HERE, task);
             }
@@ -423,7 +439,7 @@ status_t GonkBufferQueue::dequeueBuffer(int *outBuf, sp<Fence>* outFence,
             new GrallocTextureClientOGL(ImageBridgeChild::GetSingleton(),
                                         gfx::SurfaceFormat::UNKNOWN,
                                         gfx::BackendType::NONE,
-                                        TextureFlags::DEALLOCATE_CLIENT);
+                                        TEXTURE_DEALLOCATE_CLIENT);
         usage |= GraphicBuffer::USAGE_HW_TEXTURE;
         bool result = textureClient->AllocateGralloc(IntSize(w, h), format, usage);
         sp<GraphicBuffer> graphicBuffer = textureClient->GetGraphicBuffer();
@@ -774,7 +790,7 @@ void GonkBufferQueue::freeAllBuffersLocked()
         if (mSlots[i].mTextureClient) {
           mSlots[i].mTextureClient->ClearRecycleCallback();
           // release TextureClient in ImageBridge thread
-          TextureClientReleaseTask* task = new TextureClientReleaseTask(mSlots[i].mTextureClient);
+          nsProxyReleaseTask* task = new nsProxyReleaseTask(mSlots[i].mTextureClient);
           mSlots[i].mTextureClient = NULL;
           ImageBridgeChild::GetSingleton()->GetMessageLoop()->PostTask(FROM_HERE, task);
         }

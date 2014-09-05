@@ -262,12 +262,12 @@ RegisterPerfMeasurement(JSContext *cx, HandleObject globalArg)
 PerfMeasurement*
 ExtractPerfMeasurement(jsval wrapper)
 {
-    if (wrapper.isPrimitive())
+    if (JSVAL_IS_PRIMITIVE(wrapper))
         return 0;
 
     // This is what JS_GetInstancePrivate does internally.  We can't
     // call JS_anything from here, because we don't have a JSContext.
-    JSObject *obj = wrapper.toObjectOrNull();
+    JSObject *obj = JSVAL_TO_OBJECT(wrapper);
     if (obj->getClass() != js::Valueify(&pm_class))
         return 0;
 

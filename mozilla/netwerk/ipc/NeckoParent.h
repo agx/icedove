@@ -57,8 +57,6 @@ public:
                            const SerializedLoadContext& aSerialized,
                            nsCOMPtr<nsILoadContext> &aResult);
 
-  virtual void ActorDestroy(ActorDestroyReason aWhy) MOZ_OVERRIDE;
-
   virtual void
   CloneManagees(ProtocolBase* aSource,
               mozilla::ipc::ProtocolCloneContext* aCtx) MOZ_OVERRIDE;
@@ -100,16 +98,13 @@ protected:
   virtual bool DeallocPWebSocketParent(PWebSocketParent*) MOZ_OVERRIDE;
   virtual PTCPSocketParent* AllocPTCPSocketParent() MOZ_OVERRIDE;
 
-  virtual PRemoteOpenFileParent*
-    AllocPRemoteOpenFileParent(const SerializedLoadContext& aSerialized,
-                               const URIParams& aFileURI,
-                               const OptionalURIParams& aAppURI) MOZ_OVERRIDE;
-  virtual bool
-    RecvPRemoteOpenFileConstructor(PRemoteOpenFileParent* aActor,
-                                   const SerializedLoadContext& aSerialized,
-                                   const URIParams& aFileURI,
-                                   const OptionalURIParams& aAppURI)
-                                   MOZ_OVERRIDE;
+  virtual PRemoteOpenFileParent* AllocPRemoteOpenFileParent(const URIParams& aFileURI,
+                                                            const OptionalURIParams& aAppURI)
+                                                            MOZ_OVERRIDE;
+  virtual bool RecvPRemoteOpenFileConstructor(PRemoteOpenFileParent* aActor,
+                                              const URIParams& aFileURI,
+                                              const OptionalURIParams& aAppURI)
+                                              MOZ_OVERRIDE;
   virtual bool DeallocPRemoteOpenFileParent(PRemoteOpenFileParent* aActor)
                                             MOZ_OVERRIDE;
 

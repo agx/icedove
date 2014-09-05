@@ -8,11 +8,10 @@
 #include "GLReadTexImageHelper.h"
 #include "mozilla/gfx/2D.h"
 
-namespace mozilla {
-namespace layers {
-
+using namespace mozilla;
 using namespace mozilla::gfx;
 using namespace mozilla::gl;
+using namespace mozilla::layers;
 
 CompositingRenderTargetOGL::~CompositingRenderTargetOGL()
 {
@@ -100,7 +99,4 @@ CompositingRenderTargetOGL::InitializeImpl()
   }
 
   mInitParams.mStatus = InitParams::INITIALIZED;
-}
-
-}
 }

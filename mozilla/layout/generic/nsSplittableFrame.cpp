@@ -15,9 +15,9 @@
 NS_IMPL_FRAMEARENA_HELPERS(nsSplittableFrame)
 
 void
-nsSplittableFrame::Init(nsIContent*       aContent,
-                        nsContainerFrame* aParent,
-                        nsIFrame*         aPrevInFlow)
+nsSplittableFrame::Init(nsIContent*      aContent,
+                        nsIFrame*        aParent,
+                        nsIFrame*        aPrevInFlow)
 {
   nsFrame::Init(aContent, aParent, aPrevInFlow);
 
@@ -210,9 +210,12 @@ nscoord
 nsSplittableFrame::GetConsumedHeight() const
 {
   nscoord height = 0;
+
+  // Reduce the height by the computed height of prev-in-flows.
   for (nsIFrame* prev = GetPrevInFlow(); prev; prev = prev->GetPrevInFlow()) {
-    height += prev->GetContentRectRelativeToSelf().height;
+    height += prev->GetRect().height;
   }
+
   return height;
 }
 
@@ -231,8 +234,16 @@ nsSplittableFrame::GetEffectiveComputedHeight(const nsHTMLReflowState& aReflowSt
 
   height -= aConsumedHeight;
 
+  if (aConsumedHeight != 0 && aConsumedHeight != NS_INTRINSICSIZE) {
+    // We just subtracted our top-border padding, since it was included in the
+    // first frame's height. Add it back to get the content height.
+    height += aReflowState.ComputedPhysicalBorderPadding().top;
+  }
+
   // We may have stretched the frame beyond its computed height. Oh well.
-  return std::max(0, height);
+  height = std::max(0, height);
+
+  return height;
 }
 
 int
@@ -242,12 +253,8 @@ nsSplittableFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) co
     return LOGICAL_SIDES_B_BOTH;
   }
 
-  if (MOZ_UNLIKELY(StyleBorder()->mBoxDecorationBreak ==
-                     NS_STYLE_BOX_DECORATION_BREAK_CLONE)) {
-    return 0;
-  }
-
   int skip = 0;
+
   if (GetPrevInFlow()) {
     skip |= LOGICAL_SIDE_B_START;
   }
@@ -260,8 +267,7 @@ nsSplittableFrame::GetLogicalSkipSides(const nsHTMLReflowState* aReflowState) co
 
     if (NS_UNCONSTRAINEDSIZE != aReflowState->AvailableHeight()) {
       nscoord effectiveCH = this->GetEffectiveComputedHeight(*aReflowState);
-      if (effectiveCH != NS_INTRINSICSIZE &&
-          effectiveCH > aReflowState->AvailableHeight()) {
+      if (effectiveCH > aReflowState->AvailableHeight()) {
         // Our content height is going to exceed our available height, so we're
         // going to need a next-in-flow.
         skip |= LOGICAL_SIDE_B_END;

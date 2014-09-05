@@ -31,6 +31,9 @@ public:
     ~TextureImageCGL();
 
 protected:
+    already_AddRefed<gfxASurface>
+    GetSurfaceForUpdate(const gfxIntSize& aSize, ImageFormat aFmt);
+
     bool FinishedSurfaceUpdate();
 
     void FinishedSurfaceUpload();
@@ -38,6 +41,7 @@ protected:
 private:
 
     GLuint mPixelBuffer;
+    int32_t mPixelBufferSize;
     bool mBoundPixelBuffer;
 };
 

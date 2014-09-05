@@ -25,7 +25,7 @@ function run_test()
   check_except(DebuggerServer.closeListener);
   check_except(DebuggerServer.connectPipe);
 
-  DebuggerServer.registerModule("xpcshell-test/testactors");
+  DebuggerServer.addActors("resource://test/testactors.js");
 
   // Now they should work.
   DebuggerServer.openListener(-1);

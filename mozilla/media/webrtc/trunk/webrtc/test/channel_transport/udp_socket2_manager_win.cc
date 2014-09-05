@@ -65,11 +65,14 @@ UdpSocket2ManagerWindows::~UdpSocket2ManagerWindows()
         }
         StopWorkerThreads();
 
-        for (WorkerList::iterator iter = _workerThreadsList.begin();
-             iter != _workerThreadsList.end(); ++iter) {
-          delete *iter;
+        // All threads are stopped. Safe to delete them.
+        ListItem* pItem = NULL;
+        while((pItem = _workerThreadsList.First()) != NULL)
+        {
+            delete static_cast<UdpSocket2WorkerWindows*>(pItem->GetItem());
+            _workerThreadsList.PopFront();
         }
-        _workerThreadsList.clear();
+
         _ioContextPool.Free();
 
         _numOfActiveManagers--;
@@ -131,10 +134,14 @@ bool UdpSocket2ManagerWindows::Start()
     // Start worker threads.
     _stopped = false;
     int32_t error = 0;
-    for (WorkerList::iterator iter = _workerThreadsList.begin();
-         iter != _workerThreadsList.end() && !error; ++iter) {
-      if(!(*iter)->Start())
-        error = 1;
+    ListItem* pItem = _workerThreadsList.First();
+    UdpSocket2WorkerWindows* pWorker;
+    while(pItem != NULL && !error)
+    {
+        pWorker = (UdpSocket2WorkerWindows*)pItem->GetItem();
+        if(!pWorker->Start())
+            error = 1;
+        pItem = _workerThreadsList.Next(pItem);
     }
     if(error)
     {
@@ -187,7 +194,7 @@ bool UdpSocket2ManagerWindows::StartWorkerThreads()
                 delete pWorker;
                 break;
             }
-            _workerThreadsList.push_front(pWorker);
+            _workerThreadsList.PushFront(pWorker);
             i++;
         }
         if(error)
@@ -200,11 +207,12 @@ bool UdpSocket2ManagerWindows::StartWorkerThreads()
                 "creating work threads",
                 _managerNumber);
             // Delete worker threads.
-            for (WorkerList::iterator iter = _workerThreadsList.begin();
-                 iter != _workerThreadsList.end(); ++iter) {
-              delete *iter;
+            ListItem* pItem = NULL;
+            while((pItem = _workerThreadsList.First()) != NULL)
+            {
+                delete static_cast<UdpSocket2WorkerWindows*>(pItem->GetItem());
+                _workerThreadsList.PopFront();
             }
-            _workerThreadsList.clear();
             _pCrit->Leave();
             return false;
         }
@@ -273,30 +281,38 @@ bool UdpSocket2ManagerWindows::StopWorkerThreads()
  threadsStoped, numActicve Sockets=%d",
         _managerNumber,
         _numActiveSockets);
+    UdpSocket2WorkerWindows* pWorker;
+    ListItem* pItem = _workerThreadsList.First();
 
     // Set worker threads to not alive so that they will stop calling
     // UdpSocket2WorkerWindows::Run().
-    for (WorkerList::iterator iter = _workerThreadsList.begin();
-         iter != _workerThreadsList.end(); ++iter) {
-        (*iter)->SetNotAlive();
+    while(pItem != NULL)
+    {
+        pWorker = (UdpSocket2WorkerWindows*)pItem->GetItem();
+        pWorker->SetNotAlive();
+        pItem = _workerThreadsList.Next(pItem);
     }
     // Release all threads waiting for GetQueuedCompletionStatus(..).
     if(_ioCompletionHandle)
     {
         uint32_t i = 0;
-        for(i = 0; i < _workerThreadsList.size(); i++)
+        for(i = 0; i < _workerThreadsList.GetSize(); i++)
         {
             PostQueuedCompletionStatus(_ioCompletionHandle, 0 ,0 , NULL);
         }
     }
-    for (WorkerList::iterator iter = _workerThreadsList.begin();
-         iter != _workerThreadsList.end(); ++iter) {
-        if((*iter)->Stop() == false)
+    pItem = _workerThreadsList.First();
+
+    while(pItem != NULL)
+    {
+        pWorker = (UdpSocket2WorkerWindows*)pItem->GetItem();
+        if(pWorker->Stop() == false)
         {
             error = -1;
             WEBRTC_TRACE(kTraceWarning,  kTraceTransport, -1,
                          "failed to stop worker thread");
         }
+        pItem = _workerThreadsList.Next(pItem);
     }
 
     if(error)

@@ -1039,8 +1039,7 @@ VariablesView.NON_SORTABLE_CLASSES = [
   "Int32Array",
   "Uint32Array",
   "Float32Array",
-  "Float64Array",
-  "NodeList"
+  "Float64Array"
 ];
 
 /**
@@ -2705,7 +2704,7 @@ Variable.prototype = Heritage.extend(Scope.prototype, {
     this._openInspectorNode = this.document.createElement("toolbarbutton");
     this._openInspectorNode.className = "plain variables-view-open-inspector";
     this._openInspectorNode.addEventListener("mousedown", this.openNodeInInspector, false);
-    this._title.appendChild(this._openInspectorNode);
+    this._title.insertBefore(this._openInspectorNode, this._title.querySelector("toolbarbutton"));
 
     this._linkedToInspector = true;
   },
@@ -3697,10 +3696,6 @@ VariablesView.stringifiers.byObjectKind = {
         let result = "<" + preview.nodeName;
         if (attrs.id) {
           result += "#" + attrs.id;
-        }
-
-        if (attrs.class) {
-          result += "." + attrs.class.trim().replace(/\s+/, ".");
         }
         return result + ">";
       }

@@ -87,7 +87,6 @@ public:
     , mIsRepeat(false)
     , mIsComposing(false)
     , mKeyNameIndex(mozilla::KEY_NAME_INDEX_Unidentified)
-    , mCodeNameIndex(CODE_NAME_INDEX_UNKNOWN)
     , mNativeKeyEvent(nullptr)
     , mUniqueId(0)
   {
@@ -129,13 +128,8 @@ public:
   bool mIsComposing;
   // DOM KeyboardEvent.key
   KeyNameIndex mKeyNameIndex;
-  // DOM KeyboardEvent.code
-  CodeNameIndex mCodeNameIndex;
   // DOM KeyboardEvent.key only when mKeyNameIndex is KEY_NAME_INDEX_USE_STRING.
   nsString mKeyValue;
-  // DOM KeyboardEvent.code only when mCodeNameIndex is
-  // CODE_NAME_INDEX_USE_STRING.
-  nsString mCodeValue;
   // OS-specific native event can optionally be preserved
   void* mNativeKeyEvent;
   // Unique id associated with a keydown / keypress event. Used in identifing
@@ -152,19 +146,9 @@ public:
     }
     GetDOMKeyName(mKeyNameIndex, aKeyName);
   }
-  void GetDOMCodeName(nsAString& aCodeName)
-  {
-    if (mCodeNameIndex == CODE_NAME_INDEX_USE_STRING) {
-      aCodeName = mCodeValue;
-      return;
-    }
-    GetDOMCodeName(mCodeNameIndex, aCodeName);
-  }
 
-  static void GetDOMKeyName(KeyNameIndex aKeyNameIndex,
+  static void GetDOMKeyName(mozilla::KeyNameIndex aKeyNameIndex,
                             nsAString& aKeyName);
-  static void GetDOMCodeName(CodeNameIndex aCodeNameIndex,
-                             nsAString& aCodeName);
 
   static const char* GetCommandStr(Command aCommand);
 
@@ -180,9 +164,7 @@ public:
     mIsRepeat = aEvent.mIsRepeat;
     mIsComposing = aEvent.mIsComposing;
     mKeyNameIndex = aEvent.mKeyNameIndex;
-    mCodeNameIndex = aEvent.mCodeNameIndex;
     mKeyValue = aEvent.mKeyValue;
-    mCodeValue = aEvent.mCodeValue;
     // Don't copy mNativeKeyEvent because it may be referred after its instance
     // is destroyed.
     mNativeKeyEvent = nullptr;

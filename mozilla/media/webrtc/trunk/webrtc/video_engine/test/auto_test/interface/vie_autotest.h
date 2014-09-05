@@ -83,6 +83,11 @@ public:
     void ViECodecExternalCodecTest();
     void ViECodecAPITest();
 
+    // vie_autotest_encryption.cc
+    void ViEEncryptionStandardTest();
+    void ViEEncryptionExtendedTest();
+    void ViEEncryptionAPITest();
+
     // vie_autotest_image_process.cc
     void ViEImageProcessStandardTest();
     void ViEImageProcessExtendedTest();
@@ -102,6 +107,9 @@ public:
     void ViERtpRtcpStandardTest();
     void ViERtpRtcpExtendedTest();
     void ViERtpRtcpAPITest();
+
+    // vie_autotest_rtp_fuzz.cc
+    void ViERtpTryInjectingRandomPacketsIntoRtpStream(long rand_seed);
 
 private:
     void PrintAudioCodec(const webrtc::CodecInst audioCodec);

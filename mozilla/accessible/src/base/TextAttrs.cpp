@@ -13,7 +13,6 @@
 #include "gfxFont.h"
 #include "nsFontMetrics.h"
 #include "nsLayoutUtils.h"
-#include "nsContainerFrame.h"
 #include "HyperTextAccessible.h"
 #include "mozilla/AppUnits.h"
 #include "mozilla/gfx/2D.h"
@@ -27,8 +26,8 @@ using namespace mozilla::a11y;
 
 void
 TextAttrsMgr::GetAttributes(nsIPersistentProperties* aAttributes,
-                            uint32_t* aStartOffset,
-                            uint32_t* aEndOffset)
+                            int32_t* aStartHTOffset,
+                            int32_t* aEndHTOffset)
 {
   // 1. Hyper text accessible must be specified always.
   // 2. Offset accessible and result hyper text offsets must be specified in
@@ -38,9 +37,9 @@ TextAttrsMgr::GetAttributes(nsIPersistentProperties* aAttributes,
   // specified in the case of default text attributes.
   NS_PRECONDITION(mHyperTextAcc &&
                   ((mOffsetAcc && mOffsetAccIdx != -1 &&
-                    aStartOffset && aEndOffset) ||
+                    aStartHTOffset && aEndHTOffset) ||
                   (!mOffsetAcc && mOffsetAccIdx == -1 &&
-                    !aStartOffset && !aEndOffset &&
+                    !aStartHTOffset && !aEndHTOffset &&
                    mIncludeDefAttrs && aAttributes)),
                   "Wrong usage of TextAttrsMgr!");
 
@@ -51,7 +50,7 @@ TextAttrsMgr::GetAttributes(nsIPersistentProperties* aAttributes,
       if (!nsAccUtils::IsEmbeddedObject(currAcc))
         break;
 
-      (*aStartOffset)--;
+      (*aStartHTOffset)--;
     }
 
     uint32_t childCount = mHyperTextAcc->ChildCount();
@@ -61,7 +60,7 @@ TextAttrsMgr::GetAttributes(nsIPersistentProperties* aAttributes,
       if (!nsAccUtils::IsEmbeddedObject(currAcc))
         break;
 
-      (*aEndOffset)++;
+      (*aEndHTOffset)++;
     }
 
     return;
@@ -69,11 +68,8 @@ TextAttrsMgr::GetAttributes(nsIPersistentProperties* aAttributes,
 
   // Get the content and frame of the accessible. In the case of document
   // accessible it's role content and root frame.
-  nsIContent* hyperTextElm = mHyperTextAcc->GetContent();
-  if (!hyperTextElm)
-    return; // XXX: we don't support text attrs on document with no body
-
-  nsIFrame* rootFrame = mHyperTextAcc->GetFrame();
+  nsIContent *hyperTextElm = mHyperTextAcc->GetContent();
+  nsIFrame *rootFrame = mHyperTextAcc->GetFrame();
   NS_ASSERTION(rootFrame, "No frame for accessible!");
   if (!rootFrame)
     return;
@@ -145,12 +141,12 @@ TextAttrsMgr::GetAttributes(nsIPersistentProperties* aAttributes,
 
   // Expose text attributes range where they are applied if applicable.
   if (mOffsetAcc)
-    GetRange(attrArray, ArrayLength(attrArray), aStartOffset, aEndOffset);
+    GetRange(attrArray, ArrayLength(attrArray), aStartHTOffset, aEndHTOffset);
 }
 
 void
 TextAttrsMgr::GetRange(TextAttr* aAttrArray[], uint32_t aAttrArrayLen,
-                       uint32_t* aStartOffset, uint32_t* aEndOffset)
+                       int32_t* aStartHTOffset, int32_t* aEndHTOffset)
 {
   // Navigate backward from anchor accessible to find start offset.
   for (int32_t childIdx = mOffsetAccIdx - 1; childIdx >= 0; childIdx--) {
@@ -173,7 +169,7 @@ TextAttrsMgr::GetRange(TextAttr* aAttrArray[], uint32_t aAttrArrayLen,
     if (offsetFound)
       break;
 
-    *(aStartOffset) -= nsAccUtils::TextLength(currAcc);
+    *(aStartHTOffset) -= nsAccUtils::TextLength(currAcc);
   }
 
   // Navigate forward from anchor accessible to find end offset.
@@ -198,7 +194,7 @@ TextAttrsMgr::GetRange(TextAttr* aAttrArray[], uint32_t aAttrArrayLen,
     if (offsetFound)
       break;
 
-    (*aEndOffset) += nsAccUtils::TextLength(currAcc);
+    (*aEndHTOffset) += nsAccUtils::TextLength(currAcc);
   }
 }
 
@@ -365,7 +361,7 @@ TextAttrsMgr::BGColorTextAttr::
     return true;
   }
 
-  nsContainerFrame *parentFrame = aFrame->GetParent();
+  nsIFrame *parentFrame = aFrame->GetParent();
   if (!parentFrame) {
     *aColor = aFrame->PresContext()->DefaultBackgroundColor();
     return true;
@@ -519,7 +515,7 @@ TextAttrsMgr::FontSizeTextAttr::
 
   nsAutoString value;
   value.AppendInt(pts);
-  value.AppendLiteral("pt");
+  value.Append(NS_LITERAL_STRING("pt"));
 
   nsAccUtils::SetAccAttr(aAttributes, nsGkAtoms::font_size, value);
 }
@@ -874,9 +870,9 @@ TextAttrsMgr::TextPosTextAttr::
   const nsIContent* content = aFrame->GetContent();
   if (content && content->IsHTML()) {
     const nsIAtom* tagName = content->Tag();
-    if (tagName == nsGkAtoms::sup)
+    if (tagName == nsGkAtoms::sup) 
       return eTextPosSuper;
-    if (tagName == nsGkAtoms::sub)
+    if (tagName == nsGkAtoms::sub) 
       return eTextPosSub;
   }
 

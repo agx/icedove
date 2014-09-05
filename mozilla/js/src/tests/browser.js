@@ -64,7 +64,7 @@ function DocumentWrite(s)
 }
 
 function print() {
-  var s = 'TEST-INFO | ';
+  var s = '';
   var a;
   for (var i = 0; i < arguments.length; i++)
   {

@@ -44,7 +44,6 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 #include "transport_addr.h"
-#include "csi_platform.h"
 
 #ifdef __cplusplus
 #define restrict

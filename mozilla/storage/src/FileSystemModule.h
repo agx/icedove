@@ -14,7 +14,7 @@ struct sqlite3;
 namespace mozilla {
 namespace storage {
 
-int RegisterFileSystemModule(sqlite3* aDB, const char* aName);
+NS_HIDDEN_(int) RegisterFileSystemModule(sqlite3* aDB, const char* aName);
 
 } // namespace storage
 } // namespace mozilla

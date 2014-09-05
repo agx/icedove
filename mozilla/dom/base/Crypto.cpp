@@ -29,7 +29,7 @@ NS_INTERFACE_MAP_END
 NS_IMPL_CYCLE_COLLECTING_ADDREF(Crypto)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(Crypto)
 
-NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE(Crypto, mWindow, mSubtle)
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(Crypto, mWindow)
 
 Crypto::Crypto()
 {
@@ -118,15 +118,6 @@ Crypto::GetRandomValues(JSContext* aCx, const ArrayBufferView& aArray,
   }
 
   aRetval.set(view);
-}
-
-SubtleCrypto*
-Crypto::Subtle()
-{
-  if(!mSubtle) {
-    mSubtle = new SubtleCrypto(GetParentObject());
-  }
-  return mSubtle;
 }
 
 #ifndef MOZ_DISABLE_CRYPTOLEGACY

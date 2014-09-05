@@ -39,15 +39,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #else
 #include <sys/param.h>
 #include <sys/socket.h>
-#ifndef LINUX
 #include <net/if.h>
+#ifndef LINUX
 #if !defined(__OpenBSD__) && !defined(__NetBSD__)
 #include <net/if_var.h>
 #endif
 #include <net/if_dl.h>
 #include <net/if_types.h>
-#else
-#include <linux/if.h>
 #endif
 #ifndef BSD
 #include <net/route.h>

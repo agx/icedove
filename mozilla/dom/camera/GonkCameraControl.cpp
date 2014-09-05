@@ -53,9 +53,8 @@ using namespace android;
 #define RETURN_IF_NO_CAMERA_HW()                                          \
   do {                                                                    \
     if (!mCameraHw.get()) {                                               \
-      NS_WARNING("Camera hardware is not initialized");                   \
       DOM_CAMERA_LOGE("%s:%d : mCameraHw is null\n", __func__, __LINE__); \
-      return NS_ERROR_NOT_INITIALIZED;                                    \
+      return NS_ERROR_NOT_AVAILABLE;                                      \
     }                                                                     \
   } while(0)
 
@@ -108,7 +107,7 @@ nsGonkCameraControl::StartImpl(const Configuration* aInitialConfig)
 
   nsresult rv = Initialize();
   if (NS_WARN_IF(NS_FAILED(rv))) {
-    return NS_ERROR_NOT_INITIALIZED;
+    return rv;
   }
 
   if (aInitialConfig) {
@@ -127,15 +126,10 @@ nsGonkCameraControl::StartImpl(const Configuration* aInitialConfig)
 nsresult
 nsGonkCameraControl::Initialize()
 {
-  if (mCameraHw.get()) {
-    DOM_CAMERA_LOGI("Camera %d already connected (this=%p)\n", mCameraId, this);
-    return NS_ERROR_ALREADY_INITIALIZED;
-  }
-
   mCameraHw = GonkCameraHardware::Connect(this, mCameraId);
   if (!mCameraHw.get()) {
     DOM_CAMERA_LOGE("Failed to connect to camera %d (this=%p)\n", mCameraId, this);
-    return NS_ERROR_NOT_INITIALIZED;
+    return NS_ERROR_FAILURE;
   }
 
   DOM_CAMERA_LOGI("Initializing camera %d (this=%p, mCameraHw=%p)\n", mCameraId, this, mCameraHw.get());
@@ -211,29 +205,17 @@ nsGonkCameraControl::SetConfigurationInternal(const Configuration& aConfig)
 
   nsresult rv;
 
-  {
-    ICameraControlParameterSetAutoEnter set(this);
+  switch (aConfig.mMode) {
+    case kPictureMode:
+      rv = SetPictureConfiguration(aConfig);
+      break;
 
-    switch (aConfig.mMode) {
-      case kPictureMode:
-        rv = SetPictureConfiguration(aConfig);
-        break;
+    case kVideoMode:
+      rv = SetVideoConfiguration(aConfig);
+      break;
 
-      case kVideoMode:
-        rv = SetVideoConfiguration(aConfig);
-        break;
-
-      default:
-        MOZ_ASSERT_UNREACHABLE("Unanticipated camera mode in SetConfigurationInternal()");
-        rv = NS_ERROR_FAILURE;
-        break;
-    }
-
-    nsresult rv = Set(CAMERA_PARAM_RECORDINGHINT,
-                      aConfig.mMode == kVideoMode);
-    if (NS_FAILED(rv)) {
-      DOM_CAMERA_LOGE("Failed to set recording hint (0x%x)\n", rv);
-    }
+    default:
+      MOZ_ASSUME_UNREACHABLE("Unanticipated camera mode in SetConfigurationInternal()");
   }
 
   DOM_CAMERA_LOGT("%s:%d\n", __func__, __LINE__);
@@ -258,12 +240,8 @@ nsGonkCameraControl::SetConfigurationImpl(const Configuration& aConfig)
   // Stop any currently running preview
   nsresult rv = PausePreview();
   if (NS_FAILED(rv)) {
-    DOM_CAMERA_LOGW("PausePreview() in SetConfigurationImpl() failed (0x%x)\n", rv);
-    if (rv == NS_ERROR_NOT_INITIALIZED) {
-      // If there no hardware available, nothing else we try will work,
-      // so bail out here.
-      return rv;
-    }
+    // warn, but plow ahead
+    NS_WARNING("PausePreview() in SetConfigurationImpl() failed");
   }
 
   DOM_CAMERA_LOGT("%s:%d\n", __func__, __LINE__);
@@ -287,6 +265,11 @@ nsGonkCameraControl::SetPictureConfiguration(const Configuration& aConfig)
   mRecorderProfile = nullptr;
 
   nsresult rv = SetPreviewSize(aConfig.mPreviewSize);
+  if (NS_WARN_IF(NS_FAILED(rv))) {
+    return rv;
+  }
+
+  rv = PushParameters();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return rv;
   }
@@ -430,12 +413,6 @@ nsGonkCameraControl::Set(uint32_t aKey, const nsAString& aValue)
       // Explicit flash mode changes always win and stick.
       mAutoFlashModeOverridden = false;
       break;
-
-    case CAMERA_PARAM_SCENEMODE:
-      // Reset disabling normal pictures in HDR mode in conjunction with setting
-      // scene mode because some drivers require they be changed together.
-      mParams.Set(CAMERA_PARAM_SCENEMODE_HDR_RETURNNORMALPICTURE, false);
-      break;
   }
 
   return PushParameters();
@@ -469,19 +446,6 @@ nsGonkCameraControl::Set(uint32_t aKey, int64_t aValue)
 
 nsresult
 nsGonkCameraControl::Get(uint32_t aKey, int64_t& aRet)
-{
-  return mParams.Get(aKey, aRet);
-}
-
-// Boolean parameter accessors.
-nsresult
-nsGonkCameraControl::Set(uint32_t aKey, bool aValue)
-{
-  return SetAndPush(aKey, aValue);
-}
-
-nsresult
-nsGonkCameraControl::Get(uint32_t aKey, bool& aRet)
 {
   return mParams.Get(aKey, aRet);
 }
@@ -732,7 +696,8 @@ nsGonkCameraControl::SetThumbnailSize(const Size& aSize)
     {
       nsresult rv = mCameraControl->SetThumbnailSizeImpl(mSize);
       if (NS_FAILED(rv)) {
-        mCameraControl->OnUserError(CameraControlListener::kInSetThumbnailSize, rv);
+        mCameraControl->OnError(CameraControlListener::kInUnspecified,
+                                CameraControlListener::kErrorSetThumbnailSizeFailed);
       }
       return NS_OK;
     }
@@ -867,7 +832,8 @@ nsGonkCameraControl::SetPictureSize(const Size& aSize)
     {
       nsresult rv = mCameraControl->SetPictureSizeImpl(mSize);
       if (NS_FAILED(rv)) {
-        mCameraControl->OnUserError(CameraControlListener::kInSetPictureSize, rv);
+        mCameraControl->OnError(CameraControlListener::kInUnspecified,
+                                CameraControlListener::kErrorSetPictureSizeFailed);
       }
       return NS_OK;
     }
@@ -985,9 +951,7 @@ nsGonkCameraControl::StartRecordingImpl(DeviceStorageFileDescriptor* aFileDescri
    * The camera app needs to provide the file extension '.3gp' for now.
    * See bug 795202.
    */
-  if (NS_WARN_IF(!aFileDescriptor)) {
-    return NS_ERROR_INVALID_ARG;
-  }
+  NS_ENSURE_TRUE(aFileDescriptor, NS_ERROR_FAILURE);
   nsAutoString fullPath;
   mVideoFile = aFileDescriptor->mDSFile;
   mVideoFile->GetFullPath(fullPath);
@@ -1072,19 +1036,12 @@ nsGonkCameraControl::StopRecordingImpl()
   mRecorder = nullptr;
   OnRecorderStateChange(CameraControlListener::kRecorderStopped);
 
-  {
-    ICameraControlParameterSetAutoEnter set(this);
-
-    if (mAutoFlashModeOverridden) {
-      nsresult rv = Set(CAMERA_PARAM_FLASHMODE, NS_LITERAL_STRING("auto"));
-      if (NS_FAILED(rv)) {
-        DOM_CAMERA_LOGE("Failed to set flash mode (0x%x)\n", rv);
-      }
-    }
+  if (mAutoFlashModeOverridden) {
+    SetAndPush(CAMERA_PARAM_FLASHMODE, NS_LITERAL_STRING("auto"));
   }
 
   // notify DeviceStorage that the new video file is closed and ready
-  return NS_DispatchToMainThread(new RecordingComplete(mVideoFile));
+  return NS_DispatchToMainThread(new RecordingComplete(mVideoFile), NS_DISPATCH_NORMAL);
 }
 
 nsresult
@@ -1249,8 +1206,8 @@ nsGonkCameraControl::OnTakePictureComplete(uint8_t* aData, uint32_t aLength)
 void
 nsGonkCameraControl::OnTakePictureError()
 {
-  CameraControlImpl::OnUserError(CameraControlListener::kInTakePicture,
-                                 NS_ERROR_FAILURE);
+  CameraControlImpl::OnError(CameraControlListener::kInTakePicture,
+                             CameraControlListener::kErrorApiFailed);
 }
 
 nsresult
@@ -1259,7 +1216,7 @@ nsGonkCameraControl::SetPreviewSize(const Size& aSize)
   MOZ_ASSERT(NS_GetCurrentThread() == mCameraThread);
 
   nsTArray<Size> previewSizes;
-  nsresult rv = Get(CAMERA_PARAM_SUPPORTED_PREVIEWSIZES, previewSizes);
+  nsresult rv = mParams.Get(CAMERA_PARAM_SUPPORTED_PREVIEWSIZES, previewSizes);
   if (NS_FAILED(rv)) {
     DOM_CAMERA_LOGE("Camera failed to return any preview sizes (0x%x)\n", rv);
     return rv;
@@ -1280,7 +1237,7 @@ nsGonkCameraControl::SetPreviewSize(const Size& aSize)
     SetVideoSize(best);
   }
   mCurrentConfiguration.mPreviewSize = best;
-  return Set(CAMERA_PARAM_PREVIEWSIZE, best);
+  return mParams.Set(CAMERA_PARAM_PREVIEWSIZE, best);
 }
 
 nsresult
@@ -1289,7 +1246,7 @@ nsGonkCameraControl::SetVideoSize(const Size& aSize)
   MOZ_ASSERT(NS_GetCurrentThread() == mCameraThread);
 
   nsTArray<Size> videoSizes;
-  nsresult rv = Get(CAMERA_PARAM_SUPPORTED_VIDEOSIZES, videoSizes);
+  nsresult rv = mParams.Get(CAMERA_PARAM_SUPPORTED_VIDEOSIZES, videoSizes);
   if (NS_FAILED(rv)) {
     DOM_CAMERA_LOGE("Camera failed to return any video sizes (0x%x)\n", rv);
     return rv;
@@ -1303,7 +1260,7 @@ nsGonkCameraControl::SetVideoSize(const Size& aSize)
     return rv;
   }
   mLastRecorderSize = best;
-  return Set(CAMERA_PARAM_VIDEOSIZE, best);
+  return mParams.Set(CAMERA_PARAM_VIDEOSIZE, best);
 }
 
 nsresult
@@ -1409,14 +1366,20 @@ nsGonkCameraControl::SetupVideoMode(const nsAString& aProfile)
       return rv;
     }
 
-    rv = Set(CAMERA_PARAM_PREVIEWFRAMERATE, fps);
+    rv = mParams.Set(CAMERA_PARAM_PREVIEWFRAMERATE, fps);
     if (NS_FAILED(rv)) {
       DOM_CAMERA_LOGE("Failed to set video mode frame rate (0x%x)\n", rv);
       return rv;
     }
-  }
 
-  mPreviewFps = fps;
+    rv = PushParameters();
+    if (NS_FAILED(rv)) {
+      DOM_CAMERA_LOGE("Failed to set video mode settings (0x%x)\n", rv);
+      return rv;
+    }
+
+    mPreviewFps = fps;
+  }
   return NS_OK;
 }
 
@@ -1569,8 +1532,8 @@ nsGonkCameraControl::OnRecorderEvent(int msg, int ext1, int ext2)
 
 nsresult
 nsGonkCameraControl::SetupRecording(int aFd, int aRotation,
-                                    uint64_t aMaxFileSizeBytes,
-                                    uint64_t aMaxVideoLengthMs)
+                                    int64_t aMaxFileSizeBytes,
+                                    int64_t aMaxVideoLengthMs)
 {
   RETURN_IF_NO_CAMERA_HW();
 
@@ -1579,39 +1542,26 @@ nsGonkCameraControl::SetupRecording(int aFd, int aRotation,
   char buffer[SIZE];
 
   mRecorder = new GonkRecorder();
-  CHECK_SETARG_RETURN(mRecorder->init(), NS_ERROR_FAILURE);
+  CHECK_SETARG(mRecorder->init());
 
   nsresult rv = mRecorderProfile->ConfigureRecorder(mRecorder);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  CHECK_SETARG_RETURN(mRecorder->setCamera(mCameraHw), NS_ERROR_FAILURE);
+  CHECK_SETARG(mRecorder->setCamera(mCameraHw));
 
-  DOM_CAMERA_LOGI("maxVideoLengthMs=%llu\n", aMaxVideoLengthMs);
-  const uint64_t kMaxVideoLengthMs = INT64_MAX / 1000;
+  DOM_CAMERA_LOGI("maxVideoLengthMs=%lld\n", aMaxVideoLengthMs);
   if (aMaxVideoLengthMs == 0) {
     aMaxVideoLengthMs = -1;
-  } else if (aMaxVideoLengthMs > kMaxVideoLengthMs) {
-    // GonkRecorder parameters are internally limited to signed 64-bit values,
-    // and the time length limit is converted from milliseconds to microseconds,
-    // so we limit this value to prevent any unexpected overflow weirdness.
-    DOM_CAMERA_LOGW("maxVideoLengthMs capped to %lld\n", kMaxVideoLengthMs);
-    aMaxVideoLengthMs = kMaxVideoLengthMs;
   }
   snprintf(buffer, SIZE, "max-duration=%lld", aMaxVideoLengthMs);
-  CHECK_SETARG_RETURN(mRecorder->setParameters(String8(buffer)),
-                      NS_ERROR_INVALID_ARG);
+  CHECK_SETARG(mRecorder->setParameters(String8(buffer)));
 
-  DOM_CAMERA_LOGI("maxFileSizeBytes=%llu\n", aMaxFileSizeBytes);
+  DOM_CAMERA_LOGI("maxFileSizeBytes=%lld\n", aMaxFileSizeBytes);
   if (aMaxFileSizeBytes == 0) {
     aMaxFileSizeBytes = -1;
-  } else if (aMaxFileSizeBytes > INT64_MAX) {
-    // GonkRecorder parameters are internally limited to signed 64-bit values
-    DOM_CAMERA_LOGW("maxFileSizeBytes capped to INT64_MAX\n");
-    aMaxFileSizeBytes = INT64_MAX;
   }
   snprintf(buffer, SIZE, "max-filesize=%lld", aMaxFileSizeBytes);
-  CHECK_SETARG_RETURN(mRecorder->setParameters(String8(buffer)),
-                      NS_ERROR_INVALID_ARG);
+  CHECK_SETARG(mRecorder->setParameters(String8(buffer)));
 
   // adjust rotation by camera sensor offset
   int r = aRotation;
@@ -1619,15 +1569,13 @@ nsGonkCameraControl::SetupRecording(int aFd, int aRotation,
   r = RationalizeRotation(r);
   DOM_CAMERA_LOGI("setting video rotation to %d degrees (mapped from %d)\n", r, aRotation);
   snprintf(buffer, SIZE, "video-param-rotation-angle-degrees=%d", r);
-  CHECK_SETARG_RETURN(mRecorder->setParameters(String8(buffer)),
-                      NS_ERROR_INVALID_ARG);
+  CHECK_SETARG(mRecorder->setParameters(String8(buffer)));
 
-  CHECK_SETARG_RETURN(mRecorder->setListener(new GonkRecorderListener(this)),
-                      NS_ERROR_FAILURE);
+  CHECK_SETARG(mRecorder->setListener(new GonkRecorderListener(this)));
 
   // recording API needs file descriptor of output file
-  CHECK_SETARG_RETURN(mRecorder->setOutputFile(aFd, 0, 0), NS_ERROR_FAILURE);
-  CHECK_SETARG_RETURN(mRecorder->prepare(), NS_ERROR_FAILURE);
+  CHECK_SETARG(mRecorder->setOutputFile(aFd, 0, 0));
+  CHECK_SETARG(mRecorder->prepare());
 
   return NS_OK;
 }
@@ -1677,12 +1625,6 @@ nsGonkCameraControl::GetRecorderProfileManagerImpl()
 }
 
 void
-nsGonkCameraControl::OnRateLimitPreview(bool aLimit)
-{
-  CameraControlImpl::OnRateLimitPreview(aLimit);
-}
-
-void
 nsGonkCameraControl::OnNewPreviewFrame(layers::TextureClient* aBuffer)
 {
   nsRefPtr<Image> frame = mImageContainer->CreateImage(ImageFormat::GRALLOC_PLANAR_YCBCR);
@@ -1700,15 +1642,15 @@ nsGonkCameraControl::OnNewPreviewFrame(layers::TextureClient* aBuffer)
 }
 
 void
-nsGonkCameraControl::OnSystemError(CameraControlListener::SystemContext aWhere,
-                                   nsresult aError)
+nsGonkCameraControl::OnError(CameraControlListener::CameraErrorContext aWhere,
+                             CameraControlListener::CameraError aError)
 {
-  if (aWhere == CameraControlListener::kSystemService) {
+  if (aError == CameraControlListener::kErrorServiceFailed) {
     OnPreviewStateChange(CameraControlListener::kPreviewStopped);
     OnHardwareStateChange(CameraControlListener::kHardwareClosed);
   }
 
-  CameraControlImpl::OnSystemError(aWhere, aError);
+  CameraControlImpl::OnError(aWhere, aError);
 }
 
 // Gonk callback handlers.
@@ -1745,12 +1687,6 @@ OnFacesDetected(nsGonkCameraControl* gc, camera_frame_metadata_t* aMetaData)
 }
 
 void
-OnRateLimitPreview(nsGonkCameraControl* gc, bool aLimit)
-{
-  gc->OnRateLimitPreview(aLimit);
-}
-
-void
 OnNewPreviewFrame(nsGonkCameraControl* gc, layers::TextureClient* aBuffer)
 {
   gc->OnNewPreviewFrame(aBuffer);
@@ -1769,17 +1705,16 @@ OnClosed(nsGonkCameraControl* gc)
 }
 
 void
-OnSystemError(nsGonkCameraControl* gc,
-              CameraControlListener::SystemContext aWhere,
-              int32_t aArg1, int32_t aArg2)
+OnError(nsGonkCameraControl* gc, CameraControlListener::CameraError aError,
+        int32_t aArg1, int32_t aArg2)
 {
 #ifdef PR_LOGGING
-  DOM_CAMERA_LOGE("OnSystemError : aWhere=%d, aArg1=%d, aArg2=%d\n", aWhere, aArg1, aArg2);
+  DOM_CAMERA_LOGE("OnError : aError=%d, aArg1=%d, aArg2=%d\n", aError, aArg1, aArg2);
 #else
   unused << aArg1;
   unused << aArg2;
 #endif
-  gc->OnSystemError(aWhere, NS_ERROR_FAILURE);
+  gc->OnError(CameraControlListener::kInUnspecified, aError);
 }
 
 } // namespace mozilla

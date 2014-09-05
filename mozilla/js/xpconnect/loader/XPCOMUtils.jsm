@@ -223,12 +223,7 @@ this.XPCOMUtils = {
   {
     this.defineLazyGetter(aObject, aName, function XPCU_moduleLambda() {
       var temp = {};
-      try {
-        Cu.import(aResource, temp);
-      } catch (ex) {
-        Cu.reportError("Failed to load module " + aResource + ".");
-        throw ex;
-      }
+      Cu.import(aResource, temp);
       return temp[aSymbol || aName];
     });
   },

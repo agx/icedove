@@ -85,15 +85,6 @@ this.UITelemetry = {
   _simpleMeasureFunctions: {},
 
   /**
-   * A hack to generate the relative timestamp from start when we don't have
-   * access to the Java timer.
-   * XXX: Bug 1007647 - Support realtime and/or uptime in JavaScript.
-   */
-  uptimeMillis: function() {
-    return Date.now() - Services.startup.getStartupInfo().process;
-  },
-
-  /**
    * Adds a single event described by a timestamp, an action, and the calling
    * method.
    *
@@ -113,7 +104,7 @@ this.UITelemetry = {
       action: aAction,
       method: aMethod,
       sessions: sessions,
-      timestamp: (aTimestamp == undefined) ? this.uptimeMillis() : aTimestamp,
+      timestamp: aTimestamp,
     };
 
     if (aExtras) {
@@ -135,7 +126,7 @@ this.UITelemetry = {
       // Do not overwrite a previous event start if it already exists.
       return;
     }
-    this._activeSessions[aName] = (aTimestamp == undefined) ? this.uptimeMillis() : aTimestamp;
+    this._activeSessions[aName] = aTimestamp;
   },
 
   /**
@@ -158,7 +149,7 @@ this.UITelemetry = {
       name: aName,
       reason: aReason,
       start: sessionStart,
-      end: (aTimestamp == undefined) ? this.uptimeMillis() : aTimestamp,
+      end: aTimestamp,
     };
 
     this._recordEvent(aEvent);

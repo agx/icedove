@@ -301,10 +301,10 @@ FrameworkView::PerformSearch(HString& aQuery)
   }
 
   nsAutoCString parameter;
-  parameter.Append('"');
+  parameter.AppendLiteral("\"");
   unsigned int length;
   parameter.Append(NS_ConvertUTF16toUTF8(aQuery.GetRawBuffer(&length)));
-  parameter.Append('"');
+  parameter.AppendLiteral("\"");
 
   // NB: The first argument gets stripped by nsICommandLineRunner::Init,
   //     so it doesn't matter what we pass as the first argument, but we

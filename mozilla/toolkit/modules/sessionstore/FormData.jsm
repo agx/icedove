@@ -226,7 +226,6 @@ let FormDataInternal = {
       setTimeout(() => {
         if (doc.body && doc.designMode == "on" && doc.documentURI == savedURL) {
           doc.body.innerHTML = data.innerHTML;
-          this.fireEvent(doc.body, "input");
         }
       });
     }
@@ -312,21 +311,11 @@ let FormDataInternal = {
 
     // Fire events for this node if applicable
     if (eventType) {
-      this.fireEvent(aNode, eventType);
+      let doc = aNode.ownerDocument;
+      let event = doc.createEvent("UIEvents");
+      event.initUIEvent(eventType, true, true, doc.defaultView, 0);
+      aNode.dispatchEvent(event);
     }
-  },
-
-  /**
-   * Dispatches an event of type |type| to the given |node|.
-   *
-   * @param node (DOMNode)
-   * @param type (string)
-   */
-  fireEvent: function (node, type) {
-    let doc = node.ownerDocument;
-    let event = doc.createEvent("UIEvents");
-    event.initUIEvent(type, true, true, doc.defaultView, 0);
-    node.dispatchEvent(event);
   },
 
   /**

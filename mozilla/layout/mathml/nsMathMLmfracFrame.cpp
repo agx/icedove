@@ -225,7 +225,7 @@ nsMathMLmfracFrame::PlaceInternal(nsRenderingContext& aRenderingContext,
   bool outermostEmbellished = false;
   if (mEmbellishData.coreFrame) {
     nsEmbellishData parentData;
-    GetEmbellishDataFrom(GetParent(), parentData);
+    GetEmbellishDataFrom(mParent, parentData);
     outermostEmbellished = parentData.coreFrame != mEmbellishData.coreFrame;
   }
 

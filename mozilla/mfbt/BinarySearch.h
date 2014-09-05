@@ -14,12 +14,12 @@
 namespace mozilla {
 
 /*
- * The algorithm searches the given container |aContainer| over the sorted
- * index range [aBegin, aEnd) for an index |i| where |aContainer[i] == aTarget|.
- * If such an index |i| is found, BinarySearch returns |true| and the index is
- * returned via the outparam |aMatchOrInsertionPoint|. If no index is found,
- * BinarySearch returns |false| and the outparam returns the first index in
- * [aBegin, aEnd] where |aTarget| can be inserted to maintain sorted order.
+ * The algorithm searches the given container 'c' over the sorted index range
+ * [begin, end) for an index 'i' where 'c[i] == target'. If such an index 'i' is
+ * found, BinarySearch returns 'true' and the index is returned via the outparam
+ * 'matchOrInsertionPoint'. If no index is found, BinarySearch returns 'false'
+ * and the outparam returns the first index in [begin, end] where 'target' can
+ * be inserted to maintain sorted order.
  *
  * Example:
  *
@@ -32,34 +32,32 @@ namespace mozilla {
 
 template <typename Container, typename T>
 bool
-BinarySearch(const Container& aContainer, size_t aBegin, size_t aEnd,
-             T aTarget, size_t* aMatchOrInsertionPoint)
+BinarySearch(const Container &c, size_t begin, size_t end, T target, size_t *matchOrInsertionPoint)
 {
-  MOZ_ASSERT(aBegin <= aEnd);
+  MOZ_ASSERT(begin <= end);
 
-  size_t low = aBegin;
-  size_t high = aEnd;
+  size_t low = begin;
+  size_t high = end;
   while (low != high) {
     size_t middle = low + (high - low) / 2;
-    const T& middleValue = aContainer[middle];
+    const T &middleValue = c[middle];
 
-    MOZ_ASSERT(aContainer[low] <= aContainer[middle]);
-    MOZ_ASSERT(aContainer[middle] <= aContainer[high - 1]);
-    MOZ_ASSERT(aContainer[low] <= aContainer[high - 1]);
+    MOZ_ASSERT(c[low] <= c[middle]);
+    MOZ_ASSERT(c[middle] <= c[high - 1]);
+    MOZ_ASSERT(c[low] <= c[high - 1]);
 
-    if (aTarget == middleValue) {
-      *aMatchOrInsertionPoint = middle;
+    if (target == middleValue) {
+      *matchOrInsertionPoint = middle;
       return true;
     }
 
-    if (aTarget < middleValue) {
+    if (target < middleValue)
       high = middle;
-    } else {
+    else
       low = middle + 1;
-    }
   }
 
-  *aMatchOrInsertionPoint = low;
+  *matchOrInsertionPoint = low;
   return false;
 }
 

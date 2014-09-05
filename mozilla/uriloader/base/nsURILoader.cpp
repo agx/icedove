@@ -367,26 +367,11 @@ nsresult nsDocumentOpenInfo::DispatchContent(nsIRequest *request, nsISupports * 
   bool forceExternalHandling = false;
   uint32_t disposition;
   rv = aChannel->GetContentDisposition(&disposition);
-
-  bool allowContentDispositionToForceExternalHandling = true;
-
-#ifdef MOZ_B2G
-
-  // On B2G, OMA content files should never be handled by an external handler
-  // (even if the server specifies Content-Disposition: attachment) because the
-  // data should never be stored on an unencrypted form.
-  allowContentDispositionToForceExternalHandling =
-    !mContentType.LowerCaseEqualsASCII("application/vnd.oma.drm.message");
-
-#endif
-
-  if (NS_SUCCEEDED(rv) && (disposition == nsIChannel::DISPOSITION_ATTACHMENT) &&
-      allowContentDispositionToForceExternalHandling) {
+  if (NS_SUCCEEDED(rv) && disposition == nsIChannel::DISPOSITION_ATTACHMENT)
     forceExternalHandling = true;
-  }
 
   LOG(("  forceExternalHandling: %s", forceExternalHandling ? "yes" : "no"));
-
+    
   // We're going to try to find a contentListener that can handle our data
   nsCOMPtr<nsIURIContentListener> contentListener;
   // The type or data the contentListener wants.

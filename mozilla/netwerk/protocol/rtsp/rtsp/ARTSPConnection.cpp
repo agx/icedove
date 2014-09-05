@@ -30,6 +30,9 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <sys/socket.h>
+
+#include "HTTPBase.h"
 
 #include "nsCOMPtr.h"
 #include "nsString.h"
@@ -37,37 +40,33 @@
 #include "nsIServiceManager.h"
 #include "nsICryptoHash.h"
 
-#include "prnetdb.h"
-#include "prerr.h"
-#include "prerror.h"
-#include "NetworkActivityMonitor.h"
-
-using namespace mozilla::net;
-
 namespace android {
 
 // static
-const uint32_t ARTSPConnection::kSocketPollTimeoutUs = 1000;
-const uint32_t ARTSPConnection::kSocketPollTimeoutRetries = 10000;
-const uint32_t ARTSPConnection::kSocketBlokingRecvTimeout = 10;
+const int64_t ARTSPConnection::kSelectTimeoutUs = 1000ll;
+const int64_t ARTSPConnection::kSelectTimeoutRetries = 10000ll;
 
 ARTSPConnection::ARTSPConnection(bool uidValid, uid_t uid)
     : mUIDValid(uidValid),
       mUID(uid),
       mState(DISCONNECTED),
       mAuthType(NONE),
+      mSocket(-1),
       mConnectionID(0),
       mNextCSeq(0),
       mReceiveResponseEventPending(false),
-      mSocket(nullptr),
-      mNumSocketPollTimeoutRetries(0) {
+      mNumSelectTimeoutRetries(0) {
     MakeUserAgent(&mUserAgent);
 }
 
 ARTSPConnection::~ARTSPConnection() {
-    if (mSocket) {
+    if (mSocket >= 0) {
         LOGE("Connection is still open, closing the socket.");
-        closeSocket();
+        if (mUIDValid) {
+            HTTPBase::UnRegisterSocketUserTag(mSocket);
+        }
+        close(mSocket);
+        mSocket = -1;
     }
 }
 
@@ -140,7 +139,7 @@ void ARTSPConnection::onMessageReceived(const sp<AMessage> &msg) {
 
 // static
 bool ARTSPConnection::ParseURL(
-        const char *url, AString *host, uint16_t *port, AString *path,
+        const char *url, AString *host, unsigned *port, AString *path,
         AString *user, AString *pass) {
     host->clear();
     *port = 0;
@@ -200,27 +199,34 @@ bool ARTSPConnection::ParseURL(
     return true;
 }
 
-static status_t MakeSocketBlocking(PRFileDesc *fd, bool blocking) {
-    // Check if socket is closed.
-    if (!fd) {
+static status_t MakeSocketBlocking(int s, bool blocking) {
+    // Make socket non-blocking.
+    int flags = fcntl(s, F_GETFL, 0);
+
+    if (flags == -1) {
         return UNKNOWN_ERROR;
     }
 
-    PRStatus rv = PR_FAILURE;
-    PRSocketOptionData opt;
+    if (blocking) {
+        flags &= ~O_NONBLOCK;
+    } else {
+        flags |= O_NONBLOCK;
+    }
 
-    opt.option = PR_SockOpt_Nonblocking;
-    opt.value.non_blocking = !blocking;
-    rv = PR_SetSocketOption(fd, &opt);
+    flags = fcntl(s, F_SETFL, flags);
 
-    return rv == PR_SUCCESS ? OK : UNKNOWN_ERROR;
+    return flags == -1 ? UNKNOWN_ERROR : OK;
 }
 
 void ARTSPConnection::onConnect(const sp<AMessage> &msg) {
     ++mConnectionID;
 
     if (mState != DISCONNECTED) {
-        closeSocket();
+        if (mUIDValid) {
+            HTTPBase::UnRegisterSocketUserTag(mSocket);
+        }
+        close(mSocket);
+        mSocket = -1;
 
         flushPendingRequests();
     }
@@ -234,7 +240,7 @@ void ARTSPConnection::onConnect(const sp<AMessage> &msg) {
     CHECK(msg->findMessage("reply", &reply));
 
     AString host, path;
-    uint16_t port;
+    unsigned port;
     if (!ParseURL(url.c_str(), &host, &port, &path, &mUser, &mPass)
             || (mUser.size() > 0 && mPass.size() == 0)) {
         // If we have a user name but no password we have to give up
@@ -254,45 +260,40 @@ void ARTSPConnection::onConnect(const sp<AMessage> &msg) {
         LOGV("user = '%s', pass = '%s'", mUser.c_str(), mPass.c_str());
     }
 
-    PRStatus status = PR_FAILURE;
-    PRHostEnt hostentry;
-    char buffer[PR_NETDB_BUF_SIZE];
-
-    status = PR_GetHostByName(
-        host.c_str(), buffer, PR_NETDB_BUF_SIZE, &hostentry);
-    if (status == PR_FAILURE) {
+    struct hostent *ent = gethostbyname(host.c_str());
+    if (ent == NULL) {
         LOGE("Unknown host %s", host.c_str());
 
-        PRErrorCode code = PR_GetError();
-        reply->setInt32("result", -code);
+        reply->setInt32("result", -ENOENT);
         reply->post();
 
         mState = DISCONNECTED;
         return;
     }
 
-    mSocket = PR_OpenTCPSocket(PR_AF_INET);
-    if (!mSocket) {
-        TRESPASS();
-    }
+    mSocket = socket(AF_INET, SOCK_STREAM, 0);
 
-    NetworkActivityMonitor::AttachIOLayer(mSocket);
+    if (mUIDValid) {
+        HTTPBase::RegisterSocketUserTag(mSocket, mUID,
+                                        (uint32_t)*(uint32_t*) "RTSP");
+    }
 
     MakeSocketBlocking(mSocket, false);
 
-    PRNetAddr remote;
-    remote.inet.family = PR_AF_INET;
-    remote.inet.ip = *((uint32_t *) hostentry.h_addr_list[0]);
-    remote.inet.port = PR_htons(port);
+    struct sockaddr_in remote;
+    memset(remote.sin_zero, 0, sizeof(remote.sin_zero));
+    remote.sin_family = AF_INET;
+    remote.sin_addr.s_addr = *(in_addr_t *)ent->h_addr;
+    remote.sin_port = htons(port);
 
-    status = PR_Connect(mSocket, &remote, PR_INTERVAL_NO_TIMEOUT);
+    int err = ::connect(
+            mSocket, (const struct sockaddr *)&remote, sizeof(remote));
 
-    reply->setInt32("server-ip", PR_ntohl(remote.inet.ip));
+    reply->setInt32("server-ip", ntohl(remote.sin_addr.s_addr));
 
-    if (status != PR_SUCCESS) {
-        PRErrorCode code = PR_GetError();
-        if (code == PR_IN_PROGRESS_ERROR) {
-            mNumSocketPollTimeoutRetries = 0;
+    if (err < 0) {
+        if (errno == EINPROGRESS) {
+            mNumSelectTimeoutRetries = 0;
             sp<AMessage> msg = new AMessage(kWhatCompleteConnection, id());
             msg->setMessage("reply", reply);
             msg->setInt32("connection-id", mConnectionID);
@@ -300,10 +301,14 @@ void ARTSPConnection::onConnect(const sp<AMessage> &msg) {
             return;
         }
 
-        reply->setInt32("result", -code);
+        reply->setInt32("result", -errno);
         mState = DISCONNECTED;
 
-        closeSocket();
+        if (mUIDValid) {
+            HTTPBase::UnRegisterSocketUserTag(mSocket);
+        }
+        close(mSocket);
+        mSocket = -1;
     } else {
         reply->setInt32("result", OK);
         mState = CONNECTED;
@@ -316,7 +321,11 @@ void ARTSPConnection::onConnect(const sp<AMessage> &msg) {
 }
 
 void ARTSPConnection::performDisconnect() {
-    closeSocket();
+    if (mUIDValid) {
+        HTTPBase::UnRegisterSocketUserTag(mSocket);
+    }
+    close(mSocket);
+    mSocket = -1;
 
     flushPendingRequests();
 
@@ -324,7 +333,7 @@ void ARTSPConnection::performDisconnect() {
     mPass.clear();
     mAuthType = NONE;
     mNonce.clear();
-    mNumSocketPollTimeoutRetries = 0;
+    mNumSelectTimeoutRetries = 0;
 
     mState = DISCONNECTED;
 }
@@ -358,38 +367,50 @@ void ARTSPConnection::onCompleteConnection(const sp<AMessage> &msg) {
         return;
     }
 
-    PRPollDesc writePollDesc;
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = kSelectTimeoutUs;
 
-    writePollDesc.fd = mSocket;
-    writePollDesc.in_flags = PR_POLL_WRITE;
+    fd_set ws;
+    FD_ZERO(&ws);
+    FD_SET(mSocket, &ws);
 
-    int32_t numSocketsReadyToRead = PR_Poll(&writePollDesc, 1,
-        PR_MicrosecondsToInterval(kSocketPollTimeoutUs));
+    int res = select(mSocket + 1, NULL, &ws, NULL, &tv);
+    CHECK_GE(res, 0);
 
-    CHECK_GE(numSocketsReadyToRead, 0);
-
-    if (numSocketsReadyToRead == 0) {
-        // PR_Poll() timed out. Not yet connected.
-        if (mNumSocketPollTimeoutRetries < kSocketPollTimeoutRetries) {
-            mNumSocketPollTimeoutRetries++;
+    if (res == 0) {
+        // select() timed out. Not yet connected.
+        if (mNumSelectTimeoutRetries < kSelectTimeoutRetries) {
+            mNumSelectTimeoutRetries++;
             msg->post();
         } else {
             // Connection timeout here.
             // We cannot establish TCP connection, abort the connect
             // and reply an error to RTSPConnectionHandler.
             LOGE("Connection timeout. Failed to connect to the server.");
-            mNumSocketPollTimeoutRetries = 0;
+            mNumSelectTimeoutRetries = 0;
             reply->setInt32("result", -ETIMEDOUT);
             reply->post();
         }
         return;
     }
 
-    if (numSocketsReadyToRead < 0) {
-        reply->setInt32("result", -PR_GetError());
+    int err;
+    socklen_t optionLen = sizeof(err);
+    CHECK_EQ(getsockopt(mSocket, SOL_SOCKET, SO_ERROR, &err, &optionLen), 0);
+    CHECK_EQ(optionLen, (socklen_t)sizeof(err));
+
+    if (err != 0) {
+        LOGE("err = %d (%s)", err, strerror(err));
+
+        reply->setInt32("result", -err);
 
         mState = DISCONNECTED;
-        closeSocket();
+        if (mUIDValid) {
+            HTTPBase::UnRegisterSocketUserTag(mSocket);
+        }
+        close(mSocket);
+        mSocket = -1;
     } else {
         reply->setInt32("result", OK);
         mState = CONNECTED;
@@ -438,11 +459,10 @@ void ARTSPConnection::onSendRequest(const sp<AMessage> &msg) {
     size_t numBytesSent = 0;
     while (numBytesSent < request.size()) {
         ssize_t n =
-            PR_Send(mSocket, request.c_str() + numBytesSent,
-                    request.size() - numBytesSent, 0, PR_INTERVAL_NO_WAIT);
+            send(mSocket, request.c_str() + numBytesSent,
+                 request.size() - numBytesSent, 0);
 
-        PRErrorCode errCode = PR_GetError();
-        if (n < 0 && errCode == PR_PENDING_INTERRUPT_ERROR) {
+        if (n < 0 && errno == EINTR) {
             continue;
         }
 
@@ -456,8 +476,8 @@ void ARTSPConnection::onSendRequest(const sp<AMessage> &msg) {
                 reply->setInt32("result", ERROR_IO);
                 reply->post();
             } else {
-                LOGE("Error sending rtsp request. (%d)", errCode);
-                reply->setInt32("result", -errCode);
+                LOGE("Error sending rtsp request. (%s)", strerror(errno));
+                reply->setInt32("result", -errno);
                 reply->post();
             }
 
@@ -477,21 +497,18 @@ void ARTSPConnection::onReceiveResponse() {
         return;
     }
 
-    PRPollDesc readPollDesc;
-    readPollDesc.fd = mSocket;
-    readPollDesc.in_flags = PR_POLL_READ;
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = kSelectTimeoutUs;
 
-    int32_t numSocketsReadyToRead = PR_Poll(&readPollDesc, 1,
-        PR_MicrosecondsToInterval(kSocketPollTimeoutUs));
+    fd_set rs;
+    FD_ZERO(&rs);
+    FD_SET(mSocket, &rs);
 
-    CHECK_GE(numSocketsReadyToRead, 0);
+    int res = select(mSocket + 1, &rs, NULL, NULL, &tv);
+    CHECK_GE(res, 0);
 
-    // Number of ready-to-read sockets is not expected to be greater than 1.
-    if (numSocketsReadyToRead > 1) {
-        return;
-    }
-
-    if (numSocketsReadyToRead == 1) {
+    if (res == 1) {
         MakeSocketBlocking(mSocket, true);
 
         bool success = receiveRTSPResponse();
@@ -533,11 +550,9 @@ void ARTSPConnection::postReceiveResponseEvent() {
 status_t ARTSPConnection::receive(void *data, size_t size) {
     size_t offset = 0;
     while (offset < size) {
-        ssize_t n = PR_Recv(mSocket, (uint8_t *)data + offset, size - offset,
-                            0, PR_SecondsToInterval(kSocketBlokingRecvTimeout));
+        ssize_t n = recv(mSocket, (uint8_t *)data + offset, size - offset, 0);
 
-        PRErrorCode errCode = PR_GetError();
-        if (n < 0 && errCode == PR_PENDING_INTERRUPT_ERROR) {
+        if (n < 0 && errno == EINTR) {
             continue;
         }
 
@@ -549,8 +564,8 @@ status_t ARTSPConnection::receive(void *data, size_t size) {
                 LOGE("Server unexpectedly closed the connection.");
                 return ERROR_IO;
             } else {
-                LOGE("Error reading rtsp response. (%d)", errCode);
-                return -errCode;
+                LOGE("Error reading rtsp response. (%s)", strerror(errno));
+                return -errno;
             }
         }
 
@@ -793,11 +808,10 @@ bool ARTSPConnection::handleServerRequest(const sp<ARTSPResponse> &request) {
     size_t numBytesSent = 0;
     while (numBytesSent < response.size()) {
         ssize_t n =
-            PR_Send(mSocket, response.c_str() + numBytesSent,
-                 response.size() - numBytesSent, 0, PR_INTERVAL_NO_WAIT);
+            send(mSocket, response.c_str() + numBytesSent,
+                 response.size() - numBytesSent, 0);
 
-        PRErrorCode errCode = PR_GetError();
-        if (n < 0 && errCode == PR_PENDING_INTERRUPT_ERROR) {
+        if (n < 0 && errno == EINTR) {
             continue;
         }
 
@@ -806,7 +820,7 @@ bool ARTSPConnection::handleServerRequest(const sp<ARTSPResponse> &request) {
                 // Server closed the connection.
                 LOGE("Server unexpectedly closed the connection.");
             } else {
-                LOGE("Error sending rtsp response. (%d)", errCode);
+                LOGE("Error sending rtsp response (%s).", strerror(errno));
             }
 
             performDisconnect();
@@ -1083,11 +1097,6 @@ void ARTSPConnection::addUserAgent(AString *request) const {
     CHECK_GE(i, 0);
 
     request->insert(mUserAgent, i + 2);
-}
-
-void ARTSPConnection::closeSocket() {
-    PR_Close(mSocket);
-    mSocket = nullptr;
 }
 
 }  // namespace android

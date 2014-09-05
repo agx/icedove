@@ -481,7 +481,7 @@ txEXSLTFunctionCall::evaluate(txIEvalContext *aContext,
                 NS_ENSURE_SUCCESS(rv, rv);
             }
             else if (mType == SPLIT) {
-                pattern.Assign(' ');
+                pattern.AssignLiteral(" ");
             }
             else {
                 pattern.AssignLiteral("\t\r\n ");

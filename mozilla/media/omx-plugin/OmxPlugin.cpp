@@ -247,12 +247,10 @@ GetDefaultStagefrightFlags(PluginHost *aPluginHost)
   char hardware[256] = "";
   aPluginHost->GetSystemInfoString("hardware", hardware, sizeof(hardware));
 
-  if (!strcmp("qcom", hardware) ||
-      !strncmp("mt", hardware, 2)) {
+  if (!strcmp("qcom", hardware)) {
     // Qualcomm's OMXCodec implementation interprets this flag to mean that we
     // only want a thumbnail and therefore only need one frame. After the first
     // frame it returns EOS.
-    // Some MediaTek chipsets have also been found to do the same.
     // All other OMXCodec implementations seen so far interpret this flag
     // sanely; some do not return full framebuffers unless this flag is passed.
     flags &= ~OMXCodec::kClientNeedsFramebuffer;

@@ -31,7 +31,6 @@
 #include "nsIPrefBranch.h"
 #include "nsIAbManager.h"
 #include "mozilla/Services.h"
-#include <algorithm>
 
 #define ID_PAB_TABLE            1
 #define ID_DELETEDCARDS_TABLE           2
@@ -2249,8 +2248,25 @@ nsresult nsAddrDatabase::GetStringColumn(nsIMdbRow *cardRow, mdb_token outToken,
 
 void nsAddrDatabase::YarnToUInt32(struct mdbYarn *yarn, uint32_t *pResult)
 {
-    uint8_t numChars = std::min<mdb_fill>(8, yarn->mYarn_Fill);
-    *pResult = MsgUnhex((char *) yarn->mYarn_Buf, numChars);
+    uint32_t i, result, numChars;
+    char *p = (char *) yarn->mYarn_Buf;
+    if (yarn->mYarn_Fill > 8)
+        numChars = 8;
+    else
+        numChars = yarn->mYarn_Fill;
+    for (i=0, result = 0; i < numChars; i++, p++)
+    {
+        char C = *p;
+
+        int8_t unhex = ((C >= '0' && C <= '9') ? C - '0' :
+            ((C >= 'A' && C <= 'F') ? C - 'A' + 10 :
+             ((C >= 'a' && C <= 'f') ? C - 'a' + 10 : -1)));
+        if (unhex < 0)
+            break;
+        result = (result << 4) | unhex;
+    }
+
+    *pResult = result;
 }
 
 nsresult nsAddrDatabase::GetIntColumn

@@ -20,8 +20,7 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSITHREADMANAGER
 
-  static nsThreadManager* get()
-  {
+  static nsThreadManager *get() {
     static nsThreadManager sInstance;
     return &sInstance;
   }
@@ -34,15 +33,15 @@ public:
 
   // Called by nsThread to inform the ThreadManager it exists.  This method
   // must be called when the given thread is the current thread.
-  void RegisterCurrentThread(nsThread* aThread);
+  void RegisterCurrentThread(nsThread *thread);
 
   // Called by nsThread to inform the ThreadManager it is going away.  This
   // method must be called when the given thread is the current thread.
-  void UnregisterCurrentThread(nsThread* aThread);
+  void UnregisterCurrentThread(nsThread *thread);
 
   // Returns the current thread.  Returns null if OOM or if ThreadManager isn't
   // initialized.
-  nsThread* GetCurrentThread();
+  nsThread *GetCurrentThread();
 
   // Returns the maximal number of threads that have been in existence
   // simultaneously during the execution of the thread manager.
@@ -50,9 +49,7 @@ public:
 
   // This needs to be public in order to support static instantiation of this
   // class with older compilers (e.g., egcs-2.91.66).
-  ~nsThreadManager()
-  {
-  }
+  ~nsThreadManager() {}
 
 private:
   nsThreadManager()
@@ -61,23 +58,22 @@ private:
     , mLock(nullptr)
     , mInitialized(false)
     , mCurrentNumberOfThreads(1)
-    , mHighestNumberOfThreads(1)
-  {
+    , mHighestNumberOfThreads(1) {
   }
 
   nsRefPtrHashtable<nsPtrHashKey<PRThread>, nsThread> mThreadsByPRThread;
   unsigned             mCurThreadIndex;  // thread-local-storage index
   nsRefPtr<nsThread>  mMainThread;
-  PRThread*           mMainPRThread;
+  PRThread           *mMainPRThread;
   // This is a pointer in order to allow creating nsThreadManager from
   // the static context in debug builds.
   nsAutoPtr<mozilla::Mutex> mLock;  // protects tables
   bool                mInitialized;
 
-  // The current number of threads
-  uint32_t            mCurrentNumberOfThreads;
-  // The highest number of threads encountered so far during the session
-  uint32_t            mHighestNumberOfThreads;
+   // The current number of threads
+   uint32_t           mCurrentNumberOfThreads;
+   // The highest number of threads encountered so far during the session
+   uint32_t           mHighestNumberOfThreads;
 };
 
 #define NS_THREADMANAGER_CID                       \

@@ -39,7 +39,7 @@ ChunkSet::Serialize(nsACString& aChunkStr)
 nsresult
 ChunkSet::Set(uint32_t aChunk)
 {
-  size_t idx = mChunks.BinaryIndexOf(aChunk);
+  uint32_t idx = mChunks.BinaryIndexOf(aChunk);
   if (idx == nsTArray<uint32_t>::NoIndex) {
     mChunks.InsertElementSorted(aChunk);
   }

@@ -13,18 +13,18 @@
 
 namespace js {
 
-void
-ValueReadBarrier(const Value &value)
+#ifdef DEBUG
+
+bool
+HeapValue::preconditionForSet(Zone *zone)
 {
-    if (value.isObject())
-        JSObject::readBarrier(&value.toObject());
-    else if (value.isString())
-        JSString::readBarrier(value.toString());
-    else
-        JS_ASSERT(!value.isMarkable());
+    if (!value.isMarkable())
+        return true;
+
+    return ZoneOfValue(value) == zone ||
+           zone->runtimeFromAnyThread()->isAtomsZone(ZoneOfValue(value));
 }
 
-#ifdef DEBUG
 bool
 HeapSlot::preconditionForSet(JSObject *owner, Kind kind, uint32_t slot)
 {
@@ -42,12 +42,12 @@ HeapSlot::preconditionForSet(Zone *zone, JSObject *owner, Kind kind, uint32_t sl
     return ok && owner->zone() == zone;
 }
 
-bool
-HeapSlot::preconditionForWriteBarrierPost(JSObject *obj, Kind kind, uint32_t slot, Value target) const
+void
+HeapSlot::preconditionForWriteBarrierPost(JSObject *obj, Kind kind, uint32_t slot, Value target)
 {
-    return kind == Slot
-         ? obj->getSlotAddressUnchecked(slot)->get() == target
-         : static_cast<HeapSlot *>(obj->getDenseElements() + slot)->get() == target;
+    JS_ASSERT_IF(kind == Slot, obj->getSlotAddressUnchecked(slot)->get() == target);
+    JS_ASSERT_IF(kind == Element,
+                 static_cast<HeapSlot *>(obj->getDenseElements() + slot)->get() == target);
 }
 
 bool

@@ -18,6 +18,9 @@
 #include "nsIApplicationCacheContainer.h"
 #include "nsIApplicationCacheChannel.h"
 #include "nsIApplicationCacheService.h"
+#include "nsICache.h"
+#include "nsICacheService.h"
+#include "nsICacheSession.h"
 #include "nsICachingChannel.h"
 #include "nsIContent.h"
 #include "nsIDocShell.h"
@@ -692,7 +695,7 @@ OfflineAppPermForPrincipal(nsIPrincipal *aPrincipal,
     }
 
     nsCOMPtr<nsIPermissionManager> permissionManager =
-        services::GetPermissionManager();
+        do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
     if (!permissionManager) {
         return NS_OK;
     }
@@ -764,7 +767,7 @@ nsOfflineCacheUpdateService::AllowOfflineApp(nsIDOMWindow *aWindow,
     }
     else {
         nsCOMPtr<nsIPermissionManager> permissionManager =
-            services::GetPermissionManager();
+            do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
         if (!permissionManager)
             return NS_ERROR_NOT_AVAILABLE;
 

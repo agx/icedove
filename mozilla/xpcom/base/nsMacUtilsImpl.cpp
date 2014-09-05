@@ -1,5 +1,4 @@
-/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=8 sts=2 et sw=2 tw=80: */
+/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -10,20 +9,19 @@
 
 NS_IMPL_ISUPPORTS(nsMacUtilsImpl, nsIMacUtils)
 
-nsresult
-nsMacUtilsImpl::GetArchString(nsAString& aArchString)
+nsresult nsMacUtilsImpl::GetArchString(nsAString& archString)
 {
   if (!mBinaryArchs.IsEmpty()) {
-    aArchString.Assign(mBinaryArchs);
+    archString.Assign(mBinaryArchs);
     return NS_OK;
   }
 
-  aArchString.Truncate();
+  archString.Truncate();
 
   bool foundPPC = false,
-       foundX86 = false,
-       foundPPC64 = false,
-       foundX86_64 = false;
+         foundX86 = false,
+         foundPPC64 = false,
+         foundX86_64 = false;
 
   CFBundleRef mainBundle = ::CFBundleGetMainBundle();
   if (!mainBundle) {
@@ -45,15 +43,14 @@ nsMacUtilsImpl::GetArchString(nsAString& aArchString)
       return NS_ERROR_FAILURE;
     }
 
-    if (archInt == kCFBundleExecutableArchitecturePPC) {
+    if (archInt == kCFBundleExecutableArchitecturePPC)
       foundPPC = true;
-    } else if (archInt == kCFBundleExecutableArchitectureI386) {
+    else if (archInt == kCFBundleExecutableArchitectureI386)
       foundX86 = true;
-    } else if (archInt == kCFBundleExecutableArchitecturePPC64) {
+    else if (archInt == kCFBundleExecutableArchitecturePPC64)
       foundPPC64 = true;
-    } else if (archInt == kCFBundleExecutableArchitectureX86_64) {
+    else if (archInt == kCFBundleExecutableArchitectureX86_64)
       foundX86_64 = true;
-    }
   }
 
   ::CFRelease(archList);
@@ -61,48 +58,45 @@ nsMacUtilsImpl::GetArchString(nsAString& aArchString)
   // The order in the string must always be the same so
   // don't do this in the loop.
   if (foundPPC) {
-    mBinaryArchs.AppendLiteral("ppc");
+    mBinaryArchs.Append(NS_LITERAL_STRING("ppc"));
   }
 
   if (foundX86) {
     if (!mBinaryArchs.IsEmpty()) {
-      mBinaryArchs.Append('-');
+      mBinaryArchs.Append(NS_LITERAL_STRING("-"));
     }
-    mBinaryArchs.AppendLiteral("i386");
+    mBinaryArchs.Append(NS_LITERAL_STRING("i386"));
   }
 
   if (foundPPC64) {
     if (!mBinaryArchs.IsEmpty()) {
-      mBinaryArchs.Append('-');
+      mBinaryArchs.Append(NS_LITERAL_STRING("-"));
     }
-    mBinaryArchs.AppendLiteral("ppc64");
+    mBinaryArchs.Append(NS_LITERAL_STRING("ppc64"));
   }
 
   if (foundX86_64) {
     if (!mBinaryArchs.IsEmpty()) {
-      mBinaryArchs.Append('-');
+      mBinaryArchs.Append(NS_LITERAL_STRING("-"));
     }
-    mBinaryArchs.AppendLiteral("x86_64");
+    mBinaryArchs.Append(NS_LITERAL_STRING("x86_64"));
   }
 
-  aArchString.Assign(mBinaryArchs);
+  archString.Assign(mBinaryArchs);
 
-  return (aArchString.IsEmpty() ? NS_ERROR_FAILURE : NS_OK);
+  return (archString.IsEmpty() ? NS_ERROR_FAILURE : NS_OK);
 }
 
-NS_IMETHODIMP
-nsMacUtilsImpl::GetIsUniversalBinary(bool* aIsUniversalBinary)
+NS_IMETHODIMP nsMacUtilsImpl::GetIsUniversalBinary(bool *aIsUniversalBinary)
 {
-  if (NS_WARN_IF(!aIsUniversalBinary)) {
+  if (NS_WARN_IF(!aIsUniversalBinary))
     return NS_ERROR_INVALID_ARG;
-  }
   *aIsUniversalBinary = false;
 
   nsAutoString archString;
   nsresult rv = GetArchString(archString);
-  if (NS_FAILED(rv)) {
+  if (NS_FAILED(rv))
     return rv;
-  }
 
   // The delimiter char in the arch string is '-', so if that character
   // is in the string we know we have multiple architectures.
@@ -111,16 +105,14 @@ nsMacUtilsImpl::GetIsUniversalBinary(bool* aIsUniversalBinary)
   return NS_OK;
 }
 
-NS_IMETHODIMP
-nsMacUtilsImpl::GetArchitecturesInBinary(nsAString& aArchString)
+NS_IMETHODIMP nsMacUtilsImpl::GetArchitecturesInBinary(nsAString& archString)
 {
-  return GetArchString(aArchString);
+  return GetArchString(archString);
 }
 
 /* readonly attribute boolean isTranslated; */
 // True when running under binary translation (Rosetta).
-NS_IMETHODIMP
-nsMacUtilsImpl::GetIsTranslated(bool* aIsTranslated)
+NS_IMETHODIMP nsMacUtilsImpl::GetIsTranslated(bool *aIsTranslated)
 {
 #ifdef __ppc__
   static bool    sInitialized = false;

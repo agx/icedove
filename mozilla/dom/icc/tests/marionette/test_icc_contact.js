@@ -111,10 +111,5 @@ taskHelper.push(function testReadAdnContacts() {
   testAddContact("fdn");
 });
 
-/* Test read sdn contacts */
-taskHelper.push(function testReadSdnContacts() {
-  testReadContacts("sdn");
-});
-
 // Start test
 taskHelper.runNext();

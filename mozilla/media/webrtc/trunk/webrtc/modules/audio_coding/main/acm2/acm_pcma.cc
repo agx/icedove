@@ -18,8 +18,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 ACMPCMA::ACMPCMA(int16_t codec_id) { codec_id_ = codec_id; }
 
 ACMPCMA::~ACMPCMA() { return; }
@@ -56,7 +54,5 @@ void ACMPCMA::DestructEncoderSafe() {
   // PCM has no instance.
   return;
 }
-
-}  // namespace acm2
 
 }  // namespace webrtc

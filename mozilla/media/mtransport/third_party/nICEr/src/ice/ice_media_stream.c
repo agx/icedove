@@ -395,12 +395,8 @@ static void nr_ice_media_stream_check_timer_cb(NR_SOCKET s, int h, void *cb_arg)
 int nr_ice_media_stream_start_checks(nr_ice_peer_ctx *pctx, nr_ice_media_stream *stream)
   {
     int r,_status;
-
-    /* Don't start the check timer if the stream is done (failed/completed) */
-    if (stream->ice_state > NR_ICE_MEDIA_STREAM_CHECKS_ACTIVE) {
-      assert(0);
+    if (stream->ice_state > NR_ICE_MEDIA_STREAM_CHECKS_ACTIVE)
       ABORT(R_INTERNAL);
-    }
 
     if(r=nr_ice_media_stream_set_state(stream,NR_ICE_MEDIA_STREAM_CHECKS_ACTIVE))
       ABORT(r);

@@ -14,7 +14,6 @@
 #include "nsAutoPtr.h"
 #include "mozilla/dom/WifiOptionsBinding.h"
 #include "mozilla/dom/network/NetUtils.h"
-#include "WifiHotspotUtils.h"
 #include "nsCxPusher.h"
 
 // Needed to add a copy constructor to WifiCommandOptions.
@@ -132,7 +131,6 @@ public:
 private:
   nsAutoPtr<WpaSupplicantImpl> mImpl;
   nsAutoPtr<NetUtils> mNetUtils;
-  nsAutoPtr<WifiHotspotUtils> mWifiHotspotUtils;
 
 protected:
   void CheckBuffer(char* buffer, int32_t length, nsAString& aEvent);

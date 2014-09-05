@@ -66,16 +66,14 @@ var gChecking = {
     showButtons(true, false, false, false);
     this._progress = document.getElementById("checking-progress");
 
-    AddonManager.getAllAddons(aAddons => {
+    let self = this;
+    AddonManager.getAllAddons(function gChecking_getAllAddons(aAddons) {
       if (aAddons.length == 0) {
         window.close();
         return;
       }
 
       aAddons = aAddons.filter(function gChecking_filterAddons(aAddon) {
-        if (aAddon.id == AddonManager.hotfixID) {
-          return false;
-        }
         if (aAddon.type == "plugin" || aAddon.type == "service")
           return false;
 
@@ -91,12 +89,15 @@ var gChecking = {
         return true;
       });
 
-      this._addonCount = aAddons.length;
-      this._progress.value = 0;
-      this._progress.max = aAddons.length;
-      this._progress.mode = "determined";
+      self._addonCount = aAddons.length;
+      self._progress.value = 0;
+      self._progress.max = aAddons.length;
+      self._progress.mode = "determined";
 
-      AddonRepository.repopulateCache().then(() => {
+      // Ensure compatibility overrides are up to date before checking for
+      // individual addon updates.
+      let ids = [addon.id for each (addon in aAddons)];
+      AddonRepository.repopulateCache(ids, function gChecking_repopulateCache() {
         for (let addonItem of aAddons) {
           // Ignore disabled themes
           if (addonItem.type != "theme" || !addonItem.userDisabled) {
@@ -107,7 +108,7 @@ var gChecking = {
             }
           }
 
-          addonItem.findUpdates(this, AddonManager.UPDATE_WHEN_NEW_APP_INSTALLED);
+          addonItem.findUpdates(self, AddonManager.UPDATE_WHEN_NEW_APP_INSTALLED);
         }
       });
     });

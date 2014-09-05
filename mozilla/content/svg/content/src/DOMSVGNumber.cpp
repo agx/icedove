@@ -8,9 +8,9 @@
 #include "DOMSVGAnimatedNumberList.h"
 #include "SVGAnimatedNumberList.h"
 #include "nsSVGElement.h"
+#include "nsIDOMSVGNumber.h"
 #include "nsError.h"
 #include "nsContentUtils.h" // for NS_ENSURE_FINITE
-#include "mozilla/dom/SVGNumberBinding.h"
 
 // See the architecture comment in DOMSVGAnimatedNumberList.h.
 
@@ -27,25 +27,23 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(DOMSVGNumber)
   if (tmp->mList) {
     tmp->mList->mItems[tmp->mListIndex] = nullptr;
   }
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mList)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mParent)
+NS_IMPL_CYCLE_COLLECTION_UNLINK(mList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(DOMSVGNumber)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mParent)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(DOMSVGNumber)
-  NS_IMPL_CYCLE_COLLECTION_TRACE_PRESERVED_WRAPPER
-NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(DOMSVGNumber)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(DOMSVGNumber)
+}
+DOMCI_DATA(SVGNumber, mozilla::DOMSVGNumber)
 
+namespace mozilla {
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMSVGNumber)
-  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+  NS_INTERFACE_MAP_ENTRY(mozilla::DOMSVGNumber) // pseudo-interface
+  NS_INTERFACE_MAP_ENTRY(nsIDOMSVGNumber)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGNumber)
 NS_INTERFACE_MAP_END
 
 //----------------------------------------------------------------------
@@ -86,7 +84,6 @@ DOMSVGNumber::DOMSVGNumber(DOMSVGNumberList *aList,
                            uint32_t aListIndex,
                            bool aIsAnimValItem)
   : mList(aList)
-  , mParent(aList)
   , mListIndex(aListIndex)
   , mAttrEnum(aAttrEnum)
   , mIsAnimValItem(aIsAnimValItem)
@@ -98,76 +95,46 @@ DOMSVGNumber::DOMSVGNumber(DOMSVGNumberList *aList,
                     aListIndex <= MaxListIndex(), "bad arg");
 
   NS_ABORT_IF_FALSE(IndexIsValid(), "Bad index for DOMSVGNumber!");
-
-  SetIsDOMBinding();
 }
 
-DOMSVGNumber::DOMSVGNumber(nsISupports* aParent)
+DOMSVGNumber::DOMSVGNumber()
   : mList(nullptr)
-  , mParent(aParent)
   , mListIndex(0)
   , mAttrEnum(0)
   , mIsAnimValItem(false)
   , mValue(0.0f)
 {
-  SetIsDOMBinding();
 }
 
-/* static */ already_AddRefed<DOMSVGNumber>
-DOMSVGNumber::Constructor(const dom::GlobalObject& aGlobal, ErrorResult& aRv)
-{
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
-  if (!window) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return nullptr;
-  }
-
-  nsRefPtr<DOMSVGNumber> number = new DOMSVGNumber(window);
-  return number.forget();
-}
-
-/* static */ already_AddRefed<DOMSVGNumber>
-DOMSVGNumber::Constructor(const dom::GlobalObject& aGlobal, float aValue,
-                          ErrorResult& aRv)
-{
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.GetAsSupports());
-  if (!window) {
-    aRv.Throw(NS_ERROR_UNEXPECTED);
-    return nullptr;
-  }
-
-  nsRefPtr<DOMSVGNumber> number = new DOMSVGNumber(window);
-  number->SetValue(aValue, aRv);
-  return number.forget();
-}
-
-float
-DOMSVGNumber::Value()
+NS_IMETHODIMP
+DOMSVGNumber::GetValue(float* aValue)
 {
   if (mIsAnimValItem && HasOwner()) {
     Element()->FlushAnimations(); // May make HasOwner() == false
   }
-  return HasOwner() ? InternalItem() : mValue;
+  *aValue = HasOwner() ? InternalItem() : mValue;
+  return NS_OK;
 }
 
-void
-DOMSVGNumber::SetValue(float aValue, ErrorResult& aRv)
+NS_IMETHODIMP
+DOMSVGNumber::SetValue(float aValue)
 {
   if (mIsAnimValItem) {
-    aRv.Throw(NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR);
-    return;
+    return NS_ERROR_DOM_NO_MODIFICATION_ALLOWED_ERR;
   }
+
+  NS_ENSURE_FINITE(aValue, NS_ERROR_ILLEGAL_VALUE);
 
   if (HasOwner()) {
     if (InternalItem() == aValue) {
-      return;
+      return NS_OK;
     }
     AutoChangeNumberNotifier notifier(this);
     InternalItem() = aValue;
-    return;
+    return NS_OK;
   }
-
   mValue = aValue;
+  return NS_OK;
 }
 
 void
@@ -220,11 +187,5 @@ DOMSVGNumber::IndexIsValid()
           mListIndex < alist->GetBaseValue().Length());
 }
 #endif
-
-JSObject*
-DOMSVGNumber::WrapObject(JSContext* aCx)
-{
-  return dom::SVGNumberBinding::Wrap(aCx, this);
-}
 
 } // namespace mozilla

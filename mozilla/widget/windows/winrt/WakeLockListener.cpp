@@ -19,7 +19,7 @@ WakeLockListener::Callback(const nsAString& aTopic, const nsAString& aState)
     }
   }
 
-  if (aState.EqualsLiteral("locked-foreground")) {
+  if (aState.Equals(NS_LITERAL_STRING("locked-foreground"))) {
     mDisplayRequest->RequestActive();
   } else {
     mDisplayRequest->RequestRelease();

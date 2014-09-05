@@ -38,7 +38,7 @@ let appName = Services.appinfo.name;
 let { devtools } = Cu.import("resource://gre/modules/devtools/Loader.jsm", {});
 let DevToolsUtils = devtools.require("devtools/toolkit/DevToolsUtils.js");
 this.DevToolsUtils = DevToolsUtils;
-loader.loadSubScript("resource://gre/modules/devtools/transport/transport.js");
+loader.loadSubScript("resource://gre/modules/devtools/server/transport.js");
 
 let bypassOffline = false;
 let qemu = "0";
@@ -202,7 +202,7 @@ MarionetteServerConnection.prototype = {
    */
   sendAsync: function MDA_sendAsync(name, values, commandId, ignoreFailure) {
     let success = true;
-    if (commandId) {
+    if (values instanceof Object && commandId) {
       values.command_id = commandId;
     }
     if (this.curBrowser.frameManager.currentRemoteFrame !== null) {
@@ -504,25 +504,13 @@ MarionetteServerConnection.prototype = {
     this.scriptTimeout = 10000;
 
     function waitForWindow() {
+      let checkTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
       let win = this.getCurrentWindow();
-      if (!win) {
-        // If the window isn't even created, just poll wait for it
-        let checkTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+      if (!win ||
+          (appName == "Firefox" && !win.gBrowser) ||
+          (appName == "Fennec" && !win.BrowserApp)) {
         checkTimer.initWithCallback(waitForWindow.bind(this), 100,
                                     Ci.nsITimer.TYPE_ONE_SHOT);
-      }
-      else if (win.document.readyState != "complete") {
-        // Otherwise, wait for it to be fully loaded before proceeding
-        let listener = (evt) => {
-          // ensure that we proceed, on the top level document load event
-          // (not an iframe one...)
-          if (evt.target != win.document) {
-            return;
-          }
-          win.removeEventListener("load", listener);
-          waitForWindow.call(this);
-        };
-        win.addEventListener("load", listener, true);
       }
       else {
         this.startBrowser(win, true);
@@ -571,7 +559,9 @@ MarionetteServerConnection.prototype = {
       "platformVersion": Services.appinfo.platformVersion,
 
       // Supported features
+      "cssSelectorsEnabled": true,
       "handlesAlerts": false,
+      "javascriptEnabled": true,
       "nativeEvents": false,
       "rotatable": isB2G,
       "secureSsl": false,

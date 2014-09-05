@@ -935,6 +935,10 @@ nsMsgSendLater::DeleteCurrentMessage()
 // representation.  Arguably, we could allow Lines to escape, but it's not
 // required by NNTP.)
 //
+#define UNHEX(C) \
+  ((C >= '0' && C <= '9') ? C - '0' : \
+  ((C >= 'A' && C <= 'F') ? C - 'A' + 10 : \
+        ((C >= 'a' && C <= 'f') ? C - 'a' + 10 : 0)))
 nsresult
 nsMsgSendLater::BuildHeaders()
 {
@@ -1091,10 +1095,14 @@ SEARCH_NEWLINE:
     }
     else if (do_flags_p)
     {
+      int i;
       char *s = value;
       PR_ASSERT(*s != ' ' && *s != '\t');
-      NS_ASSERTION(MsgIsHex(s, 4), "Expected 4 hex digits for flags.");
-      m_flags = MsgUnhex(s, 4);
+      m_flags = 0;
+      for (i=0 ; i<4 ; i++) {
+      m_flags = (m_flags << 4) | UNHEX(*s);
+      s++;
+      }
     }
 
     if (*buf == '\r' || *buf == '\n')

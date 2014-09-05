@@ -12,12 +12,10 @@
 
 #include <windows.h>
 
-#include "webrtc/modules/desktop_capture/desktop_capture_options.h"
 #include "webrtc/modules/desktop_capture/desktop_frame.h"
 #include "webrtc/modules/desktop_capture/desktop_frame_win.h"
 #include "webrtc/modules/desktop_capture/desktop_region.h"
 #include "webrtc/modules/desktop_capture/differ.h"
-#include "webrtc/modules/desktop_capture/mouse_cursor.h"
 #include "webrtc/modules/desktop_capture/mouse_cursor_shape.h"
 #include "webrtc/modules/desktop_capture/screen_capture_frame_queue.h"
 #include "webrtc/modules/desktop_capture/screen_capturer_helper.h"
@@ -45,7 +43,7 @@ const wchar_t kDwmapiLibraryName[] = L"dwmapi.dll";
 // ScreenCapturerWin is double-buffered as required by ScreenCapturer.
 class ScreenCapturerWin : public ScreenCapturer {
  public:
-  ScreenCapturerWin(const DesktopCaptureOptions& options);
+  ScreenCapturerWin(bool disable_aero);
   virtual ~ScreenCapturerWin();
 
   // Overridden from ScreenCapturer:
@@ -53,28 +51,19 @@ class ScreenCapturerWin : public ScreenCapturer {
   virtual void Capture(const DesktopRegion& region) OVERRIDE;
   virtual void SetMouseShapeObserver(
       MouseShapeObserver* mouse_shape_observer) OVERRIDE;
-  virtual bool GetScreenList(ScreenList* screens) OVERRIDE;
-  virtual bool SelectScreen(ScreenId id) OVERRIDE;
 
  private:
   // Make sure that the device contexts match the screen configuration.
   void PrepareCaptureResources();
 
-  // Captures the current screen contents into the current buffer. Returns true
-  // if succeeded.
-  bool CaptureImage();
+  // Captures the current screen contents into the current buffer.
+  void CaptureImage();
 
   // Capture the current cursor shape.
   void CaptureCursor();
 
-  // Get the rect of the currently selected screen. If the screen is disabled
-  // or disconnected, or any error happens, an empty rect is returned.
-  DesktopRect GetScreenRect();
-
   Callback* callback_;
   MouseShapeObserver* mouse_shape_observer_;
-  ScreenId current_screen_id_;
-  std::wstring current_device_key_;
 
   // A thread-safe list of invalid rectangles, and the size of the most
   // recently captured screen.
@@ -109,16 +98,15 @@ class ScreenCapturerWin : public ScreenCapturer {
   DISALLOW_COPY_AND_ASSIGN(ScreenCapturerWin);
 };
 
-ScreenCapturerWin::ScreenCapturerWin(const DesktopCaptureOptions& options)
+ScreenCapturerWin::ScreenCapturerWin(bool disable_aero)
     : callback_(NULL),
       mouse_shape_observer_(NULL),
-      current_screen_id_(kFullDesktopScreenId),
       desktop_dc_(NULL),
       memory_dc_(NULL),
       dwmapi_library_(NULL),
       composition_func_(NULL),
       set_thread_execution_state_failed_(false) {
-  if (options.disable_effects()) {
+  if (disable_aero) {
     // Load dwmapi.dll dynamically since it is not available on XP.
     if (!dwmapi_library_)
       dwmapi_library_ = LoadLibrary(kDwmapiLibraryName);
@@ -162,14 +150,11 @@ void ScreenCapturerWin::Capture(const DesktopRegion& region) {
   PrepareCaptureResources();
 
   // Copy screen bits to the current buffer.
-  if (!CaptureImage()) {
-    callback_->OnCaptureCompleted(NULL);
-    return;
-  }
+  CaptureImage();
 
   const DesktopFrame* current_frame = queue_.current_frame();
   const DesktopFrame* last_frame = queue_.previous_frame();
-  if (last_frame && last_frame->size().equals(current_frame->size())) {
+  if (last_frame) {
     // Make sure the differencer is set up correctly for these previous and
     // current screens.
     if (!differ_.get() ||
@@ -215,43 +200,6 @@ void ScreenCapturerWin::SetMouseShapeObserver(
   assert(mouse_shape_observer);
 
   mouse_shape_observer_ = mouse_shape_observer;
-}
-
-bool ScreenCapturerWin::GetScreenList(ScreenList* screens) {
-  assert(screens->size() == 0);
-  BOOL enum_result = TRUE;
-  for (int device_index = 0; ; ++device_index) {
-    DISPLAY_DEVICE device;
-    device.cb = sizeof(device);
-    enum_result = EnumDisplayDevices(NULL, device_index, &device, 0);
-    // |enum_result| is 0 if we have enumerated all devices.
-    if (!enum_result)
-      break;
-
-    // We only care about active displays.
-    if (!(device.StateFlags & DISPLAY_DEVICE_ACTIVE))
-      continue;
-    Screen screen;
-    screen.id = device_index;
-    screens->push_back(screen);
-  }
-  return true;
-}
-
-bool ScreenCapturerWin::SelectScreen(ScreenId id) {
-  if (id == kFullDesktopScreenId) {
-    current_screen_id_ = id;
-    return true;
-  }
-  DISPLAY_DEVICE device;
-  device.cb = sizeof(device);
-  BOOL enum_result = EnumDisplayDevices(NULL, id, &device, 0);
-  if (!enum_result)
-    return false;
-
-  current_device_key_ = device.DeviceKey;
-  current_screen_id_ = id;
-  return true;
 }
 
 void ScreenCapturerWin::Start(Callback* callback) {
@@ -332,18 +280,16 @@ void ScreenCapturerWin::PrepareCaptureResources() {
   }
 }
 
-bool ScreenCapturerWin::CaptureImage() {
-  DesktopRect screen_rect = GetScreenRect();
-  if (screen_rect.is_empty())
-    return false;
-  DesktopSize size = screen_rect.size();
+void ScreenCapturerWin::CaptureImage() {
   // If the current buffer is from an older generation then allocate a new one.
   // Note that we can't reallocate other buffers at this point, since the caller
   // may still be reading from them.
-  if (!queue_.current_frame() ||
-      !queue_.current_frame()->size().equals(size)) {
+  if (!queue_.current_frame()) {
     assert(desktop_dc_ != NULL);
     assert(memory_dc_ != NULL);
+
+    DesktopSize size = DesktopSize(
+        desktop_dc_rect_.width(), desktop_dc_rect_.height());
 
     size_t buffer_size = size.width() * size.height() *
         DesktopFrame::kBytesPerPixel;
@@ -361,16 +307,15 @@ bool ScreenCapturerWin::CaptureImage() {
   HGDIOBJ previous_object = SelectObject(memory_dc_, current->bitmap());
   if (previous_object != NULL) {
     BitBlt(memory_dc_,
-           0, 0, screen_rect.width(), screen_rect.height(),
+           0, 0, desktop_dc_rect_.width(), desktop_dc_rect_.height(),
            desktop_dc_,
-           screen_rect.left(), screen_rect.top(),
+           desktop_dc_rect_.left(), desktop_dc_rect_.top(),
            SRCCOPY | CAPTUREBLT);
 
     // Select back the previously selected object to that the device contect
     // could be destroyed independently of the bitmap if needed.
     SelectObject(memory_dc_, previous_object);
   }
-  return true;
 }
 
 void ScreenCapturerWin::CaptureCursor() {
@@ -382,21 +327,10 @@ void ScreenCapturerWin::CaptureCursor() {
   }
 
   // Note that |cursor_info.hCursor| does not need to be freed.
-  scoped_ptr<MouseCursor> cursor_image(
-      CreateMouseCursorFromHCursor(desktop_dc_, cursor_info.hCursor));
-  if (!cursor_image.get())
+  scoped_ptr<MouseCursorShape> cursor(
+      CreateMouseCursorShapeFromCursor(desktop_dc_, cursor_info.hCursor));
+  if (!cursor.get())
     return;
-
-  scoped_ptr<MouseCursorShape> cursor(new MouseCursorShape);
-  cursor->hotspot = cursor_image->hotspot();
-  cursor->size = cursor_image->image()->size();
-  uint8_t* current_row = cursor_image->image()->data();
-  for (int y = 0; y < cursor_image->image()->size().height(); ++y) {
-    cursor->data.append(current_row,
-                        current_row + cursor_image->image()->size().width() *
-                                        DesktopFrame::kBytesPerPixel);
-    current_row += cursor_image->image()->stride();
-  }
 
   // Compare the current cursor with the last one we sent to the client. If
   // they're the same, then don't bother sending the cursor again.
@@ -416,43 +350,16 @@ void ScreenCapturerWin::CaptureCursor() {
     mouse_shape_observer_->OnCursorShapeChanged(cursor.release());
 }
 
-DesktopRect ScreenCapturerWin::GetScreenRect() {
-  DesktopRect rect = desktop_dc_rect_;
-  if (current_screen_id_ == kFullDesktopScreenId)
-    return rect;
-
-  DISPLAY_DEVICE device;
-  device.cb = sizeof(device);
-  BOOL result = EnumDisplayDevices(NULL, current_screen_id_, &device, 0);
-  if (!result)
-    return DesktopRect();
-
-  // Verifies the device index still maps to the same display device. DeviceKey
-  // is documented as reserved, but it actually contains the registry key for
-  // the device and is unique for each monitor, while DeviceID is not.
-  if (current_device_key_ != device.DeviceKey)
-    return DesktopRect();
-
-  DEVMODE device_mode;
-  device_mode.dmSize = sizeof(device_mode);
-  device_mode.dmDriverExtra = 0;
-  result = EnumDisplaySettingsEx(
-      device.DeviceName, ENUM_CURRENT_SETTINGS, &device_mode, 0);
-  if (!result)
-    return DesktopRect();
-
-  rect = DesktopRect::MakeXYWH(
-      rect.left() + device_mode.dmPosition.x,
-      rect.top() + device_mode.dmPosition.y,
-      device_mode.dmPelsWidth,
-      device_mode.dmPelsHeight);
-  return rect;
-}
 }  // namespace
 
 // static
-ScreenCapturer* ScreenCapturer::Create(const DesktopCaptureOptions& options) {
-  return new ScreenCapturerWin(options);
+ScreenCapturer* ScreenCapturer::Create() {
+  return CreateWithDisableAero(true);
+}
+
+// static
+ScreenCapturer* ScreenCapturer::CreateWithDisableAero(bool disable_aero) {
+  return new ScreenCapturerWin(disable_aero);
 }
 
 }  // namespace webrtc

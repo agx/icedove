@@ -63,6 +63,9 @@ HTMLButtonElement::HTMLButtonElement(already_AddRefed<nsINodeInfo>& aNodeInfo,
     mInInternalActivate(false),
     mInhibitStateRestoration(!!(aFromParser & FROM_PARSER_FRAGMENT))
 {
+  // <button> is always barred from constraint validation.
+  SetBarredFromConstraintValidation(true);
+
   // Set up our default state: enabled
   AddStatesSilently(NS_EVENT_STATE_ENABLED);
 }
@@ -89,35 +92,10 @@ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLButtonElement)
 NS_INTERFACE_TABLE_TAIL_INHERITING(nsGenericHTMLFormElementWithState)
 
 // nsIConstraintValidation
-NS_IMPL_NSICONSTRAINTVALIDATION_EXCEPT_SETCUSTOMVALIDITY(HTMLButtonElement)
-
-NS_IMETHODIMP
-HTMLButtonElement::SetCustomValidity(const nsAString& aError) 
-{
-  nsIConstraintValidation::SetCustomValidity(aError);
-  
-  UpdateState(true);
-
-  return NS_OK;
-}
-
-void
-HTMLButtonElement::UpdateBarredFromConstraintValidation()
-{
-  SetBarredFromConstraintValidation(mType == NS_FORM_BUTTON_BUTTON ||
-                                    mType == NS_FORM_BUTTON_RESET ||
-                                    IsDisabled());
-}
-
-void
-HTMLButtonElement::FieldSetDisabledChanged(bool aNotify)
-{
-  UpdateBarredFromConstraintValidation();
-
-  nsGenericHTMLFormElementWithState::FieldSetDisabledChanged(aNotify);
-}
+NS_IMPL_NSICONSTRAINTVALIDATION(HTMLButtonElement)
 
 // nsIDOMHTMLButtonElement
+
 
 NS_IMPL_ELEMENT_CLONE(HTMLButtonElement)
 
@@ -513,11 +491,8 @@ HTMLButtonElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       if (!aValue) {
         mType = kButtonDefaultType->value;
       }
-    }
 
-    if (aName == nsGkAtoms::type || aName == nsGkAtoms::disabled) {
-      UpdateBarredFromConstraintValidation();
-      UpdateState(aNotify); 
+      UpdateState(aNotify);
     }
   }
 
@@ -556,20 +531,6 @@ EventStates
 HTMLButtonElement::IntrinsicState() const
 {
   EventStates state = nsGenericHTMLFormElementWithState::IntrinsicState();
-  
-  if (IsCandidateForConstraintValidation()) {
-    if (IsValid()) {
-      state |= NS_EVENT_STATE_VALID;
-      if (!mForm || !mForm->HasAttr(kNameSpaceID_None, nsGkAtoms::novalidate)) {
-        state |= NS_EVENT_STATE_MOZ_UI_VALID;
-      }
-    } else {
-      state |= NS_EVENT_STATE_INVALID;
-      if (!mForm || !mForm->HasAttr(kNameSpaceID_None, nsGkAtoms::novalidate)) {
-        state |= NS_EVENT_STATE_MOZ_UI_INVALID;
-      }
-    }
-  }
 
   if (mForm && !mForm->GetValidity() && IsSubmitControl()) {
     state |= NS_EVENT_STATE_MOZ_SUBMITINVALID;

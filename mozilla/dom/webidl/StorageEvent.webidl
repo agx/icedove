@@ -11,7 +11,7 @@
  */
 interface Storage;
 
-[Constructor(DOMString type, optional StorageEventInit eventInitDict)]
+[Constructor(DOMString type, optional StorageEventInit eventInitDict), HeaderFile="GeneratedEventClasses.h"]
 interface StorageEvent : Event
 {
   readonly attribute DOMString? key;
@@ -20,7 +20,7 @@ interface StorageEvent : Event
   readonly attribute DOMString? url;
   readonly attribute Storage? storageArea;
 
-  // Bug 1016053 - This is not spec compliant.
+  // initStorageEvent is a Gecko specific deprecated method.
   [Throws]
   void initStorageEvent(DOMString type,
                         boolean canBubble,

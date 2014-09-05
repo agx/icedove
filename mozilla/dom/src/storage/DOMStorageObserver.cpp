@@ -272,14 +272,14 @@ DOMStorageObserver::Observe(nsISupports* aSubject,
 
     nsAutoCString scope;
     scope.AppendInt(appId);
-    scope.AppendLiteral(":t:");
+    scope.Append(NS_LITERAL_CSTRING(":t:"));
     db->AsyncClearMatchingScope(scope);
     Notify("app-data-cleared", scope);
 
     if (!browserOnly) {
       scope.Truncate();
       scope.AppendInt(appId);
-      scope.AppendLiteral(":f:");
+      scope.Append(NS_LITERAL_CSTRING(":f:"));
       db->AsyncClearMatchingScope(scope);
       Notify("app-data-cleared", scope);
     }

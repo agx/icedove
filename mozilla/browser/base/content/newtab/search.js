@@ -15,6 +15,7 @@ let gSearch = {
     }
 
     window.addEventListener("ContentSearchService", this);
+    this.setUpInitialState();
   },
 
   setUpInitialState: function () {
@@ -145,7 +146,7 @@ let gSearch = {
 
     // Set the logo.
     let logoURI = window.devicePixelRatio == 2 ? engine.logo2xURI :
-                  engine.logoURI || engine.logo2xURI;
+                  engine.logoURI;
     if (logoURI) {
       this._nodes.logo.hidden = false;
       this._nodes.logo.style.backgroundImage = "url(" + logoURI + ")";

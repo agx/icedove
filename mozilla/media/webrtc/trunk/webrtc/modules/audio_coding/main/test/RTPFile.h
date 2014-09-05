@@ -8,16 +8,15 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_RTPFILE_H_
-#define WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_RTPFILE_H_
+#ifndef RTPFILE_H
+#define RTPFILE_H
 
+#include "audio_coding_module.h"
+#include "module_common_types.h"
+#include "typedefs.h"
+#include "rw_lock_wrapper.h"
 #include <stdio.h>
 #include <queue>
-
-#include "webrtc/modules/audio_coding/main/interface/audio_coding_module.h"
-#include "webrtc/modules/interface/module_common_types.h"
-#include "webrtc/system_wrappers/interface/rw_lock_wrapper.h"
-#include "webrtc/typedefs.h"
 
 namespace webrtc {
 
@@ -114,5 +113,4 @@ class RTPFile : public RTPStream {
 };
 
 }  // namespace webrtc
-
-#endif  // WEBRTC_MODULES_AUDIO_CODING_MAIN_TEST_RTPFILE_H_
+#endif

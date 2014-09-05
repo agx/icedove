@@ -9,28 +9,19 @@
 var gDebuggee;
 var gClient;
 var gThreadClient;
-var gCallback;
 
 function run_test()
 {
-  run_test_with_server(DebuggerServer, function () {
-    run_test_with_server(WorkerDebuggerServer, do_test_finished);
-  });
-  do_test_pending();
-};
-
-function run_test_with_server(aServer, aCallback)
-{
-  gCallback = aCallback;
-  initTestDebuggerServer(aServer);
-  gDebuggee = addTestGlobal("test-stack", aServer);
-  gClient = new DebuggerClient(aServer.connectPipe());
+  initTestDebuggerServer();
+  gDebuggee = addTestGlobal("test-stack");
+  gClient = new DebuggerClient(DebuggerServer.connectPipe());
   gClient.connect(function () {
     attachTestTabAndResume(gClient, "test-stack", function (aResponse, aTabClient, aThreadClient) {
       gThreadClient = aThreadClient;
       test_child_breakpoint();
     });
   });
+  do_test_pending();
 }
 
 function test_child_breakpoint()
@@ -61,7 +52,7 @@ function test_child_breakpoint()
           // Remove the breakpoint.
           bpClient.remove(function (aResponse) {
             gThreadClient.resume(function () {
-              gClient.close(gCallback);
+              finishClient(gClient);
             });
           });
         });

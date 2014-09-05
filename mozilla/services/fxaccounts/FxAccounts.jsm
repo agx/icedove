@@ -25,7 +25,6 @@ XPCOMUtils.defineLazyModuleGetter(this, "jwcrypto",
 
 // All properties exposed by the public FxAccounts API.
 let publicProperties = [
-  "accountStatus",
   "getAccountsClient",
   "getAccountsSignInURI",
   "getAccountsSignUpURI",
@@ -512,15 +511,6 @@ FxAccountsInternal.prototype = {
     this.currentAccountState = new AccountState(this);
   },
 
-  accountStatus: function accountStatus() {
-    return this.currentAccountState.getUserAccountData().then(data => {
-      if (!data) {
-        return false;
-      }
-      return this.fxAccountsClient.accountStatus(data.uid);
-    });
-  },
-
   signOut: function signOut(localOnly) {
     let currentState = this.currentAccountState;
     let sessionToken;
@@ -733,14 +723,8 @@ FxAccountsInternal.prototype = {
     // Login is truly complete once keys have been fetched, so once getKeys()
     // obtains and stores kA and kB, it will fire the onverified observer
     // notification.
-
-    // The callers of startVerifiedCheck never consume a returned promise (ie,
-    // this is simply kicking off a background fetch) so we must add a rejection
-    // handler to avoid runtime warnings about the rejection not being handled.
-    this.whenVerified(data).then(
-      () => this.getKeys(),
-      err => log.info("startVerifiedCheck promise was rejected: " + err)
-    );
+    return this.whenVerified(data)
+      .then(() => this.getKeys());
   },
 
   whenVerified: function(data) {
@@ -758,9 +742,9 @@ FxAccountsInternal.prototype = {
     );
   },
 
-  notifyObservers: function(topic, data) {
+  notifyObservers: function(topic) {
     log.debug("Notifying observers of " + topic);
-    Services.obs.notifyObservers(null, topic, data);
+    Services.obs.notifyObservers(null, topic, null);
   },
 
   // XXX - pollEmailStatus should maybe be on the AccountState object?
@@ -800,8 +784,6 @@ FxAccountsInternal.prototype = {
                 currentState.whenVerifiedDeferred.resolve(data);
                 delete currentState.whenVerifiedDeferred;
               }
-              // Tell FxAccountsManager to clear its cache
-              this.notifyObservers(ON_FXA_UPDATE_NOTIFICATION, ONVERIFIED_NOTIFICATION);
             });
         } else {
           log.debug("polling with step = " + this.POLL_STEP);

@@ -4,6 +4,7 @@
 
 html {
   background-color: #111;
+  background-image: url("chrome://browser/skin/devtools/noise.png");
 }
 
 body {

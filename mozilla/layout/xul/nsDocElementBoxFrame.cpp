@@ -64,7 +64,7 @@ private:
 
 //----------------------------------------------------------------------
 
-nsContainerFrame*
+nsIFrame*
 NS_NewDocElementBoxFrame(nsIPresShell* aPresShell, nsStyleContext* aContext)
 {
   return new (aPresShell) nsDocElementBoxFrame (aPresShell, aContext);

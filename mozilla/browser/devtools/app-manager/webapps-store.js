@@ -73,17 +73,15 @@ WebappsStore.prototype = {
   _listTabs: function() {
     this._connection.client.listTabs((resp) => {
       this._webAppsActor = resp.webappsActor;
-      this._feedStore().then(() => {
-        this.emit("store-ready");
-      });
+      this._feedStore();
     });
   },
 
-  _feedStore: function() {
+  _feedStore: function(deviceFront, webAppsActor) {
     this._listenToApps();
-    return this._getAllApps()
-               .then(this._getRunningApps.bind(this))
-               .then(this._getAppsIcons.bind(this))
+    this._getAllApps()
+    .then(this._getRunningApps.bind(this))
+    .then(this._getAppsIcons.bind(this))
   },
 
   _listenToApps: function() {

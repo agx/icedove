@@ -45,6 +45,7 @@ var gStatusFeedback = {
   },
   showProgress: function(percentage)
   {
+      //dump("XXX progress" + percentage + "\n");
   },
   closeWindow: function()
   {
@@ -75,7 +76,7 @@ var gFilterTreeView = {
   },
   /* nsITreeView methods */
   get rowCount() {
-    return this.mFilterList ? this.mFilterList.filterCount : 0;
+    return this.mFilterList.filterCount;
   },
   selection: null,
   getRowProperties: function getRowProperties(row) {
@@ -168,24 +169,51 @@ function onLoad()
     top.controllers.insertControllerAt(0, gFilterController);
 }
 
- /**
-  * Called when a user selects a server in the list, so we can update the filters
-  * that are displayed
-  *
-  * @param aURI  the uri of the server that was selected
-  */
-function onFilterServerClick(aURI)
+/*
+function onCancel()
 {
-    if (!aURI || aURI == gCurrentServerURI)
+    var firstItem = getSelectedServerForFilters();
+    if (!firstItem)
+        firstItem = getServerThatCanHaveFilters();
+    
+    if (firstItem) {
+        var resource = gRDF.GetResource(firstItem);
+        var msgFolder = resource.QueryInterface(Components.interfaces.nsIMsgFolder);
+        if (msgFolder)
+        {
+           msgFolder.ReleaseDelegate("filter");
+           msgFolder.setFilterList(null);
+           try
+           {
+              //now find Inbox
+              const kInboxFlag = Components.interfaces.nsMsgFolderFlags.Inbox;
+              var inboxFolder = msgFolder.getFolderWithFlags(kInboxFlag);
+              inboxFolder.setFilterList(null);
+           }
+           catch(ex)
+           {
+             dump ("ex " +ex + "\n");
+           }
+        }
+    }
+    window.close();
+}
+*/
+
+function onFilterServerClick(selection)
+{
+    var itemURI = selection.getAttribute('itemUri');
+
+    if (itemURI == gCurrentServerURI)
       return;
 
     // Save the current filters to disk before switching because
     // the dialog may be closed and we'll lose current filters.
     var filterList = currentFilterList();
-    if (filterList)
+    if (filterList) 
       filterList.saveToDefaultFile();
 
-    selectServer(aURI);
+    selectServer(itemURI);
 }
 
 function CanRunFiltersAfterTheFact(aServer)

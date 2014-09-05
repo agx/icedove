@@ -13,12 +13,6 @@
 #include "js/RootingAPI.h"
 #include "js/Value.h"
 
-namespace js {
-namespace gc {
-class GCRuntime;
-}
-}
-
 typedef enum JSGCMode {
     /* Perform only global GCs. */
     JSGC_MODE_GLOBAL = 0,
@@ -249,7 +243,7 @@ enum GCProgress {
 struct JS_FRIEND_API(GCDescription) {
     bool isCompartment_;
 
-    explicit GCDescription(bool isCompartment)
+    GCDescription(bool isCompartment)
       : isCompartment_(isCompartment) {}
 
     jschar *formatMessage(JSRuntime *rt) const;
@@ -335,13 +329,13 @@ WasIncrementalGC(JSRuntime *rt);
 /* Ensure that generational GC is disabled within some scope. */
 class JS_FRIEND_API(AutoDisableGenerationalGC)
 {
-    js::gc::GCRuntime *gc;
+    JSRuntime *runtime;
 #if defined(JSGC_GENERATIONAL) && defined(JS_GC_ZEAL)
     bool restartVerifier;
 #endif
 
   public:
-    explicit AutoDisableGenerationalGC(JSRuntime *rt);
+    AutoDisableGenerationalGC(JSRuntime *rt);
     ~AutoDisableGenerationalGC();
 };
 
@@ -369,36 +363,9 @@ extern JS_FRIEND_API(void)
 ShrinkGCBuffers(JSRuntime *rt);
 
 /*
- * Assert if a GC occurs while this class is live. This class does not disable
- * the static rooting hazard analysis.
- */
-class JS_PUBLIC_API(AutoAssertOnGC)
-{
-#ifdef DEBUG
-    js::gc::GCRuntime *gc;
-    size_t gcNumber;
-
-  public:
-    AutoAssertOnGC();
-    explicit AutoAssertOnGC(JSRuntime *rt);
-    ~AutoAssertOnGC();
-
-    static void VerifyIsSafeToGC(JSRuntime *rt);
-#else
-  public:
-    AutoAssertOnGC() {}
-    explicit AutoAssertOnGC(JSRuntime *rt) {}
-    ~AutoAssertOnGC() {}
-
-    static void VerifyIsSafeToGC(JSRuntime *rt) {}
-#endif
-};
-
-/*
- * Disable the static rooting hazard analysis in the live region, but assert if
- * any GC occurs while this guard object is live. This is most useful to help
- * the exact rooting hazard analysis in complex regions, since it cannot
- * understand dataflow.
+ * Assert if any GC occured while this guard object was live. This is most
+ * useful to help the exact rooting hazard analysis in complex regions, since
+ * it cannot understand dataflow.
  *
  * Note: GC behavior is unpredictable even when deterministice and is generally
  *       non-deterministic in practice. The fact that this guard has not
@@ -408,28 +375,22 @@ class JS_PUBLIC_API(AutoAssertOnGC)
  *       that the hazard analysis is correct for that code, rather than relying
  *       on this class.
  */
-class JS_PUBLIC_API(AutoSuppressGCAnalysis) : public AutoAssertOnGC
+class JS_PUBLIC_API(AutoAssertNoGC)
 {
-  public:
-    AutoSuppressGCAnalysis() : AutoAssertOnGC() {}
-    explicit AutoSuppressGCAnalysis(JSRuntime *rt) : AutoAssertOnGC(rt) {}
-};
+#ifdef JS_DEBUG
+    JSRuntime *runtime;
+    size_t gcNumber;
 
-/*
- * Place AutoCheckCannotGC in scopes that you believe can never GC. These
- * annotations will be verified both dynamically via AutoAssertOnGC, and
- * statically with the rooting hazard analysis (implemented by making the
- * analysis consider AutoCheckCannotGC to be a GC pointer, and therefore
- * complain if it is live across a GC call.) It is useful when dealing with
- * internal pointers to GC things where the GC thing itself may not be present
- * for the static analysis: e.g. acquiring inline chars from a JSString* on the
- * heap.
- */
-class JS_PUBLIC_API(AutoCheckCannotGC) : public AutoAssertOnGC
-{
   public:
-    AutoCheckCannotGC() : AutoAssertOnGC() {}
-    explicit AutoCheckCannotGC(JSRuntime *rt) : AutoAssertOnGC(rt) {}
+    AutoAssertNoGC();
+    AutoAssertNoGC(JSRuntime *rt);
+    ~AutoAssertNoGC();
+#else
+  public:
+    /* Prevent unreferenced local warnings in opt builds. */
+    AutoAssertNoGC() {}
+    AutoAssertNoGC(JSRuntime *) {}
+#endif
 };
 
 class JS_PUBLIC_API(ObjectPtr)
@@ -439,7 +400,7 @@ class JS_PUBLIC_API(ObjectPtr)
   public:
     ObjectPtr() : value(nullptr) {}
 
-    explicit ObjectPtr(JSObject *obj) : value(obj) {}
+    ObjectPtr(JSObject *obj) : value(obj) {}
 
     /* Always call finalize before the destructor. */
     ~ObjectPtr() { MOZ_ASSERT(!value); }
@@ -498,7 +459,7 @@ ExposeGCThingToActiveJS(void *thing, JSGCTraceKind kind)
      * All live objects in the nursery are moved to tenured at the beginning of
      * each GC slice, so the gray marker never sees nursery things.
      */
-    if (js::gc::IsInsideNursery((js::gc::Cell *)thing))
+    if (js::gc::IsInsideNursery(rt, thing))
         return;
 #endif
     if (IsIncrementalBarrierNeededOnGCThing(rt, thing, kind))
@@ -531,7 +492,7 @@ MarkGCThingAsLive(JSRuntime *rt_, void *thing, JSGCTraceKind kind)
     /*
      * Any object in the nursery will not be freed during any GC running at that time.
      */
-    if (js::gc::IsInsideNursery((js::gc::Cell *)thing))
+    if (js::gc::IsInsideNursery(rt, thing))
         return;
 #endif
     if (IsIncrementalBarrierNeededOnGCThing(rt, thing, kind))

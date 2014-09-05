@@ -101,6 +101,7 @@ const char implementationString[] = "Mozilla JavaScript Debugger Service";
 
 const char jsdServiceCtrID[] = "@mozilla.org/js/jsd/debugger-service;1";
 const char jsdARObserverCtrID[] = "@mozilla.org/js/jsd/app-start-observer;2";
+const char jsdASObserverCtrID[] = "service,@mozilla.org/js/jsd/app-start-observer;2";
 
 #ifdef DEBUG_verbose
 uint32_t gScriptCount   = 0;
@@ -1911,7 +1912,7 @@ jsdStackFrame::GetFunctionName(nsACString &_rval)
     if (str)
         return AssignToJSString(mCx, &_rval, str);
     
-    _rval.AssignLiteral("anonymous");
+    _rval.Assign("anonymous");
     return NS_OK;
 }
 
@@ -2157,21 +2158,21 @@ jsdValue::GetJsType (uint32_t *_rval)
     ASSERT_VALID_EPHEMERAL;
     JS::RootedValue val(JSD_GetJSRuntime(mCx), JSD_GetValueWrappedJSVal (mCx, mValue));
 
-    if (val.isNull())
+    if (JSVAL_IS_NULL(val))
         *_rval = TYPE_NULL;
-    else if (val.isBoolean())
+    else if (JSVAL_IS_BOOLEAN(val))
         *_rval = TYPE_BOOLEAN;
-    else if (val.isDouble())
+    else if (JSVAL_IS_DOUBLE(val))
         *_rval = TYPE_DOUBLE;
-    else if (val.isInt32())
+    else if (JSVAL_IS_INT(val))
         *_rval = TYPE_INT;
-    else if (val.isString())
+    else if (JSVAL_IS_STRING(val))
         *_rval = TYPE_STRING;
-    else if (val.isUndefined())
+    else if (JSVAL_IS_VOID(val))
         *_rval = TYPE_VOID;
     else if (JSD_IsValueFunction (mCx, mValue))
         *_rval = TYPE_FUNCTION;
-    else if (!val.isPrimitive())
+    else if (!JSVAL_IS_PRIMITIVE(val))
         *_rval = TYPE_OBJECT;
     else
         NS_ASSERTION (0, "Value has no discernible type.");

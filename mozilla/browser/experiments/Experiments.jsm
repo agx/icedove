@@ -326,7 +326,7 @@ Experiments.Policy.prototype = {
             .healthReporter;
       yield reporter.onInit();
       let payload = yield reporter.collectAndObtainJSONPayload();
-      return payload;
+      throw new Task.Result(payload);
     });
   },
 
@@ -336,14 +336,11 @@ Experiments.Policy.prototype = {
 };
 
 function AlreadyShutdownError(message="already shut down") {
-  Error.call(this, message);
-  let error = new Error();
   this.name = "AlreadyShutdownError";
   this.message = message;
-  this.stack = error.stack;
 }
 
-AlreadyShutdownError.prototype = Object.create(Error.prototype);
+AlreadyShutdownError.prototype = new Error();
 AlreadyShutdownError.prototype.constructor = AlreadyShutdownError;
 
 /**
@@ -351,27 +348,10 @@ AlreadyShutdownError.prototype.constructor = AlreadyShutdownError;
  */
 
 Experiments.Experiments = function (policy=new Experiments.Policy()) {
-  let log = Log.repository.getLoggerWithMessagePrefix(
-      "Browser.Experiments.Experiments",
-      "Experiments #" + gExperimentsCounter++ + "::");
-
-  // At the time of this writing, Experiments.jsm has severe
-  // crashes. For forensics purposes, keep the last few log
-  // messages in memory and upload them in case of crash.
-  this._forensicsLogs = [];
-  this._forensicsLogs.length = 3;
-  this._log = Object.create(log);
-  this._log.log = (level, string, params) => {
-    this._forensicsLogs.shift();
-    this._forensicsLogs.push(level + ": " + string);
-    log.log(level, string, params);
-  };
-
+  this._log = Log.repository.getLoggerWithMessagePrefix(
+    "Browser.Experiments.Experiments",
+    "Experiments #" + gExperimentsCounter++ + "::");
   this._log.trace("constructor");
-
-  // Capture the latest error, for forensics purposes.
-  this._latestError = null;
-
 
   this._policy = policy;
 
@@ -422,26 +402,27 @@ Experiments.Experiments.prototype = {
 
     gPrefsTelemetry.observe(PREF_TELEMETRY_ENABLED, this._telemetryStatusChanged, this);
 
-    AddonManager.shutdown.addBlocker("Experiments.jsm shutdown",
-                                     this.uninit.bind(this),
-                                     this._getState.bind(this));
+    AsyncShutdown.profileBeforeChange.addBlocker("Experiments.jsm shutdown",
+      this.uninit.bind(this));
 
     this._registerWithAddonManager();
 
-    this._loadTask = this._loadFromCache();
+    let deferred = Promise.defer();
 
-    return this._loadTask.then(
+    this._loadTask = this._loadFromCache();
+    this._loadTask.then(
       () => {
         this._log.trace("_loadTask finished ok");
         this._loadTask = null;
-        return this._run();
+        this._run().then(deferred.resolve, deferred.reject);
       },
       (e) => {
         this._log.error("_loadFromCache caught error: " + e);
-        this._latestError = e;
-        throw e;
+        deferred.reject(e);
       }
     );
+
+    return deferred.promise;
   },
 
   /**
@@ -482,43 +463,11 @@ Experiments.Experiments.prototype = {
         yield this._mainTask;
       } catch (e if e instanceof AlreadyShutdownError) {
         // We error out of tasks after shutdown via that exception.
-      } catch (e) {
-        this._latestError = e;
-        throw e;
       }
     }
 
     this._log.info("Completed uninitialization.");
   }),
-
-  // Return state information, for debugging purposes.
-  _getState: function() {
-    let state = {
-      isShutdown: this._shutdown,
-      isEnabled: gExperimentsEnabled,
-      isRefresh: this._refresh,
-      isDirty: this._dirty,
-      isFirstEvaluate: this._firstEvaluate,
-      hasLoadTask: !!this._loadTask,
-      hasMainTask: !!this._mainTask,
-      hasTimer: !!this._hasTimer,
-      hasAddonProvider: !!gAddonProvider,
-      latestLogs: this._forensicsLogs,
-      experiments: this._experiments.keys(),
-      terminateReason: this._terminateReason,
-    };
-    if (this._latestError) {
-      if (typeof this._latestError == "object") {
-        state.latestError = {
-          message: this._latestError.message,
-          stack: this._latestError.stack
-        };
-      } else {
-        state.latestError = "" + this._latestError;
-      }
-    }
-    return state;
-  },
 
   _registerWithAddonManager: function (previousExperimentsProvider) {
     this._log.trace("Registering instance with Addon Manager.");
@@ -546,18 +495,14 @@ Experiments.Experiments.prototype = {
   _unregisterWithAddonManager: function () {
     this._log.trace("Unregistering instance with Addon Manager.");
 
-    this._log.trace("Removing install listener from add-on manager.");
-    AddonManager.removeInstallListener(this);
-    this._log.trace("Removing addon listener from add-on manager.");
-    AddonManager.removeAddonListener(this);
-
     if (gAddonProvider) {
       this._log.trace("Unregistering previous experiment add-on provider.");
       AddonManagerPrivate.unregisterProvider(gAddonProvider);
       gAddonProvider = null;
     }
 
-    this._log.trace("Finished unregistering with addon manager.");
+    AddonManager.removeInstallListener(this);
+    AddonManager.removeAddonListener(this);
   },
 
   /*
@@ -774,22 +719,18 @@ Experiments.Experiments.prototype = {
     this._log.trace("_run");
     this._checkForShutdown();
     if (!this._mainTask) {
-      this._mainTask = Task.spawn(function*() {
-        try {
-          yield this._main();
-        } catch (e) {
+      this._mainTask = Task.spawn(this._main.bind(this));
+      this._mainTask.then(
+        () => {
+          this._log.trace("_main finished, scheduling next run");
+          this._mainTask = null;
+          this._scheduleNextRun();
+        },
+        (e) => {
           this._log.error("_main caught error: " + e);
-          return;
-        } finally {
           this._mainTask = null;
         }
-        this._log.trace("_main finished, scheduling next run");
-        try {
-          yield this._scheduleNextRun();
-        } catch (ex if ex instanceof AlreadyShutdownError) {
-          // We error out of tasks after shutdown via that exception.
-        }
-      }.bind(this));
+      );
     }
     return this._mainTask;
   },
@@ -1267,9 +1208,7 @@ Experiments.Experiments.prototype = {
           let desc = TELEMETRY_LOG.ACTIVATION;
           let data = [TELEMETRY_LOG.ACTIVATION.REJECTED, id];
           data = data.concat(reason);
-          const key = TELEMETRY_LOG.ACTIVATION_KEY;
-          TelemetryLog.log(key, data);
-          this._log.trace("evaluateExperiments() - added " + key + " to TelemetryLog: " + JSON.stringify(data));
+          TelemetryLog.log(TELEMETRY_LOG.ACTIVATION_KEY, data);
         }
 
         if (!applicable) {
@@ -1703,6 +1642,10 @@ Experiments.ExperimentEntry.prototype = {
       };
 
       let sandbox = Cu.Sandbox(nullprincipal);
+      let context = {};
+      context.healthReportPayload = yield this._policy.healthReportPayload();
+      context.telemetryPayload    = yield this._policy.telemetryPayload();
+
       try {
         Cu.evalInSandbox(jsfilter, sandbox);
       } catch (e) {
@@ -1712,7 +1655,7 @@ Experiments.ExperimentEntry.prototype = {
 
       // You can't insert arbitrarily complex objects into a sandbox, so
       // we serialize everything through JSON.
-      sandbox._hr = yield this._policy.healthReportPayload();
+      sandbox._hr = JSON.stringify(yield this._policy.healthReportPayload());
       Object.defineProperty(sandbox, "_t",
         { get: () => JSON.stringify(this._policy.telemetryPayload()) });
 

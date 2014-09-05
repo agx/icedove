@@ -18,8 +18,6 @@
 
 namespace webrtc {
 
-namespace acm2 {
-
 #ifndef WEBRTC_CODEC_AVT
 
 ACMDTMFPlayout::ACMDTMFPlayout(int16_t /* codec_id */) { return; }
@@ -84,7 +82,5 @@ void ACMDTMFPlayout::DestructEncoderSafe() {
 }
 
 #endif
-
-}  // namespace acm2
 
 }  // namespace webrtc

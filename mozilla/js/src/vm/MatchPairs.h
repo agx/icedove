@@ -24,14 +24,14 @@ namespace js {
 
 struct MatchPair
 {
-    int32_t start;
-    int32_t limit;
+    int start;
+    int limit;
 
     MatchPair()
       : start(-1), limit(-1)
     { }
 
-    MatchPair(int32_t start, int32_t limit)
+    MatchPair(int start, int limit)
       : start(start), limit(limit)
     { }
 
@@ -56,11 +56,8 @@ struct MatchPair
 class MatchPairs
 {
   protected:
-    /* Length of pairs_. */
-    uint32_t pairCount_;
-
-    /* Raw pointer into an allocated MatchPair buffer. */
-    MatchPair *pairs_;
+    size_t     pairCount_;   /* Length of pairs_. */
+    MatchPair *pairs_;       /* Raw pointer into an allocated MatchPair buffer. */
 
   protected:
     /* Not used directly: use ScopedMatchPairs or VectorMatchPairs. */
@@ -84,7 +81,7 @@ class MatchPairs
     void checkAgainst(size_t inputLength) {
 #ifdef DEBUG
         for (size_t i = 0; i < pairCount_; i++) {
-            const MatchPair &p = (*this)[i];
+            const MatchPair &p = pair(i);
             JS_ASSERT(p.check());
             if (p.isUndefined())
                 continue;
@@ -99,22 +96,18 @@ class MatchPairs
     size_t pairCount() const       { JS_ASSERT(pairCount_ > 0); return pairCount_; }
     size_t parenCount() const      { return pairCount_ - 1; }
 
-    static size_t offsetOfPairs() { return offsetof(MatchPairs, pairs_); }
-    static size_t offsetOfPairCount() { return offsetof(MatchPairs, pairCount_); }
-
-    int32_t *pairsRaw() { return reinterpret_cast<int32_t *>(pairs_); }
-
   public:
+    unsigned *rawBuf() const { return reinterpret_cast<unsigned *>(pairs_); }
     size_t length() const { return pairCount_; }
 
-    const MatchPair &operator[](size_t i) const {
-        JS_ASSERT(i < pairCount_);
+    /* Pair accessors. */
+    const MatchPair &pair(size_t i) const {
+        JS_ASSERT(pairCount_ && i < pairCount_);
+        JS_ASSERT(pairs_);
         return pairs_[i];
     }
-    MatchPair &operator[](size_t i) {
-        JS_ASSERT(i < pairCount_);
-        return pairs_[i];
-    }
+
+    const MatchPair &operator[](size_t i) const { return pair(i); }
 };
 
 /* MatchPairs allocated into temporary storage, removed when out of scope. */
@@ -124,9 +117,11 @@ class ScopedMatchPairs : public MatchPairs
 
   public:
     /* Constructs an implicit LifoAllocScope. */
-    explicit ScopedMatchPairs(LifoAlloc *lifoAlloc)
+    ScopedMatchPairs(LifoAlloc *lifoAlloc)
       : lifoScope_(lifoAlloc)
     { }
+
+    const MatchPair &operator[](size_t i) const { return pair(i); }
 
   protected:
     bool allocOrExpandArray(size_t pairCount);
@@ -144,6 +139,8 @@ class VectorMatchPairs : public MatchPairs
     VectorMatchPairs() {
         vec_.clear();
     }
+
+    const MatchPair &operator[](size_t i) const { return pair(i); }
 
   protected:
     friend class RegExpStatics;

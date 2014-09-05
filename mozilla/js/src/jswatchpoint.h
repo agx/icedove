@@ -21,8 +21,8 @@ struct WatchKey {
     WatchKey() {}
     WatchKey(JSObject *obj, jsid id) : object(obj), id(id) {}
     WatchKey(const WatchKey &key) : object(key.object.get()), id(key.id.get()) {}
-    PreBarrieredObject object;
-    PreBarrieredId id;
+    EncapsulatedPtrObject object;
+    EncapsulatedId id;
 
     bool operator!=(const WatchKey &other) const {
         return object != other.object || id != other.id;
@@ -31,7 +31,7 @@ struct WatchKey {
 
 struct Watchpoint {
     JSWatchPointHandler handler;
-    PreBarrieredObject closure;  /* This is always marked in minor GCs and so doesn't require a postbarrier. */
+    EncapsulatedPtrObject closure;  /* This is always marked in minor GCs and so doesn't require a postbarrier. */
     bool held;  /* true if currently running handler */
     Watchpoint(JSWatchPointHandler handler, JSObject* closure, bool held)
       : handler(handler), closure(closure), held(held) {}

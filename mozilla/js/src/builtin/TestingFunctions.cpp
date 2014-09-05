@@ -238,7 +238,7 @@ GC(JSContext *cx, unsigned argc, jsval *vp)
     }
 
 #ifndef JS_MORE_DETERMINISTIC
-    size_t preBytes = cx->runtime()->gc.bytes;
+    size_t preBytes = cx->runtime()->gcBytes;
 #endif
 
     if (compartment)
@@ -250,7 +250,7 @@ GC(JSContext *cx, unsigned argc, jsval *vp)
     char buf[256] = { '\0' };
 #ifndef JS_MORE_DETERMINISTIC
     JS_snprintf(buf, sizeof(buf), "before %lu, after %lu\n",
-                (unsigned long)preBytes, (unsigned long)cx->runtime()->gc.bytes);
+                (unsigned long)preBytes, (unsigned long)cx->runtime()->gcBytes);
 #endif
     JSString *str = JS_NewStringCopyZ(cx, buf);
     if (!str)
@@ -265,7 +265,7 @@ MinorGC(JSContext *cx, unsigned argc, jsval *vp)
     CallArgs args = CallArgsFromVp(argc, vp);
 #ifdef JSGC_GENERATIONAL
     if (args.get(0) == BooleanValue(true))
-        cx->runtime()->gc.storeBuffer.setAboutToOverflow();
+        cx->runtime()->gcStoreBuffer.setAboutToOverflow();
 
     MinorGC(cx, gcreason::API);
 #endif
@@ -445,7 +445,7 @@ GCPreserveCode(JSContext *cx, unsigned argc, jsval *vp)
         return false;
     }
 
-    cx->runtime()->gc.setAlwaysPreserveCode();
+    cx->runtime()->alwaysPreserveCode = true;
 
     args.rval().setUndefined();
     return true;
@@ -510,17 +510,10 @@ SelectForGC(JSContext *cx, unsigned argc, Value *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 
-    /*
-     * The selectedForMarking set is intended to be manually marked at slice
-     * start to detect missing pre-barriers. It is invalid for nursery things
-     * to be in the set, so evict the nursery before adding items.
-     */
     JSRuntime *rt = cx->runtime();
-    MinorGC(rt, JS::gcreason::EVICT_NURSERY);
-
     for (unsigned i = 0; i < args.length(); i++) {
         if (args[i].isObject()) {
-            if (!rt->gc.selectForMarking(&args[i].toObject()))
+            if (!rt->gcSelectedForMarking.append(&args[i].toObject()))
                 return false;
         }
     }
@@ -571,7 +564,7 @@ GCState(JSContext *cx, unsigned argc, jsval *vp)
     }
 
     const char *state;
-    gc::State globalState = cx->runtime()->gc.incrementalState;
+    gc::State globalState = cx->runtime()->gcIncrementalState;
     if (globalState == gc::NO_INCREMENTAL)
         state = "none";
     else if (globalState == gc::MARK)
@@ -599,7 +592,7 @@ DeterministicGC(JSContext *cx, unsigned argc, jsval *vp)
         return false;
     }
 
-    cx->runtime()->gc.setDeterministic(ToBoolean(args[0]));
+    gc::SetDeterministicGC(cx, ToBoolean(args[0]));
     args.rval().setUndefined();
     return true;
 }
@@ -641,7 +634,7 @@ ValidateGC(JSContext *cx, unsigned argc, jsval *vp)
         return false;
     }
 
-    cx->runtime()->gc.setValidate(ToBoolean(args[0]));
+    gc::SetValidateGC(cx, ToBoolean(args[0]));
     args.rval().setUndefined();
     return true;
 }
@@ -657,7 +650,7 @@ FullCompartmentChecks(JSContext *cx, unsigned argc, jsval *vp)
         return false;
     }
 
-    cx->runtime()->gc.setFullCompartmentChecks(ToBoolean(args[0]));
+    gc::SetFullCompartmentChecks(cx, ToBoolean(args[0]));
     args.rval().setUndefined();
     return true;
 }
@@ -877,20 +870,6 @@ SaveStack(JSContext *cx, unsigned argc, jsval *vp)
     return true;
 }
 
-static bool
-EnableTrackAllocations(JSContext *cx, unsigned argc, jsval *vp)
-{
-    SetObjectMetadataCallback(cx, SavedStacksMetadataCallback);
-    return true;
-}
-
-static bool
-DisableTrackAllocations(JSContext *cx, unsigned argc, jsval *vp)
-{
-    SetObjectMetadataCallback(cx, nullptr);
-    return true;
-}
-
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
 static bool
 OOMAfterAllocations(JSContext *cx, unsigned argc, jsval *vp)
@@ -1023,64 +1002,35 @@ Terminate(JSContext *cx, unsigned arg, jsval *vp)
     return false;
 }
 
-#define SPS_PROFILING_STACK_MAX_SIZE 1000
-static ProfileEntry SPS_PROFILING_STACK[SPS_PROFILING_STACK_MAX_SIZE];
-static uint32_t SPS_PROFILING_STACK_SIZE = 0;
-
 static bool
-EnableSPSProfiling(JSContext *cx, unsigned argc, jsval *vp)
+EnableSPSProfilingAssertions(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
-
-    // Disable before re-enabling; see the assertion in |SPSProfiler::setProfilingStack|.
-    if (cx->runtime()->spsProfiler.installed())
-        cx->runtime()->spsProfiler.enable(false);
-
-    SetRuntimeProfilingStack(cx->runtime(), SPS_PROFILING_STACK, &SPS_PROFILING_STACK_SIZE,
-                             SPS_PROFILING_STACK_MAX_SIZE);
-    cx->runtime()->spsProfiler.enableSlowAssertions(false);
-    cx->runtime()->spsProfiler.enable(true);
-
-    args.rval().setUndefined();
-    return true;
-}
-
-static bool
-EnableSPSProfilingWithSlowAssertions(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    args.rval().setUndefined();
-
-    if (cx->runtime()->spsProfiler.enabled()) {
-        // If profiling already enabled with slow assertions disabled,
-        // this is a no-op.
-        if (cx->runtime()->spsProfiler.slowAssertionsEnabled())
-            return true;
-
-        // Slow assertions are off.  Disable profiling before re-enabling
-        // with slow assertions on.
-        cx->runtime()->spsProfiler.enable(false);
+    if (!args.get(0).isBoolean()) {
+        RootedObject arg(cx, &args.callee());
+        ReportUsageError(cx, arg, "Must have one boolean argument");
+        return false;
     }
 
+    static ProfileEntry stack[1000];
+    static uint32_t stack_size = 0;
+
     // Disable before re-enabling; see the assertion in |SPSProfiler::setProfilingStack|.
     if (cx->runtime()->spsProfiler.installed())
         cx->runtime()->spsProfiler.enable(false);
-
-    SetRuntimeProfilingStack(cx->runtime(), SPS_PROFILING_STACK, &SPS_PROFILING_STACK_SIZE,
-                             SPS_PROFILING_STACK_MAX_SIZE);
-    cx->runtime()->spsProfiler.enableSlowAssertions(true);
+    SetRuntimeProfilingStack(cx->runtime(), stack, &stack_size, 1000);
+    cx->runtime()->spsProfiler.enableSlowAssertions(args[0].toBoolean());
     cx->runtime()->spsProfiler.enable(true);
 
+    args.rval().setUndefined();
     return true;
 }
 
 static bool
 DisableSPSProfiling(JSContext *cx, unsigned argc, jsval *vp)
 {
-    CallArgs args = CallArgsFromVp(argc, vp);
     if (cx->runtime()->spsProfiler.installed())
         cx->runtime()->spsProfiler.enable(false);
-    args.rval().setUndefined();
     return true;
 }
 
@@ -1150,14 +1100,10 @@ ShellObjectMetadataCallback(JSContext *cx, JSObject **pmetadata)
     }
 
     int stackIndex = 0;
-    RootedId id(cx);
-    RootedValue callee(cx);
     for (NonBuiltinScriptFrameIter iter(cx); !iter.done(); ++iter) {
         if (iter.isFunctionFrame() && iter.compartment() == cx->compartment()) {
-            id = INT_TO_JSID(stackIndex);
-            RootedObject callee(cx, iter.callee());
-            if (!JS_DefinePropertyById(cx, stack, id, callee, 0,
-                                       JS_PropertyStub, JS_StrictPropertyStub))
+            if (!JS_DefinePropertyById(cx, stack, INT_TO_JSID(stackIndex), ObjectValue(*iter.callee()),
+                                       JS_PropertyStub, JS_StrictPropertyStub, 0))
             {
                 return false;
             }
@@ -1575,11 +1521,11 @@ Neuter(JSContext *cx, unsigned argc, jsval *vp)
 }
 
 static bool
-HelperThreadCount(JSContext *cx, unsigned argc, jsval *vp)
+WorkerThreadCount(JSContext *cx, unsigned argc, jsval *vp)
 {
     CallArgs args = CallArgsFromVp(argc, vp);
 #ifdef JS_THREADSAFE
-    args.rval().setInt32(HelperThreadState().threadCount);
+    args.rval().setInt32(cx->runtime()->useHelperThreads() ? WorkerThreadState().threadCount : 0);
 #else
     args.rval().setInt32(0);
 #endif
@@ -1612,42 +1558,6 @@ DisableTraceLogger(JSContext *cx, unsigned argc, jsval *vp)
     TraceLogger *logger = TraceLoggerForMainThread(cx->runtime());
     args.rval().setBoolean(TraceLoggerDisable(logger));
 
-    return true;
-}
-
-#ifdef DEBUG
-static bool
-DumpObject(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    RootedObject obj(cx);
-    if (!JS_ConvertArguments(cx, args, "o", obj.address()))
-        return false;
-
-    js_DumpObject(obj);
-
-    args.rval().setUndefined();
-    return true;
-}
-#endif
-
-static bool
-ReportOutOfMemory(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    JS_ReportOutOfMemory(cx);
-    cx->clearPendingException();
-    args.rval().setUndefined();
-    return true;
-}
-
-static bool
-ReportLargeAllocationFailure(JSContext *cx, unsigned argc, jsval *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-    void *buf = cx->runtime()->onOutOfMemoryCanGC(NULL, JSRuntime::LARGE_ALLOCATION);
-    js_free(buf);
-    args.rval().setUndefined();
     return true;
 }
 
@@ -1689,16 +1599,6 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
     JS_FN_HELP("saveStack", SaveStack, 0, 0,
 "saveStack()",
 "  Capture a stack.\n"),
-
-    JS_FN_HELP("enableTrackAllocations", EnableTrackAllocations, 0, 0,
-"enableTrackAllocations()",
-"  Start capturing the JS stack at every allocation. Note that this sets an "
-"  object metadata callback that will override any other object metadata "
-"  callback that may be set."),
-
-    JS_FN_HELP("disableTrackAllocations", DisableTrackAllocations, 0, 0,
-"disableTrackAllocations()",
-"  Stop capturing the JS stack at every allocation."),
 
 #if defined(DEBUG) || defined(JS_OOM_BREAKPOINT)
     JS_FN_HELP("oomAfterAllocations", OOMAfterAllocations, 1, 0,
@@ -1803,17 +1703,14 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  Terminate JavaScript execution, as if we had run out of\n"
 "  memory or been terminated by the slow script dialog."),
 
-    JS_FN_HELP("enableSPSProfiling", EnableSPSProfiling, 0, 0,
-"enableSPSProfiling()",
-"  Enables SPS instrumentation and corresponding assertions, with slow\n"
-"  assertions disabled.\n"),
+    JS_FN_HELP("enableSPSProfilingAssertions", EnableSPSProfilingAssertions, 1, 0,
+"enableSPSProfilingAssertions(slow)",
+"  Enables SPS instrumentation and corresponding assertions. If 'slow' is\n"
+"  true, then even slower assertions are enabled for all generated JIT code.\n"
+"  When 'slow' is false, then instrumentation is enabled, but the slow\n"
+"  assertions are disabled."),
 
-    JS_FN_HELP("enableSPSProfilingWithSlowAssertions", EnableSPSProfilingWithSlowAssertions, 0, 0,
-"enableSPSProfilingWithSlowAssertions()",
-"  Enables SPS instrumentation and corresponding assertions, with slow\n"
-"  assertions enabled.\n"),
-
-    JS_FN_HELP("disableSPSProfiling", DisableSPSProfiling, 0, 0,
+    JS_FN_HELP("disableSPSProfiling", DisableSPSProfiling, 1, 0,
 "disableSPSProfiling()",
 "  Disables SPS instrumentation"),
 
@@ -1907,9 +1804,9 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  \"same-data\" will leave it set to its original value, to mimic eg\n"
 "  asm.js ArrayBuffer neutering."),
 
-    JS_FN_HELP("helperThreadCount", HelperThreadCount, 0, 0,
-"helperThreadCount()",
-"  Returns the number of helper threads available for off-main-thread tasks."),
+    JS_FN_HELP("workerThreadCount", WorkerThreadCount, 0, 0,
+"workerThreadCount()",
+"  Returns the number of worker threads available for off-main-thread tasks."),
 
     JS_FN_HELP("startTraceLogger", EnableTraceLogger, 0, 0,
 "startTraceLogger()",
@@ -1918,25 +1815,8 @@ static const JSFunctionSpecWithHelp TestingFunctions[] = {
 "  TLOPTIONS=disableMainThread"),
 
     JS_FN_HELP("stopTraceLogger", DisableTraceLogger, 0, 0,
-"stopTraceLogger()",
+"startTraceLogger()",
 "  Stop logging the mainThread."),
-
-    JS_FN_HELP("reportOutOfMemory", ReportOutOfMemory, 0, 0,
-"reportOutOfMemory()",
-"  Report OOM, then clear the exception and return undefined. For crash testing."),
-
-    JS_FN_HELP("reportLargeAllocationFailure", ReportLargeAllocationFailure, 0, 0,
-"reportLargeAllocationFailure()",
-"  Call the large allocation failure callback, as though a large malloc call failed,\n"
-"  then return undefined. In Gecko, this sends a memory pressure notification, which\n"
-"  can free up some memory."),
-
-#ifdef DEBUG
-    JS_FN_HELP("dumpObject", DumpObject, 1, 0,
-"dumpObject()",
-"  Dump an internal representation of an object."),
-#endif
-
     JS_FS_HELP_END
 };
 

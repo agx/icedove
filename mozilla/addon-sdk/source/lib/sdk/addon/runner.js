@@ -12,12 +12,11 @@ const { once } = require('../system/events');
 const { exit, env, staticArgs } = require('../system');
 const { when: unload } = require('../system/unload');
 const { loadReason } = require('../self');
-const { rootURI, metadata } = require("@loader/options");
+const { rootURI } = require("@loader/options");
 const globals = require('../system/globals');
 const xulApp = require('../system/xul-app');
 const appShellService = Cc['@mozilla.org/appshell/appShellService;1'].
                         getService(Ci.nsIAppShellService);
-const { preferences } = metadata;
 
 const NAME2TOPIC = {
   'Firefox': 'sessionstore-windows-restored',
@@ -130,40 +129,20 @@ function run(options) {
     catch(error) {
       console.exception(error);
     }
-
-    // native-options does stuff directly with preferences key from package.json
-    if (preferences && preferences.length > 0) {
-      try {
-        require('../preferences/native-options').enable(preferences);
-      }
-      catch (error) {
-        console.exception(error);
-      }
+    // Initialize inline options localization, without preventing addon to be
+    // run in case of error
+    try {
+      require('../l10n/prefs');
     }
-    else {
-      // keeping support for addons packaged with older SDK versions,
-      // when cfx didn't include the 'preferences' key in @loader/options
+    catch(error) {
+      console.exception(error);
+    }
 
-      // Initialize inline options localization, without preventing addon to be
-      // run in case of error
-      try {
-        require('../l10n/prefs').enable();
-      }
-      catch(error) {
-        console.exception(error);
-      }
-
-      // TODO: When bug 564675 is implemented this will no longer be needed
-      // Always set the default prefs, because they disappear on restart
-      if (options.prefsURI) {
-        // Only set if `prefsURI` specified
-        try {
-          setDefaultPrefs(options.prefsURI);
-        }
-        catch (err) {
-          // cfx bootstrap always passes prefsURI, even in addons without prefs
-        }
-      }
+    // TODO: When bug 564675 is implemented this will no longer be needed
+    // Always set the default prefs, because they disappear on restart
+    if (options.prefsURI) {
+      // Only set if `prefsURI` specified
+      setDefaultPrefs(options.prefsURI);
     }
 
     // this is where the addon's main.js finally run.

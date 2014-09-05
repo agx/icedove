@@ -232,7 +232,7 @@ public:
     AutoSyncLoopHolder syncLoop(mWorkerPrivate);
     mSyncLoopTarget = syncLoop.EventTarget();
 
-    if (NS_FAILED(NS_DispatchToMainThread(this))) {
+    if (NS_FAILED(NS_DispatchToMainThread(this, NS_DISPATCH_NORMAL))) {
       JS_ReportError(cx,
                      "Failed to dispatch to main thread for the Console API!");
       return false;
@@ -295,10 +295,9 @@ private:
       return false;
     }
 
-    JS::Rooted<JS::Value> arg(aCx);
     for (uint32_t i = 0; i < mCallData->mArguments.Length(); ++i) {
-      arg = mCallData->mArguments[i];
-      if (!JS_DefineElement(aCx, arguments, i, arg, JSPROP_ENUMERATE)) {
+      if (!JS_DefineElement(aCx, arguments, i, mCallData->mArguments[i],
+                            nullptr, nullptr, JSPROP_ENUMERATE)) {
         return false;
       }
     }
@@ -406,10 +405,9 @@ private:
       return false;
     }
 
-    JS::Rooted<JS::Value> arg(aCx);
     for (uint32_t i = 0; i < mArguments.Length(); ++i) {
-      arg = mArguments[i];
-      if (!JS_DefineElement(aCx, arguments, i, arg, JSPROP_ENUMERATE)) {
+      if (!JS_DefineElement(aCx, arguments, i, mArguments[i], nullptr, nullptr,
+                            JSPROP_ENUMERATE)) {
         return false;
       }
     }
@@ -1439,13 +1437,13 @@ void
 Console::MakeFormatString(nsCString& aFormat, int32_t aInteger,
                           int32_t aMantissa, char aCh)
 {
-  aFormat.Append('%');
+  aFormat.Append("%");
   if (aInteger >= 0) {
     aFormat.AppendInt(aInteger);
   }
 
   if (aMantissa >= 0) {
-    aFormat.Append('.');
+    aFormat.Append(".");
     aFormat.AppendInt(aMantissa);
   }
 
@@ -1589,7 +1587,7 @@ Console::IncreaseCounter(JSContext* aCx, const ConsoleStackEntry& aFrame,
 
   if (key.IsEmpty()) {
     key.Append(aFrame.mFilename);
-    key.Append(':');
+    key.Append(NS_LITERAL_STRING(":"));
     key.AppendInt(aFrame.mLineNumber);
   }
 

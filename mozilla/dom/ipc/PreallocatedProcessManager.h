@@ -83,7 +83,6 @@ public:
 #ifdef MOZ_NUWA_PROCESS
   static void PublishSpareProcess(ContentParent* aContent);
   static void MaybeForgetSpare(ContentParent* aContent);
-  static bool IsNuwaReady();
   static void OnNuwaReady();
   static bool PreallocatedProcessReady();
   static void RunAfterPreallocatedProcessReady(nsIRunnable* aRunnable);
