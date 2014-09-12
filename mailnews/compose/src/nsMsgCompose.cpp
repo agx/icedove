@@ -4631,9 +4631,16 @@ struct nsMsgMailListComparator
     if (!mailList.mName.Equals(recipient.mName,
                                nsCaseInsensitiveStringComparator()))
       return false;
+
+    // The list description may be quoted...
+    nsString quotedMailListDesc;
+    quotedMailListDesc.AssignLiteral("\"");
+    quotedMailListDesc.Append(mailList.mDescription);
+    quotedMailListDesc.AppendLiteral("\"");
     return mailList.mDescription.IsEmpty() ?
       mailList.mName.Equals(recipient.mEmail, nsCaseInsensitiveStringComparator()) :
-      mailList.mDescription.Equals(recipient.mEmail, nsCaseInsensitiveStringComparator());
+      (mailList.mDescription.Equals(recipient.mEmail, nsCaseInsensitiveStringComparator()) || 
+       quotedMailListDesc.Equals(recipient.mEmail, nsCaseInsensitiveStringComparator()));
   }
 };
 

@@ -39,7 +39,7 @@ function checkPopulate(aTo, aCheckTo)
   msgCompose.initialize(params);
 
   msgCompose.expandMailingLists();
-  equal(fields.to, aCheckTo);
+  Assert.equal(fields.to, aCheckTo);
 }
 
 function run_test() {
