@@ -14,7 +14,6 @@
 
 #include "nsMsgImapCID.h"
 #include "nsThreadUtils.h"
-#include "nsISupportsObsolete.h"
 #include "nsIMsgStatusFeedback.h"
 #include "nsImapCore.h"
 #include "nsImapProtocol.h"
@@ -836,7 +835,8 @@ nsresult nsImapProtocol::SetupWithUrl(nsIURI * aURL, nsISupports* aConsumer)
           connectionType =  "starttls";
 
         nsCOMPtr<nsIProxyInfo> proxyInfo;
-        rv = MsgExamineForProxy("imap", m_realHostName.get(), port, getter_AddRefs(proxyInfo));
+        if (m_mockChannel)
+          rv = MsgExamineForProxy(m_mockChannel, getter_AddRefs(proxyInfo));
         if (NS_FAILED(rv))
           proxyInfo = nullptr;
 
@@ -1092,7 +1092,7 @@ NS_IMETHODIMP nsImapProtocol::Run()
 NS_IMETHODIMP nsImapProtocol::CloseStreams()
 {
   // make sure that it is called by the UI thread
-  NS_ABORT_IF_FALSE(NS_IsMainThread(), "CloseStreams() should not be called from an off UI thread");
+  MOZ_ASSERT(NS_IsMainThread(), "CloseStreams() should not be called from an off UI thread");
 
   {
     MutexAutoLock mon(mLock);
@@ -2538,7 +2538,7 @@ void nsImapProtocol::ProcessSelectedStateURL()
              || m_imapAction == nsIImapUrl::nsImapMsgPreview)
           {
             // multiple messages, fetch them all
-            SetProgressString("imapFolderReceivingMessageOf");
+            SetProgressString("imapFolderReceivingMessageOf2");
 
             m_progressIndex = 0;
             m_progressCount = CountMessagesInIdString(messageIdString.get());
@@ -2958,7 +2958,7 @@ void nsImapProtocol::ProcessSelectedStateURL()
           nsresult rv = m_runningUrl->GetListOfMessageIds(messageIdString);
           if (NS_SUCCEEDED(rv))
           {
-            SetProgressString("imapFolderReceivingMessageOf");
+            SetProgressString("imapFolderReceivingMessageOf2");
             m_progressIndex = 0;
             m_progressCount = CountMessagesInIdString(messageIdString.get());
 
@@ -4202,13 +4202,13 @@ void nsImapProtocol::FolderMsgDump(uint32_t *msgUids, uint32_t msgCount, nsIMAPe
   // lets worry about this progress stuff later.
   switch (fields) {
   case kHeadersRFC822andUid:
-    SetProgressString("imapReceivingMessageHeaders");
+    SetProgressString("imapReceivingMessageHeaders2");
     break;
   case kFlags:
-    SetProgressString("imapReceivingMessageFlags");
+    SetProgressString("imapReceivingMessageFlags2");
     break;
   default:
-    SetProgressString("imapFolderReceivingMessageOf");
+    SetProgressString("imapFolderReceivingMessageOf2");
     break;
   }
 
@@ -7599,14 +7599,19 @@ void nsImapProtocol::Lsub(const char *mailboxPattern, bool addDirectoryIfNecessa
                         mailboxPattern, escapedPattern);
 
   nsCString command (GetServerCommandTag());
-  if ((GetServerStateParser().GetCapabilityFlag() & kHasListExtendedCapability) &&
-      !GetListSubscribedIsBrokenOnServer())
+  eIMAPCapabilityFlags flag = GetServerStateParser().GetCapabilityFlag();
+  bool useListSubscribed = (flag & kHasListExtendedCapability) &&
+                           !GetListSubscribedIsBrokenOnServer();
+  if (useListSubscribed)
     command += " list (subscribed)";
   else
     command += " lsub";
   command += " \"\" \"";
   command += escapedPattern;
-  command += "\"" CRLF;
+  if (useListSubscribed && (flag & kHasSpecialUseCapability))
+    command += "\" return (special-use)" CRLF;
+  else
+    command += "\"" CRLF;
 
   PR_Free(boxnameWithOnlineDirectory);
 
@@ -9576,7 +9581,7 @@ nsImapMockChannel::SetNotificationCallbacks(nsIInterfaceRequestor* aNotification
 
 NS_IMETHODIMP
 nsImapMockChannel::OnTransportStatus(nsITransport *transport, nsresult status,
-                                     uint64_t progress, uint64_t progressMax)
+                                     int64_t progress, int64_t progressMax)
 {
   if (NS_FAILED(m_cancelStatus) || (mLoadFlags & LOAD_BACKGROUND) || !m_url)
     return NS_OK;

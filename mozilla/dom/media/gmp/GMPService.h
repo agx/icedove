@@ -30,7 +30,7 @@ class GMPParent;
 
 #define GMP_DEFAULT_ASYNC_SHUTDONW_TIMEOUT 3000
 
-class GeckoMediaPluginService MOZ_FINAL : public mozIGeckoMediaPluginService
+class GeckoMediaPluginService final : public mozIGeckoMediaPluginService
                                         , public nsIObserver
 {
 public:
@@ -49,8 +49,38 @@ public:
 
   int32_t AsyncShutdownTimeoutMs();
 
+  class PluginCrashCallback
+  {
+  public:
+    NS_INLINE_DECL_REFCOUNTING(PluginCrashCallback)
+
+    PluginCrashCallback(const nsACString& aPluginId)
+      : mPluginId(aPluginId)
+    {
+      MOZ_ASSERT(NS_IsMainThread());
+    }
+    const nsACString& PluginId() const { return mPluginId; }
+    virtual void Run(const nsACString& aPluginName, const nsAString& aPluginDumpId) = 0;
+    virtual bool IsStillValid() = 0; // False if callback has become useless.
+  protected:
+    virtual ~PluginCrashCallback()
+    {
+      MOZ_ASSERT(NS_IsMainThread());
+    }
+  private:
+    const nsCString mPluginId;
+  };
+  void RemoveObsoletePluginCrashCallbacks(); // Called from add/remove/run.
+  void AddPluginCrashCallback(nsRefPtr<PluginCrashCallback> aPluginCrashCallback);
+  void RemovePluginCrashCallbacks(const nsACString& aPluginId);
+  void RunPluginCrashCallbacks(const nsACString& aPluginId,
+                               const nsACString& aPluginName,
+                               const nsAString& aPluginDumpId);
+
 private:
   ~GeckoMediaPluginService();
+
+  nsresult GMPDispatch(nsIRunnable* event, uint32_t flags = NS_DISPATCH_NORMAL);
 
   void ClearStorage();
 
@@ -69,25 +99,42 @@ private:
   void LoadFromEnvironment();
   void ProcessPossiblePlugin(nsIFile* aDir);
 
-  void AddOnGMPThread(const nsAString& aSearchDir);
-  void RemoveOnGMPThread(const nsAString& aSearchDir);
+  void AddOnGMPThread(const nsAString& aDirectory);
+  void RemoveOnGMPThread(const nsAString& aDirectory,
+                         const bool aDeleteFromDisk);
 
   nsresult SetAsyncShutdownTimeout();
+
+  struct DirectoryFilter {
+    virtual bool operator()(nsIFile* aPath) = 0;
+    ~DirectoryFilter() {}
+  };
+  void ClearNodeIdAndPlugin(DirectoryFilter& aFilter);
+
+  void ForgetThisSiteOnGMPThread(const nsACString& aOrigin);
+  void ClearRecentHistoryOnGMPThread(PRTime aSince);
 
 protected:
   friend class GMPParent;
   void ReAddOnGMPThread(nsRefPtr<GMPParent>& aOld);
 private:
   GMPParent* ClonePlugin(const GMPParent* aOriginal);
+  nsresult EnsurePluginsOnDiskScanned();
 
   class PathRunnable : public nsRunnable
   {
   public:
-    PathRunnable(GeckoMediaPluginService* service, const nsAString& path,
-                 bool add)
-      : mService(service)
-      , mPath(path)
-      , mAdd(add)
+    enum EOperation {
+      ADD,
+      REMOVE,
+      REMOVE_AND_DELETE_FROM_DISK,
+    };
+
+    PathRunnable(GeckoMediaPluginService* aService, const nsAString& aPath,
+                 EOperation aOperation)
+      : mService(aService)
+      , mPath(aPath)
+      , mOperation(aOperation)
     { }
 
     NS_DECL_NSIRUNNABLE
@@ -95,7 +142,7 @@ private:
   private:
     nsRefPtr<GeckoMediaPluginService> mService;
     nsString mPath;
-    bool mAdd;
+    EOperation mOperation;
   };
 
   Mutex mMutex; // Protects mGMPThread and mShuttingDown and mPlugins
@@ -103,6 +150,8 @@ private:
   nsCOMPtr<nsIThread> mGMPThread;
   bool mShuttingDown;
   bool mShuttingDownOnGMPThread;
+
+  nsTArray<nsRefPtr<PluginCrashCallback>> mPluginCrashCallbacks;
 
   // True if we've inspected MOZ_GMP_PATH on the GMP thread and loaded any
   // plugins found there into mPlugins.
@@ -139,6 +188,9 @@ private:
   // persistently on disk.
   nsDataHashtable<nsCStringHashKey, bool> mPersistentStorageAllowed;
 };
+
+nsresult ReadSalt(nsIFile* aPath, nsACString& aOutData);
+bool MatchOrigin(nsIFile* aPath, const nsACString& aOrigin);
 
 } // namespace gmp
 } // namespace mozilla

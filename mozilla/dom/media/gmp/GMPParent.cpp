@@ -62,8 +62,10 @@ GMPParent::GMPParent()
   , mAbnormalShutdownInProgress(false)
   , mAsyncShutdownRequired(false)
   , mAsyncShutdownInProgress(false)
-  , mHasAccessedStorage(false)
 {
+  // Use the parent address to identify it.
+  // We could use any unique-to-the-parent value.
+  mPluginId.AppendInt(reinterpret_cast<uint64_t>(this));
 }
 
 GMPParent::~GMPParent()
@@ -148,27 +150,30 @@ GMPParent::LoadProcess()
 
     bool opened = Open(mProcess->GetChannel(), mProcess->GetChildProcessHandle());
     if (!opened) {
+      LOGD(("%s::%s: Failed to create new child process %p", __CLASS__, __FUNCTION__, (void *)mProcess));
       mProcess->Delete();
       mProcess = nullptr;
       return NS_ERROR_FAILURE;
     }
-    LOGD(("%s::%s: Created new process %p", __CLASS__, __FUNCTION__, (void *)mProcess));
+    LOGD(("%s::%s: Created new child process %p", __CLASS__, __FUNCTION__, (void *)mProcess));
 
     bool ok = SendSetNodeId(mNodeId);
     if (!ok) {
+      LOGD(("%s::%s: Failed to send node id to child process %p", __CLASS__, __FUNCTION__, (void *)mProcess));
       mProcess->Delete();
       mProcess = nullptr;
       return NS_ERROR_FAILURE;
     }
-    LOGD(("%s::%s: Failed to send node id %p", __CLASS__, __FUNCTION__, (void *)mProcess));
+    LOGD(("%s::%s: Sent node id to child process %p", __CLASS__, __FUNCTION__, (void *)mProcess));
 
     ok = SendStartPlugin();
     if (!ok) {
+      LOGD(("%s::%s: Failed to send start to child process %p", __CLASS__, __FUNCTION__, (void *)mProcess));
       mProcess->Delete();
       mProcess = nullptr;
       return NS_ERROR_FAILURE;
     }
-    LOGD(("%s::%s: Failed to send start %p", __CLASS__, __FUNCTION__, (void *)mProcess));
+    LOGD(("%s::%s: Sent StartPlugin to child process %p", __CLASS__, __FUNCTION__, (void *)mProcess));
   }
 
   mState = GMPStateLoaded;
@@ -633,6 +638,9 @@ GMPParent::GetCrashID(nsString& aResult)
   TakeMinidump(getter_AddRefs(dumpFile), nullptr);
   if (!dumpFile) {
     NS_WARNING("GMP crash without crash report");
+    aResult = mName;
+    aResult += '-';
+    AppendUTF8toUTF16(mVersion, aResult);
     return;
   }
   GetIDFromMinidump(dumpFile, aResult);
@@ -640,12 +648,23 @@ GMPParent::GetCrashID(nsString& aResult)
 }
 
 static void
-GMPNotifyObservers(nsAString& aData)
+GMPNotifyObservers(const nsACString& aPluginId, const nsACString& aPluginName, const nsAString& aPluginDumpId)
 {
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
-    nsString temp(aData);
-    obs->NotifyObservers(nullptr, "gmp-plugin-crash", temp.get());
+    nsString id;
+    AppendUTF8toUTF16(aPluginId, id);
+    id.Append(NS_LITERAL_STRING(" "));
+    AppendUTF8toUTF16(aPluginName, id);
+    id.Append(NS_LITERAL_STRING(" "));
+    id.Append(aPluginDumpId);
+    obs->NotifyObservers(nullptr, "gmp-plugin-crash", id.Data());
+  }
+
+  nsRefPtr<gmp::GeckoMediaPluginService> service =
+    gmp::GeckoMediaPluginService::GetGeckoMediaPluginService();
+  if (service) {
+    service->RunPluginCrashCallbacks(aPluginId, aPluginName, aPluginDumpId);
   }
 }
 #endif
@@ -659,18 +678,10 @@ GMPParent::ActorDestroy(ActorDestroyReason aWhy)
                           NS_LITERAL_CSTRING("gmplugin"), 1);
     nsString dumpID;
     GetCrashID(dumpID);
-    nsString id;
-    // use the parent address to identify it
-    // We could use any unique-to-the-parent value
-    id.AppendInt(reinterpret_cast<uint64_t>(this));
-    id.Append(NS_LITERAL_STRING(" "));
-    AppendUTF8toUTF16(mDisplayName, id);
-    id.Append(NS_LITERAL_STRING(" "));
-    id.Append(dumpID);
-
     // NotifyObservers is mainthread-only
-    NS_DispatchToMainThread(WrapRunnableNM(&GMPNotifyObservers, id),
-                            NS_DISPATCH_NORMAL);
+    NS_DispatchToMainThread(WrapRunnableNM(&GMPNotifyObservers,
+                                           mPluginId, mDisplayName, dumpID),
+                             NS_DISPATCH_NORMAL);
   }
 #endif
   // warn us off trying to close again
@@ -692,12 +703,6 @@ GMPParent::ActorDestroy(ActorDestroyReason aWhy)
     // Note: final destruction will be Dispatched to ourself
     mService->ReAddOnGMPThread(self);
   }
-}
-
-bool
-GMPParent::HasAccessedStorage() const
-{
-  return mHasAccessedStorage;
 }
 
 mozilla::dom::PCrashReporterParent*
@@ -806,7 +811,6 @@ GMPParent::RecvPGMPStorageConstructor(PGMPStorageParent* aActor)
   if (NS_WARN_IF(NS_FAILED(p->Init()))) {
     return false;
   }
-  mHasAccessedStorage = true;
   return true;
 }
 
@@ -966,7 +970,7 @@ GMPParent::ReadGMPMetaData()
     }
 
 #if defined(XP_LINUX) && defined(MOZ_GMP_SANDBOX)
-    if (cap->mAPIName.EqualsLiteral("eme-decrypt") &&
+    if (cap->mAPIName.EqualsLiteral(GMP_API_DECRYPTOR) &&
         !mozilla::SandboxInfo::Get().CanSandboxMedia()) {
       printf_stderr("GMPParent::ReadGMPMetaData: Plugin \"%s\" is an EME CDM"
                     " but this system can't sandbox it; not loading.\n",
@@ -1005,6 +1009,24 @@ GMPParent::SetNodeId(const nsACString& aNodeId)
   MOZ_ASSERT(!aNodeId.IsEmpty());
   MOZ_ASSERT(CanBeUsedFrom(aNodeId));
   mNodeId = aNodeId;
+}
+
+const nsCString&
+GMPParent::GetDisplayName() const
+{
+  return mDisplayName;
+}
+
+const nsCString&
+GMPParent::GetVersion() const
+{
+  return mVersion;
+}
+
+const nsACString&
+GMPParent::GetPluginId() const
+{
+  return mPluginId;
 }
 
 bool

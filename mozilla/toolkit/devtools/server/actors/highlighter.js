@@ -12,6 +12,7 @@ const events = require("sdk/event/core");
 const Heritage = require("sdk/core/heritage");
 const {CssLogic} = require("devtools/styleinspector/css-logic");
 const EventEmitter = require("devtools/toolkit/event-emitter");
+const {setIgnoreLayoutChanges} = require("devtools/server/actors/layout");
 
 Cu.import("resource://gre/modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
@@ -25,8 +26,8 @@ const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 const HIGHLIGHTER_STYLESHEET_URI = "resource://gre/modules/devtools/server/actors/highlighter.css";
 const HIGHLIGHTER_PICKED_TIMER = 1000;
 // How high is the nodeinfobar
-const NODE_INFOBAR_HEIGHT = 40; //px
-const NODE_INFOBAR_ARROW_SIZE = 15; // px
+const NODE_INFOBAR_HEIGHT = 34; //px
+const NODE_INFOBAR_ARROW_SIZE = 9; // px
 // Width of boxmodelhighlighter guides
 const GUIDE_STROKE_WIDTH = 1;
 // The minimum distance a line should be before it has an arrow marker-end
@@ -44,13 +45,41 @@ const SIMPLE_OUTLINE_SHEET = ".__fx-devtools-hide-shortcut__ {" +
                              "  outline-offset: -2px!important;" +
                              "}";
 
-// All possible highlighter classes
-let HIGHLIGHTER_CLASSES = exports.HIGHLIGHTER_CLASSES = {
-  "BoxModelHighlighter": BoxModelHighlighter,
-  "CssTransformHighlighter": CssTransformHighlighter,
-  "SelectorHighlighter": SelectorHighlighter,
-  "RectHighlighter": RectHighlighter
+/**
+ * The registration mechanism for highlighters provide a quick way to
+ * have modular highlighters, instead of a hard coded list.
+ * It allow us to split highlighers in sub modules, and add them dynamically
+ * using add-on (useful for 3rd party developers, or prototyping)
+ *
+ * Note that currently, highlighters added using add-ons, can only work on
+ * Firefox desktop, or Fennec if the same add-on is installed in both.
+ */
+const highlighterTypes = new Map();
+
+/**
+ * Returns `true` if a highlighter for the given `typeName` is registered,
+ * `false` otherwise.
+ */
+const isTypeRegistered = (typeName) => highlighterTypes.has(typeName);
+exports.isTypeRegistered = isTypeRegistered;
+
+/**
+ * Registers a given constructor as highlighter, for the `typeName` given.
+ * If no `typeName` is provided, is looking for a `typeName` property in
+ * the prototype's constructor.
+ */
+const register = (constructor, typeName=constructor.prototype.typeName) => {
+  if (!typeName) {
+    throw Error("No type's name found, or provided.")
+  }
+
+  if (highlighterTypes.has(typeName)) {
+    throw Error(`${typeName} is already registered.`)
+  }
+
+  highlighterTypes.set(typeName, constructor);
 };
+exports.register = register;
 
 /**
  * The Highlighter is the server-side entry points for any tool that wishes to
@@ -318,10 +347,11 @@ let CustomHighlighterActor = exports.CustomHighlighterActor = protocol.ActorClas
 
     this._inspector = inspector;
 
-    let constructor = HIGHLIGHTER_CLASSES[typeName];
+    let constructor = highlighterTypes.get(typeName);
     if (!constructor) {
-      throw new Error(typeName + " isn't a valid highlighter class (" +
-        Object.keys(HIGHLIGHTER_CLASSES) + ")");
+      let list = [...highlighterTypes.keys()];
+
+      throw new Error(`${typeName} isn't a valid highlighter class (${list})`);
       return;
     }
 
@@ -420,6 +450,9 @@ let CustomHighlighterFront = protocol.FrontClass(CustomHighlighterActor, {});
 function CanvasFrameAnonymousContentHelper(tabActor, nodeBuilder) {
   this.tabActor = tabActor;
   this.nodeBuilder = nodeBuilder;
+  this.anonymousContentDocument = this.tabActor.window.document;
+  // XXX the next line is a wallpaper for bug 1123362.
+  this.anonymousContentGlobal = Cu.getGlobalForObject(this.anonymousContentDocument);
 
   this._insert();
 
@@ -432,27 +465,45 @@ CanvasFrameAnonymousContentHelper.prototype = {
     // If the current window isn't the one the content was inserted into, this
     // will fail, but that's fine.
     try {
-      let doc = this.tabActor.window.document;
+      let doc = this.anonymousContentDocument;
       doc.removeAnonymousContent(this._content);
-    } catch (e) {}
+    } catch (e) {console.error(e)}
     events.off(this.tabActor, "navigate", this._onNavigate);
     this.tabActor = this.nodeBuilder = this._content = null;
+    this.anonymousContentDocument = null;
+    this.anonymousContentGlobal = null;
   },
 
   _insert: function() {
     // Re-insert the content node after page navigation only if the new page
     // isn't XUL.
-    if (!isXUL(this.tabActor)) {
-      // For now highlighter.css is injected in content as a ua sheet because
-      // <style scoped> doesn't work inside anonymous content (see bug 1086532).
-      // If it did, highlighter.css would be injected as an anonymous content
-      // node using CanvasFrameAnonymousContentHelper instead.
-      installHelperSheet(this.tabActor.window,
-        "@import url('" + HIGHLIGHTER_STYLESHEET_URI + "');");
-      let node = this.nodeBuilder();
-      let doc = this.tabActor.window.document;
-      this._content = doc.insertAnonymousContent(node);
+    if (isXUL(this.tabActor)) {
+      return;
     }
+    let doc = this.tabActor.window.document;
+
+    // On B2G, for example, when connecting to keyboard just after startup,
+    // we connect to a hidden document, which doesn't accept
+    // insertAnonymousContent call yet.
+    if (doc.hidden) {
+      // In such scenario, just wait for the document to be visible
+      // before injecting anonymous content.
+      let onVisibilityChange = () => {
+        doc.removeEventListener("visibilitychange", onVisibilityChange);
+        this._insert();
+      };
+      doc.addEventListener("visibilitychange", onVisibilityChange);
+      return;
+    }
+
+    // For now highlighter.css is injected in content as a ua sheet because
+    // <style scoped> doesn't work inside anonymous content (see bug 1086532).
+    // If it did, highlighter.css would be injected as an anonymous content
+    // node using CanvasFrameAnonymousContentHelper instead.
+    installHelperSheet(this.tabActor.window,
+      "@import url('" + HIGHLIGHTER_STYLESHEET_URI + "');");
+    let node = this.nodeBuilder();
+    this._content = doc.insertAnonymousContent(node);
   },
 
   _onNavigate: function({isTopLevel}) {
@@ -494,7 +545,7 @@ CanvasFrameAnonymousContentHelper.prototype = {
   },
 
   get content() {
-    if (Cu.isDeadWrapper(this._content)) {
+    if (!this._content || Cu.isDeadWrapper(this._content)) {
       return null;
     }
     return this._content;
@@ -549,6 +600,11 @@ CanvasFrameAnonymousContentHelper.prototype = {
  * - this.currentNode: the node to be shown
  * - this.currentQuads: all of the node's box model region quads
  * - this.win: the current window
+ *
+ * Emits the following events:
+ * - shown
+ * - hidden
+ * - updated
  */
 function AutoRefreshHighlighter(tabActor) {
   EventEmitter.decorate(this);
@@ -587,6 +643,8 @@ AutoRefreshHighlighter.prototype = {
     this._updateAdjustedQuads();
     this._startRefreshLoop();
     this._show();
+
+    this.emit("shown");
   },
 
   /**
@@ -602,6 +660,8 @@ AutoRefreshHighlighter.prototype = {
     this.currentNode = null;
     this.currentQuads = {};
     this.options = null;
+
+    this.emit("hidden");
   },
 
   /**
@@ -683,16 +743,15 @@ AutoRefreshHighlighter.prototype = {
   _startRefreshLoop: function() {
     let win = this.currentNode.ownerDocument.defaultView;
     this.rafID = win.requestAnimationFrame(this._startRefreshLoop.bind(this));
+    this.rafWin = win;
     this.update();
   },
 
   _stopRefreshLoop: function() {
-    if (!this.rafID) {
-      return;
+    if (this.rafID && !Cu.isDeadWrapper(this.rafWin)) {
+      this.rafWin.cancelAnimationFrame(this.rafID);
     }
-    let win = this.currentNode.ownerDocument.defaultView;
-    win.cancelAnimationFrame(this.rafID);
-    this.rafID = null;
+    this.rafID = this.rafWin = null;
   },
 
   destroy: function() {
@@ -777,6 +836,8 @@ function BoxModelHighlighter(tabActor) {
 }
 
 BoxModelHighlighter.prototype = Heritage.extend(AutoRefreshHighlighter.prototype, {
+  typeName: "BoxModelHighlighter",
+
   ID_CLASS_PREFIX: "box-model-",
 
   get zoom() {
@@ -984,6 +1045,8 @@ BoxModelHighlighter.prototype = Heritage.extend(AutoRefreshHighlighter.prototype
    * Should be called whenever node size or attributes change
    */
   _update: function() {
+    setIgnoreLayoutChanges(true);
+
     if (this._updateBoxModel()) {
       if (!this.options.hideInfoBar) {
         this._showInfobar();
@@ -995,15 +1058,21 @@ BoxModelHighlighter.prototype = Heritage.extend(AutoRefreshHighlighter.prototype
       // Nothing to highlight (0px rectangle like a <script> tag for instance)
       this._hide();
     }
+
+    setIgnoreLayoutChanges(false, this.currentNode.ownerDocument.documentElement);
   },
 
   /**
    * Hide the highlighter, the outline and the infobar.
    */
   _hide: function() {
+    setIgnoreLayoutChanges(true);
+
     this._untrackMutations();
     this._hideBoxModel();
     this._hideInfobar();
+
+    setIgnoreLayoutChanges(false, this.currentNode.ownerDocument.documentElement);
   },
 
   /**
@@ -1249,8 +1318,8 @@ BoxModelHighlighter.prototype = Heritage.extend(AutoRefreshHighlighter.prototype
       pseudos += ":" + pseudo;
     }
 
-    let rect = node.getBoundingClientRect();
-    let dim = Math.ceil(rect.width) + " x " + Math.ceil(rect.height);
+    let rect = this.currentQuads.border.bounds;
+    let dim = Math.ceil(rect.width) + " \u00D7 " + Math.ceil(rect.height);
 
     let elementId = this.ID_CLASS_PREFIX + "nodeinfobar-";
     this.markup.setTextContentForElement(elementId + "tagname", tagName);
@@ -1313,6 +1382,8 @@ BoxModelHighlighter.prototype = Heritage.extend(AutoRefreshHighlighter.prototype
     this.markup.setAttributeForElement(containerId, "style", style);
   }
 });
+register(BoxModelHighlighter);
+exports.BoxModelHighlighter = BoxModelHighlighter;
 
 /**
  * The CssTransformHighlighter is the class that draws an outline around a
@@ -1329,6 +1400,8 @@ function CssTransformHighlighter(tabActor) {
 let MARKER_COUNTER = 1;
 
 CssTransformHighlighter.prototype = Heritage.extend(AutoRefreshHighlighter.prototype, {
+  typeName: "CssTransformHighlighter",
+
   ID_CLASS_PREFIX: "css-transform-",
 
   _buildMarkup: function() {
@@ -1491,6 +1564,8 @@ CssTransformHighlighter.prototype = Heritage.extend(AutoRefreshHighlighter.proto
    * Should be called whenever node size or attributes change
    */
   _update: function() {
+    setIgnoreLayoutChanges(true);
+
     // Getting the points for the transformed shape
     let quad = this.currentQuads.border;
     if (!quad || quad.bounds.width <= 0 || quad.bounds.height <= 0) {
@@ -1511,13 +1586,17 @@ CssTransformHighlighter.prototype = Heritage.extend(AutoRefreshHighlighter.proto
     this.markup.scaleRootElement(this.currentNode, this.ID_CLASS_PREFIX + "root");
 
     this._showShapes();
+
+    setIgnoreLayoutChanges(false, this.currentNode.ownerDocument.documentElement);
   },
 
   /**
    * Hide the highlighter, the outline and the infobar.
    */
   _hide: function() {
+    setIgnoreLayoutChanges(true);
     this._hideShapes();
+    setIgnoreLayoutChanges(false, this.currentNode.ownerDocument.documentElement);
   },
 
   _hideShapes: function() {
@@ -1530,6 +1609,9 @@ CssTransformHighlighter.prototype = Heritage.extend(AutoRefreshHighlighter.proto
       "hidden");
   }
 });
+register(CssTransformHighlighter);
+exports.CssTransformHighlighter = CssTransformHighlighter;
+
 
 /**
  * The SelectorHighlighter runs a given selector through querySelectorAll on the
@@ -1542,6 +1624,7 @@ function SelectorHighlighter(tabActor) {
 }
 
 SelectorHighlighter.prototype = {
+  typeName: "SelectorHighlighter",
   /**
    * Show BoxModelHighlighter on each node that matches that provided selector.
    * @param {DOMNode} node A context node that is used to get the document on
@@ -1593,6 +1676,8 @@ SelectorHighlighter.prototype = {
     this.tabActor = null;
   }
 };
+register(SelectorHighlighter);
+exports.SelectorHighlighter = SelectorHighlighter;
 
 /**
  * The RectHighlighter is a class that draws a rectangle highlighter at specific
@@ -1609,6 +1694,8 @@ function RectHighlighter(tabActor) {
 }
 
 RectHighlighter.prototype = {
+  typeName: "RectHighlighter",
+
   _buildMarkup: function() {
     let doc = this.win.document;
 
@@ -1673,6 +1760,8 @@ RectHighlighter.prototype = {
     this.markup.setAttributeForElement("highlighted-rect", "hidden", "true");
   }
 };
+register(RectHighlighter);
+exports.RectHighlighter = RectHighlighter;
 
 /**
  * The SimpleOutlineHighlighter is a class that has the same API than the

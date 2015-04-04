@@ -370,7 +370,6 @@ pref("mail.collect_email_address_incoming", false);
 pref("mail.collect_email_address_newsgroup", false);
 #endif
 pref("mail.collect_email_address_outgoing", true);
-
 // by default, use the Collected Addressbook for collection
 pref("mail.collect_addressbook", "moz-abmdbdirectory://history.mab");
 
@@ -459,6 +458,9 @@ pref("mail.server.default.offline_download",true);
 
 // -1 means no limit, no purging of offline stores.
 pref("mail.server.default.autosync_max_age_days", -1);
+
+// can we change the store type?
+pref("mail.server.default.canChangeStoreType", false);
 
 // This is the default store contractID for newly created servers.
 // We don't use mail.server.default because we want to ensure that the
@@ -807,6 +809,10 @@ pref("mailnews.database.summary.dontPreserveOnCopy",
 //                     Allows extensions to control preservation of properties.
 pref("mailnews.database.summary.dontPreserveOnMove",
   "account msgOffset threadParent msgThreadId statusOfset flags size numLines ProtoThreadFlags label storeToken");
+// Should we output dbcache log via dump? Set to "Debug" to show.
+pref("mailnews.database.dbcache.logging.dump", "None");
+// Should we output dbcache log to the "error console"? Set to "Debug" to show.
+pref("mailnews.database.dbcache.logging.console", "None");
 
 // -- Global Database (gloda) options
 // Should the indexer be enabled?
