@@ -1,3 +1,23 @@
+icedove (1:45.1.0-1~deb8u1~1.gbpe88938) UNRELEASED; urgency=medium
+
+  ** SNAPSHOT build @e889386b29cd02eb1a98a0ac1f6b9d64f3d57b72 **
+
+  [ Carsten Schoenert ]
+  * debian/icedove-dev.links: adding some extra links.
+    As we build with some more internal libraries we link them too to
+    /usr/lib/icedove/*.
+    Also order the entries in alphabetical order.
+
+  [ Guido Günther ]
+  * Backport to Wheezy-LTS (Closes: #766032)
+  * Disble hurd/kfreebsd specific LDAP integration fix.  This breaks
+    compilation and is not needed in LTS.
+  * icedove-dev: Drop dependencies on nspr, nss since we ship our own versions
+  * Explicitly depend on libgtk2.0 to avoid confusion about the used GTK+
+    version
+
+ -- Guido Günther <agx@sigxcpu.org>  Sun, 29 May 2016 13:17:53 +0200
+
 icedove (1:45.1.0-1) unstable; urgency=medium
 
   [ Carsten Schoenert ]
